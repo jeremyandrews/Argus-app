@@ -9,14 +9,19 @@ struct NewsView: View {
         NavigationView {
             List {
                 ForEach(notifications) { notification in
-                    NavigationLink(destination: NotificationDetailView(notification: notification)) {
-                        HStack {
-                            if !notification.isViewed {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 10, height: 10)
-                                    .padding(.trailing, 5)
-                            }
+                    HStack {
+                        // Unread indicator button
+                        Button(action: {
+                            toggleReadStatus(notification)
+                        }) {
+                            Image(systemName: notification.isViewed ? "circle" : "circle.fill")
+                                .foregroundColor(.blue)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 5)
+
+                        // NavigationLink for the notification details
+                        NavigationLink(destination: NotificationDetailView(notification: notification)) {
                             VStack(alignment: .leading) {
                                 Text(notification.title)
                                     .font(.headline)
@@ -28,15 +33,17 @@ struct NewsView: View {
                                     .font(.caption)
                                     .foregroundColor(.gray)
                             }
-                            Spacer()
-                            Button(action: {
-                                toggleBookmark(notification)
-                            }) {
-                                Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
-                                    .foregroundColor(notification.isBookmarked ? .blue : .gray)
-                            }
-                            .buttonStyle(BorderlessButtonStyle())
                         }
+                        Spacer()
+
+                        // Bookmark button
+                        Button(action: {
+                            toggleBookmark(notification)
+                        }) {
+                            Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
+                                .foregroundColor(notification.isBookmarked ? .blue : .gray)
+                        }
+                        .buttonStyle(.borderless)
                     }
                 }
                 .onDelete(perform: deleteNotifications)
@@ -45,6 +52,15 @@ struct NewsView: View {
             .toolbar {
                 EditButton()
             }
+        }
+    }
+
+    private func toggleReadStatus(_ notification: NotificationData) {
+        notification.isViewed.toggle()
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to toggle read status: \(error)")
         }
     }
 

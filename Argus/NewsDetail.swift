@@ -21,8 +21,19 @@ struct NotificationDetailView: View {
                 .font(.footnote)
                 .foregroundColor(.gray)
 
-            Spacer()
+            Button(action: {
+                toggleReadStatus()
+            }) {
+                HStack {
+                    Image(systemName: notification.isViewed ? "envelope.open" : "envelope.badge")
+                        .foregroundColor(notification.isViewed ? .blue : .red)
+                    Text(notification.isViewed ? "Mark as Unread" : "Mark as Read")
+                }
+            }
+            .padding()
+            .buttonStyle(.bordered)
 
+            // Bookmark button (unchanged)
             Button(action: {
                 toggleBookmark()
             }) {
@@ -39,6 +50,15 @@ struct NotificationDetailView: View {
         .navigationTitle("Detail")
         .onAppear {
             markAsViewed()
+        }
+    }
+
+    private func toggleReadStatus() {
+        notification.isViewed.toggle()
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to toggle read status: \(error)")
         }
     }
 
