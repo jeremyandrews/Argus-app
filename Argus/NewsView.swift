@@ -5,50 +5,65 @@ struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \NotificationData.date, order: .reverse) private var notifications: [NotificationData]
 
+    @State private var showBookmarkedOnly: Bool = false
+
+    private var filteredNotifications: [NotificationData] {
+        showBookmarkedOnly ? notifications.filter { $0.isBookmarked } : notifications
+    }
+
     var body: some View {
         NavigationView {
-            List {
-                ForEach(notifications) { notification in
-                    HStack {
-                        // Unread indicator button
-                        Button(action: {
-                            toggleReadStatus(notification)
-                        }) {
-                            Image(systemName: notification.isViewed ? "circle" : "circle.fill")
-                                .foregroundColor(.blue)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 5)
-
-                        // NavigationLink for the notification details
-                        NavigationLink(destination: NotificationDetailView(notification: notification)) {
-                            VStack(alignment: .leading) {
-                                Text(notification.title)
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-                                Text(notification.body)
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Text(notification.date, format: .dateTime.hour().minute())
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        Spacer()
-
-                        // Bookmark button
-                        Button(action: {
-                            toggleBookmark(notification)
-                        }) {
-                            Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
-                                .foregroundColor(notification.isBookmarked ? .blue : .gray)
-                        }
-                        .buttonStyle(.borderless)
-                    }
+            VStack {
+                Picker("Filter", selection: $showBookmarkedOnly) {
+                    Text("All News").tag(false)
+                    Text("Bookmarked").tag(true)
                 }
-                .onDelete(perform: deleteNotifications)
+                .pickerStyle(SegmentedPickerStyle())
+                .padding()
+
+                List {
+                    ForEach(filteredNotifications) { notification in
+                        HStack {
+                            // Unread indicator button
+                            Button(action: {
+                                toggleReadStatus(notification)
+                            }) {
+                                Image(systemName: notification.isViewed ? "circle" : "circle.fill")
+                                    .foregroundColor(.blue)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 5)
+
+                            // NavigationLink for the notification details
+                            NavigationLink(destination: NotificationDetailView(notification: notification)) {
+                                VStack(alignment: .leading) {
+                                    Text(notification.title)
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    Text(notification.body)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                    Text(notification.date, format: .dateTime.hour().minute())
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                            Spacer()
+
+                            // Bookmark button
+                            Button(action: {
+                                toggleBookmark(notification)
+                            }) {
+                                Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
+                                    .foregroundColor(notification.isBookmarked ? .blue : .gray)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .onDelete(perform: deleteNotifications)
+                }
             }
-            .navigationTitle("News")
+            .navigationTitle(showBookmarkedOnly ? "Bookmarked" : "News")
             .toolbar {
                 EditButton()
             }
@@ -75,7 +90,7 @@ struct NewsView: View {
 
     private func deleteNotifications(offsets: IndexSet) {
         withAnimation {
-            offsets.map { notifications[$0] }.forEach(modelContext.delete)
+            offsets.map { filteredNotifications[$0] }.forEach(modelContext.delete)
             updateBadgeCount()
         }
     }

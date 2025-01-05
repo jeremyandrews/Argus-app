@@ -16,17 +16,8 @@ struct ArgusApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TabView {
-                NewsView()
-                    .tabItem {
-                        Label("News", systemImage: "list.bullet")
-                    }
-                BookmarkedView()
-                    .tabItem {
-                        Label("Bookmarked", systemImage: "bookmark.fill")
-                    }
-            }
-            .modelContainer(sharedModelContainer)
+            NewsView()
+                .modelContainer(sharedModelContainer)
         }
     }
 }
