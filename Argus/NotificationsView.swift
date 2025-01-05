@@ -24,9 +24,14 @@ struct NotificationsView: View {
                                 Text(notification.body)
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
-                                Text(notification.date, style: .date)
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
+                                HStack {
+                                    Text(notification.date, style: .date)
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                    Text(notification.date, format: .dateTime.hour().minute())
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
                             }
                         }
                     }

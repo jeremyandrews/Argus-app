@@ -15,6 +15,9 @@ struct NotificationDetailView: View {
             Text(notification.date, style: .date)
                 .font(.footnote)
                 .foregroundColor(.gray)
+            Text(notification.date, format: .dateTime.hour().minute().second())
+                .font(.footnote)
+                .foregroundColor(.gray)
             Spacer()
         }
         .padding()
