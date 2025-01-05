@@ -8,19 +8,19 @@ struct NotificationDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Parse and display the title
+            // Display formatted title
             let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
             Text(AttributedString(attributedTitle))
                 .font(.title)
                 .bold()
 
-            // Parse and display the body
+            // Display formatted body
             let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
             Text(AttributedString(attributedBody))
                 .font(.body)
 
-            // Display the notification date
-            Text(notification.date, style: .time)
+            // Display timestamp with "HH:MM:SS"
+            Text(notification.date, format: .dateTime.hour().minute().second())
                 .font(.footnote)
                 .foregroundColor(.gray)
 
@@ -28,16 +28,31 @@ struct NotificationDetailView: View {
         }
         .padding()
         .navigationTitle("Detail")
+        .onAppear {
+            markAsViewed()
+        }
+    }
+
+    private func markAsViewed() {
+        if !notification.isViewed {
+            notification.isViewed = true
+            do {
+                try modelContext.save()
+                updateBadgeCount()
+            } catch {
+                print("Failed to mark notification as viewed: \(error)")
+            }
+        }
     }
 
     private func updateBadgeCount() {
         let unviewedCount = (try? modelContext.fetch(
             FetchDescriptor<NotificationData>(
-                predicate: #Predicate { $0.isViewed == false }
+                predicate: #Predicate { !$0.isViewed }
             )
         ))?.count ?? 0
 
-        UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
+        UNUserNotificationCenter.current().updateBadgeCount(unviewedCount) { error in
             if let error = error {
                 print("Failed to set badge count: \(error)")
             }

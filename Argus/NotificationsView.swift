@@ -24,14 +24,10 @@ struct NotificationsView: View {
                                 Text(notification.body)
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
-                                HStack {
-                                    Text(notification.date, style: .date)
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                    Text(notification.date, format: .dateTime.hour().minute())
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                }
+                                // Show timestamp in "HH:MM" format
+                                Text(notification.date, format: .dateTime.hour().minute())
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
                             }
                         }
                     }
@@ -42,9 +38,6 @@ struct NotificationsView: View {
             .toolbar {
                 EditButton()
             }
-        }
-        .onAppear {
-            updateBadgeCount()
         }
     }
 
@@ -57,8 +50,7 @@ struct NotificationsView: View {
 
     private func updateBadgeCount() {
         let unviewedCount = notifications.filter { !$0.isViewed }.count
-
-        UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
+        UNUserNotificationCenter.current().updateBadgeCount(unviewedCount) { error in
             if let error = error {
                 print("Failed to set badge count: \(error)")
             }
