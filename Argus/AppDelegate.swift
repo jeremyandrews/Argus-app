@@ -72,4 +72,3 @@ class NotificationData {
         self.isViewed = isViewed
     }
 }
-

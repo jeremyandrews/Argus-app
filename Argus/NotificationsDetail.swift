@@ -23,6 +23,21 @@ struct NotificationDetailView: View {
             if !notification.isViewed {
                 notification.isViewed = true
                 try? modelContext.save() // Persist the change
+                updateBadgeCount()
+            }
+        }
+    }
+
+    private func updateBadgeCount() {
+        let unviewedCount = (try? modelContext.fetch(
+            FetchDescriptor<NotificationData>(
+                predicate: #Predicate { $0.isViewed == false }
+            )
+        ))?.count ?? 0
+
+        UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
+            if let error = error {
+                print("Failed to set badge count: \(error)")
             }
         }
     }

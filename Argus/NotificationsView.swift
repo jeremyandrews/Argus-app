@@ -38,11 +38,25 @@ struct NotificationsView: View {
                 EditButton()
             }
         }
+        .onAppear {
+            updateBadgeCount()
+        }
     }
 
     private func deleteNotifications(offsets: IndexSet) {
         withAnimation {
             offsets.map { notifications[$0] }.forEach(modelContext.delete)
+            updateBadgeCount()
+        }
+    }
+
+    private func updateBadgeCount() {
+        let unviewedCount = notifications.filter { !$0.isViewed }.count
+
+        UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
+            if let error = error {
+                print("Failed to set badge count: \(error)")
+            }
         }
     }
 }
