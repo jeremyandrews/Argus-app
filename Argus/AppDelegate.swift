@@ -62,56 +62,14 @@ class NotificationData {
     @Attribute var date: Date
     @Attribute var title: String
     @Attribute var body: String
+    @Attribute var isViewed: Bool
 
-    // Required initializer for SwiftData
-    init(id: UUID = UUID(), date: Date, title: String, body: String) {
+    init(id: UUID = UUID(), date: Date, title: String, body: String, isViewed: Bool = false) {
         self.id = id
         self.date = date
         self.title = title
         self.body = body
+        self.isViewed = isViewed
     }
 }
 
-struct NotificationsView: View {
-    @Query(sort: \NotificationData.date, order: .reverse) private var notifications: [NotificationData]
-
-    var body: some View {
-        NavigationView {
-            List(notifications) { notification in
-                NavigationLink(destination: NotificationDetailView(notification: notification)) {
-                    VStack(alignment: .leading) {
-                        Text(notification.title)
-                            .font(.headline)
-                        Text(notification.body)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text(notification.date, style: .date)
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                }
-            }
-            .navigationTitle("Notifications")
-        }
-    }
-}
-
-struct NotificationDetailView: View {
-    var notification: NotificationData
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(notification.title)
-                .font(.title)
-                .bold()
-            Text(notification.body)
-                .font(.body)
-            Text(notification.date, style: .date)
-                .font(.footnote)
-                .foregroundColor(.gray)
-            Spacer()
-        }
-        .padding()
-        .navigationTitle("Detail")
-    }
-}
