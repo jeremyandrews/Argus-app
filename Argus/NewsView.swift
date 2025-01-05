@@ -1,7 +1,7 @@
 import SwiftData
 import SwiftUI
 
-struct NotificationsView: View {
+struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \NotificationData.date, order: .reverse) private var notifications: [NotificationData]
 
@@ -41,7 +41,7 @@ struct NotificationsView: View {
                 }
                 .onDelete(perform: deleteNotifications)
             }
-            .navigationTitle("Notifications")
+            .navigationTitle("News")
             .toolbar {
                 EditButton()
             }
