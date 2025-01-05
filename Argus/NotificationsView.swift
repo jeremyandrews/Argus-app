@@ -24,11 +24,18 @@ struct NotificationsView: View {
                                 Text(notification.body)
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
-                                // Show timestamp in "HH:MM" format
                                 Text(notification.date, format: .dateTime.hour().minute())
                                     .font(.caption)
                                     .foregroundColor(.gray)
                             }
+                            Spacer()
+                            Button(action: {
+                                toggleBookmark(notification)
+                            }) {
+                                Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
+                                    .foregroundColor(notification.isBookmarked ? .blue : .gray)
+                            }
+                            .buttonStyle(BorderlessButtonStyle())
                         }
                     }
                 }
@@ -38,6 +45,15 @@ struct NotificationsView: View {
             .toolbar {
                 EditButton()
             }
+        }
+    }
+
+    private func toggleBookmark(_ notification: NotificationData) {
+        notification.isBookmarked.toggle()
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to toggle bookmark: \(error)")
         }
     }
 

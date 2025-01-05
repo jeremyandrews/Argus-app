@@ -8,7 +8,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     private lazy var modelContainer: ModelContainer = {
         let schema = Schema([NotificationData.self])
         do {
-            return try ModelContainer(for: schema)
+            let container = try ModelContainer(for: schema)
+            return container
         } catch {
             fatalError("Failed to initialize ModelContainer: \(error)")
         }
@@ -83,12 +84,14 @@ class NotificationData {
     @Attribute var title: String
     @Attribute var body: String
     @Attribute var isViewed: Bool
+    @Attribute var isBookmarked: Bool // New attribute
 
-    init(id: UUID = UUID(), date: Date, title: String, body: String, isViewed: Bool = false) {
+    init(id: UUID = UUID(), date: Date, title: String, body: String, isViewed: Bool = false, isBookmarked: Bool = false) {
         self.id = id
         self.date = date
         self.title = title
         self.body = body
         self.isViewed = isViewed
+        self.isBookmarked = isBookmarked
     }
 }
