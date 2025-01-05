@@ -14,10 +14,6 @@ struct ArgusApp: App {
         }
     }()
 
-    init() {
-        appDelegate.modelContext = sharedModelContainer.mainContext
-    }
-
     var body: some Scene {
         WindowGroup {
             NotificationsView()

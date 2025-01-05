@@ -5,7 +5,14 @@ import UserNotifications
 
 class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
-    var modelContext: ModelContext?
+    private lazy var modelContainer: ModelContainer = {
+        let schema = Schema([NotificationData.self])
+        do {
+            return try ModelContainer(for: schema)
+        } catch {
+            fatalError("Failed to initialize ModelContainer: \(error)")
+        }
+    }()
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -32,16 +39,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func saveNotification(_ notification: UNNotification) {
-        do {
-            let schema = Schema([NotificationData.self])
-            let container = try ModelContainer(for: schema)
-            let context = container.mainContext
+        let context = modelContainer.mainContext
 
-            let content = notification.request.content
-            let newNotification = NotificationData(date: Date(), title: content.title, body: content.body)
-            context.insert(newNotification)
+        let content = notification.request.content
+        let newNotification = NotificationData(date: Date(), title: content.title, body: content.body)
+        context.insert(newNotification)
+
+        do {
             try context.save()
             print("Notification saved: \(newNotification)")
+
+            // Update badge count
+            let unviewedCount = try context.fetch(
+                FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
+            ).count
+            UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
+                if let error = error {
+                    print("Failed to set badge count: \(error)")
+                }
+            }
         } catch {
             print("Failed to save notification: \(error)")
         }
