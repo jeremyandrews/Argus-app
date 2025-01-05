@@ -1,99 +1,118 @@
 import UIKit
 import UserNotifications
 import SwiftData
+import SwiftUI
 
 class AppDelegate: UIResponder, UIApplicationDelegate {
-
     var window: UIWindow?
-    var notifications: [NotificationData] = [] // Store notifications
+    var modelContext: ModelContext?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-
-        // Request permission to send push notifications
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if let error = error {
-                print("Error requesting push notification authorization: \(error)")
-            } else if granted {
-                print("Push notification permission granted.")
+            if granted {
                 DispatchQueue.main.async {
                     application.registerForRemoteNotifications()
                 }
-            } else {
-                print("Push notification permission denied.")
+            } else if let error = error {
+                print("Error requesting notification authorization: \(error)")
             }
         }
 
         UNUserNotificationCenter.current().delegate = self
-
-        window = UIWindow(frame: UIScreen.main.bounds)
-        let viewController = NotificationsViewController() // Update to use NotificationsViewController
-        window?.rootViewController = UINavigationController(rootViewController: viewController)
-        window?.makeKeyAndVisible()
-
         return true
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        print("Successfully registered for notifications with token: \(token)")
+        print("Device Token: \(token)")
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("Failed to register for remote notifications: \(error)")
+        print("Failed to register: \(error)")
+    }
+
+    private func saveNotification(_ notification: UNNotification) {
+        guard let modelContext = modelContext else {
+            print("ModelContext is not available.")
+            return
+        }
+
+        let content = notification.request.content
+        let newNotification = NotificationData(date: Date(), title: content.title, body: content.body)
+        modelContext.insert(newNotification)
+        print("Notification saved: \(newNotification)")
     }
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        print("Notification received while app is in foreground: \(notification.request.content.userInfo)")
-        saveNotification(notification: notification)
+        saveNotification(notification)
         completionHandler([.banner, .sound])
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        print("Notification opened: \(response.notification.request.content.userInfo)")
-        saveNotification(notification: response.notification)
+        saveNotification(response.notification)
         completionHandler()
     }
+}
 
-    private func saveNotification(notification: UNNotification) {
-        let content = notification.request.content
-        let newNotification = NotificationData(date: Date(), title: content.title, body: content.body)
-        notifications.append(newNotification)
-        print("Notification saved: \(newNotification)")
+@Model
+class NotificationData {
+    @Attribute var id: UUID
+    @Attribute var date: Date
+    @Attribute var title: String
+    @Attribute var body: String
+
+    // Required initializer for SwiftData
+    init(id: UUID = UUID(), date: Date, title: String, body: String) {
+        self.id = id
+        self.date = date
+        self.title = title
+        self.body = body
     }
 }
 
-struct NotificationData: Identifiable {
-    let id = UUID()
-    let date: Date
-    let title: String
-    let body: String
+struct NotificationsView: View {
+    @Query(sort: \NotificationData.date, order: .reverse) private var notifications: [NotificationData]
+
+    var body: some View {
+        NavigationView {
+            List(notifications) { notification in
+                NavigationLink(destination: NotificationDetailView(notification: notification)) {
+                    VStack(alignment: .leading) {
+                        Text(notification.title)
+                            .font(.headline)
+                        Text(notification.body)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Text(notification.date, style: .date)
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .navigationTitle("Notifications")
+        }
+    }
 }
 
-class NotificationsViewController: UITableViewController {
-    private var notifications: [NotificationData] = []
+struct NotificationDetailView: View {
+    var notification: NotificationData
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        title = "Notifications"
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
-    }
-
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return notifications.count
-    }
-
-    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
-        let notification = notifications[indexPath.row]
-        cell.textLabel?.text = "\(notification.title) - \(notification.body)"
-        return cell
-    }
-
-    func updateNotifications(_ newNotifications: [NotificationData]) {
-        notifications = newNotifications
-        tableView.reloadData()
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(notification.title)
+                .font(.title)
+                .bold()
+            Text(notification.body)
+                .font(.body)
+            Text(notification.date, style: .date)
+                .font(.footnote)
+                .foregroundColor(.gray)
+            Spacer()
+        }
+        .padding()
+        .navigationTitle("Detail")
     }
 }
 

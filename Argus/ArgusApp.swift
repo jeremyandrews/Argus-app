@@ -1,34 +1,28 @@
-//
-//  ArgusApp.swift
-//  Argus
-//
-//  Created by Jeremy Andrews on 04/01/25.
-//
-
 import SwiftUI
 import SwiftData
 
 @main
 struct ArgusApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
+    var sharedModelContainer: ModelContainer = {
+        let schema = Schema([NotificationData.self])
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(for: schema)
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            fatalError("Failed to initialize ModelContainer: \(error)")
         }
     }()
 
+    init() {
+        appDelegate.modelContext = sharedModelContainer.mainContext
+    }
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            NotificationsView()
+                .modelContainer(sharedModelContainer)
         }
-        .modelContainer(sharedModelContainer)
     }
 }
+
