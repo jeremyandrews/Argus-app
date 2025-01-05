@@ -32,15 +32,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func saveNotification(_ notification: UNNotification) {
-        guard let modelContext = modelContext else {
-            print("ModelContext is not available.")
-            return
-        }
+        do {
+            let schema = Schema([NotificationData.self])
+            let container = try ModelContainer(for: schema)
+            let context = container.mainContext
 
-        let content = notification.request.content
-        let newNotification = NotificationData(date: Date(), title: content.title, body: content.body)
-        modelContext.insert(newNotification)
-        print("Notification saved: \(newNotification)")
+            let content = notification.request.content
+            let newNotification = NotificationData(date: Date(), title: content.title, body: content.body)
+            context.insert(newNotification)
+            try context.save()
+            print("Notification saved: \(newNotification)")
+        } catch {
+            print("Failed to save notification: \(error)")
+        }
     }
 }
 
