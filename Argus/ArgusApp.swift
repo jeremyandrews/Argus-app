@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 @main
 struct ArgusApp: App {
@@ -25,4 +25,3 @@ struct ArgusApp: App {
         }
     }
 }
-
