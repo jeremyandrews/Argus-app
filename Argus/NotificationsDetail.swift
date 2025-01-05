@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import SwiftyMarkdown
 
 struct NotificationDetailView: View {
     var notification: NotificationData
@@ -7,28 +8,26 @@ struct NotificationDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(notification.title)
+            // Parse and display the title
+            let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
+            Text(AttributedString(attributedTitle))
                 .font(.title)
                 .bold()
-            Text(notification.body)
+
+            // Parse and display the body
+            let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
+            Text(AttributedString(attributedBody))
                 .font(.body)
-            Text(notification.date, style: .date)
+
+            // Display the notification date
+            Text(notification.date, style: .time)
                 .font(.footnote)
                 .foregroundColor(.gray)
-            Text(notification.date, format: .dateTime.hour().minute().second())
-                .font(.footnote)
-                .foregroundColor(.gray)
+
             Spacer()
         }
         .padding()
         .navigationTitle("Detail")
-        .onAppear {
-            if !notification.isViewed {
-                notification.isViewed = true
-                try? modelContext.save() // Persist the change
-                updateBadgeCount()
-            }
-        }
     }
 
     private func updateBadgeCount() {
