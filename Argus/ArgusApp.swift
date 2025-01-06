@@ -5,7 +5,8 @@ import SwiftUI
 struct ArgusApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    var sharedModelContainer: ModelContainer = {
+    // Shared container for the entire app
+    static let sharedModelContainer: ModelContainer = {
         let schema = Schema([NotificationData.self])
         do {
             return try ModelContainer(for: schema)
@@ -17,7 +18,7 @@ struct ArgusApp: App {
     var body: some Scene {
         WindowGroup {
             NewsView()
-                .modelContainer(sharedModelContainer)
+                .modelContainer(ArgusApp.sharedModelContainer)
         }
     }
 }

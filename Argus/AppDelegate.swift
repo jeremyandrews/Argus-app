@@ -4,29 +4,25 @@ import UIKit
 import UserNotifications
 
 class AppDelegate: UIResponder, UIApplicationDelegate {
-    var window: UIWindow?
-    private lazy var modelContainer: ModelContainer = {
-        let schema = Schema([NotificationData.self])
-        do {
-            let container = try ModelContainer(for: schema)
-            return container
-        } catch {
-            fatalError("Failed to initialize ModelContainer: \(error)")
-        }
-    }()
+    func application(_: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
 
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // Handle notifications that launched the app
+        if let notificationData = launchOptions?[.remoteNotification] as? [String: AnyObject] {
+            handleRemoteNotification(userInfo: notificationData)
+        }
+
+        // Request notification permissions
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if granted {
                 DispatchQueue.main.async {
-                    application.registerForRemoteNotifications()
+                    UIApplication.shared.registerForRemoteNotifications()
                 }
             } else if let error = error {
                 print("Error requesting notification authorization: \(error)")
             }
         }
 
-        UNUserNotificationCenter.current().delegate = self
         return true
     }
 
@@ -39,11 +35,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         print("Failed to register: \(error)")
     }
 
-    private func saveNotification(_ notification: UNNotification) {
-        let context = modelContainer.mainContext
+    private func handleRemoteNotification(userInfo: [String: AnyObject]) {
+        guard let aps = userInfo["aps"] as? [String: AnyObject],
+              let alert = aps["alert"] as? [String: String],
+              let title = alert["title"],
+              let body = alert["body"]
+        else {
+            return
+        }
+        saveNotification(title: title, body: body)
+    }
 
-        let content = notification.request.content
-        let newNotification = NotificationData(date: Date(), title: content.title, body: content.body)
+    private func saveNotification(title: String, body: String) {
+        let context = ArgusApp.sharedModelContainer.mainContext
+        let newNotification = NotificationData(date: Date(), title: title, body: body)
         context.insert(newNotification)
 
         do {
@@ -67,12 +72,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 extension AppDelegate: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        saveNotification(notification)
+        let content = notification.request.content
+        saveNotification(title: content.title, body: content.body)
         completionHandler([.banner, .sound])
     }
 
     func userNotificationCenter(_: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        saveNotification(response.notification)
+        let content = response.notification.request.content
+        saveNotification(title: content.title, body: content.body)
         completionHandler()
     }
 }
