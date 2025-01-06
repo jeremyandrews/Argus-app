@@ -24,14 +24,14 @@ struct NewsView: View {
     var body: some View {
         NavigationView {
             VStack {
-                // Header with "Argus"
-                Text("Argus")
-                    .font(.largeTitle)
-                    .bold()
-                    .padding(.bottom, 8) // Less space between header and stories
-
-                // Article list
                 List {
+                    Section(header: Text("Argus")
+                        .font(.largeTitle)
+                        .bold()
+                        .padding(.bottom, 8)
+                    ) {}
+
+                    // Article list
                     ForEach(filteredNotifications) { notification in
                         HStack {
                             // Read/Unread icon
@@ -153,7 +153,7 @@ struct FilterView: View {
                     Toggle("Bookmarked", isOn: $showBookmarkedOnly)
                 }
             }
-            .navigationTitle("Filter Articles")
+            .navigationTitle("Show only")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {

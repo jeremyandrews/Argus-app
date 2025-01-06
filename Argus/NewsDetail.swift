@@ -4,64 +4,69 @@ import SwiftyMarkdown
 
 struct NotificationDetailView: View {
     var notification: NotificationData
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\ .modelContext) private var modelContext
+    @Environment(\ .dismiss) private var dismiss
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        VStack {
+            // Top Bar with Back and Icons
+            HStack {
+                Button(action: {
+                    dismiss()
+                }) {
+                    Image(systemName: "chevron.left")
+                        .font(.title2)
+                }
+                Spacer()
+
+                Button(action: {
+                    toggleReadStatus()
+                }) {
+                    Image(systemName: notification.isViewed ? "envelope.open" : "envelope.badge")
+                        .foregroundColor(notification.isViewed ? .blue : .red)
+                }
+
+                Button(action: {
+                    toggleBookmark()
+                }) {
+                    Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
+                        .foregroundColor(notification.isBookmarked ? .blue : .gray)
+                }
+
+                Button(role: .destructive, action: {
+                    deleteNotification()
+                }) {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
+                }
+            }
+            .padding()
+
+            // Scrollable Title
+            ScrollView(.horizontal) {
                 let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
                 Text(AttributedString(attributedTitle))
                     .font(.title)
                     .bold()
                     .multilineTextAlignment(.leading)
                     .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding([.leading, .trailing])
 
+            // Body
+            ScrollView {
                 let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
                 Text(AttributedString(attributedBody))
                     .font(.body)
+                    .padding([.leading, .trailing])
 
                 Text(notification.date, format: .dateTime.hour().minute().second())
                     .font(.footnote)
                     .foregroundColor(.gray)
-
-                Button(action: {
-                    toggleReadStatus()
-                }) {
-                    HStack {
-                        Image(systemName: notification.isViewed ? "envelope.open" : "envelope.badge")
-                            .foregroundColor(notification.isViewed ? .blue : .red)
-                        Text(notification.isViewed ? "Mark as Unread" : "Mark as Read")
-                    }
-                }
-                .padding()
-                .buttonStyle(.bordered)
-
-                Button(action: {
-                    toggleBookmark()
-                }) {
-                    HStack {
-                        Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
-                            .foregroundColor(notification.isBookmarked ? .blue : .gray)
-                        Text(notification.isBookmarked ? "Remove Bookmark" : "Add Bookmark")
-                    }
-                }
-                .padding()
-                .buttonStyle(.bordered)
-
-                Button(role: .destructive, action: {
-                    deleteNotification()
-                }) {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("Delete")
-                    }
-                }
-                .padding()
-                .buttonStyle(.bordered)
+                    .padding([.leading, .trailing, .top])
             }
-            .padding()
+
+            Spacer()
         }
         .navigationTitle("") // No title at the top navigation bar
         .onAppear {
