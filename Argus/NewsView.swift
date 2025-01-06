@@ -91,6 +91,7 @@ struct NewsView: View {
         notification.isViewed.toggle()
         do {
             try modelContext.save()
+            updateBadgeCount()
         } catch {
             print("Failed to toggle read status: \(error)")
         }
