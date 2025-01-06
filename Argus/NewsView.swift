@@ -108,8 +108,19 @@ struct NewsView: View {
 
     private func deleteNotifications(offsets: IndexSet) {
         withAnimation {
-            offsets.map { filteredNotifications[$0] }.forEach(modelContext.delete)
-            updateBadgeCount()
+            // Delete the notifications
+            let notificationsToDelete = offsets.map { filteredNotifications[$0] }
+            notificationsToDelete.forEach(modelContext.delete)
+
+            do {
+                // Save changes to persist deletions
+                try modelContext.save()
+
+                // Update the badge count after deletion
+                updateBadgeCount()
+            } catch {
+                print("Failed to delete notifications: \(error)")
+            }
         }
     }
 
