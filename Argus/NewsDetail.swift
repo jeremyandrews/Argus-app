@@ -5,18 +5,19 @@ import SwiftyMarkdown
 struct NotificationDetailView: View {
     @State private var showDeleteConfirmation = false
     var notification: NotificationData
-    @Environment(\ .modelContext) private var modelContext
-    @Environment(\ .dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack {
-            // Top Bar with Icons
-            HStack(spacing: 16) { // Add spacing between icons
+            // Top Bar with Icons (Custom Toolbar)
+            HStack(spacing: 16) {
                 Button(action: {
                     dismiss()
                 }) {
                     Image(systemName: "chevron.left")
                         .font(.title2)
+                        .foregroundColor(.primary)
                 }
 
                 Spacer()
@@ -73,12 +74,14 @@ struct NotificationDetailView: View {
         .onAppear {
             markAsViewed()
         }
-        .alert("Are you sure you want to delete this notification?", isPresented: $showDeleteConfirmation) {
+        .alert("Are you sure you want to delete this article?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 deleteNotification()
             }
             Button("Cancel", role: .cancel) {}
         }
+        // Hide the default navigation bar
+        .navigationBarHidden(true)
     }
 
     private func toggleReadStatus() {
