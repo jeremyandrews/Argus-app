@@ -24,12 +24,17 @@ struct NewsView: View {
     var body: some View {
         NavigationView {
             VStack {
-                // Header with title and filter button
+                // Header with icon, title, and filter button
                 HStack {
+                    Image("Argus")
+                        .resizable()
+                        .frame(width: 40, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .padding(.trailing, 8)
+
                     Text("Argus")
                         .font(.largeTitle)
                         .bold()
-                        .padding(.bottom, 8)
 
                     Spacer()
 
