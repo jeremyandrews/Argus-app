@@ -24,14 +24,33 @@ struct NewsView: View {
     var body: some View {
         NavigationView {
             VStack {
-                List {
-                    Section(header: Text("Argus")
+                // Header with title and filter button
+                HStack {
+                    Text("Argus")
                         .font(.largeTitle)
                         .bold()
                         .padding(.bottom, 8)
-                    ) {}
 
-                    // Article list
+                    Spacer()
+
+                    Button(action: {
+                        isFilterMenuPresented.toggle()
+                    }) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .foregroundColor(.primary)
+                            .padding(.bottom, 8)
+                    }
+                    .sheet(isPresented: $isFilterMenuPresented) {
+                        FilterView(
+                            showUnreadOnly: $showUnreadOnly,
+                            showBookmarkedOnly: $showBookmarkedOnly
+                        )
+                    }
+                }
+                .padding(.horizontal)
+
+                // Article list
+                List {
                     ForEach(filteredNotifications) { notification in
                         HStack {
                             // Read/Unread icon
@@ -79,23 +98,6 @@ struct NewsView: View {
                     .onDelete(perform: deleteNotifications)
                 }
                 .listStyle(PlainListStyle())
-                .toolbar {
-                    // Filter button
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: {
-                            isFilterMenuPresented.toggle()
-                        }) {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                                .foregroundColor(.primary)
-                        }
-                        .sheet(isPresented: $isFilterMenuPresented) {
-                            FilterView(
-                                showUnreadOnly: $showUnreadOnly,
-                                showBookmarkedOnly: $showBookmarkedOnly
-                            )
-                        }
-                    }
-                }
             }
         }
     }
