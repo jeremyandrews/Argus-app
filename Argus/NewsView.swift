@@ -6,13 +6,17 @@ struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \NotificationData.date, order: .reverse) private var notifications: [NotificationData]
 
-    @State private var showBookmarkedOnly: Bool = false
     @State private var showUnreadOnly: Bool = false
+    @State private var showBookmarkedOnly: Bool = false
+    @State private var isFilterMenuPresented: Bool = false
 
     private var filteredNotifications: [NotificationData] {
-        var result = showBookmarkedOnly ? notifications.filter { $0.isBookmarked } : notifications
+        var result = notifications
         if showUnreadOnly {
             result = result.filter { !$0.isViewed }
+        }
+        if showBookmarkedOnly {
+            result = result.filter { $0.isBookmarked }
         }
         return result
     }
@@ -20,24 +24,17 @@ struct NewsView: View {
     var body: some View {
         NavigationView {
             VStack {
-                Picker("Filter", selection: $showBookmarkedOnly) {
-                    Text("News").tag(false)
-                    Text("Bookmarks").tag(true)
-                }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding()
+                // Header with "Argus"
+                Text("Argus")
+                    .font(.largeTitle)
+                    .bold()
+                    .padding(.bottom, 8) // Less space between header and stories
 
-                Picker("Unread Filter", selection: $showUnreadOnly) {
-                    Text("All").tag(false)
-                    Text("Unread").tag(true)
-                }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding()
-
+                // Article list
                 List {
                     ForEach(filteredNotifications) { notification in
                         HStack {
-                            // Unread indicator button
+                            // Read/Unread icon
                             Button(action: {
                                 toggleReadStatus(notification)
                             }) {
@@ -45,48 +42,60 @@ struct NewsView: View {
                                     .foregroundColor(.blue)
                             }
                             .buttonStyle(.plain)
-                            .padding(.trailing, 5)
+                            .padding(.trailing, 8)
 
-                            // NavigationLink for the notification details
+                            // NavigationLink to details
                             NavigationLink(destination: NotificationDetailView(notification: notification)) {
-                                VStack(alignment: .leading) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    // SwiftyMarkdown formatted title
                                     let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
                                     Text(AttributedString(attributedTitle))
-                                        .font(.title3)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.primary)
+                                        .font(.headline)
                                         .lineLimit(2)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .padding(.bottom, 4)
+                                        .foregroundColor(.primary)
 
+                                    // SwiftyMarkdown formatted body
                                     let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
                                     Text(AttributedString(attributedBody))
                                         .font(.subheadline)
+                                        .lineLimit(2)
                                         .foregroundColor(.secondary)
-
-                                    Text(notification.date, format: .dateTime.hour().minute())
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
                                 }
                             }
+
                             Spacer()
 
-                            // Bookmark button
+                            // Bookmark icon
                             Button(action: {
                                 toggleBookmark(notification)
                             }) {
                                 Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
                                     .foregroundColor(notification.isBookmarked ? .blue : .gray)
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(.plain)
                         }
+                        .padding(.vertical, 4)
                     }
                     .onDelete(perform: deleteNotifications)
                 }
-            }
-            .navigationTitle("News")
-            .toolbar {
-                EditButton()
+                .listStyle(PlainListStyle())
+                .toolbar {
+                    // Filter button
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: {
+                            isFilterMenuPresented.toggle()
+                        }) {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .foregroundColor(.primary)
+                        }
+                        .sheet(isPresented: $isFilterMenuPresented) {
+                            FilterView(
+                                showUnreadOnly: $showUnreadOnly,
+                                showBookmarkedOnly: $showBookmarkedOnly
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -95,44 +104,64 @@ struct NewsView: View {
         notification.isViewed.toggle()
         do {
             try modelContext.save()
-            updateBadgeCount()
+            updateBadgeCount() // Ensure badge count is updated
         } catch {
             print("Failed to toggle read status: \(error)")
         }
     }
 
-    private func toggleBookmark(_ notification: NotificationData) {
-        notification.isBookmarked.toggle()
-        do {
-            try modelContext.save()
-        } catch {
-            print("Failed to toggle bookmark: \(error)")
-        }
-    }
-
-    private func deleteNotifications(offsets: IndexSet) {
-        withAnimation {
-            // Delete the notifications
-            let notificationsToDelete = offsets.map { filteredNotifications[$0] }
-            notificationsToDelete.forEach(modelContext.delete)
-
-            do {
-                // Save changes to persist deletions
-                try modelContext.save()
-
-                // Update the badge count after deletion
-                updateBadgeCount()
-            } catch {
-                print("Failed to delete notifications: \(error)")
+    private func updateBadgeCount() {
+        let unviewedCount = notifications.filter { !$0.isViewed }.count
+        UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
+            if let error = error {
+                print("Failed to set badge count: \(error)")
             }
         }
     }
 
-    private func updateBadgeCount() {
-        let unviewedCount = notifications.filter { !$0.isViewed }.count
-        UNUserNotificationCenter.current().updateBadgeCount(unviewedCount) { error in
-            if let error = error {
-                print("Failed to set badge count: \(error)")
+    private func toggleBookmark(_ notification: NotificationData) {
+        notification.isBookmarked.toggle()
+        saveChanges()
+    }
+
+    private func deleteNotifications(offsets: IndexSet) {
+        withAnimation {
+            let notificationsToDelete = offsets.map { filteredNotifications[$0] }
+            notificationsToDelete.forEach(modelContext.delete)
+            saveChanges()
+        }
+    }
+
+    private func saveChanges() {
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to save changes: \(error)")
+        }
+    }
+}
+
+struct FilterView: View {
+    @Binding var showUnreadOnly: Bool
+    @Binding var showBookmarkedOnly: Bool
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Filters")) {
+                    Toggle("Unread", isOn: $showUnreadOnly)
+                    Toggle("Bookmarked", isOn: $showBookmarkedOnly)
+                }
+            }
+            .navigationTitle("Filter Articles")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                            scene.windows.first?.rootViewController?.dismiss(animated: true, completion: nil)
+                        }
+                    }
+                }
             }
         }
     }
