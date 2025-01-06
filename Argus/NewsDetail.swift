@@ -45,16 +45,15 @@ struct NotificationDetailView: View {
             }
             .padding()
 
-            // Scrollable Title
-            ScrollView(.horizontal) {
-                let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
-                Text(AttributedString(attributedTitle))
-                    .font(.title)
-                    .bold()
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(nil)
-            }
-            .padding([.leading, .trailing])
+            // Wrapping Title
+            let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
+            Text(AttributedString(attributedTitle))
+                .font(.title)
+                .bold()
+                .multilineTextAlignment(.leading)
+                .lineLimit(nil) // Allow unlimited lines
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding([.leading, .trailing])
 
             // Body
             ScrollView {
