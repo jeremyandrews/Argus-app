@@ -4,13 +4,8 @@ import UIKit
 import UserNotifications
 
 class AppDelegate: UIResponder, UIApplicationDelegate {
-    func application(_: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+    func application(_: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
-
-        // Handle notifications that launched the app
-        if let notificationData = launchOptions?[.remoteNotification] as? [String: AnyObject] {
-            handleRemoteNotification(userInfo: notificationData)
-        }
 
         // Request notification permissions
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -33,6 +28,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         print("Failed to register: \(error)")
+    }
+
+    func application(_: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        guard let aps = userInfo["aps"] as? [String: AnyObject],
+              let contentAvailable = aps["content-available"] as? Int, contentAvailable == 1
+        else {
+            completionHandler(.noData)
+            return
+        }
+
+        if let alert = aps["alert"] as? [String: String],
+           let title = alert["title"],
+           let body = alert["body"]
+        {
+            saveNotification(title: title, body: body)
+            completionHandler(.newData)
+        } else {
+            completionHandler(.noData)
+        }
     }
 
     private func handleRemoteNotification(userInfo: [String: AnyObject]) {
@@ -71,15 +85,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {
-    func userNotificationCenter(_: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        let content = notification.request.content
-        saveNotification(title: content.title, body: content.body)
+    func userNotificationCenter(_: UNUserNotificationCenter, willPresent _: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
     }
 
-    func userNotificationCenter(_: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        let content = response.notification.request.content
-        saveNotification(title: content.title, body: content.body)
+    func userNotificationCenter(_: UNUserNotificationCenter, didReceive _: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        // No saving here, as the notification should already be saved in the background
         completionHandler()
     }
 }
