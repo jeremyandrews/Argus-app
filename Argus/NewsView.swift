@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import SwiftyMarkdown
 
 struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -37,12 +38,16 @@ struct NewsView: View {
                             // NavigationLink for the notification details
                             NavigationLink(destination: NotificationDetailView(notification: notification)) {
                                 VStack(alignment: .leading) {
-                                    Text(notification.title)
+                                    let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
+                                    Text(AttributedString(attributedTitle))
                                         .font(.headline)
                                         .foregroundColor(.primary)
-                                    Text(notification.body)
+
+                                    let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
+                                    Text(AttributedString(attributedBody))
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
+
                                     Text(notification.date, format: .dateTime.hour().minute())
                                         .font(.caption)
                                         .foregroundColor(.gray)
