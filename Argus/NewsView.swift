@@ -7,17 +7,29 @@ struct NewsView: View {
     @Query(sort: \NotificationData.date, order: .reverse) private var notifications: [NotificationData]
 
     @State private var showBookmarkedOnly: Bool = false
+    @State private var showUnreadOnly: Bool = false
 
     private var filteredNotifications: [NotificationData] {
-        showBookmarkedOnly ? notifications.filter { $0.isBookmarked } : notifications
+        var result = showBookmarkedOnly ? notifications.filter { $0.isBookmarked } : notifications
+        if showUnreadOnly {
+            result = result.filter { !$0.isViewed }
+        }
+        return result
     }
 
     var body: some View {
         NavigationView {
             VStack {
                 Picker("Filter", selection: $showBookmarkedOnly) {
-                    Text("All News").tag(false)
-                    Text("Bookmarked").tag(true)
+                    Text("News").tag(false)
+                    Text("Bookmarks").tag(true)
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                .padding()
+
+                Picker("Unread Filter", selection: $showUnreadOnly) {
+                    Text("All").tag(false)
+                    Text("Unread").tag(true)
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .padding()
@@ -68,7 +80,7 @@ struct NewsView: View {
                     .onDelete(perform: deleteNotifications)
                 }
             }
-            .navigationTitle(showBookmarkedOnly ? "Bookmarked" : "News")
+            .navigationTitle("News")
             .toolbar {
                 EditButton()
             }
