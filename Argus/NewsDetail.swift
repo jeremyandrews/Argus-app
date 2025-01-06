@@ -3,27 +3,29 @@ import SwiftUI
 import SwiftyMarkdown
 
 struct NotificationDetailView: View {
+    @State private var showDeleteConfirmation = false
     var notification: NotificationData
     @Environment(\ .modelContext) private var modelContext
     @Environment(\ .dismiss) private var dismiss
 
     var body: some View {
         VStack {
-            // Top Bar with Back and Icons
-            HStack {
+            // Top Bar with Icons
+            HStack(spacing: 16) { // Add spacing between icons
                 Button(action: {
                     dismiss()
                 }) {
                     Image(systemName: "chevron.left")
                         .font(.title2)
                 }
+
                 Spacer()
 
                 Button(action: {
                     toggleReadStatus()
                 }) {
                     Image(systemName: notification.isViewed ? "envelope.open" : "envelope.badge")
-                        .foregroundColor(notification.isViewed ? .blue : .red)
+                        .foregroundColor(notification.isViewed ? .gray : .blue)
                 }
 
                 Button(action: {
@@ -34,7 +36,7 @@ struct NotificationDetailView: View {
                 }
 
                 Button(role: .destructive, action: {
-                    deleteNotification()
+                    showDeleteConfirmation = true
                 }) {
                     Image(systemName: "trash")
                         .foregroundColor(.red)
@@ -68,9 +70,14 @@ struct NotificationDetailView: View {
 
             Spacer()
         }
-        .navigationTitle("") // No title at the top navigation bar
         .onAppear {
             markAsViewed()
+        }
+        .alert("Are you sure you want to delete this notification?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                deleteNotification()
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
