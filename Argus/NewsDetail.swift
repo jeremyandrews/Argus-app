@@ -82,6 +82,14 @@ struct NotificationDetailView: View {
         }
         // Hide the default navigation bar
         .navigationBarHidden(true)
+        .gesture(
+            DragGesture()
+                .onEnded { value in
+                    if value.translation.width > 100 { // Detect left-to-right swipe
+                        dismiss()
+                    }
+                }
+        )
     }
 
     private func toggleReadStatus() {
