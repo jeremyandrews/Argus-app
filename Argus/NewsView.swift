@@ -52,8 +52,12 @@ struct NewsView: View {
                                 VStack(alignment: .leading) {
                                     let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
                                     Text(AttributedString(attributedTitle))
-                                        .font(.headline)
+                                        .font(.title3)
+                                        .fontWeight(.semibold)
                                         .foregroundColor(.primary)
+                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .padding(.bottom, 4)
 
                                     let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
                                     Text(AttributedString(attributedBody))
