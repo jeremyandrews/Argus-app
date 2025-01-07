@@ -78,9 +78,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         {
             saveNotification(title: title, body: body, json_url: json_url)
             completionHandler(.newData)
-        } else if json_url != nil {
-            // Handle silent notification with just data
-            saveNotification(title: "Background Update", body: "New content available.", json_url: json_url)
+        } else if let alert = aps["alert"] as? [String: String],
+                  let title = alert["title"],
+                  let body = alert["body"]
+        {
+            // Handle silent notification using alert's title and body
+            saveNotification(title: title, body: body, json_url: json_url)
             completionHandler(.newData)
         } else {
             completionHandler(.noData)
