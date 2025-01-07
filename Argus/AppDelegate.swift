@@ -74,18 +74,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         if let alert = aps["alert"] as? [String: String],
            let title = alert["title"],
-           let body = alert["body"] {
+           let body = alert["body"]
+        {
             let topic = data?["topic"] as? String // Extract topic from data
             saveNotification(title: title, body: body, json_url: json_url, topic: topic)
             completionHandler(.newData)
-        } else if json_url != nil {
+        } else if let alert = aps["alert"] as? [String: String],
+                  let title = alert["title"],
+                  let body = alert["body"]
+        {
             let topic = data?["topic"] as? String // Extract topic from data
-            saveNotification(title: "Background Update", body: "New content available.", json_url: json_url, topic: topic)
+            saveNotification(title: title, body: body, json_url: json_url, topic: topic)
             completionHandler(.newData)
         } else {
             completionHandler(.noData)
         }
-
     }
 
     private func handleRemoteNotification(userInfo: [String: AnyObject]) {

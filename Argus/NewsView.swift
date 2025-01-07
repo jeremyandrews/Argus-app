@@ -12,9 +12,22 @@ struct NewsView: View {
     @State private var isEditing: Bool = false
     @State private var selectedNotifications: Set<NotificationData> = []
     @State private var showDeleteConfirmation: Bool = false
+    @State private var selectedTopic: String = "All" // Current tab selection
+
+    private var topics: [String] {
+        let uniqueTopics = Set(notifications.compactMap { $0.topic }).sorted()
+        return ["All"] + uniqueTopics
+    }
 
     private var filteredNotifications: [NotificationData] {
         var result = notifications
+
+        // Filter by selected topic
+        if selectedTopic != "All" {
+            result = result.filter { $0.topic == selectedTopic }
+        }
+
+        // Additional filters
         if showUnreadOnly {
             result = result.filter { !$0.isViewed }
         }
@@ -27,8 +40,13 @@ struct NewsView: View {
     var body: some View {
         NavigationView {
             VStack {
-                // Header with Edit button and filters
+                // Header
                 HStack {
+                    Image("Argus")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 40, height: 40)
+
                     Text("Argus")
                         .font(.largeTitle)
                         .bold()
@@ -58,13 +76,32 @@ struct NewsView: View {
                 }
                 .padding(.horizontal)
 
+                // Tab bar for topics
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(topics, id: \.self) { topic in
+                            Button(action: {
+                                selectedTopic = topic
+                            }) {
+                                Text(topic)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(selectedTopic == topic ? Color.blue : Color.gray.opacity(0.2))
+                                    .foregroundColor(selectedTopic == topic ? .white : .primary)
+                                    .cornerRadius(8)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.vertical, 8)
+                .background(Color(UIColor.systemGray6))
+
                 // Article list
                 List {
                     ForEach(filteredNotifications) { notification in
-                        // Updated list row gesture to toggle selection in edit mode or navigate otherwise
                         HStack {
                             if isEditing {
-                                // Selection checkbox
                                 Button(action: {
                                     toggleSelection(notification)
                                 }) {
@@ -75,7 +112,6 @@ struct NewsView: View {
                                 .padding(.trailing, 8)
                             }
 
-                            // Row content with conditional NavigationLink
                             if !isEditing {
                                 NavigationLink(destination: NotificationDetailView(notification: notification)) {
                                     rowContent(for: notification)
@@ -89,7 +125,6 @@ struct NewsView: View {
 
                             Spacer()
 
-                            // Bookmark icon
                             Button(action: {
                                 toggleBookmark(notification)
                             }) {
@@ -186,7 +221,6 @@ struct NewsView: View {
         }
     }
 
-    // Helper function for row content
     private func rowContent(for notification: NotificationData) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
@@ -208,7 +242,6 @@ struct NewsView: View {
             action(notification)
         }
         saveChanges()
-        // Exit edit mode
         isEditing = false
         selectedNotifications.removeAll()
     }
