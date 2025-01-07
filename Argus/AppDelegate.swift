@@ -68,26 +68,26 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // Ensure "data" is cast to a dictionary
+        // Extract data payload
         let data = userInfo["data"] as? [String: AnyObject]
-        let json_url = data?["json_url"] as? String // Extract the URL
+        let json_url = data?["json_url"] as? String
+        let topic = data?["topic"] as? String
 
+        // Handle alert for high-priority notifications
         if let alert = aps["alert"] as? [String: String],
            let title = alert["title"],
            let body = alert["body"]
         {
-            let topic = data?["topic"] as? String // Extract topic from data
-            saveNotification(title: title, body: body, json_url: json_url, topic: topic)
-            completionHandler(.newData)
-        } else if let alert = aps["alert"] as? [String: String],
-                  let title = alert["title"],
-                  let body = alert["body"]
-        {
-            let topic = data?["topic"] as? String // Extract topic from data
             saveNotification(title: title, body: body, json_url: json_url, topic: topic)
             completionHandler(.newData)
         } else {
-            completionHandler(.noData)
+            // Handle low-priority notifications without an alert
+            if let json_url = json_url {
+                saveNotification(title: "Background Update", body: "New content available.", json_url: json_url, topic: topic)
+                completionHandler(.newData)
+            } else {
+                completionHandler(.noData)
+            }
         }
     }
 
