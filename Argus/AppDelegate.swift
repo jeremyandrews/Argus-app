@@ -30,7 +30,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         print("Failed to register: \(error)")
     }
 
-    func application(_: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+    func application(
+        _: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
         guard let aps = userInfo["aps"] as? [String: AnyObject],
               let contentAvailable = aps["content-available"] as? Int, contentAvailable == 1
         else {
@@ -38,11 +42,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
+        // Ensure "data" is cast to a dictionary
+        let data = userInfo["data"] as? [String: AnyObject]
+        let json_url = data?["json_url"] as? String // Extract the URL
+
         if let alert = aps["alert"] as? [String: String],
            let title = alert["title"],
            let body = alert["body"]
         {
-            saveNotification(title: title, body: body)
+            saveNotification(title: title, body: body, json_url: json_url)
             completionHandler(.newData)
         } else {
             completionHandler(.noData)
@@ -57,12 +65,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         else {
             return
         }
-        saveNotification(title: title, body: body)
+
+        // Extract the `json_url` from the `data` field
+        let data = userInfo["data"] as? [String: AnyObject]
+        let json_url = data?["json_url"] as? String
+
+        saveNotification(title: title, body: body, json_url: json_url)
     }
 
-    private func saveNotification(title: String, body: String) {
+    private func saveNotification(title: String, body: String, json_url: String?) {
         let context = ArgusApp.sharedModelContainer.mainContext
-        let newNotification = NotificationData(date: Date(), title: title, body: body)
+        let newNotification = NotificationData(date: Date(), title: title, body: body, json_url: json_url)
         context.insert(newNotification)
 
         do {
@@ -102,13 +115,15 @@ class NotificationData {
     @Attribute var title: String
     @Attribute var body: String
     @Attribute var isViewed: Bool
-    @Attribute var isBookmarked: Bool // New attribute
+    @Attribute var isBookmarked: Bool
+    @Attribute var json_url: String?
 
-    init(id: UUID = UUID(), date: Date, title: String, body: String, isViewed: Bool = false, isBookmarked: Bool = false) {
+    init(id: UUID = UUID(), date: Date, title: String, body: String, json_url: String? = nil, isViewed: Bool = false, isBookmarked: Bool = false) {
         self.id = id
         self.date = date
         self.title = title
         self.body = body
+        self.json_url = json_url
         self.isViewed = isViewed
         self.isBookmarked = isBookmarked
     }

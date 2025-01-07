@@ -4,6 +4,18 @@ import SwiftyMarkdown
 
 struct NotificationDetailView: View {
     @State private var showDeleteConfirmation = false
+    @State private var additionalContent: [String: Any]? = nil // State to store parsed JSON
+    @State private var isLoadingAdditionalContent = false // State for loading status
+    @State private var expandedSections: [String: Bool] = [
+        "Summary": true,
+        "Article": true,
+        "Critical Analysis": false,
+        "Logical Fallacies": false,
+        "Source Analysis": false,
+        "Relevance": false,
+        "Technical": false,
+    ]
+
     var notification: NotificationData
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -51,7 +63,7 @@ struct NotificationDetailView: View {
                 .font(.title)
                 .bold()
                 .multilineTextAlignment(.leading)
-                .lineLimit(nil) // Allow unlimited lines
+                .lineLimit(nil)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding([.leading, .trailing])
 
@@ -66,12 +78,50 @@ struct NotificationDetailView: View {
                     .font(.footnote)
                     .foregroundColor(.gray)
                     .padding([.leading, .trailing, .top])
+
+                // Additional content from JSON URL
+                if isLoadingAdditionalContent {
+                    ProgressView("Loading additional content...")
+                        .padding()
+                } else if let content = additionalContent {
+                    ForEach(getSections(from: content), id: \.header) { section in
+                        VStack {
+                            Divider()
+                            DisclosureGroup(
+                                isExpanded: Binding(
+                                    get: { expandedSections[section.header] ?? false },
+                                    set: { expandedSections[section.header] = $0 }
+                                )
+                            ) {
+                                if section.header == "Article", let url = section.content as? String, let link = URL(string: url) {
+                                    Link("View Article", destination: link)
+                                        .font(.body)
+                                        .foregroundColor(.blue)
+                                } else if let markdownContent = section.content as? String {
+                                    let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
+                                    Text(AttributedString(attributedMarkdown))
+                                        .font(.body)
+                                        .padding(.top, 8)
+                                } else if section.header == "Technical", let technicalData = section.content as? (String, Double) {
+                                    Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
+                                        .font(.body)
+                                        .padding(.top, 8)
+                                }
+                            } label: {
+                                Text(section.header)
+                                    .font(.headline)
+                            }
+                            .padding([.leading, .trailing, .top])
+                        }
+                    }
+                }
             }
 
             Spacer()
         }
         .onAppear {
             markAsViewed()
+            loadAdditionalContent()
         }
         .alert("Are you sure you want to delete this article?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
@@ -79,16 +129,57 @@ struct NotificationDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        // Hide the default navigation bar
         .navigationBarHidden(true)
         .gesture(
             DragGesture()
                 .onEnded { value in
-                    if value.translation.width > 100 { // Detect left-to-right swipe
+                    if value.translation.width > 100 {
                         dismiss()
                     }
                 }
         )
+    }
+
+    private func loadAdditionalContent() {
+        guard let jsonURL = notification.json_url, let url = URL(string: jsonURL) else { return }
+        isLoadingAdditionalContent = true
+
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    additionalContent = json
+                } else {
+                    additionalContent = ["Error": "No valid content found."]
+                }
+            } catch {
+                additionalContent = ["Error": "Failed to load content: \(error.localizedDescription)"]
+            }
+            isLoadingAdditionalContent = false
+        }
+    }
+
+    private func getSections(from json: [String: Any]) -> [Section] {
+        [
+            Section(header: "Summary", content: json["summary"] as? String ?? ""),
+            Section(header: "Article", content: json["url"] as? String ?? ""),
+            Section(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
+            Section(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
+            Section(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
+            Section(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
+            Section(
+                header: "Technical",
+                content: (
+                    json["model"] as? String ?? "Unknown",
+                    (json["elapsed_time"] as? Double) ?? 0.0
+                )
+            ),
+        ]
+    }
+
+    private struct Section {
+        let header: String
+        let content: Any
     }
 
     private func toggleReadStatus() {
