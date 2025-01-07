@@ -7,8 +7,8 @@ struct NotificationDetailView: View {
     @State private var additionalContent: [String: Any]? = nil // State to store parsed JSON
     @State private var isLoadingAdditionalContent = false // State for loading status
     @State private var expandedSections: [String: Bool] = [
+        "Article": false,
         "Summary": true,
-        "Article": true,
         "Critical Analysis": false,
         "Logical Fallacies": false,
         "Source Analysis": false,
@@ -96,9 +96,16 @@ struct NotificationDetailView: View {
                                 )
                             ) {
                                 if section.header == "Article", let url = section.content as? String, let link = URL(string: url) {
-                                    Link("View Article", destination: link)
-                                        .font(.body)
-                                        .foregroundColor(.blue)
+                                    Button(action: {
+                                        UIApplication.shared.open(link)
+                                    }) {
+                                        Text(notification.title)
+                                            .font(.body)
+                                            .foregroundColor(.blue)
+                                            .multilineTextAlignment(.leading)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .padding(.vertical, 4)
                                 } else if let markdownContent = section.content as? String {
                                     let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
                                     Text(AttributedString(attributedMarkdown))
@@ -166,8 +173,8 @@ struct NotificationDetailView: View {
 
     private func getSections(from json: [String: Any]) -> [Section] {
         [
-            Section(header: "Summary", content: json["summary"] as? String ?? ""),
             Section(header: "Article", content: json["url"] as? String ?? ""),
+            Section(header: "Summary", content: json["summary"] as? String ?? ""),
             Section(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
             Section(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
             Section(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
