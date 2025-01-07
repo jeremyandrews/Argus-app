@@ -74,20 +74,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         if let alert = aps["alert"] as? [String: String],
            let title = alert["title"],
-           let body = alert["body"]
-        {
-            saveNotification(title: title, body: body, json_url: json_url)
+           let body = alert["body"] {
+            let topic = data?["topic"] as? String // Extract topic from data
+            saveNotification(title: title, body: body, json_url: json_url, topic: topic)
             completionHandler(.newData)
-        } else if let alert = aps["alert"] as? [String: String],
-                  let title = alert["title"],
-                  let body = alert["body"]
-        {
-            // Handle silent notification using alert's title and body
-            saveNotification(title: title, body: body, json_url: json_url)
+        } else if json_url != nil {
+            let topic = data?["topic"] as? String // Extract topic from data
+            saveNotification(title: "Background Update", body: "New content available.", json_url: json_url, topic: topic)
             completionHandler(.newData)
         } else {
             completionHandler(.noData)
         }
+
     }
 
     private func handleRemoteNotification(userInfo: [String: AnyObject]) {
@@ -99,16 +97,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // Extract the `json_url` from the `data` field
+        // Extract the `json_url` and `topic` from the `data` field
         let data = userInfo["data"] as? [String: AnyObject]
         let json_url = data?["json_url"] as? String
+        let topic = data?["topic"] as? String
 
-        saveNotification(title: title, body: body, json_url: json_url)
+        saveNotification(title: title, body: body, json_url: json_url, topic: topic)
     }
 
-    private func saveNotification(title: String, body: String, json_url: String?) {
+    private func saveNotification(title: String, body: String, json_url: String?, topic: String?) {
         let context = ArgusApp.sharedModelContainer.mainContext
-        let newNotification = NotificationData(date: Date(), title: title, body: body, json_url: json_url)
+        let newNotification = NotificationData(
+            date: Date(),
+            title: title,
+            body: body,
+            json_url: json_url,
+            topic: topic // Add topic here
+        )
         context.insert(newNotification)
 
         do {
@@ -150,13 +155,24 @@ class NotificationData {
     @Attribute var isViewed: Bool
     @Attribute var isBookmarked: Bool
     @Attribute var json_url: String?
+    @Attribute var topic: String? // Add this
 
-    init(id: UUID = UUID(), date: Date, title: String, body: String, json_url: String? = nil, isViewed: Bool = false, isBookmarked: Bool = false) {
+    init(
+        id: UUID = UUID(),
+        date: Date,
+        title: String,
+        body: String,
+        json_url: String? = nil,
+        topic: String? = nil, // Add this
+        isViewed: Bool = false,
+        isBookmarked: Bool = false
+    ) {
         self.id = id
         self.date = date
         self.title = title
         self.body = body
         self.json_url = json_url
+        self.topic = topic // Add this
         self.isViewed = isViewed
         self.isBookmarked = isBookmarked
     }
