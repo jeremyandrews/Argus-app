@@ -61,6 +61,7 @@ struct NewsView: View {
                 // Article list
                 List {
                     ForEach(filteredNotifications) { notification in
+                        // Updated list row gesture to toggle selection in edit mode or navigate otherwise
                         HStack {
                             if isEditing {
                                 // Selection checkbox
@@ -74,23 +75,16 @@ struct NewsView: View {
                                 .padding(.trailing, 8)
                             }
 
-                            // Row content with background for unread
-                            NavigationLink(destination: NotificationDetailView(notification: notification)) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    // SwiftyMarkdown formatted title
-                                    let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
-                                    Text(AttributedString(attributedTitle))
-                                        .font(.headline)
-                                        .lineLimit(2)
-                                        .foregroundColor(.primary)
-
-                                    // SwiftyMarkdown formatted body
-                                    let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
-                                    Text(AttributedString(attributedBody))
-                                        .font(.subheadline)
-                                        .lineLimit(2)
-                                        .foregroundColor(.secondary)
+                            // Row content with conditional NavigationLink
+                            if !isEditing {
+                                NavigationLink(destination: NotificationDetailView(notification: notification)) {
+                                    rowContent(for: notification)
                                 }
+                            } else {
+                                rowContent(for: notification)
+                                    .onTapGesture {
+                                        toggleSelection(notification)
+                                    }
                             }
 
                             Spacer()
@@ -105,6 +99,7 @@ struct NewsView: View {
                             .buttonStyle(.plain)
                         }
                         .padding(.vertical, 8)
+                        .background(isEditing && selectedNotifications.contains(notification) ? Color.gray.opacity(0.2) : Color.clear)
                         .listRowBackground(notification.isViewed ? Color.clear : Color.blue.opacity(0.4))
                         .cornerRadius(8)
                         .gesture(
@@ -168,13 +163,6 @@ struct NewsView: View {
         }
     }
 
-    private func performActionOnSelection(action: (NotificationData) -> Void) {
-        for notification in selectedNotifications {
-            action(notification)
-        }
-        saveChanges()
-    }
-
     private func deleteSelectedNotifications() {
         withAnimation {
             for notification in selectedNotifications {
@@ -196,6 +184,33 @@ struct NewsView: View {
         } catch {
             print("Failed to save changes: \(error)")
         }
+    }
+
+    // Helper function for row content
+    private func rowContent(for notification: NotificationData) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
+            Text(AttributedString(attributedTitle))
+                .font(.headline)
+                .lineLimit(2)
+                .foregroundColor(.primary)
+
+            let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
+            Text(AttributedString(attributedBody))
+                .font(.subheadline)
+                .lineLimit(2)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func performActionOnSelection(action: (NotificationData) -> Void) {
+        for notification in selectedNotifications {
+            action(notification)
+        }
+        saveChanges()
+        // Exit edit mode
+        isEditing = false
+        selectedNotifications.removeAll()
     }
 }
 
