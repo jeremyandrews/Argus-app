@@ -69,15 +69,17 @@ struct NotificationDetailView: View {
 
             // Body
             ScrollView {
-                let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
-                Text(AttributedString(attributedBody))
-                    .font(.body)
-                    .padding([.leading, .trailing])
-
-                Text(notification.date, format: .dateTime.hour().minute().second())
-                    .font(.footnote)
-                    .foregroundColor(.gray)
-                    .padding([.leading, .trailing, .top])
+                VStack(alignment: .leading, spacing: 8) {
+                    let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
+                    Text(AttributedString(attributedBody))
+                        .font(.custom("AvenirNext-Italic", size: 12))
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(UIColor.systemGray6))
+                        )
+                        .padding([.leading, .trailing])
+                }
 
                 // Additional content from JSON URL
                 if isLoadingAdditionalContent {
@@ -102,10 +104,13 @@ struct NotificationDetailView: View {
                                     Text(AttributedString(attributedMarkdown))
                                         .font(.body)
                                         .padding(.top, 8)
-                                } else if section.header == "Technical", let technicalData = section.content as? (String, Double) {
-                                    Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
-                                        .font(.body)
-                                        .padding(.top, 8)
+                                } else if section.header == "Technical", let technicalData = section.content as? (String, Double, Date) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
+                                        Text("Received from Argus at \(technicalData.2, format: .dateTime.hour().minute().second()).")
+                                    }
+                                    .font(.body)
+                                    .padding(.top, 8)
                                 }
                             } label: {
                                 Text(section.header)
@@ -171,7 +176,8 @@ struct NotificationDetailView: View {
                 header: "Technical",
                 content: (
                     json["model"] as? String ?? "Unknown",
-                    (json["elapsed_time"] as? Double) ?? 0.0
+                    (json["elapsed_time"] as? Double) ?? 0.0,
+                    notification.date
                 )
             ),
         ]
