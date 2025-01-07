@@ -73,22 +73,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let json_url = data?["json_url"] as? String
         let topic = data?["topic"] as? String
 
-        // Handle alert for high-priority notifications
-        if let alert = aps["alert"] as? [String: String],
-           let title = alert["title"],
-           let body = alert["body"]
-        {
-            saveNotification(title: title, body: body, json_url: json_url, topic: topic)
-            completionHandler(.newData)
-        } else {
-            // Handle low-priority notifications without an alert
-            if let json_url = json_url {
-                saveNotification(title: "Background Update", body: "New content available.", json_url: json_url, topic: topic)
-                completionHandler(.newData)
-            } else {
-                completionHandler(.noData)
-            }
-        }
+        // Extract alert details
+        let alert = aps["alert"] as? [String: String]
+        let title = alert?["title"] ?? "[no title]"
+        let body = alert?["body"] ?? "[no body]"
+
+        // Save the notification with extracted details
+        saveNotification(title: title, body: body, json_url: json_url, topic: topic)
+        completionHandler(.newData)
     }
 
     private func handleRemoteNotification(userInfo: [String: AnyObject]) {

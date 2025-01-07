@@ -91,7 +91,7 @@ struct NotificationDetailView: View {
                         .padding()
                 } else if let content = additionalContent {
                     ForEach(getSections(from: content), id: \.header) { section in
-                        if section.header != "Article" { // Removed Article block
+                        if section.header != "Article" {
                             VStack {
                                 Divider()
                                 DisclosureGroup(
