@@ -9,11 +9,11 @@ struct NotificationDetailView: View {
     @State private var expandedSections: [String: Bool] = [
         "Article": false,
         "Summary": true,
+        "Relevance": false,
         "Critical Analysis": false,
         "Logical Fallacies": false,
         "Source Analysis": false,
-        "Relevance": false,
-        "Technical": false,
+        "Argus Details": false,
     ]
 
     var notification: NotificationData
@@ -57,22 +57,26 @@ struct NotificationDetailView: View {
             }
             .padding()
 
-            // Wrapping Title
-            let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
-            Text(AttributedString(attributedTitle))
-                .font(.title)
-                .bold()
-                .multilineTextAlignment(.leading)
-                .lineLimit(nil)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Clickable Title
+            if let content = additionalContent, let articleURL = content["url"] as? String, let link = URL(string: articleURL) {
+                Button(action: {
+                    UIApplication.shared.open(link)
+                }) {
+                    Text(notification.title)
+                        .font(.title3)
+                        .bold()
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 .padding([.leading, .trailing])
+            }
 
             // Body
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
                     Text(AttributedString(attributedBody))
-                        .font(.custom("AvenirNext-Italic", size: 12))
+                        .font(.footnote)
                         .padding()
                         .background(
                             RoundedRectangle(cornerRadius: 8)
@@ -81,49 +85,40 @@ struct NotificationDetailView: View {
                         .padding([.leading, .trailing])
                 }
 
-                // Additional content from JSON URL
+                // Additional Content
                 if isLoadingAdditionalContent {
                     ProgressView("Loading additional content...")
                         .padding()
                 } else if let content = additionalContent {
                     ForEach(getSections(from: content), id: \.header) { section in
-                        VStack {
-                            Divider()
-                            DisclosureGroup(
-                                isExpanded: Binding(
-                                    get: { expandedSections[section.header] ?? false },
-                                    set: { expandedSections[section.header] = $0 }
-                                )
-                            ) {
-                                if section.header == "Article", let url = section.content as? String, let link = URL(string: url) {
-                                    Button(action: {
-                                        UIApplication.shared.open(link)
-                                    }) {
-                                        Text(notification.title)
+                        if section.header != "Article" { // Removed Article block
+                            VStack {
+                                Divider()
+                                DisclosureGroup(
+                                    isExpanded: Binding(
+                                        get: { expandedSections[section.header] ?? false },
+                                        set: { expandedSections[section.header] = $0 }
+                                    )
+                                ) {
+                                    if let markdownContent = section.content as? String {
+                                        let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
+                                        Text(AttributedString(attributedMarkdown))
                                             .font(.body)
-                                            .foregroundColor(.blue)
-                                            .multilineTextAlignment(.leading)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .padding(.vertical, 4)
-                                } else if let markdownContent = section.content as? String {
-                                    let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
-                                    Text(AttributedString(attributedMarkdown))
+                                            .padding(.top, 8)
+                                    } else if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date) {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
+                                            Text("Received from Argus at \(technicalData.2, format: .dateTime.hour().minute().second()).")
+                                        }
                                         .font(.body)
                                         .padding(.top, 8)
-                                } else if section.header == "Technical", let technicalData = section.content as? (String, Double, Date) {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
-                                        Text("Received from Argus at \(technicalData.2, format: .dateTime.hour().minute().second()).")
                                     }
-                                    .font(.body)
-                                    .padding(.top, 8)
+                                } label: {
+                                    Text(section.header)
+                                        .font(.headline)
                                 }
-                            } label: {
-                                Text(section.header)
-                                    .font(.headline)
+                                .padding([.leading, .trailing, .top])
                             }
-                            .padding([.leading, .trailing, .top])
                         }
                     }
                 }
@@ -175,12 +170,12 @@ struct NotificationDetailView: View {
         [
             Section(header: "Article", content: json["url"] as? String ?? ""),
             Section(header: "Summary", content: json["summary"] as? String ?? ""),
+            Section(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
             Section(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
             Section(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
             Section(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
-            Section(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
             Section(
-                header: "Technical",
+                header: "Argus Details",
                 content: (
                     json["model"] as? String ?? "Unknown",
                     (json["elapsed_time"] as? Double) ?? 0.0,

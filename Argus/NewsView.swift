@@ -9,6 +9,9 @@ struct NewsView: View {
     @State private var showUnreadOnly: Bool = false
     @State private var showBookmarkedOnly: Bool = false
     @State private var isFilterMenuPresented: Bool = false
+    @State private var isEditing: Bool = false
+    @State private var selectedNotifications: Set<NotificationData> = []
+    @State private var showDeleteConfirmation: Bool = false
 
     private var filteredNotifications: [NotificationData] {
         var result = notifications
@@ -24,26 +27,27 @@ struct NewsView: View {
     var body: some View {
         NavigationView {
             VStack {
-                // Header with icon, title, and filter button
+                // Header with Edit button and filters
                 HStack {
-                    Image("Argus")
-                        .resizable()
-                        .frame(width: 40, height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .padding(.trailing, 8)
-
                     Text("Argus")
                         .font(.largeTitle)
                         .bold()
 
                     Spacer()
 
+                    Button(isEditing ? "Done" : "Edit") {
+                        isEditing.toggle()
+                        if !isEditing {
+                            selectedNotifications.removeAll()
+                        }
+                    }
+
                     Button(action: {
                         isFilterMenuPresented.toggle()
                     }) {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                             .foregroundColor(.primary)
-                            .padding(.bottom, 8)
+                            .padding(.leading, 8)
                     }
                     .sheet(isPresented: $isFilterMenuPresented) {
                         FilterView(
@@ -58,17 +62,19 @@ struct NewsView: View {
                 List {
                     ForEach(filteredNotifications) { notification in
                         HStack {
-                            // Read/Unread icon
-                            Button(action: {
-                                toggleReadStatus(notification)
-                            }) {
-                                Image(systemName: notification.isViewed ? "circle" : "circle.fill")
-                                    .foregroundColor(.blue)
+                            if isEditing {
+                                // Selection checkbox
+                                Button(action: {
+                                    toggleSelection(notification)
+                                }) {
+                                    Image(systemName: selectedNotifications.contains(notification) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundColor(.blue)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.trailing, 8)
                             }
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 8)
 
-                            // NavigationLink to details
+                            // Row content with background for unread
                             NavigationLink(destination: NotificationDetailView(notification: notification)) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     // SwiftyMarkdown formatted title
@@ -98,45 +104,84 @@ struct NewsView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 8)
+                        .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.3))
+                        .cornerRadius(8)
                     }
-                    .onDelete(perform: deleteNotifications)
                 }
                 .listStyle(PlainListStyle())
+
+                // Toolbar for actions
+                if isEditing && !selectedNotifications.isEmpty {
+                    HStack {
+                        Button(action: {
+                            performActionOnSelection { $0.isViewed = true }
+                        }) {
+                            Image(systemName: "envelope.open.fill")
+                                .font(.title2)
+                                .foregroundColor(.gray)
+                        }
+
+                        Button(action: {
+                            performActionOnSelection { $0.isViewed = false }
+                        }) {
+                            Image(systemName: "envelope.badge.fill")
+                                .font(.title2)
+                        }
+
+                        Button(action: {
+                            showDeleteConfirmation = true
+                        }) {
+                            Image(systemName: "trash.fill")
+                                .font(.title2)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .padding()
+                    .background(Color(UIColor.systemGray6))
+                }
+            }
+            .confirmationDialog(
+                "Are you sure you want to delete \(selectedNotifications.count) articles?",
+                isPresented: $showDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    deleteSelectedNotifications()
+                }
+                Button("Cancel", role: .cancel) {}
             }
         }
     }
 
-    private func toggleReadStatus(_ notification: NotificationData) {
-        notification.isViewed.toggle()
-        do {
-            try modelContext.save()
-            updateBadgeCount() // Ensure badge count is updated
-        } catch {
-            print("Failed to toggle read status: \(error)")
+    private func toggleSelection(_ notification: NotificationData) {
+        if selectedNotifications.contains(notification) {
+            selectedNotifications.remove(notification)
+        } else {
+            selectedNotifications.insert(notification)
         }
     }
 
-    private func updateBadgeCount() {
-        let unviewedCount = notifications.filter { !$0.isViewed }.count
-        UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
-            if let error = error {
-                print("Failed to set badge count: \(error)")
+    private func performActionOnSelection(action: (NotificationData) -> Void) {
+        for notification in selectedNotifications {
+            action(notification)
+        }
+        saveChanges()
+    }
+
+    private func deleteSelectedNotifications() {
+        withAnimation {
+            for notification in selectedNotifications {
+                modelContext.delete(notification)
             }
+            selectedNotifications.removeAll()
+            saveChanges()
         }
     }
 
     private func toggleBookmark(_ notification: NotificationData) {
         notification.isBookmarked.toggle()
         saveChanges()
-    }
-
-    private func deleteNotifications(offsets: IndexSet) {
-        withAnimation {
-            let notificationsToDelete = offsets.map { filteredNotifications[$0] }
-            notificationsToDelete.forEach(modelContext.delete)
-            saveChanges()
-        }
     }
 
     private func saveChanges() {
@@ -161,15 +206,6 @@ struct FilterView: View {
                 }
             }
             .navigationTitle("Show only")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                            scene.windows.first?.rootViewController?.dismiss(animated: true, completion: nil)
-                        }
-                    }
-                }
-            }
         }
     }
 }
