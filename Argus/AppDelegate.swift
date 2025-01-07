@@ -21,6 +21,32 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
+    func application(_: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        let context = ArgusApp.sharedModelContainer.mainContext
+
+        do {
+            // Fetch unviewed notifications
+            let unviewedCount = try context.fetch(
+                FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
+            ).count
+
+            // Update the app's badge count
+            UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
+                if let error = error {
+                    print("Failed to update badge count during background fetch: \(error)")
+                    completionHandler(.failed)
+                    return
+                }
+            }
+
+            // Indicate successful background fetch
+            completionHandler(.newData)
+        } catch {
+            print("Failed to fetch unviewed notifications: \(error)")
+            completionHandler(.failed)
+        }
+    }
+
     func application(_: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
         print("Device Token: \(token)")
@@ -51,6 +77,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
            let body = alert["body"]
         {
             saveNotification(title: title, body: body, json_url: json_url)
+            completionHandler(.newData)
+        } else if json_url != nil {
+            // Handle silent notification with just data
+            saveNotification(title: "Background Update", body: "New content available.", json_url: json_url)
             completionHandler(.newData)
         } else {
             completionHandler(.noData)
