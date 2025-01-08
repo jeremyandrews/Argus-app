@@ -134,8 +134,7 @@ struct NewsView: View {
                             .buttonStyle(.plain)
                         }
                         .padding(.vertical, 8)
-                        .background(isEditing && selectedNotifications.contains(notification) ? Color.gray.opacity(0.2) : Color.clear)
-                        .listRowBackground(notification.isViewed ? Color.clear : Color.blue.opacity(0.4))
+                        .listRowBackground(isEditing && selectedNotifications.contains(notification) ? Color.blue.opacity(0.4) : notification.isViewed ? Color.clear : Color.blue.opacity(0.2))
                         .cornerRadius(8)
                         .gesture(
                             LongPressGesture().onEnded { _ in
