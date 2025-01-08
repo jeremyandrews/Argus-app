@@ -73,13 +73,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let json_url = data?["json_url"] as? String
         let topic = data?["topic"] as? String
 
-        // Extract alert details
+        // Extract alert details, or fallback to data if alert is nil
         let alert = aps["alert"] as? [String: String]
-        let title = alert?["title"] ?? "[no title]"
-        let body = alert?["body"] ?? "[no body]"
+        let title = alert?["title"] ?? (data?["title"] as? String ?? "[no title]")
+        let body = alert?["body"] ?? (data?["body"] as? String ?? "[no body]")
+        let articleTitle = data?["article_title"] as? String ?? "[no article title]"
+        let affected = data?["affected"] as? String ?? ""
 
         // Save the notification with extracted details
-        saveNotification(title: title, body: body, json_url: json_url, topic: topic)
+        saveNotification(title: title, body: body, json_url: json_url, topic: topic, articleTitle: articleTitle, affected: affected)
         completionHandler(.newData)
     }
 
@@ -92,22 +94,34 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // Extract the `json_url` and `topic` from the `data` field
+        // Extract additional data from the `data` field
         let data = userInfo["data"] as? [String: AnyObject]
         let json_url = data?["json_url"] as? String
         let topic = data?["topic"] as? String
+        let articleTitle = data?["article_title"] as? String ?? "[no article title]"
+        let affected = data?["affected"] as? String ?? ""
 
-        saveNotification(title: title, body: body, json_url: json_url, topic: topic)
+        // Save the notification with all extracted details
+        saveNotification(
+            title: title,
+            body: body,
+            json_url: json_url,
+            topic: topic,
+            articleTitle: articleTitle,
+            affected: affected
+        )
     }
 
-    private func saveNotification(title: String, body: String, json_url: String?, topic: String?) {
+    private func saveNotification(title: String, body: String, json_url: String?, topic: String?, articleTitle: String, affected: String) {
         let context = ArgusApp.sharedModelContainer.mainContext
         let newNotification = NotificationData(
             date: Date(),
             title: title,
             body: body,
             json_url: json_url,
-            topic: topic // Add topic here
+            topic: topic,
+            article_title: articleTitle, // Add article title here
+            affected: affected // Add affected text here
         )
         context.insert(newNotification)
 
@@ -150,7 +164,9 @@ class NotificationData {
     @Attribute var isViewed: Bool
     @Attribute var isBookmarked: Bool
     @Attribute var json_url: String?
-    @Attribute var topic: String? // Add this
+    @Attribute var topic: String?
+    @Attribute var article_title: String
+    @Attribute var affected: String
 
     init(
         id: UUID = UUID(),
@@ -158,7 +174,9 @@ class NotificationData {
         title: String,
         body: String,
         json_url: String? = nil,
-        topic: String? = nil, // Add this
+        topic: String? = nil,
+        article_title: String,
+        affected: String,
         isViewed: Bool = false,
         isBookmarked: Bool = false
     ) {
@@ -167,7 +185,9 @@ class NotificationData {
         self.title = title
         self.body = body
         self.json_url = json_url
-        self.topic = topic // Add this
+        self.topic = topic
+        self.article_title = article_title
+        self.affected = affected
         self.isViewed = isViewed
         self.isBookmarked = isBookmarked
     }
