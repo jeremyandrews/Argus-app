@@ -79,9 +79,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let body = alert?["body"] ?? (data?["body"] as? String ?? "[no body]")
         let articleTitle = data?["article_title"] as? String ?? "[no article title]"
         let affected = data?["affected"] as? String ?? ""
+        // Extract additional data from the `data` field
+        let domain = data?["domain"] as? String
 
-        // Save the notification with extracted details
-        saveNotification(title: title, body: body, json_url: json_url, topic: topic, articleTitle: articleTitle, affected: affected)
+        // Save the notification with all extracted details
+        saveNotification(
+            title: title,
+            body: body,
+            json_url: json_url,
+            topic: topic,
+            articleTitle: articleTitle,
+            affected: affected,
+            domain: domain // Pass domain here
+        )
         completionHandler(.newData)
     }
 
@@ -100,6 +110,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let topic = data?["topic"] as? String
         let articleTitle = data?["article_title"] as? String ?? "[no article title]"
         let affected = data?["affected"] as? String ?? ""
+        let domain = data?["domain"] as? String ?? "[unknown]"
 
         // Save the notification with all extracted details
         saveNotification(
@@ -108,11 +119,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             json_url: json_url,
             topic: topic,
             articleTitle: articleTitle,
-            affected: affected
+            affected: affected,
+            domain: domain
         )
     }
 
-    private func saveNotification(title: String, body: String, json_url: String?, topic: String?, articleTitle: String, affected: String) {
+    private func saveNotification(title: String, body: String, json_url: String?, topic: String?, articleTitle: String, affected: String, domain: String?) {
         let context = ArgusApp.sharedModelContainer.mainContext
         let newNotification = NotificationData(
             date: Date(),
@@ -120,8 +132,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             body: body,
             json_url: json_url,
             topic: topic,
-            article_title: articleTitle, // Add article title here
-            affected: affected // Add affected text here
+            article_title: articleTitle,
+            affected: affected,
+            domain: domain // Add domain here
         )
         context.insert(newNotification)
 
@@ -167,6 +180,7 @@ class NotificationData {
     @Attribute var topic: String?
     @Attribute var article_title: String
     @Attribute var affected: String
+    @Attribute var domain: String?
 
     init(
         id: UUID = UUID(),
@@ -177,6 +191,7 @@ class NotificationData {
         topic: String? = nil,
         article_title: String,
         affected: String,
+        domain: String? = nil,
         isViewed: Bool = false,
         isBookmarked: Bool = false
     ) {
@@ -188,6 +203,7 @@ class NotificationData {
         self.topic = topic
         self.article_title = article_title
         self.affected = affected
+        self.domain = domain
         self.isViewed = isViewed
         self.isBookmarked = isBookmarked
     }

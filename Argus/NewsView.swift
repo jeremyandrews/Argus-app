@@ -221,18 +221,47 @@ struct NewsView: View {
     }
 
     private func rowContent(for notification: NotificationData) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
             Text(AttributedString(attributedTitle))
                 .font(.headline)
                 .lineLimit(2)
                 .foregroundColor(.primary)
 
+            // Display domain if available
+            if let domain = notification.domain, !domain.isEmpty {
+                Text(domain)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+            }
+            
+            // Display article title
+            if !notification.article_title.isEmpty {
+                Text(notification.article_title)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.primary)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 10)
+            }
+
+            // Display body text
             let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
             Text(AttributedString(attributedBody))
-                .font(.subheadline)
-                .lineLimit(2)
+                .font(.system(size: 14, weight: .light))
                 .foregroundColor(.secondary)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 16)
+
+            // Display affected text if not empty
+            if !notification.affected.isEmpty {
+                Text(notification.affected)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 18)
+            }
         }
     }
 
