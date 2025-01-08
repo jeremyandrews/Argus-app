@@ -236,7 +236,7 @@ struct NewsView: View {
                     .lineLimit(1)
                     .padding(.horizontal, 10)
             }
-            
+
             // Display article title
             if !notification.article_title.isEmpty {
                 Text(notification.article_title)

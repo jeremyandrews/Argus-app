@@ -74,15 +74,37 @@ struct NotificationDetailView: View {
             // Body
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
+                    // Display domain if available
+                    if let domain = notification.domain, !domain.isEmpty {
+                        Text(domain)
+                            .font(.system(size: 14, weight: .medium)) // 3/4 the size of the title
+                            .foregroundColor(.blue)
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                    }
+
+                    // Display article title
+                    if !notification.article_title.isEmpty {
+                        Text(notification.article_title)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.primary)
+                            .multilineTextAlignment(.leading)
+                            .padding(.horizontal, 10)
+                    }
+
                     let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
                     Text(AttributedString(attributedBody))
                         .font(.footnote)
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(UIColor.systemGray6))
-                        )
                         .padding([.leading, .trailing])
+
+                    // Display affected text if not empty
+                    if !notification.affected.isEmpty {
+                        Text(notification.affected)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .padding([.leading, .trailing, .top])
+                    }
                 }
 
                 // Additional Content
