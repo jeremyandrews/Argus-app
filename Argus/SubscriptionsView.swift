@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SubscriptionsView: View {
     @State private var subscriptions: [String: Bool] = [:]
-    let listOfSubscriptions: [String] = ["Alert", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "EVs", "Global", "LLMs", "Longevity", "Music", "Rust", "Space", "Tuscany", "Vulnerability"]
+    let listOfSubscriptions: [String] = ["Alert", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "EVs", "Global", "LLMs", "Longevity", "Music", "Rust", "Space", "Tuscany", "Vulnerability", "Test"]
 
     var body: some View {
         NavigationView {
@@ -15,9 +15,12 @@ struct SubscriptionsView: View {
                     }) {
                         HStack {
                             Text(subscription)
+                                .foregroundColor(isSelected ? .blue : .gray)
                             Spacer()
                             Image(systemName: isSelected ? "checkmark" : "xmark")
+                                .foregroundColor(isSelected ? .blue : .gray)
                         }
+                        .listRowBackground(isSelected ? Color.clear : Color.gray.opacity(0.2))
                     }
                 }
             }
