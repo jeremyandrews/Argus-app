@@ -203,6 +203,7 @@ struct NewsView: View {
                 modelContext.delete(notification)
             }
             selectedNotifications.removeAll()
+            isEditing = false
             saveChanges()
         }
     }
