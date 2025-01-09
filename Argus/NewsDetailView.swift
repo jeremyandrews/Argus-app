@@ -235,23 +235,9 @@ struct NotificationDetailView: View {
             notification.isViewed = true
             do {
                 try modelContext.save()
-                updateBadgeCount()
+                AppDelegate().updateBadgeCount()
             } catch {
                 print("Failed to mark notification as viewed: \(error)")
-            }
-        }
-    }
-
-    private func updateBadgeCount() {
-        let unviewedCount = (try? modelContext.fetch(
-            FetchDescriptor<NotificationData>(
-                predicate: #Predicate { !$0.isViewed }
-            )
-        ))?.count ?? 0
-
-        UNUserNotificationCenter.current().updateBadgeCount(unviewedCount) { error in
-            if let error = error {
-                print("Failed to set badge count: \(error)")
             }
         }
     }
@@ -260,6 +246,7 @@ struct NotificationDetailView: View {
         modelContext.delete(notification)
         do {
             try modelContext.save()
+            AppDelegate().updateBadgeCount()
             dismiss()
         } catch {
             print("Failed to delete notification: \(error)")

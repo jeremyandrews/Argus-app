@@ -17,6 +17,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 print("Error requesting notification authorization: \(error)")
             }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.updateBadgeCount()
+        }
 
         return true
     }
@@ -41,9 +44,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
             // Indicate successful background fetch
             completionHandler(.newData)
+            updateBadgeCount()
         } catch {
             print("Failed to fetch unviewed notifications: \(error)")
             completionHandler(.failed)
+            updateBadgeCount()
         }
     }
 
@@ -93,6 +98,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             domain: domain // Pass domain here
         )
         completionHandler(.newData)
+        updateBadgeCount()
     }
 
     private func handleRemoteNotification(userInfo: [String: AnyObject]) {
@@ -141,8 +147,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         do {
             try context.save()
             print("Notification saved: \(newNotification)")
+            updateBadgeCount()
+        } catch {
+            print("Failed to save notification: \(error)")
+        }
+    }
 
-            // Update badge count
+    func updateBadgeCount() {
+        do {
+            let context = ArgusApp.sharedModelContainer.mainContext
             let unviewedCount = try context.fetch(
                 FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
             ).count
@@ -152,7 +165,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 }
             }
         } catch {
-            print("Failed to save notification: \(error)")
+            print("Failed to fetch unviewed notifications: \(error)")
         }
     }
 }

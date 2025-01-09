@@ -216,6 +216,7 @@ struct NewsView: View {
     private func saveChanges() {
         do {
             try modelContext.save()
+            AppDelegate().updateBadgeCount()
         } catch {
             print("Failed to save changes: \(error)")
         }
