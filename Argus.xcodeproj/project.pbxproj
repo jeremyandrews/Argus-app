@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		B06729902D2A98F900A05424 /* SwiftyMarkdown in Frameworks */ = {isa = PBXBuildFile; productRef = B067298F2D2A98F900A05424 /* SwiftyMarkdown */; };
+		B06C5FB12D300CC30077A453 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = B06C5FB02D300CC30077A453 /* FirebaseMessaging */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,6 +70,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B06C5FB12D300CC30077A453 /* FirebaseMessaging in Frameworks */,
 				B06729902D2A98F900A05424 /* SwiftyMarkdown in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -139,6 +141,7 @@
 			name = Argus;
 			packageProductDependencies = (
 				B067298F2D2A98F900A05424 /* SwiftyMarkdown */,
+				B06C5FB02D300CC30077A453 /* FirebaseMessaging */,
 			);
 			productName = Argus;
 			productReference = B058375A2D2933020067DBAF /* Argus.app */;
@@ -224,6 +227,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				B067298D2D2A947900A05424 /* XCRemoteSwiftPackageReference "SwiftyMarkdown" */,
+				B06C5FAF2D300CC30077A453 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B058375B2D2933020067DBAF /* Products */;
@@ -633,6 +637,14 @@
 				minimumVersion = 1.2.4;
 			};
 		};
+		B06C5FAF2D300CC30077A453 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.6.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -640,6 +652,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B067298D2D2A947900A05424 /* XCRemoteSwiftPackageReference "SwiftyMarkdown" */;
 			productName = SwiftyMarkdown;
+		};
+		B06C5FB02D300CC30077A453 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B06C5FAF2D300CC30077A453 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
