@@ -1,3 +1,5 @@
+import Firebase
+import FirebaseMessaging
 import SwiftUI
 
 struct SubscriptionsView: View {
@@ -12,6 +14,7 @@ struct SubscriptionsView: View {
                     Button(action: {
                         subscriptions[subscription] = !isSelected
                         saveSubscriptions(subscriptions)
+                        updateFirebaseSubscription(subscription: subscription, enabled: !isSelected)
                     }) {
                         HStack {
                             Text(subscription)
@@ -20,7 +23,6 @@ struct SubscriptionsView: View {
                             Image(systemName: isSelected ? "checkmark" : "xmark")
                                 .foregroundColor(isSelected ? .blue : .gray)
                         }
-                        .listRowBackground(isSelected ? Color.clear : Color.gray.opacity(0.2))
                     }
                 }
             }
@@ -58,6 +60,11 @@ struct SubscriptionsView: View {
             }
         }
 
+        // Initialize Firebase subscriptions
+        for (topic, enabled) in subscriptions {
+            updateFirebaseSubscription(subscription: topic, enabled: enabled)
+        }
+
         return subscriptions
     }
 
@@ -75,5 +82,25 @@ struct SubscriptionsView: View {
         }
 
         defaults.set(subscriptionString, forKey: "subscriptions")
+    }
+
+    private func updateFirebaseSubscription(subscription: String, enabled: Bool) {
+        if enabled {
+            Messaging.messaging().subscribe(toTopic: subscription) { error in
+                if let error = error {
+                    print("Failed to subscribe to \(subscription) topic: \(error)")
+                } else {
+                    print("Subscribed to \(subscription) topic")
+                }
+            }
+        } else {
+            Messaging.messaging().unsubscribe(fromTopic: subscription) { error in
+                if let error = error {
+                    print("Failed to unsubscribe from \(subscription) topic: \(error)")
+                } else {
+                    print("Unsubscribed from \(subscription) topic")
+                }
+            }
+        }
     }
 }

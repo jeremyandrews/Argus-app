@@ -1,22 +1,32 @@
+import FirebaseCore
+import FirebaseMessaging
 import SwiftData
 import SwiftUI
 import UIKit
 import UserNotifications
 
-class AppDelegate: UIResponder, UIApplicationDelegate {
-    func application(_: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        UNUserNotificationCenter.current().delegate = self
+class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool
+    {
+        FirebaseApp.configure()
 
         // Request notification permissions
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if granted {
-                DispatchQueue.main.async {
-                    UIApplication.shared.registerForRemoteNotifications()
-                }
-            } else if let error = error {
-                print("Error requesting notification authorization: \(error)")
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+            if let error = error {
+                print("Error requesting notification permissions: \(error.localizedDescription)")
+            } else {
+                print("Notification permissions granted: \(granted)")
             }
         }
+
+        // Register for remote notifications
+        application.registerForRemoteNotifications()
+        print("App registered for remote notifications")
+
+        // Be sure our badge count is correct at startup time.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.updateBadgeCount()
         }
@@ -66,59 +76,62 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        guard let aps = userInfo["aps"] as? [String: AnyObject],
-              let contentAvailable = aps["content-available"] as? Int, contentAvailable == 1
-        else {
-            completionHandler(.noData)
-            return
+        if let messageID = userInfo["gcm.message_id"] as? String {
+            // Firebase notification
+            print("Firebase Notification received with ID: \(messageID)")
+            Messaging.messaging().appDidReceiveMessage(userInfo)
+            completionHandler(.newData)
+        } else {
+            // Direct notification from your backend
+            print("Direct notification received: \(userInfo)")
+            handleRemoteNotification(userInfo: userInfo)
+            completionHandler(.newData)
         }
-
-        // Extract data payload
-        let data = userInfo["data"] as? [String: AnyObject]
-        let json_url = data?["json_url"] as? String
-        let topic = data?["topic"] as? String
-
-        // Extract alert details, or fallback to data if alert is nil
-        let alert = aps["alert"] as? [String: String]
-        let title = alert?["title"] ?? (data?["title"] as? String ?? "[no title]")
-        let body = alert?["body"] ?? (data?["body"] as? String ?? "[no body]")
-        let articleTitle = data?["article_title"] as? String ?? "[no article title]"
-        let affected = data?["affected"] as? String ?? ""
-        // Extract additional data from the `data` field
-        let domain = data?["domain"] as? String
-
-        // Save the notification with all extracted details
-        saveNotification(
-            title: title,
-            body: body,
-            json_url: json_url,
-            topic: topic,
-            articleTitle: articleTitle,
-            affected: affected,
-            domain: domain // Pass domain here
-        )
-        completionHandler(.newData)
-        updateBadgeCount()
     }
 
-    private func handleRemoteNotification(userInfo: [String: AnyObject]) {
-        guard let aps = userInfo["aps"] as? [String: AnyObject],
-              let alert = aps["alert"] as? [String: String],
-              let title = alert["title"],
-              let body = alert["body"]
-        else {
-            return
+    func messaging(_: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        print("Firebase registration token: \(String(describing: fcmToken))")
+
+        // TODO: save the registration token or perform any other necessary actions
+    }
+
+    private func handleRemoteNotification(userInfo: [AnyHashable: Any]) {
+        print("Notification interaction received: \(userInfo)")
+
+        // Extract custom data from userInfo
+        let json_url = userInfo["json_url"] as? String
+        let topic = userInfo["topic"] as? String
+        let articleTitle = userInfo["article_title"] as? String ?? "[no article title]"
+        let affected = userInfo["affected"] as? String ?? ""
+        let domain = userInfo["domain"] as? String
+        let titleFromData = userInfo["title"] as? String
+        let bodyFromData = userInfo["body"] as? String
+
+        // Extract APS payload (optional)
+        let aps = userInfo["aps"] as? [String: AnyObject]
+        if aps == nil {
+            print("APS payload is missing or malformed")
         }
+        let alert = aps?["alert"] as? [String: String]
+        let titleFromAlert = alert?["title"]
+        let bodyFromAlert = alert?["body"]
 
-        // Extract additional data from the `data` field
-        let data = userInfo["data"] as? [String: AnyObject]
-        let json_url = data?["json_url"] as? String
-        let topic = data?["topic"] as? String
-        let articleTitle = data?["article_title"] as? String ?? "[no article title]"
-        let affected = data?["affected"] as? String ?? ""
-        let domain = data?["domain"] as? String ?? "[unknown]"
+        // Determine notification title and body
+        let title = titleFromAlert ?? titleFromData ?? "[no title]"
+        let body = bodyFromAlert ?? bodyFromData ?? "[no body]"
 
-        // Save the notification with all extracted details
+        // Debug extracted values
+        print("Extracted values:")
+        print("- Title: \(title)")
+        print("- Body: \(body)")
+        print("- json_url: \(String(describing: json_url))")
+        print("- Topic: \(String(describing: topic))")
+        print("- Article Title: \(articleTitle)")
+        print("- Affected: \(affected)")
+        print("- Domain: \(String(describing: domain))")
+
+        // Save notification
+        print("Attempting to save notification...")
         saveNotification(
             title: title,
             body: body,
@@ -128,6 +141,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             affected: affected,
             domain: domain
         )
+        print("Notification save process completed.")
+
+        // Update badge count
+        updateBadgeCount()
+        print("Badge count updated.")
     }
 
     private func saveNotification(title: String, body: String, json_url: String?, topic: String?, articleTitle: String, affected: String, domain: String?) {
@@ -171,13 +189,31 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {
-    func userNotificationCenter(_: UNUserNotificationCenter, willPresent _: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .sound])
+    func userNotificationCenter(_: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        if userInfo["gcm.message_id"] != nil {
+            // Firebase notification
+            print("Firebase Messaging received message: \(userInfo)")
+        } else {
+            // Direct notification
+            handleRemoteNotification(userInfo: userInfo)
+        }
+        completionHandler()
     }
 
-    func userNotificationCenter(_: UNUserNotificationCenter, didReceive _: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        // No saving here, as the notification should already be saved in the background
-        completionHandler()
+    func userNotificationCenter(_: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let userInfo = notification.request.content.userInfo
+        print("Notification interaction received: \(userInfo)")
+
+        if userInfo["gcm.message_id"] != nil {
+            // Firebase notification
+            completionHandler([.badge, .sound])
+            handleRemoteNotification(userInfo: userInfo)
+        } else {
+            // Direct notification
+            completionHandler([.badge, .sound])
+            handleRemoteNotification(userInfo: userInfo)
+        }
     }
 }
 
