@@ -7,10 +7,12 @@ import UserNotifications
 
 class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
     func application(_ application: UIApplication,
-                     didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool
     {
         FirebaseApp.configure()
-
+        UNUserNotificationCenter.current().delegate = self
+        Messaging.messaging().delegate = self
+        
         // Request notification permissions
         let center = UNUserNotificationCenter.current()
         center.delegate = self
@@ -25,6 +27,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
         // Register for remote notifications
         application.registerForRemoteNotifications()
         print("App registered for remote notifications")
+        
+        UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
+            for notification in notifications {
+                let userInfo = notification.request.content.userInfo
+                // Add a check to avoid re-processing notifications
+                guard !self.hasNotificationBeenProcessed(userInfo) else { continue }
+                self.handleRemoteNotification(userInfo: userInfo)
+                self.markNotificationAsProcessed(userInfo)
+            }
+        }
 
         // Be sure our badge count is correct at startup time.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -32,6 +44,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
         }
 
         return true
+    }
+    
+    private var processedNotifications = Set<String>()
+
+    private func hasNotificationBeenProcessed(_ userInfo: [AnyHashable: Any]) -> Bool {
+        guard let notificationID = userInfo["gcm.message_id"] as? String else { return false }
+        return processedNotifications.contains(notificationID)
+    }
+
+    private func markNotificationAsProcessed(_ userInfo: [AnyHashable: Any]) {
+        if let notificationID = userInfo["gcm.message_id"] as? String {
+            processedNotifications.insert(notificationID)
+        }
     }
 
     func application(_: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
@@ -94,7 +119,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
 
         // TODO: save the registration token or perform any other necessary actions
     }
-
+    
     private func handleRemoteNotification(userInfo: [AnyHashable: Any]) {
         print("Notification interaction received: \(userInfo)")
 
@@ -194,26 +219,30 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         if userInfo["gcm.message_id"] != nil {
             // Firebase notification
             print("Firebase Messaging received message: \(userInfo)")
+            handleRemoteNotification(userInfo: userInfo)
         } else {
             // Direct notification
+            print("Direct notification received message: \(userInfo)")
             handleRemoteNotification(userInfo: userInfo)
         }
         completionHandler()
     }
 
-    func userNotificationCenter(_: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    func userNotificationCenter(
+        _: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
         let userInfo = notification.request.content.userInfo
-        print("Notification interaction received: \(userInfo)")
+        print("Will present notification: \(userInfo)")
 
-        if userInfo["gcm.message_id"] != nil {
-            // Firebase notification
-            completionHandler([.badge, .sound])
-            handleRemoteNotification(userInfo: userInfo)
-        } else {
-            // Direct notification
-            completionHandler([.badge, .sound])
-            handleRemoteNotification(userInfo: userInfo)
+        if let messageID = userInfo["gcm.message_id"] {
+            print("Firebase notification with ID: \(messageID)")
         }
+        self.handleRemoteNotification(userInfo: userInfo)
+
+        // Show the notification even when the app is foregrounded
+        completionHandler([.banner, .sound, .badge])
     }
 }
 
