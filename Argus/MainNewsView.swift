@@ -200,6 +200,7 @@ struct NewsView: View {
     private func deleteSelectedNotifications() {
         withAnimation {
             for notification in selectedNotifications {
+                AppDelegate().deleteLocalJSON(notification: notification)
                 modelContext.delete(notification)
             }
             selectedNotifications.removeAll()
@@ -210,6 +211,13 @@ struct NewsView: View {
 
     private func toggleBookmark(_ notification: NotificationData) {
         notification.isBookmarked.toggle()
+
+        if notification.isBookmarked {
+            AppDelegate().saveJSONLocally(notification: notification)
+        } else {
+            AppDelegate().deleteLocalJSON(notification: notification)
+        }
+
         saveChanges()
     }
 

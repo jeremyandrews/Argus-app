@@ -168,6 +168,38 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             print("Failed to fetch unviewed notifications: \(error)")
         }
     }
+    
+    func saveJSONLocally(notification: NotificationData) {
+        guard let jsonURL = notification.json_url, let url = URL(string: jsonURL) else { return }
+
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                let fileURL = getLocalFileURL(for: notification)
+                try data.write(to: fileURL)
+                print("Saved JSON locally at: \(fileURL)")
+            } catch {
+                print("Failed to save JSON locally: \(error)")
+            }
+        }
+    }
+    
+    func deleteLocalJSON(notification: NotificationData) {
+        let fileURL = getLocalFileURL(for: notification)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                print("Deleted local JSON at: \(fileURL)")
+            } catch {
+                print("Failed to delete local JSON: \(error)")
+            }
+        }
+    }
+
+    func getLocalFileURL(for notification: NotificationData) -> URL {
+        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return documentsDirectory.appendingPathComponent("\(notification.id).json")
+    }
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {

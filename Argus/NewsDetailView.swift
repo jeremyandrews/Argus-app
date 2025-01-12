@@ -170,13 +170,29 @@ struct NotificationDetailView: View {
     }
 
     private func loadAdditionalContent() {
+        if notification.isBookmarked {
+            let localFileURL = AppDelegate().getLocalFileURL(for: notification)
+            if FileManager.default.fileExists(atPath: localFileURL.path) {
+                do {
+                    let data = try Data(contentsOf: localFileURL)
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        additionalContent = json
+                        return
+                    }
+                } catch {
+                    print("Failed to load local JSON: \(error)")
+                }
+            }
+        }
+
+        // Fallback to downloading the content if not bookmarked or local file unavailable
         guard let jsonURL = notification.json_url, let url = URL(string: jsonURL) else { return }
         isLoadingAdditionalContent = true
 
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
-                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     additionalContent = json
                 } else {
                     additionalContent = ["Error": "No valid content found."]
@@ -243,7 +259,9 @@ struct NotificationDetailView: View {
     }
 
     private func deleteNotification() {
+        AppDelegate().deleteLocalJSON(notification: notification)
         modelContext.delete(notification)
+
         do {
             try modelContext.save()
             AppDelegate().updateBadgeCount()
