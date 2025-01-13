@@ -9,7 +9,10 @@ struct SubscriptionsView: View {
     @State private var subscriptions: [String: Bool] = [:]
     @State private var jwtToken: String? = nil
     @State private var errorMessage: ErrorWrapper? = nil
+    @State private var isFirstLaunch: Bool = true
+
     let listOfSubscriptions: [String] = ["Alert", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "EVs", "Global", "LLMs", "Longevity", "Music", "Rust", "Space", "Tuscany", "Vulnerability", "Test"]
+    let defaultAutoSubscriptions: [String] = ["Apple", "Bitcoins", "Drupal", "EVs", "LLMs", "Rust", "Space"]
 
     var body: some View {
         NavigationView {
@@ -43,17 +46,37 @@ struct SubscriptionsView: View {
     private func authenticateAndLoadSubscriptions() {
         Task {
             do {
-                // Authenticate and get the JWT token
                 jwtToken = try await authenticateDevice()
                 subscriptions = loadSubscriptions()
+
+                // Check if it's the first launch and auto-subscribe
+                if isFirstLaunch {
+                    isFirstLaunch = false
+                    autoSubscribeToDefaultTopics()
+                }
             } catch {
                 errorMessage = ErrorWrapper(message: "Failed to authenticate: \(error.localizedDescription)")
             }
         }
     }
 
+    private func autoSubscribeToDefaultTopics() {
+        Task {
+            for topic in defaultAutoSubscriptions {
+                guard subscriptions[topic] == false else { continue }
+                do {
+                    try await performAPIRequest { try await subscribeToTopic(topic, token: $0) }
+                    subscriptions[topic] = true
+                } catch {
+                    errorMessage = ErrorWrapper(message: "Failed to auto-subscribe to \(topic): \(error.localizedDescription)")
+                }
+            }
+            saveSubscriptions(subscriptions)
+        }
+    }
+
     private func toggleSubscription(_ topic: String, isSelected: Bool) {
-        guard jwtToken != nil else { // No need to bind `token` if it’s not used
+        guard jwtToken != nil else {
             errorMessage = ErrorWrapper(message: "Not authenticated. Please try again.")
             return
         }
@@ -99,13 +122,10 @@ struct SubscriptionsView: View {
 
     private func performAPIRequest(apiCall: (String) async throws -> Void) async throws {
         do {
-            // Attempt the API call with the current token
             guard let token = jwtToken else { throw URLError(.userAuthenticationRequired) }
             try await apiCall(token)
         } catch {
-            // Check if the error is a 401 Unauthorized
             if let urlError = error as? URLError, urlError.code == .userAuthenticationRequired {
-                // Re-authenticate and retry
                 jwtToken = try await authenticateDevice()
                 guard let newToken = jwtToken else { throw URLError(.userAuthenticationRequired) }
                 try await apiCall(newToken)
