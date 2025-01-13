@@ -55,6 +55,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
         print("Device Token: \(token)")
+
+        // Save the token for later use
+        UserDefaults.standard.set(token, forKey: "deviceToken")
     }
 
     func application(_: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -168,7 +171,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             print("Failed to fetch unviewed notifications: \(error)")
         }
     }
-    
+
     func saveJSONLocally(notification: NotificationData) {
         guard let jsonURL = notification.json_url, let url = URL(string: jsonURL) else { return }
 
@@ -183,7 +186,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
         }
     }
-    
+
     func deleteLocalJSON(notification: NotificationData) {
         let fileURL = getLocalFileURL(for: notification)
         if FileManager.default.fileExists(atPath: fileURL.path) {

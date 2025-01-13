@@ -1,7 +1,14 @@
 import SwiftUI
 
+struct ErrorWrapper: Identifiable {
+    let id = UUID()
+    let message: String
+}
+
 struct SubscriptionsView: View {
     @State private var subscriptions: [String: Bool] = [:]
+    @State private var jwtToken: String? = nil
+    @State private var errorMessage: ErrorWrapper? = nil
     let listOfSubscriptions: [String] = ["Alert", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "EVs", "Global", "LLMs", "Longevity", "Music", "Rust", "Space", "Tuscany", "Vulnerability", "Test"]
 
     var body: some View {
@@ -10,8 +17,7 @@ struct SubscriptionsView: View {
                 ForEach(listOfSubscriptions, id: \.self) { subscription in
                     let isSelected = subscriptions[subscription] ?? false
                     Button(action: {
-                        subscriptions[subscription] = !isSelected
-                        saveSubscriptions(subscriptions)
+                        toggleSubscription(subscription, isSelected: isSelected)
                     }) {
                         HStack {
                             Text(subscription)
@@ -26,18 +32,128 @@ struct SubscriptionsView: View {
             }
             .navigationTitle("Subscriptions")
             .onAppear {
-                subscriptions = loadSubscriptions()
+                authenticateAndLoadSubscriptions()
+            }
+            .alert(item: $errorMessage) { error in
+                Alert(title: Text("Error"), message: Text(error.message), dismissButton: .default(Text("OK")))
             }
         }
     }
 
+    private func authenticateAndLoadSubscriptions() {
+        Task {
+            do {
+                // Authenticate and get the JWT token
+                jwtToken = try await authenticateDevice()
+                subscriptions = loadSubscriptions()
+            } catch {
+                errorMessage = ErrorWrapper(message: "Failed to authenticate: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func toggleSubscription(_ topic: String, isSelected: Bool) {
+        guard jwtToken != nil else { // No need to bind `token` if it’s not used
+            errorMessage = ErrorWrapper(message: "Not authenticated. Please try again.")
+            return
+        }
+
+        Task {
+            do {
+                if isSelected {
+                    try await performAPIRequest { try await unsubscribeFromTopic(topic, token: $0) }
+                } else {
+                    try await performAPIRequest { try await subscribeToTopic(topic, token: $0) }
+                }
+                subscriptions[topic] = !isSelected
+                saveSubscriptions(subscriptions)
+            } catch {
+                errorMessage = ErrorWrapper(message: "Failed to update subscription for \(topic): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func authenticateDevice() async throws -> String {
+        guard let deviceToken = UserDefaults.standard.string(forKey: "deviceToken") else {
+            throw URLError(.userAuthenticationRequired, userInfo: [NSLocalizedDescriptionKey: "Device token not available."])
+        }
+
+        let url = URL(string: "https://api.arguspulse.com/authenticate")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["device_id": deviceToken])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+
+        let jsonResponse = try JSONDecoder().decode([String: String].self, from: data)
+        guard let token = jsonResponse["token"] else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        return token
+    }
+
+    private func performAPIRequest(apiCall: (String) async throws -> Void) async throws {
+        do {
+            // Attempt the API call with the current token
+            guard let token = jwtToken else { throw URLError(.userAuthenticationRequired) }
+            try await apiCall(token)
+        } catch {
+            // Check if the error is a 401 Unauthorized
+            if let urlError = error as? URLError, urlError.code == .userAuthenticationRequired {
+                // Re-authenticate and retry
+                jwtToken = try await authenticateDevice()
+                guard let newToken = jwtToken else { throw URLError(.userAuthenticationRequired) }
+                try await apiCall(newToken)
+            } else {
+                throw error
+            }
+        }
+    }
+
+    private func subscribeToTopic(_ topic: String, token: String) async throws {
+        let url = URL(string: "https://api.arguspulse.com/subscribe")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["topic": topic])
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
+                throw URLError(.userAuthenticationRequired)
+            }
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    private func unsubscribeFromTopic(_ topic: String, token: String) async throws {
+        let url = URL(string: "https://api.arguspulse.com/unsubscribe")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["topic": topic])
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
+                throw URLError(.userAuthenticationRequired)
+            }
+            throw URLError(.badServerResponse)
+        }
+    }
+
     private func loadSubscriptions() -> [String: Bool] {
-        // Load subscriptions from UserDefaults
         let defaults = UserDefaults.standard
         let subscriptionString = defaults.string(forKey: "subscriptions") ?? ""
         var subscriptions: [String: Bool] = [:]
 
-        // Parse subscriptions string
         if !subscriptionString.isEmpty {
             let components = subscriptionString.components(separatedBy: ",")
             for component in components {
@@ -47,14 +163,8 @@ struct SubscriptionsView: View {
                 }
             }
         } else {
-            // Default subscriptions
             for topic in listOfSubscriptions {
-                switch topic {
-                case "Apple", "Bitcoins", "Drupal", "LLMs", "Space":
-                    subscriptions[topic] = true
-                default:
-                    subscriptions[topic] = false
-                }
+                subscriptions[topic] = false
             }
         }
 
@@ -62,11 +172,9 @@ struct SubscriptionsView: View {
     }
 
     private func saveSubscriptions(_ subscriptions: [String: Bool]) {
-        // Save subscriptions to UserDefaults
         let defaults = UserDefaults.standard
         var subscriptionString = ""
 
-        // Build subscriptions string
         for (topic, isEnabled) in subscriptions {
             if !subscriptionString.isEmpty {
                 subscriptionString += ","
