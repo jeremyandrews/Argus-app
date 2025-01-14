@@ -113,7 +113,7 @@ struct NewsView: View {
                             }
 
                             if !isEditing {
-                                NavigationLink(destination: NotificationDetailView(notification: notification)) {
+                                NavigationLink(destination: NewsDetailView(notification: notification)) {
                                     rowContent(for: notification)
                                 }
                             } else {

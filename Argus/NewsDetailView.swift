@@ -2,7 +2,7 @@ import SwiftData
 import SwiftUI
 import SwiftyMarkdown
 
-struct NotificationDetailView: View {
+struct NewsDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var additionalContent: [String: Any]? = nil // State to store parsed JSON
     @State private var isLoadingAdditionalContent = false // State for loading status
