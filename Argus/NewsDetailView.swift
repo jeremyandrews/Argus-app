@@ -112,7 +112,7 @@ struct NewsDetailView: View {
                     ProgressView("Loading additional content...")
                         .padding()
                 } else if let content = additionalContent {
-                    ForEach(getSections(from: content), id: \.header) { section in
+                    ForEach(getSections(from: content), id: \ .header) { section in
                         if section.header != "Article" {
                             VStack {
                                 Divider()
@@ -122,18 +122,21 @@ struct NewsDetailView: View {
                                         set: { expandedSections[section.header] = $0 }
                                     )
                                 ) {
-                                    if let markdownContent = section.content as? String {
+                                    if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date) {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
+                                                .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                            Text("Received from Argus on \(technicalData.2, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
+                                                .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                        }
+                                        .padding()
+                                        .background(Color.gray.opacity(0.2))
+                                        .cornerRadius(8)
+                                    } else if let markdownContent = section.content as? String {
                                         let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
                                         Text(AttributedString(attributedMarkdown))
                                             .font(.body)
                                             .padding(.top, 8)
-                                    } else if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date) {
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
-                                            Text("Received from Argus at \(technicalData.2, format: .dateTime.hour().minute().second()).")
-                                        }
-                                        .font(.body)
-                                        .padding(.top, 8)
                                     }
                                 } label: {
                                     Text(section.header)
