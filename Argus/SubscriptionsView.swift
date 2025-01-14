@@ -169,7 +169,7 @@ struct SubscriptionsView: View {
         }
     }
 
-    private func loadSubscriptions() -> [String: Bool] {
+    func loadSubscriptions() -> [String: Bool] {
         let defaults = UserDefaults.standard
         let subscriptionString = defaults.string(forKey: "subscriptions") ?? ""
         var subscriptions: [String: Bool] = [:]

@@ -3,7 +3,7 @@ import SwiftUI
 import SwiftyMarkdown
 
 struct NewsView: View {
-    @Environment(\.modelContext) private var modelContext
+    @Environment(\ .modelContext) private var modelContext
     @Query(sort: \NotificationData.date, order: .reverse) private var notifications: [NotificationData]
 
     @State private var showUnreadOnly: Bool = false
@@ -13,6 +13,7 @@ struct NewsView: View {
     @State private var selectedNotifications: Set<NotificationData> = []
     @State private var showDeleteConfirmation: Bool = false
     @State private var selectedTopic: String = "All" // Current tab selection
+    @State private var subscriptions: [String: Bool] = SubscriptionsView().loadSubscriptions()
 
     private var topics: [String] {
         let uniqueTopics = Set(notifications.compactMap { $0.topic }).sorted()
@@ -79,7 +80,7 @@ struct NewsView: View {
                 // Tab bar for topics
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
-                        ForEach(topics, id: \.self) { topic in
+                        ForEach(topics, id: \ .self) { topic in
                             Button(action: {
                                 selectedTopic = topic
                             }) {
@@ -118,6 +119,19 @@ struct NewsView: View {
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.gray)
                             .padding(.vertical, 6)
+
+                        let activeSubscriptions = subscriptions.filter { $0.value }.keys.sorted()
+                        if !activeSubscriptions.isEmpty {
+                            Text("You are currently subscribed to: \(activeSubscriptions.joined(separator: ", ")).")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray)
+                                .padding(.top, 6)
+                        } else {
+                            Text("You are not currently subscribed to any topics.")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray)
+                                .padding(.top, 6)
+                        }
 
                         Spacer()
                     }
@@ -203,6 +217,13 @@ struct NewsView: View {
                     .padding()
                     .background(Color(UIColor.systemGray6))
                 }
+            }
+            .onAppear {
+                // Reload subscriptions when the view appears
+                subscriptions = SubscriptionsView().loadSubscriptions()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NotificationPermissionGranted"))) { _ in
+                subscriptions = SubscriptionsView().loadSubscriptions()
             }
             .confirmationDialog(
                 "Are you sure you want to delete \(selectedNotifications.count) articles?",

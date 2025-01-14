@@ -12,6 +12,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             if granted {
                 DispatchQueue.main.async {
                     UIApplication.shared.registerForRemoteNotifications()
+                    NotificationCenter.default.post(name: Notification.Name("NotificationPermissionGranted"), object: nil)
                 }
             } else if let error = error {
                 print("Error requesting notification authorization: \(error)")
