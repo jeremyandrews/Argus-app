@@ -97,54 +97,82 @@ struct NewsView: View {
                 .padding(.vertical, 8)
                 .background(Color(UIColor.systemGray6))
 
-                // Article list
-                List {
-                    ForEach(filteredNotifications) { notification in
-                        HStack {
-                            if isEditing {
+                // Main content
+                if filteredNotifications.isEmpty {
+                    VStack {
+                        Text("RSS Fed")
+                            .font(.title)
+                            .padding(.bottom, 8)
+
+                        Image("Argus")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 120, height: 120)
+                            .padding(.bottom, 8)
+
+                        Text("No news is good news.")
+                            .font(.headline)
+                            .foregroundColor(.gray)
+
+                        Text("Please be patient, news will arrive automatically. You do not need to leave this application open.")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray)
+                            .padding(.vertical, 6)
+
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .padding()
+                } else {
+                    // Article list
+                    List {
+                        ForEach(filteredNotifications) { notification in
+                            HStack {
+                                if isEditing {
+                                    Button(action: {
+                                        toggleSelection(notification)
+                                    }) {
+                                        Image(systemName: selectedNotifications.contains(notification) ? "checkmark.circle.fill" : "circle")
+                                            .foregroundColor(.blue)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.trailing, 8)
+                                }
+
+                                if !isEditing {
+                                    NavigationLink(destination: NewsDetailView(notification: notification)) {
+                                        rowContent(for: notification)
+                                    }
+                                } else {
+                                    rowContent(for: notification)
+                                        .onTapGesture {
+                                            toggleSelection(notification)
+                                        }
+                                }
+
+                                Spacer()
+
                                 Button(action: {
-                                    toggleSelection(notification)
+                                    toggleBookmark(notification)
                                 }) {
-                                    Image(systemName: selectedNotifications.contains(notification) ? "checkmark.circle.fill" : "circle")
-                                        .foregroundColor(.blue)
+                                    Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
+                                        .foregroundColor(notification.isBookmarked ? .blue : .gray)
                                 }
                                 .buttonStyle(.plain)
-                                .padding(.trailing, 8)
                             }
-
-                            if !isEditing {
-                                NavigationLink(destination: NewsDetailView(notification: notification)) {
-                                    rowContent(for: notification)
+                            .padding(.vertical, 8)
+                            .listRowBackground(isEditing && selectedNotifications.contains(notification) ? Color.blue.opacity(0.4) : notification.isViewed ? Color.clear : Color.blue.opacity(0.2))
+                            .cornerRadius(8)
+                            .gesture(
+                                LongPressGesture().onEnded { _ in
+                                    isEditing = true
+                                    selectedNotifications.insert(notification)
                                 }
-                            } else {
-                                rowContent(for: notification)
-                                    .onTapGesture {
-                                        toggleSelection(notification)
-                                    }
-                            }
-
-                            Spacer()
-
-                            Button(action: {
-                                toggleBookmark(notification)
-                            }) {
-                                Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
-                                    .foregroundColor(notification.isBookmarked ? .blue : .gray)
-                            }
-                            .buttonStyle(.plain)
+                            )
                         }
-                        .padding(.vertical, 8)
-                        .listRowBackground(isEditing && selectedNotifications.contains(notification) ? Color.blue.opacity(0.4) : notification.isViewed ? Color.clear : Color.blue.opacity(0.2))
-                        .cornerRadius(8)
-                        .gesture(
-                            LongPressGesture().onEnded { _ in
-                                isEditing = true
-                                selectedNotifications.insert(notification)
-                            }
-                        )
                     }
+                    .listStyle(PlainListStyle())
                 }
-                .listStyle(PlainListStyle())
 
                 // Toolbar for actions
                 if isEditing && !selectedNotifications.isEmpty {
