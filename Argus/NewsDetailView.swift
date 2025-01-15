@@ -122,16 +122,8 @@ struct NewsDetailView: View {
                                         set: { expandedSections[section.header] = $0 }
                                     )
                                 ) {
-                                    if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date) {
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
-                                                .font(.system(size: 14, weight: .regular, design: .monospaced))
-                                            Text("Received from Argus on \(technicalData.2, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
-                                                .font(.system(size: 14, weight: .regular, design: .monospaced))
-                                        }
-                                        .padding()
-                                        .background(Color.gray.opacity(0.2))
-                                        .cornerRadius(8)
+                                    if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
+                                        ArgusDetailsView(technicalData: technicalData)
                                     } else if let markdownContent = section.content as? String {
                                         let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
                                         Text(AttributedString(attributedMarkdown))
@@ -220,7 +212,8 @@ struct NewsDetailView: View {
                 content: (
                     json["model"] as? String ?? "Unknown",
                     (json["elapsed_time"] as? Double) ?? 0.0,
-                    notification.date
+                    notification.date,
+                    json["stats"] as? String ?? "N/A"
                 )
             ),
         ]
@@ -229,6 +222,37 @@ struct NewsDetailView: View {
     private struct Section {
         let header: String
         let content: Any
+    }
+
+    struct ArgusDetailsView: View {
+        let technicalData: (String, Double, Date, String)
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
+                    .font(.system(size: 14, weight: .regular, design: .monospaced))
+                Text("DB: \(formattedStats(technicalData.3))")
+                    .font(.system(size: 14, weight: .regular, design: .monospaced))
+                Text("Received from Argus on \(technicalData.2, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
+            }
+            .padding()
+            .background(Color.gray.opacity(0.2))
+            .cornerRadius(8)
+        }
+    }
+
+    static func formattedStats(_ stats: String) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+
+        let parts = stats.split(separator: ":").map { part -> String in
+            if let number = Int(part), let formatted = formatter.string(from: NSNumber(value: number)) {
+                return formatted
+            }
+            return String(part) // Return unformatted part if conversion fails
+        }
+
+        return parts.joined(separator: ":")
     }
 
     private func toggleReadStatus() {
