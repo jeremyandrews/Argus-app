@@ -54,10 +54,12 @@ struct NewsView: View {
 
                     Spacer()
 
-                    Button(isEditing ? "Done" : "Edit") {
-                        isEditing.toggle()
-                        if !isEditing {
-                            selectedNotifications.removeAll()
+                    if !filteredNotifications.isEmpty {
+                        Button(isEditing ? "Done" : "Edit") {
+                            isEditing.toggle()
+                            if !isEditing {
+                                selectedNotifications.removeAll()
+                            }
                         }
                     }
 
