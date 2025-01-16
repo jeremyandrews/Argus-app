@@ -416,8 +416,8 @@ struct ShareSelectionView: View {
 
     private func getSections(from json: [String: Any], notification: NotificationData) -> [ContentSection] {
         [
-            ContentSection(header: "Tiny summary", content: notification.body),
             ContentSection(header: "Article", content: json["url"] as? String ?? ""),
+            ContentSection(header: "Notification Body", content: notification.body),
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
             ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
             ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
@@ -438,11 +438,35 @@ struct ShareSelectionView: View {
     private func formatArgusDetails(_ technicalData: (String, Double, Date, String)) -> String {
         let (model, elapsedTime, date, stats) = technicalData
         return """
-        Model: \(model)
-        Elapsed Time: \(String(format: "%.2f", elapsedTime)) seconds
-        Date: \(date.formatted())
-        Stats: \(stats)
+        Generated with \(model) in \(String(format: "%.2f", elapsedTime)) seconds.
+        Metrics:
+        \(formattedStats(stats))
+        Received from Argus on \(date.formatted(.dateTime.month(.wide).day().year().hour().minute().second()))
         """
+    }
+
+    private func formattedStats(_ stats: String) -> String {
+        let parts = stats.split(separator: ":").map { String($0) }
+        guard parts.count == 6 else {
+            return "Invalid stats format"
+        }
+        let numberFormatter = NumberFormatter()
+        numberFormatter.numberStyle = .decimal
+        func formattedNumber(_ value: String) -> String {
+            if let number = Int(value), let formatted = numberFormatter.string(from: NSNumber(value: number)) {
+                return formatted
+            }
+            return value
+        }
+        let descriptions = [
+            "Articles reviewed: \(formattedNumber(parts[0]))",
+            "Matched: \(formattedNumber(parts[1]))",
+            "Queued to review: \(formattedNumber(parts[2]))",
+            "Life safety queue: \(formattedNumber(parts[3]))",
+            "Matched topics queue: \(formattedNumber(parts[4]))",
+            "Clients: \(formattedNumber(parts[5]))",
+        ]
+        return descriptions.joined(separator: "\n")
     }
 }
 
