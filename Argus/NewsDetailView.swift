@@ -4,8 +4,8 @@ import SwiftyMarkdown
 
 struct NewsDetailView: View {
     @State private var showDeleteConfirmation = false
-    @State private var additionalContent: [String: Any]? = nil // State to store parsed JSON
-    @State private var isLoadingAdditionalContent = false // State for loading status
+    @State private var additionalContent: [String: Any]? = nil
+    @State private var isLoadingAdditionalContent = false
     @State private var expandedSections: [String: Bool] = [
         "Article": false,
         "Summary": true,
@@ -15,6 +15,8 @@ struct NewsDetailView: View {
         "Source Analysis": false,
         "Argus Details": false,
     ]
+    @State private var isSharePresented = false
+    @State private var selectedSections: Set<String> = []
 
     var notification: NotificationData
     @Environment(\.modelContext) private var modelContext
@@ -40,125 +42,9 @@ struct NewsDetailView: View {
 
     var body: some View {
         VStack {
-            // Top Bar with Icons (Custom Toolbar)
-            HStack(spacing: 16) {
-                Button(action: {
-                    dismiss()
-                }) {
-                    Image(systemName: "chevron.left")
-                        .font(.title2)
-                        .foregroundColor(.primary)
-                }
-
-                Spacer()
-
-                Button(action: {
-                    toggleReadStatus()
-                }) {
-                    Image(systemName: notification.isViewed ? "envelope.open" : "envelope.badge")
-                        .foregroundColor(notification.isViewed ? .gray : .blue)
-                }
-
-                Button(action: {
-                    toggleBookmark()
-                }) {
-                    Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
-                        .foregroundColor(notification.isBookmarked ? .blue : .gray)
-                }
-
-                Button(role: .destructive, action: {
-                    showDeleteConfirmation = true
-                }) {
-                    Image(systemName: "trash")
-                        .foregroundColor(.red)
-                }
-            }
-            .padding()
-
-            // Clickable Title
-            if let content = additionalContent, let articleURL = content["url"] as? String, let link = URL(string: articleURL) {
-                Button(action: {
-                    UIApplication.shared.open(link)
-                }) {
-                    Text(notification.title)
-                        .font(.title3)
-                        .bold()
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding([.leading, .trailing])
-            }
-
-            // Body
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    // Display domain if available
-                    if let domain = notification.domain, !domain.isEmpty {
-                        Text(domain)
-                            .font(.system(size: 14, weight: .medium)) // 3/4 the size of the title
-                            .foregroundColor(.blue)
-                            .lineLimit(1)
-                            .padding(.horizontal, 10)
-                    }
-
-                    // Display article title
-                    if !notification.article_title.isEmpty {
-                        Text(notification.article_title)
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.primary)
-                            .multilineTextAlignment(.leading)
-                            .padding(.horizontal, 10)
-                    }
-
-                    let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
-                    Text(AttributedString(attributedBody))
-                        .font(.footnote)
-                        .padding([.leading, .trailing])
-
-                    // Display affected text if not empty
-                    if !notification.affected.isEmpty {
-                        Text(notification.affected)
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .padding([.leading, .trailing, .top])
-                    }
-                }
-
-                // Additional Content
-                if isLoadingAdditionalContent {
-                    ProgressView("Loading additional content...")
-                        .padding()
-                } else if let content = additionalContent {
-                    ForEach(getSections(from: content), id: \ .header) { section in
-                        if section.header != "Article" {
-                            VStack {
-                                Divider()
-                                DisclosureGroup(
-                                    isExpanded: Binding(
-                                        get: { expandedSections[section.header] ?? false },
-                                        set: { expandedSections[section.header] = $0 }
-                                    )
-                                ) {
-                                    if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
-                                        ArgusDetailsView(technicalData: technicalData)
-                                    } else if let markdownContent = section.content as? String {
-                                        let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
-                                        Text(AttributedString(attributedMarkdown))
-                                            .font(.body)
-                                            .padding(.top, 8)
-                                    }
-                                } label: {
-                                    Text(section.header)
-                                        .font(.headline)
-                                }
-                                .padding([.leading, .trailing, .top])
-                            }
-                        }
-                    }
-                }
-            }
-
+            topBar
+            titleView
+            contentScrollView
             Spacer()
         }
         .onAppear {
@@ -171,6 +57,9 @@ struct NewsDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .sheet(isPresented: $isSharePresented) {
+            ShareSelectionView(content: additionalContent, notification: notification, selectedSections: $selectedSections, isPresented: $isSharePresented)
+        }
         .navigationBarHidden(true)
         .gesture(
             DragGesture()
@@ -180,6 +69,146 @@ struct NewsDetailView: View {
                     }
                 }
         )
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 16) {
+            Button(action: { dismiss() }) {
+                Image(systemName: "chevron.left")
+                    .font(.title2)
+                    .foregroundColor(.primary)
+            }
+            Spacer()
+            Button(action: { toggleReadStatus() }) {
+                Image(systemName: notification.isViewed ? "envelope.open" : "envelope.badge")
+                    .foregroundColor(notification.isViewed ? .gray : .blue)
+            }
+            Button(action: { toggleBookmark() }) {
+                Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
+                    .foregroundColor(notification.isBookmarked ? .blue : .gray)
+            }
+            Button(action: { isSharePresented = true }) {
+                Image(systemName: "square.and.arrow.up")
+                    .foregroundColor(.blue)
+            }
+            Button(role: .destructive, action: { showDeleteConfirmation = true }) {
+                Image(systemName: "trash")
+                    .foregroundColor(.red)
+            }
+        }
+        .padding()
+    }
+
+    private var titleView: some View {
+        Group {
+            if let content = additionalContent, let articleURL = content["url"] as? String, let link = URL(string: articleURL) {
+                Button(action: { UIApplication.shared.open(link) }) {
+                    Text(notification.title)
+                        .font(.title3)
+                        .bold()
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding([.leading, .trailing])
+            }
+        }
+    }
+
+    private var contentScrollView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                domainView
+                articleTitleView
+                bodyContentView
+                affectedTextView
+                additionalContentView
+            }
+        }
+    }
+
+    private var domainView: some View {
+        Group {
+            if let domain = notification.domain, !domain.isEmpty {
+                Text(domain)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+            }
+        }
+    }
+
+    private var articleTitleView: some View {
+        Group {
+            if !notification.article_title.isEmpty {
+                Text(notification.article_title)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.primary)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 10)
+            }
+        }
+    }
+
+    private var bodyContentView: some View {
+        let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
+        return Text(AttributedString(attributedBody))
+            .font(.footnote)
+            .padding([.leading, .trailing])
+    }
+
+    private var affectedTextView: some View {
+        Group {
+            if !notification.affected.isEmpty {
+                Text(notification.affected)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .padding([.leading, .trailing, .top])
+            }
+        }
+    }
+
+    private var additionalContentView: some View {
+        Group {
+            if isLoadingAdditionalContent {
+                ProgressView("Loading additional content...")
+                    .padding()
+            } else if let content = additionalContent {
+                ForEach(getSections(from: content), id: \.header) { section in
+                    if section.header != "Article" {
+                        VStack {
+                            Divider()
+                            DisclosureGroup(
+                                isExpanded: Binding(
+                                    get: { expandedSections[section.header] ?? false },
+                                    set: { expandedSections[section.header] = $0 }
+                                )
+                            ) {
+                                sectionContent(for: section)
+                            } label: {
+                                Text(section.header)
+                                    .font(.headline)
+                            }
+                            .padding([.leading, .trailing, .top])
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func sectionContent(for section: ContentSection) -> some View {
+        Group {
+            if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
+                ArgusDetailsView(technicalData: technicalData)
+            } else if let markdownContent = section.content as? String {
+                let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
+                Text(AttributedString(attributedMarkdown))
+                    .font(.body)
+                    .padding(.top, 8)
+            }
+        }
     }
 
     private func loadAdditionalContent() {
@@ -197,11 +226,9 @@ struct NewsDetailView: View {
                 }
             }
         }
-
         // Fallback to downloading the content if not bookmarked or local file unavailable
         guard let jsonURL = notification.json_url, let url = URL(string: jsonURL) else { return }
         isLoadingAdditionalContent = true
-
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
@@ -217,15 +244,15 @@ struct NewsDetailView: View {
         }
     }
 
-    private func getSections(from json: [String: Any]) -> [Section] {
+    private func getSections(from json: [String: Any]) -> [ContentSection] {
         [
-            Section(header: "Article", content: json["url"] as? String ?? ""),
-            Section(header: "Summary", content: json["summary"] as? String ?? ""),
-            Section(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
-            Section(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
-            Section(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
-            Section(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
-            Section(
+            ContentSection(header: "Article", content: json["url"] as? String ?? ""),
+            ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
+            ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
+            ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
+            ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
+            ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
+            ContentSection(
                 header: "Argus Details",
                 content: (
                     json["model"] as? String ?? "Unknown",
@@ -235,79 +262,6 @@ struct NewsDetailView: View {
                 )
             ),
         ]
-    }
-
-    private struct Section {
-        let header: String
-        let content: Any
-    }
-
-    struct ArgusDetailsView: View {
-        let technicalData: (String, Double, Date, String)
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
-                    .font(.system(size: 14, weight: .regular, design: .monospaced))
-                Text("Metrics:")
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                Text(formattedStats(technicalData.3))
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .padding(.leading, 16)
-                Text("Received from Argus on \(technicalData.2, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
-            }
-            .padding()
-            .background(Color.gray.opacity(0.2))
-            .cornerRadius(8)
-        }
-
-        private func formattedStats(_ stats: String) -> String {
-            // Split the stats string by ":"
-            let parts = stats.split(separator: ":").map { String($0) }
-
-            // Ensure we have exactly 6 parts
-            guard parts.count == 6 else {
-                return "Invalid stats format"
-            }
-
-            // Helper to format numbers with commas
-            let numberFormatter = NumberFormatter()
-            numberFormatter.numberStyle = .decimal
-
-            func formattedNumber(_ value: String) -> String {
-                if let number = Int(value), let formatted = numberFormatter.string(from: NSNumber(value: number)) {
-                    return formatted
-                }
-                return value
-            }
-
-            // Map the parts to their respective descriptions with formatted numbers
-            let descriptions = [
-                "Articles reviewed: \(formattedNumber(parts[0]))",
-                "Matched: \(formattedNumber(parts[1]))",
-                "Queued to review: \(formattedNumber(parts[2]))",
-                "Life safety queue: \(formattedNumber(parts[3]))",
-                "Matched topics queue: \(formattedNumber(parts[4]))",
-                "Clients: \(formattedNumber(parts[5]))",
-            ]
-
-            // Join the descriptions with newlines for better readability
-            return descriptions.joined(separator: "\n")
-        }
-    }
-
-    static func formattedStats(_ stats: String) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-
-        let parts = stats.split(separator: ":").map { part -> String in
-            if let number = Int(part), let formatted = formatter.string(from: NSNumber(value: number)) {
-                return formatted
-            }
-            return String(part) // Return unformatted part if conversion fails
-        }
-
-        return parts.joined(separator: ":")
     }
 
     private func toggleReadStatus() {
@@ -343,7 +297,6 @@ struct NewsDetailView: View {
     private func deleteNotification() {
         AppDelegate().deleteLocalJSON(notification: notification)
         modelContext.delete(notification)
-
         do {
             try modelContext.save()
             AppDelegate().updateBadgeCount()
@@ -352,4 +305,154 @@ struct NewsDetailView: View {
             print("Failed to delete notification: \(error)")
         }
     }
+}
+
+struct ContentSection {
+    let header: String
+    let content: Any
+}
+
+struct ArgusDetailsView: View {
+    let technicalData: (String, Double, Date, String)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
+                .font(.system(size: 14, weight: .regular, design: .monospaced))
+            Text("Metrics:")
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+            Text(formattedStats(technicalData.3))
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .padding(.leading, 16)
+            Text("Received from Argus on \(technicalData.2, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
+        }
+        .padding()
+        .background(Color.gray.opacity(0.2))
+        .cornerRadius(8)
+    }
+
+    private func formattedStats(_ stats: String) -> String {
+        let parts = stats.split(separator: ":").map { String($0) }
+        guard parts.count == 6 else {
+            return "Invalid stats format"
+        }
+        let numberFormatter = NumberFormatter()
+        numberFormatter.numberStyle = .decimal
+        func formattedNumber(_ value: String) -> String {
+            if let number = Int(value), let formatted = numberFormatter.string(from: NSNumber(value: number)) {
+                return formatted
+            }
+            return value
+        }
+        let descriptions = [
+            "Articles reviewed: \(formattedNumber(parts[0]))",
+            "Matched: \(formattedNumber(parts[1]))",
+            "Queued to review: \(formattedNumber(parts[2]))",
+            "Life safety queue: \(formattedNumber(parts[3]))",
+            "Matched topics queue: \(formattedNumber(parts[4]))",
+            "Clients: \(formattedNumber(parts[5]))",
+        ]
+        return descriptions.joined(separator: "\n")
+    }
+}
+
+struct ShareSelectionView: View {
+    let content: [String: Any]?
+    let notification: NotificationData
+    @Binding var selectedSections: Set<String>
+    @Binding var isPresented: Bool
+    @State private var shareItems: [Any] = []
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(getSections(from: content ?? [:], notification: notification), id: \.header) { section in
+                    Button(action: {
+                        if selectedSections.contains(section.header) {
+                            selectedSections.remove(section.header)
+                        } else {
+                            selectedSections.insert(section.header)
+                        }
+                    }) {
+                        HStack {
+                            Text(section.header)
+                            Spacer()
+                            if selectedSections.contains(section.header) {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select items to share")
+            .navigationBarItems(
+                leading: Button("Cancel") { isPresented = false },
+                trailing: Button("Share") {
+                    prepareShareContent()
+                }
+            )
+        }
+        .sheet(isPresented: Binding(
+            get: { !shareItems.isEmpty },
+            set: { if !$0 { shareItems = [] } }
+        )) {
+            ActivityViewController(activityItems: shareItems)
+        }
+    }
+
+    private func prepareShareContent() {
+        var shareText = ""
+        for section in getSections(from: content ?? [:], notification: notification) {
+            if selectedSections.contains(section.header) {
+                shareText += "\(section.header):\n"
+                if let shareableContent = section.content as? String {
+                    shareText += "\(shareableContent)\n\n"
+                } else if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
+                    shareText += formatArgusDetails(technicalData)
+                }
+            }
+        }
+        shareItems = [shareText]
+    }
+
+    private func getSections(from json: [String: Any], notification: NotificationData) -> [ContentSection] {
+        [
+            ContentSection(header: "Tiny summary", content: notification.body),
+            ContentSection(header: "Article", content: json["url"] as? String ?? ""),
+            ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
+            ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
+            ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
+            ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
+            ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
+            ContentSection(
+                header: "Argus Details",
+                content: (
+                    json["model"] as? String ?? "Unknown",
+                    (json["elapsed_time"] as? Double) ?? 0.0,
+                    notification.date,
+                    json["stats"] as? String ?? "N/A"
+                )
+            ),
+        ]
+    }
+
+    private func formatArgusDetails(_ technicalData: (String, Double, Date, String)) -> String {
+        let (model, elapsedTime, date, stats) = technicalData
+        return """
+        Model: \(model)
+        Elapsed Time: \(String(format: "%.2f", elapsedTime)) seconds
+        Date: \(date.formatted())
+        Stats: \(stats)
+        """
+    }
+}
+
+struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context _: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        return controller
+    }
+
+    func updateUIViewController(_: UIActivityViewController, context _: Context) {}
 }
