@@ -20,6 +20,24 @@ struct NewsDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
+    struct ContentView: View {
+        var body: some View {
+            ArgusDetailsView(technicalData: (
+                "ArgusModel v1.0",
+                0.1234,
+                Date(),
+                "200066:16514:419:0:0:1"
+            ))
+        }
+    }
+
+    // Preview
+    struct ContentView_Previews: PreviewProvider {
+        static var previews: some View {
+            ContentView()
+        }
+    }
+
     var body: some View {
         VStack {
             // Top Bar with Icons (Custom Toolbar)
@@ -231,13 +249,50 @@ struct NewsDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
                     .font(.system(size: 14, weight: .regular, design: .monospaced))
-                Text("DB: \(formattedStats(technicalData.3))")
-                    .font(.system(size: 14, weight: .regular, design: .monospaced))
+                Text("Metrics:")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                Text(formattedStats(technicalData.3))
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .padding(.leading, 16)
                 Text("Received from Argus on \(technicalData.2, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
             }
             .padding()
             .background(Color.gray.opacity(0.2))
             .cornerRadius(8)
+        }
+
+        private func formattedStats(_ stats: String) -> String {
+            // Split the stats string by ":"
+            let parts = stats.split(separator: ":").map { String($0) }
+
+            // Ensure we have exactly 6 parts
+            guard parts.count == 6 else {
+                return "Invalid stats format"
+            }
+
+            // Helper to format numbers with commas
+            let numberFormatter = NumberFormatter()
+            numberFormatter.numberStyle = .decimal
+
+            func formattedNumber(_ value: String) -> String {
+                if let number = Int(value), let formatted = numberFormatter.string(from: NSNumber(value: number)) {
+                    return formatted
+                }
+                return value
+            }
+
+            // Map the parts to their respective descriptions with formatted numbers
+            let descriptions = [
+                "Articles reviewed: \(formattedNumber(parts[0]))",
+                "Matched: \(formattedNumber(parts[1]))",
+                "Queued to review: \(formattedNumber(parts[2]))",
+                "Life safety queue: \(formattedNumber(parts[3]))",
+                "Matched topics queue: \(formattedNumber(parts[4]))",
+                "Clients: \(formattedNumber(parts[5]))",
+            ]
+
+            // Join the descriptions with newlines for better readability
+            return descriptions.joined(separator: "\n")
         }
     }
 
