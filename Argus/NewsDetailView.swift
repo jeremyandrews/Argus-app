@@ -401,46 +401,36 @@ struct ShareSelectionView: View {
 
     private func prepareShareContent() {
         var shareText = ""
+
         for section in getSections(from: content ?? [:], notification: notification) {
             if selectedSections.contains(section.header) {
-                shareText += "\(section.header):\n"
+                if section.header != "Description" && section.header != "Article" {
+                    // Add header in all caps for emphasis, except for Description and Article
+                    shareText += "\(section.header.uppercased())\n\n"
+                }
+
                 if let shareableContent = section.content as? String {
+                    // Add body content
                     shareText += "\(shareableContent)\n\n"
                 } else if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
-                    shareText += formatArgusDetails(technicalData)
+                    // Add Argus Details
+                    shareText += formatArgusDetails(technicalData) + "\n\n"
                 }
             }
         }
-        shareItems = [shareText]
-    }
 
-    private func getSections(from json: [String: Any], notification: NotificationData) -> [ContentSection] {
-        [
-            ContentSection(header: "Article", content: json["url"] as? String ?? ""),
-            ContentSection(header: "Notification Body", content: notification.body),
-            ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
-            ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
-            ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
-            ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
-            ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
-            ContentSection(
-                header: "Argus Details",
-                content: (
-                    json["model"] as? String ?? "Unknown",
-                    (json["elapsed_time"] as? Double) ?? 0.0,
-                    notification.date,
-                    json["stats"] as? String ?? "N/A"
-                )
-            ),
-        ]
+        shareItems = [shareText]
     }
 
     private func formatArgusDetails(_ technicalData: (String, Double, Date, String)) -> String {
         let (model, elapsedTime, date, stats) = technicalData
         return """
         Generated with \(model) in \(String(format: "%.2f", elapsedTime)) seconds.
+
         Metrics:
+
         \(formattedStats(stats))
+
         Received from Argus on \(date.formatted(.dateTime.month(.wide).day().year().hour().minute().second()))
         """
     }
@@ -459,14 +449,35 @@ struct ShareSelectionView: View {
             return value
         }
         let descriptions = [
-            "Articles reviewed: \(formattedNumber(parts[0]))",
-            "Matched: \(formattedNumber(parts[1]))",
-            "Queued to review: \(formattedNumber(parts[2]))",
-            "Life safety queue: \(formattedNumber(parts[3]))",
-            "Matched topics queue: \(formattedNumber(parts[4]))",
-            "Clients: \(formattedNumber(parts[5]))",
+            "• Articles reviewed: \(formattedNumber(parts[0]))",
+            "• Matched: \(formattedNumber(parts[1]))",
+            "• Queued to review: \(formattedNumber(parts[2]))",
+            "• Life safety queue: \(formattedNumber(parts[3]))",
+            "• Matched topics queue: \(formattedNumber(parts[4]))",
+            "• Clients: \(formattedNumber(parts[5]))",
         ]
         return descriptions.joined(separator: "\n")
+    }
+
+    private func getSections(from json: [String: Any], notification: NotificationData) -> [ContentSection] {
+        [
+            ContentSection(header: "Description", content: notification.body),
+            ContentSection(header: "Article", content: json["url"] as? String ?? ""),
+            ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
+            ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
+            ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
+            ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
+            ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
+            ContentSection(
+                header: "Argus Details",
+                content: (
+                    json["model"] as? String ?? "Unknown",
+                    (json["elapsed_time"] as? Double) ?? 0.0,
+                    notification.date,
+                    json["stats"] as? String ?? "N/A"
+                )
+            ),
+        ]
     }
 }
 
