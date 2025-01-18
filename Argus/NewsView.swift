@@ -11,38 +11,35 @@ struct NewsView: View {
     @State private var showArchivedContent: Bool = false
     @State private var isFilterMenuPresented: Bool = false
     @State private var isEditing: Bool = false
+    @State private var needsTopicReset: Bool = false
     @State private var selectedNotifications: Set<NotificationData> = []
     @State private var showDeleteConfirmation: Bool = false
     @State private var selectedTopic: String = "All" // Current tab selection
     @State private var subscriptions: [String: Bool] = SubscriptionsView().loadSubscriptions()
 
+    private var visibleTopics: [String] {
+        let filteredNotifications = notifications.filter { notification in
+            let archivedCondition = showArchivedContent || !notification.isArchived
+            let unreadCondition = !showUnreadOnly || !notification.isViewed
+            let bookmarkedCondition = !showBookmarkedOnly || notification.isBookmarked
+            return archivedCondition && unreadCondition && bookmarkedCondition
+        }
+        let topics = Set(filteredNotifications.compactMap { $0.topic })
+        return ["All"] + topics.sorted()
+    }
+
     private var topics: [String] {
-        let uniqueTopics = Set(notifications.compactMap { $0.topic }).sorted()
-        return ["All"] + uniqueTopics
+        return visibleTopics
     }
 
     private var filteredNotifications: [NotificationData] {
-        var result = notifications
-
-        // Filter by selected topic
-        if selectedTopic != "All" {
-            result = result.filter { $0.topic == selectedTopic }
+        notifications.filter { notification in
+            let topicCondition = selectedTopic == "All" || notification.topic == selectedTopic
+            let archivedCondition = showArchivedContent || !notification.isArchived
+            let unreadCondition = !showUnreadOnly || !notification.isViewed
+            let bookmarkedCondition = !showBookmarkedOnly || notification.isBookmarked
+            return topicCondition && archivedCondition && unreadCondition && bookmarkedCondition
         }
-
-        // Additional filters
-        if showUnreadOnly {
-            result = result.filter { !$0.isViewed }
-        }
-        if showBookmarkedOnly {
-            result = result.filter { $0.isBookmarked }
-        }
-
-        // Archive filter
-        if !showArchivedContent {
-            result = result.filter { !$0.isArchived }
-        }
-
-        return result
     }
 
     var body: some View {
@@ -90,7 +87,7 @@ struct NewsView: View {
                 // Tab bar for topics
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
-                        ForEach(topics, id: \ .self) { topic in
+                        ForEach(topics, id: \.self) { topic in
                             Button(action: {
                                 selectedTopic = topic
                             }) {
@@ -239,6 +236,23 @@ struct NewsView: View {
                     }
                     .padding()
                     .background(Color(UIColor.systemGray6))
+                }
+            }
+            .onChange(of: showArchivedContent) {
+                needsTopicReset = true
+            }
+            .onChange(of: showUnreadOnly) {
+                needsTopicReset = true
+            }
+            .onChange(of: showBookmarkedOnly) {
+                needsTopicReset = true
+            }
+            .onChange(of: visibleTopics) {
+                if needsTopicReset {
+                    if !visibleTopics.contains(selectedTopic) {
+                        selectedTopic = "All"
+                    }
+                    needsTopicReset = false
                 }
             }
             .onAppear {
