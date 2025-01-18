@@ -5,13 +5,16 @@ import SwiftUI
 struct ArgusApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    // Shared container for the entire app
     static let sharedModelContainer: ModelContainer = {
-        let schema = Schema([NotificationData.self])
+        let schema = Schema([
+            NotificationData.self,
+        ])
+        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+
         do {
-            return try ModelContainer(for: schema)
+            return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
-            fatalError("Failed to initialize ModelContainer: \(error)")
+            fatalError("Could not create ModelContainer: \(error)")
         }
     }()
 
@@ -23,14 +26,13 @@ struct ArgusApp: App {
                         Image(systemName: "newspaper")
                         Text("News")
                     }
-                    .modelContainer(ArgusApp.sharedModelContainer)
-
                 SubscriptionsView()
                     .tabItem {
                         Image(systemName: "mail")
                         Text("Subscriptions")
                     }
             }
+            .modelContainer(ArgusApp.sharedModelContainer)
         }
     }
 }

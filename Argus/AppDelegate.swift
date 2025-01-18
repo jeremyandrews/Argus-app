@@ -225,6 +225,7 @@ class NotificationData {
     @Attribute var body: String
     @Attribute var isViewed: Bool
     @Attribute var isBookmarked: Bool
+    @Attribute var isArchived: Bool = false
     @Attribute var json_url: String?
     @Attribute var topic: String?
     @Attribute var article_title: String

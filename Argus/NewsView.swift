@@ -8,6 +8,7 @@ struct NewsView: View {
 
     @State private var showUnreadOnly: Bool = false
     @State private var showBookmarkedOnly: Bool = false
+    @State private var showArchivedContent: Bool = false
     @State private var isFilterMenuPresented: Bool = false
     @State private var isEditing: Bool = false
     @State private var selectedNotifications: Set<NotificationData> = []
@@ -35,6 +36,12 @@ struct NewsView: View {
         if showBookmarkedOnly {
             result = result.filter { $0.isBookmarked }
         }
+
+        // Archive filter
+        if !showArchivedContent {
+            result = result.filter { !$0.isArchived }
+        }
+
         return result
     }
 
@@ -73,7 +80,8 @@ struct NewsView: View {
                     .sheet(isPresented: $isFilterMenuPresented) {
                         FilterView(
                             showUnreadOnly: $showUnreadOnly,
-                            showBookmarkedOnly: $showBookmarkedOnly
+                            showBookmarkedOnly: $showBookmarkedOnly,
+                            showArchivedContent: $showArchivedContent
                         )
                     }
                 }
@@ -183,6 +191,14 @@ struct NewsView: View {
                                     selectedNotifications.insert(notification)
                                 }
                             )
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    toggleArchive(notification)
+                                } label: {
+                                    Label(notification.isArchived ? "Unarchive" : "Archive", systemImage: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox")
+                                }
+                                .tint(.orange)
+                            }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     deleteNotification(notification)
@@ -296,6 +312,11 @@ struct NewsView: View {
         saveChanges()
     }
 
+    private func toggleArchive(_ notification: NotificationData) {
+        notification.isArchived.toggle()
+        saveChanges()
+    }
+
     private func saveChanges() {
         do {
             try modelContext.save()
@@ -363,6 +384,7 @@ struct NewsView: View {
 struct FilterView: View {
     @Binding var showUnreadOnly: Bool
     @Binding var showBookmarkedOnly: Bool
+    @Binding var showArchivedContent: Bool
 
     var body: some View {
         NavigationView {
@@ -370,6 +392,7 @@ struct FilterView: View {
                 Section(header: Text("Filters")) {
                     Toggle("Unread", isOn: $showUnreadOnly)
                     Toggle("Bookmarked", isOn: $showBookmarkedOnly)
+                    Toggle("Show Archived", isOn: $showArchivedContent)
                 }
             }
             .navigationTitle("Show only")

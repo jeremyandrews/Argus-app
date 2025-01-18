@@ -91,6 +91,10 @@ struct NewsDetailView: View {
                 Image(systemName: "square.and.arrow.up")
                     .foregroundColor(.blue)
             }
+            Button(action: { toggleArchive() }) {
+                Image(systemName: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox")
+                    .foregroundColor(notification.isArchived ? .orange : .gray)
+            }
             Button(role: .destructive, action: { showDeleteConfirmation = true }) {
                 Image(systemName: "trash")
                     .foregroundColor(.red)
@@ -279,6 +283,15 @@ struct NewsDetailView: View {
             try modelContext.save()
         } catch {
             print("Failed to toggle bookmark: \(error)")
+        }
+    }
+
+    private func toggleArchive() {
+        notification.isArchived.toggle()
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to toggle archive status: \(error)")
         }
     }
 
