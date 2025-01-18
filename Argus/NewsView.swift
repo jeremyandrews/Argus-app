@@ -3,22 +3,32 @@ import SwiftUI
 import SwiftyMarkdown
 
 struct NewsView: View {
-    @Environment(\ .modelContext) private var modelContext
-    @Query(sort: \NotificationData.date, order: .reverse) private var notifications: [NotificationData]
-
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \NotificationData.date, order: .reverse) private var allNotifications: [NotificationData]
+    @State private var filteredNotifications: [NotificationData] = []
     @State private var showUnreadOnly: Bool = false
     @State private var showBookmarkedOnly: Bool = false
     @State private var showArchivedContent: Bool = false
-    @State private var isFilterMenuPresented: Bool = false
+    @State private var isFilterViewPresented: Bool = false
     @State private var isEditing: Bool = false
-    @State private var needsTopicReset: Bool = false
     @State private var selectedNotifications: Set<NotificationData> = []
     @State private var showDeleteConfirmation: Bool = false
-    @State private var selectedTopic: String = "All" // Current tab selection
+    @State private var selectedTopic: String = "All"
     @State private var subscriptions: [String: Bool] = SubscriptionsView().loadSubscriptions()
+    @State private var needsTopicReset: Bool = false
+    @State private var filterViewHeight: CGFloat = 200
+    @Binding var tabBarHeight: CGFloat
+
+    private var topics: [String] {
+        return visibleTopics
+    }
+
+    private var isAnyFilterActive: Bool {
+        showUnreadOnly || showBookmarkedOnly || showArchivedContent
+    }
 
     private var visibleTopics: [String] {
-        let filteredNotifications = notifications.filter { notification in
+        let filteredNotifications = allNotifications.filter { notification in
             let archivedCondition = showArchivedContent || !notification.isArchived
             let unreadCondition = !showUnreadOnly || !notification.isViewed
             let bookmarkedCondition = !showBookmarkedOnly || notification.isBookmarked
@@ -28,12 +38,8 @@ struct NewsView: View {
         return ["All"] + topics.sorted()
     }
 
-    private var topics: [String] {
-        return visibleTopics
-    }
-
-    private var filteredNotifications: [NotificationData] {
-        notifications.filter { notification in
+    private func updateFilteredNotifications() {
+        filteredNotifications = allNotifications.filter { notification in
             let topicCondition = selectedTopic == "All" || notification.topic == selectedTopic
             let archivedCondition = showArchivedContent || !notification.isArchived
             let unreadCondition = !showUnreadOnly || !notification.isViewed
@@ -44,234 +50,244 @@ struct NewsView: View {
 
     var body: some View {
         NavigationView {
-            VStack {
-                // Header
-                HStack {
-                    Image("Argus")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 40, height: 40)
-
-                    Text("Argus")
-                        .font(.largeTitle)
-                        .bold()
-
-                    Spacer()
-
-                    if !filteredNotifications.isEmpty {
-                        Button(isEditing ? "Done" : "Edit") {
-                            isEditing.toggle()
-                            if !isEditing {
-                                selectedNotifications.removeAll()
+            ZStack(alignment: .bottom) {
+                VStack {
+                    // Header
+                    HStack {
+                        Image("Argus")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 40, height: 40)
+                        Text("Argus")
+                            .font(.largeTitle)
+                            .bold()
+                        Spacer()
+                        if !filteredNotifications.isEmpty {
+                            Button(isEditing ? "Done" : "Edit") {
+                                isEditing.toggle()
+                                if !isEditing {
+                                    selectedNotifications.removeAll()
+                                }
                             }
                         }
+                        Button(action: {
+                            withAnimation {
+                                isFilterViewPresented.toggle()
+                            }
+                        }) {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .foregroundColor(isAnyFilterActive ? .blue : .primary)
+                                .overlay(
+                                    Circle()
+                                        .fill(isAnyFilterActive ? .blue : .clear)
+                                        .frame(width: 8, height: 8)
+                                        .offset(x: 10, y: -10)
+                                )
+                                .padding(.leading, 8)
+                        }
                     }
+                    .padding(.horizontal)
 
-                    Button(action: {
-                        isFilterMenuPresented.toggle()
-                    }) {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .foregroundColor(.primary)
-                            .padding(.leading, 8)
+                    // Tab bar for topics
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(visibleTopics, id: \.self) { topic in
+                                Button(action: {
+                                    selectedTopic = topic
+                                }) {
+                                    Text(topic)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(selectedTopic == topic ? Color.blue : Color.gray.opacity(0.2))
+                                        .foregroundColor(selectedTopic == topic ? .white : .primary)
+                                        .cornerRadius(8)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
                     }
-                    .sheet(isPresented: $isFilterMenuPresented) {
+                    .padding(.vertical, 8)
+                    .background(Color(UIColor.systemGray6))
+
+                    // Main content
+                    if filteredNotifications.isEmpty {
+                        VStack {
+                            Text("RSS Fed")
+                                .font(.title)
+                                .padding(.bottom, 8)
+                            Image("Argus")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 120, height: 120)
+                                .padding(.bottom, 8)
+                            Text("No news is good news.")
+                                .font(.headline)
+                                .foregroundColor(.gray)
+                            Text("Please be patient, news will arrive automatically. You do not need to leave this application open.")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray)
+                                .padding(.vertical, 6)
+                            let activeSubscriptions = subscriptions.filter { $0.value }.keys.sorted()
+                            if !activeSubscriptions.isEmpty {
+                                Text("You are currently subscribed to: \(activeSubscriptions.joined(separator: ", ")).")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.gray)
+                                    .padding(.top, 6)
+                            } else {
+                                Text("You are not currently subscribed to any topics.")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.gray)
+                                    .padding(.top, 6)
+                            }
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, alignment: .top)
+                        .padding()
+                    } else {
+                        // Article list
+                        List {
+                            ForEach(filteredNotifications, id: \.id) { notification in
+                                HStack {
+                                    if isEditing {
+                                        Button(action: {
+                                            toggleSelection(notification)
+                                        }) {
+                                            Image(systemName: selectedNotifications.contains(notification) ? "checkmark.circle.fill" : "circle")
+                                                .foregroundColor(.blue)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(.trailing, 8)
+                                    }
+                                    if !isEditing {
+                                        rowContent(for: notification)
+                                            .onTapGesture {
+                                                openArticle(notification)
+                                            }
+                                    } else {
+                                        rowContent(for: notification)
+                                            .onTapGesture {
+                                                toggleSelection(notification)
+                                            }
+                                    }
+                                    Spacer()
+                                    Button(action: {
+                                        toggleBookmark(notification)
+                                    }) {
+                                        Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
+                                            .foregroundColor(notification.isBookmarked ? .blue : .gray)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.vertical, 8)
+                                .listRowBackground(isEditing && selectedNotifications.contains(notification) ? Color.blue.opacity(0.4) : notification.isViewed ? Color.clear : Color.blue.opacity(0.2))
+                                .cornerRadius(8)
+                                .gesture(
+                                    LongPressGesture().onEnded { _ in
+                                        isEditing = true
+                                        selectedNotifications.insert(notification)
+                                    }
+                                )
+                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                    Button {
+                                        toggleArchive(notification)
+                                    } label: {
+                                        Label(notification.isArchived ? "Unarchive" : "Archive", systemImage: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox")
+                                    }
+                                    .tint(.orange)
+                                }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        deleteNotification(notification)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                            }
+                            .onDelete(perform: deleteNotifications)
+                        }
+                        .listStyle(PlainListStyle())
+                    }
+                }
+
+                // Bottom sheet filter view
+                if isFilterViewPresented {
+                    VStack(spacing: 0) {
+                        Color.black.opacity(0.3)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                withAnimation {
+                                    isFilterViewPresented = false
+                                }
+                            }
+
                         FilterView(
                             showUnreadOnly: $showUnreadOnly,
                             showBookmarkedOnly: $showBookmarkedOnly,
                             showArchivedContent: $showArchivedContent
                         )
-                    }
-                }
-                .padding(.horizontal)
-
-                // Tab bar for topics
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        ForEach(topics, id: \.self) { topic in
-                            Button(action: {
-                                selectedTopic = topic
-                            }) {
-                                Text(topic)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(selectedTopic == topic ? Color.blue : Color.gray.opacity(0.2))
-                                    .foregroundColor(selectedTopic == topic ? .white : .primary)
-                                    .cornerRadius(8)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                .padding(.vertical, 8)
-                .background(Color(UIColor.systemGray6))
-
-                // Main content
-                if filteredNotifications.isEmpty {
-                    VStack {
-                        Text("RSS Fed")
-                            .font(.title)
-                            .padding(.bottom, 8)
-
-                        Image("Argus")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 120, height: 120)
-                            .padding(.bottom, 8)
-
-                        Text("No news is good news.")
-                            .font(.headline)
-                            .foregroundColor(.gray)
-
-                        Text("Please be patient, news will arrive automatically. You do not need to leave this application open.")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.gray)
-                            .padding(.vertical, 6)
-
-                        let activeSubscriptions = subscriptions.filter { $0.value }.keys.sorted()
-                        if !activeSubscriptions.isEmpty {
-                            Text("You are currently subscribed to: \(activeSubscriptions.joined(separator: ", ")).")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.gray)
-                                .padding(.top, 6)
-                        } else {
-                            Text("You are not currently subscribed to any topics.")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.gray)
-                                .padding(.top, 6)
-                        }
-
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .top)
-                    .padding()
-                } else {
-                    // Article list
-                    List {
-                        ForEach(filteredNotifications) { notification in
-                            HStack {
-                                if isEditing {
-                                    Button(action: {
-                                        toggleSelection(notification)
-                                    }) {
-                                        Image(systemName: selectedNotifications.contains(notification) ? "checkmark.circle.fill" : "circle")
-                                            .foregroundColor(.blue)
+                        .frame(height: filterViewHeight)
+                        .background(Color(UIColor.systemBackground))
+                        .cornerRadius(15, corners: [.topLeft, .topRight])
+                        .shadow(radius: 10)
+                        .gesture(
+                            DragGesture()
+                                .onEnded { value in
+                                    if value.translation.height > 50 {
+                                        withAnimation {
+                                            isFilterViewPresented = false
+                                        }
                                     }
-                                    .buttonStyle(.plain)
-                                    .padding(.trailing, 8)
                                 }
-                                if !isEditing {
-                                    rowContent(for: notification)
-                                        .onTapGesture {
-                                            openArticle(notification)
-                                        }
-                                } else {
-                                    rowContent(for: notification)
-                                        .onTapGesture {
-                                            toggleSelection(notification)
-                                        }
-                                }
-                                Spacer()
-                                Button(action: {
-                                    toggleBookmark(notification)
-                                }) {
-                                    Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
-                                        .foregroundColor(notification.isBookmarked ? .blue : .gray)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.vertical, 8)
-                            .listRowBackground(isEditing && selectedNotifications.contains(notification) ? Color.blue.opacity(0.4) : notification.isViewed ? Color.clear : Color.blue.opacity(0.2))
-                            .cornerRadius(8)
-                            .gesture(
-                                LongPressGesture().onEnded { _ in
-                                    isEditing = true
-                                    selectedNotifications.insert(notification)
-                                }
-                            )
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button {
-                                    toggleArchive(notification)
-                                } label: {
-                                    Label(notification.isArchived ? "Unarchive" : "Archive", systemImage: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox")
-                                }
-                                .tint(.orange)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    deleteNotification(notification)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                        }
+                        )
                     }
-                    .listStyle(PlainListStyle())
-                }
-
-                // Toolbar for actions
-                if isEditing && !selectedNotifications.isEmpty {
-                    HStack {
-                        Button(action: {
-                            performActionOnSelection { $0.isViewed = true }
-                        }) {
-                            Image(systemName: "envelope.open.fill")
-                                .font(.title2)
-                                .foregroundColor(.gray)
-                        }
-
-                        Button(action: {
-                            performActionOnSelection { $0.isViewed = false }
-                        }) {
-                            Image(systemName: "envelope.badge.fill")
-                                .font(.title2)
-                        }
-
-                        Button(action: {
-                            showDeleteConfirmation = true
-                        }) {
-                            Image(systemName: "trash.fill")
-                                .font(.title2)
-                                .foregroundColor(.red)
-                        }
-                    }
-                    .padding()
-                    .background(Color(UIColor.systemGray6))
+                    .transition(.move(edge: .bottom))
+                    .ignoresSafeArea()
+                    .padding(.bottom, tabBarHeight)
                 }
             }
-            .onChange(of: showArchivedContent) {
-                needsTopicReset = true
-            }
-            .onChange(of: showUnreadOnly) {
-                needsTopicReset = true
-            }
-            .onChange(of: showBookmarkedOnly) {
-                needsTopicReset = true
-            }
-            .onChange(of: visibleTopics) {
-                if needsTopicReset {
-                    if !visibleTopics.contains(selectedTopic) {
-                        selectedTopic = "All"
-                    }
-                    needsTopicReset = false
+        }
+        .onChange(of: allNotifications) { _ in
+            updateFilteredNotifications()
+        }
+        .onChange(of: selectedTopic) { _ in
+            updateFilteredNotifications()
+        }
+        .onChange(of: showArchivedContent) { _ in
+            needsTopicReset = true
+            updateFilteredNotifications()
+        }
+        .onChange(of: showUnreadOnly) { _ in
+            needsTopicReset = true
+            updateFilteredNotifications()
+        }
+        .onChange(of: showBookmarkedOnly) { _ in
+            needsTopicReset = true
+            updateFilteredNotifications()
+        }
+        .onChange(of: visibleTopics) {
+            if needsTopicReset {
+                if !visibleTopics.contains(selectedTopic) {
+                    selectedTopic = "All"
                 }
+                needsTopicReset = false
             }
-            .onAppear {
-                // Reload subscriptions when the view appears
-                subscriptions = SubscriptionsView().loadSubscriptions()
+        }
+        .onAppear {
+            subscriptions = SubscriptionsView().loadSubscriptions()
+            updateFilteredNotifications()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NotificationPermissionGranted"))) { _ in
+            subscriptions = SubscriptionsView().loadSubscriptions()
+        }
+        .confirmationDialog(
+            "Are you sure you want to delete \(selectedNotifications.count) articles?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                deleteSelectedNotifications()
             }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NotificationPermissionGranted"))) { _ in
-                subscriptions = SubscriptionsView().loadSubscriptions()
-            }
-            .confirmationDialog(
-                "Are you sure you want to delete \(selectedNotifications.count) articles?",
-                isPresented: $showDeleteConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    deleteSelectedNotifications()
-                }
-                Button("Cancel", role: .cancel) {}
-            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -294,11 +310,27 @@ struct NewsView: View {
         }
     }
 
+    private func deleteNotifications(at offsets: IndexSet) {
+        withAnimation {
+            let notificationsToDelete = offsets.map { filteredNotifications[$0] }
+            for notification in notificationsToDelete {
+                deleteNotification(notification)
+            }
+        }
+    }
+
     private func deleteNotification(_ notification: NotificationData) {
         withAnimation {
             AppDelegate().deleteLocalJSON(notification: notification)
             modelContext.delete(notification)
-            saveChanges()
+            do {
+                try modelContext.save()
+                AppDelegate().updateBadgeCount()
+                // Update filteredNotifications after deletion
+                updateFilteredNotifications()
+            } catch {
+                print("Failed to delete notification: \(error)")
+            }
         }
     }
 
@@ -395,21 +427,40 @@ struct NewsView: View {
     }
 }
 
+extension View {
+    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
+        clipShape(RoundedCorner(radius: radius, corners: corners))
+    }
+}
+
+struct RoundedCorner: Shape {
+    var radius: CGFloat = .infinity
+    var corners: UIRectCorner = .allCorners
+
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(roundedRect: rect, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius))
+        return Path(path.cgPath)
+    }
+}
+
 struct FilterView: View {
     @Binding var showUnreadOnly: Bool
     @Binding var showBookmarkedOnly: Bool
     @Binding var showArchivedContent: Bool
 
     var body: some View {
-        NavigationView {
-            Form {
-                Section(header: Text("Filters")) {
-                    Toggle("Unread", isOn: $showUnreadOnly)
-                    Toggle("Bookmarked", isOn: $showBookmarkedOnly)
-                    Toggle("Show Archived", isOn: $showArchivedContent)
-                }
-            }
-            .navigationTitle("Show only")
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Filters")
+                .font(.headline)
+                .padding(.top)
+
+            Toggle("Only unread", isOn: $showUnreadOnly)
+            Toggle("Only bookmarked", isOn: $showBookmarkedOnly)
+            Toggle("Show archived", isOn: $showArchivedContent)
         }
+        .padding()
+        .background(Color(UIColor.systemBackground))
+        .cornerRadius(15, corners: [.topLeft, .topRight])
+        .shadow(radius: 10)
     }
 }

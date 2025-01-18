@@ -20,19 +20,8 @@ struct ArgusApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TabView {
-                NewsView()
-                    .tabItem {
-                        Image(systemName: "newspaper")
-                        Text("News")
-                    }
-                SubscriptionsView()
-                    .tabItem {
-                        Image(systemName: "mail")
-                        Text("Subscriptions")
-                    }
-            }
-            .modelContainer(ArgusApp.sharedModelContainer)
+            ContentView()
+                .modelContainer(ArgusApp.sharedModelContainer)
         }
     }
 }
