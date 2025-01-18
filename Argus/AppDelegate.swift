@@ -161,7 +161,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         do {
             let context = ArgusApp.sharedModelContainer.mainContext
             let unviewedCount = try context.fetch(
-                FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
+                FetchDescriptor<NotificationData>(
+                    predicate: #Predicate { !$0.isViewed && !$0.isArchived }
+                )
             ).count
             UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
                 if let error = error {
