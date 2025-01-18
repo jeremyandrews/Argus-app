@@ -154,20 +154,18 @@ struct NewsView: View {
                                     .buttonStyle(.plain)
                                     .padding(.trailing, 8)
                                 }
-
                                 if !isEditing {
-                                    NavigationLink(destination: NewsDetailView(notification: notification)) {
-                                        rowContent(for: notification)
-                                    }
+                                    rowContent(for: notification)
+                                        .onTapGesture {
+                                            openArticle(notification)
+                                        }
                                 } else {
                                     rowContent(for: notification)
                                         .onTapGesture {
                                             toggleSelection(notification)
                                         }
                                 }
-
                                 Spacer()
-
                                 Button(action: {
                                     toggleBookmark(notification)
                                 }) {
@@ -185,6 +183,13 @@ struct NewsView: View {
                                     selectedNotifications.insert(notification)
                                 }
                             )
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    deleteNotification(notification)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                     .listStyle(PlainListStyle())
@@ -245,6 +250,25 @@ struct NewsView: View {
             selectedNotifications.remove(notification)
         } else {
             selectedNotifications.insert(notification)
+        }
+    }
+
+    private func openArticle(_ notification: NotificationData) {
+        let detailView = NewsDetailView(notification: notification)
+        let hostingController = UIHostingController(rootView: detailView)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController
+        {
+            rootViewController.present(hostingController, animated: true, completion: nil)
+        }
+    }
+
+    private func deleteNotification(_ notification: NotificationData) {
+        withAnimation {
+            AppDelegate().deleteLocalJSON(notification: notification)
+            modelContext.delete(notification)
+            saveChanges()
         }
     }
 
