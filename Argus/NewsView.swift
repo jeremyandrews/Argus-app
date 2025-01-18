@@ -206,6 +206,54 @@ struct NewsView: View {
                             .onDelete(perform: deleteNotifications)
                         }
                         .listStyle(PlainListStyle())
+                        .toolbar {
+                            if isEditing {
+                                ToolbarItemGroup(placement: .bottomBar) {
+                                    Button(action: {
+                                        performActionOnSelection { notification in
+                                            notification.isViewed.toggle()
+                                        }
+                                        updateFilteredNotifications()
+                                    }) {
+                                        Label("Toggle Read", systemImage: "envelope.badge")
+                                    }
+                                    .labelStyle(.iconOnly)
+
+                                    Spacer()
+
+                                    Button(action: {
+                                        performActionOnSelection { notification in
+                                            toggleBookmark(notification)
+                                        }
+                                        updateFilteredNotifications()
+                                    }) {
+                                        Label("Bookmark", systemImage: "bookmark")
+                                    }
+                                    .labelStyle(.iconOnly)
+
+                                    Spacer()
+
+                                    Button(action: {
+                                        performActionOnSelection { notification in
+                                            toggleArchive(notification)
+                                        }
+                                        updateFilteredNotifications()
+                                    }) {
+                                        Label("Archive", systemImage: "archivebox")
+                                    }
+                                    .labelStyle(.iconOnly)
+
+                                    Spacer()
+
+                                    Button(action: {
+                                        showDeleteConfirmation = true
+                                    }) {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    .labelStyle(.iconOnly)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -246,21 +294,21 @@ struct NewsView: View {
                 }
             }
         }
-        .onChange(of: allNotifications) { _ in
+        .onChange(of: allNotifications) { _, _ in
             updateFilteredNotifications()
         }
-        .onChange(of: selectedTopic) { _ in
+        .onChange(of: selectedTopic) { _, _ in
             updateFilteredNotifications()
         }
-        .onChange(of: showArchivedContent) { _ in
+        .onChange(of: showArchivedContent) { _, _ in
             needsTopicReset = true
             updateFilteredNotifications()
         }
-        .onChange(of: showUnreadOnly) { _ in
+        .onChange(of: showUnreadOnly) { _, _ in
             needsTopicReset = true
             updateFilteredNotifications()
         }
-        .onChange(of: showBookmarkedOnly) { _ in
+        .onChange(of: showBookmarkedOnly) { _, _ in
             needsTopicReset = true
             updateFilteredNotifications()
         }
@@ -343,6 +391,7 @@ struct NewsView: View {
             selectedNotifications.removeAll()
             isEditing = false
             saveChanges()
+            updateFilteredNotifications()
         }
     }
 
@@ -356,11 +405,13 @@ struct NewsView: View {
         }
 
         saveChanges()
+        updateFilteredNotifications()
     }
 
     private func toggleArchive(_ notification: NotificationData) {
         notification.isArchived.toggle()
         saveChanges()
+        updateFilteredNotifications()
     }
 
     private func saveChanges() {
