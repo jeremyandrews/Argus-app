@@ -14,44 +14,37 @@ struct SubscriptionsView: View {
     @State private var subscriptions: [String: SubscriptionInfo] = [:]
     @State private var jwtToken: String? = nil
     @State private var errorMessage: ErrorWrapper? = nil
-    @State private var isFirstLaunch: Bool = true
+    @AppStorage("isFirstLaunch") private var isFirstLaunch: Bool = true
 
     let listOfSubscriptions: [String] = ["Alert", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "EVs", "Global", "LLMs", "Longevity", "Music", "Rust", "Space", "Tuscany", "Vulnerability", "Test"]
-    let defaultAutoSubscriptions: [String] = ["Apple", "Bitcoins", "Drupal", "EVs", "Global", "LLMs", "Space", "Vulnerability"]
+
+    let highPriorityDefaults = ["Alert", "Clients", "Global", "Vulnerability", "Test"]
+    let lowPriorityDefaults = ["Apple", "Bitcoins", "Drupal", "Rust", "Space"]
 
     var body: some View {
         NavigationView {
-            List {
-                ForEach(listOfSubscriptions, id: \.self) { subscription in
-                    let info = subscriptions[subscription] ?? SubscriptionInfo(isSubscribed: false, isHighPriority: false)
-                    VStack {
-                        Button(action: {
-                            toggleSubscription(subscription, info: info)
-                        }) {
-                            HStack {
-                                Text(subscription)
-                                    .foregroundColor(info.isSubscribed ? .blue : .gray)
-                                Spacer()
-                                Image(systemName: info.isSubscribed ? "checkmark" : "xmark")
-                                    .foregroundColor(info.isSubscribed ? .blue : .gray)
-                            }
-                        }
-                        if info.isSubscribed {
-                            Toggle("High Priority", isOn: Binding(
-                                get: { info.isHighPriority },
-                                set: { newValue in
-                                    togglePriority(subscription, isHighPriority: newValue)
-                                }
-                            ))
-                            .padding(.leading, 20)
-                        }
+            VStack {
+                // Column headers
+                HStack {
+                    Text("Topic")
+                        .font(.headline)
+                        .padding(.leading)
+                    Spacer()
+                    Text("Priority")
+                        .font(.headline)
+                        .padding(.trailing)
+                }
+                .padding(.top)
+
+                List {
+                    ForEach(listOfSubscriptions, id: \.self) { topic in
+                        SubscriptionRow(topic: topic, subscriptionInfo: binding(for: topic))
                     }
-                    .listRowBackground(info.isSubscribed ? Color.clear : Color.gray.opacity(0.2))
                 }
             }
             .navigationTitle("Subscriptions")
             .onAppear {
-                authenticateAndLoadSubscriptions()
+                loadSubscriptionsAndAuthenticate()
             }
             .alert(item: $errorMessage) { error in
                 Alert(title: Text("Error"), message: Text(error.message), dismissButton: .default(Text("OK")))
@@ -59,35 +52,62 @@ struct SubscriptionsView: View {
         }
     }
 
-    private func authenticateAndLoadSubscriptions() {
+    private func binding(for topic: String) -> Binding<SubscriptionInfo> {
+        Binding(
+            get: { self.subscriptions[topic] ?? SubscriptionInfo(isSubscribed: false, isHighPriority: false) },
+            set: { self.subscriptions[topic] = $0 }
+        )
+    }
+
+    private func loadSubscriptionsAndAuthenticate() {
+        subscriptions = loadSubscriptions()
+
+        if isFirstLaunch {
+            applyDefaultSubscriptions()
+            isFirstLaunch = false
+        }
+
+        authenticateDevice()
+    }
+
+    private func authenticateDevice() {
         Task {
             do {
                 jwtToken = try await authenticateDevice()
-                subscriptions = loadSubscriptions()
-
-                // Check if it's the first launch and auto-subscribe
-                if isFirstLaunch {
-                    isFirstLaunch = false
-                    autoSubscribeToDefaultTopics()
-                }
+                // Sync subscriptions with the server if needed
+                syncSubscriptionsWithServer()
             } catch {
                 errorMessage = ErrorWrapper(message: "Failed to authenticate: \(error.localizedDescription)")
             }
         }
     }
 
-    private func autoSubscribeToDefaultTopics() {
+    private func applyDefaultSubscriptions() {
+        for topic in listOfSubscriptions {
+            if highPriorityDefaults.contains(topic) {
+                subscriptions[topic] = SubscriptionInfo(isSubscribed: true, isHighPriority: true)
+            } else if lowPriorityDefaults.contains(topic) {
+                subscriptions[topic] = SubscriptionInfo(isSubscribed: true, isHighPriority: false)
+            } else {
+                subscriptions[topic] = SubscriptionInfo(isSubscribed: false, isHighPriority: false)
+            }
+        }
+        saveSubscriptions(subscriptions)
+    }
+
+    private func syncSubscriptionsWithServer() {
         Task {
-            for topic in defaultAutoSubscriptions {
-                guard subscriptions[topic]?.isSubscribed != true else { continue }
+            for (topic, info) in subscriptions {
                 do {
-                    try await performAPIRequest { try await subscribeToTopic(topic, token: $0) }
-                    subscriptions[topic] = SubscriptionInfo(isSubscribed: true, isHighPriority: false)
+                    if info.isSubscribed {
+                        try await performAPIRequest { try await subscribeToTopic(topic, token: $0) }
+                    } else {
+                        try await performAPIRequest { try await unsubscribeFromTopic(topic, token: $0) }
+                    }
                 } catch {
-                    errorMessage = ErrorWrapper(message: "Failed to auto-subscribe to \(topic): \(error.localizedDescription)")
+                    errorMessage = ErrorWrapper(message: "Failed to sync \(topic): \(error.localizedDescription)")
                 }
             }
-            saveSubscriptions(subscriptions)
         }
     }
 
@@ -118,7 +138,7 @@ struct SubscriptionsView: View {
         saveSubscriptions(subscriptions)
         // You might want to add an API call here to update the priority on the server
     }
-    
+
     private func authenticateDevice() async throws -> String {
         guard let deviceToken = UserDefaults.standard.string(forKey: "deviceToken") else {
             throw URLError(.userAuthenticationRequired, userInfo: [NSLocalizedDescriptionKey: "Device token not available."])
@@ -194,17 +214,65 @@ struct SubscriptionsView: View {
 
     func loadSubscriptions() -> [String: SubscriptionInfo] {
         let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: "subscriptions"),
-           let loadedSubscriptions = try? JSONDecoder().decode([String: SubscriptionInfo].self, from: data) {
-            return loadedSubscriptions
+        if let savedData = defaults.data(forKey: "subscriptions"),
+           let decodedSubscriptions = try? JSONDecoder().decode([String: SubscriptionInfo].self, from: savedData)
+        {
+            return decodedSubscriptions
         }
-        return Dictionary(uniqueKeysWithValues: listOfSubscriptions.map { ($0, SubscriptionInfo(isSubscribed: false, isHighPriority: false)) })
+
+        // If no saved data, return an empty dictionary
+        return [:]
     }
 
     private func saveSubscriptions(_ subscriptions: [String: SubscriptionInfo]) {
         let defaults = UserDefaults.standard
-        if let data = try? JSONEncoder().encode(subscriptions) {
-            defaults.set(data, forKey: "subscriptions")
+        if let encoded = try? JSONEncoder().encode(subscriptions) {
+            defaults.set(encoded, forKey: "subscriptions")
+        }
+    }
+}
+
+struct SubscriptionRow: View {
+    let topic: String
+    @Binding var subscriptionInfo: SubscriptionInfo
+
+    var body: some View {
+        HStack {
+            // Topic column
+            HStack {
+                Image(systemName: subscriptionInfo.isSubscribed ? "checkmark.square.fill" : "square")
+                    .foregroundColor(subscriptionInfo.isSubscribed ? .blue : .gray)
+                    .onTapGesture {
+                        subscriptionInfo.isSubscribed.toggle()
+                    }
+
+                Text(topic)
+                    .foregroundColor(subscriptionInfo.isSubscribed ? .primary : .gray)
+            }
+
+            Spacer()
+
+            // Priority column
+            if subscriptionInfo.isSubscribed {
+                HStack {
+                    Image(systemName: "bell.fill")
+                        .foregroundColor(subscriptionInfo.isHighPriority ? .gray : .blue)
+
+                    Toggle("", isOn: $subscriptionInfo.isHighPriority)
+                        .labelsHidden()
+                        .toggleStyle(SwitchToggleStyle(tint: .blue))
+
+                    Image(systemName: "bell.and.waves.left.and.right.fill")
+                        .foregroundColor(subscriptionInfo.isHighPriority ? .blue : .gray)
+                }
+                .padding(6)
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(8)
+            } else {
+                // Placeholder to maintain alignment when not subscribed
+                Color.clear
+                    .frame(width: 120, height: 30)
+            }
         }
     }
 }

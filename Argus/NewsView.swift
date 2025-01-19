@@ -127,7 +127,7 @@ struct NewsView: View {
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(.gray)
                                 .padding(.vertical, 6)
-                            
+
                             let activeSubscriptions = subscriptions.filter { $0.value.isSubscribed }.keys.sorted()
                             if !activeSubscriptions.isEmpty {
                                 Text("You are currently subscribed to: \(activeSubscriptions.joined(separator: ", ")).")
@@ -140,7 +140,7 @@ struct NewsView: View {
                                     .foregroundColor(.gray)
                                     .padding(.top, 6)
                             }
-                            
+
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, alignment: .top)
