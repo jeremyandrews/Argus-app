@@ -14,7 +14,7 @@ struct NewsView: View {
     @State private var selectedNotifications: Set<NotificationData> = []
     @State private var showDeleteConfirmation: Bool = false
     @State private var selectedTopic: String = "All"
-    @State private var subscriptions: [String: Bool] = SubscriptionsView().loadSubscriptions()
+    @State private var subscriptions: [String: SubscriptionInfo] = [:]
     @State private var needsTopicReset: Bool = false
     @State private var filterViewHeight: CGFloat = 200
     @Binding var tabBarHeight: CGFloat
@@ -127,7 +127,8 @@ struct NewsView: View {
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(.gray)
                                 .padding(.vertical, 6)
-                            let activeSubscriptions = subscriptions.filter { $0.value }.keys.sorted()
+                            
+                            let activeSubscriptions = subscriptions.filter { $0.value.isSubscribed }.keys.sorted()
                             if !activeSubscriptions.isEmpty {
                                 Text("You are currently subscribed to: \(activeSubscriptions.joined(separator: ", ")).")
                                     .font(.system(size: 14, weight: .medium))
@@ -139,6 +140,7 @@ struct NewsView: View {
                                     .foregroundColor(.gray)
                                     .padding(.top, 6)
                             }
+                            
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, alignment: .top)
