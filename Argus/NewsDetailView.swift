@@ -374,34 +374,49 @@ struct ShareSelectionView: View {
     @Binding var selectedSections: Set<String>
     @Binding var isPresented: Bool
     @State private var shareItems: [Any] = []
+    @State private var formatText = true
 
     var body: some View {
         NavigationView {
             List {
-                ForEach(getSections(from: content ?? [:], notification: notification), id: \.header) { section in
-                    Button(action: {
-                        if selectedSections.contains(section.header) {
-                            selectedSections.remove(section.header)
-                        } else {
-                            selectedSections.insert(section.header)
-                        }
-                    }) {
-                        HStack {
-                            Text(section.header)
-                            Spacer()
+                Section(header: Text("Select the sections to share:").padding(.top)) {
+                    ForEach(getSections(from: content ?? [:], notification: notification), id: \.header) { section in
+                        Button(action: {
                             if selectedSections.contains(section.header) {
-                                Image(systemName: "checkmark")
+                                selectedSections.remove(section.header)
+                            } else {
+                                selectedSections.insert(section.header)
+                            }
+                        }) {
+                            HStack {
+                                Text(section.header)
+                                Spacer()
+                                if selectedSections.contains(section.header) {
+                                    Image(systemName: "checkmark")
+                                }
                             }
                         }
                     }
                 }
+
+                Section {
+                    Toggle(isOn: $formatText) {
+                        VStack(alignment: .leading) {
+                            Text("Format text")
+                            Text("Some apps are unable to handle formatted text")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
             }
-            .navigationTitle("Select items to share")
+            .navigationTitle("Share Content")
             .navigationBarItems(
                 leading: Button("Cancel") { isPresented = false },
                 trailing: Button("Share") {
                     prepareShareContent()
                 }
+                .disabled(selectedSections.isEmpty)
             )
         }
         .sheet(isPresented: Binding(
@@ -410,29 +425,35 @@ struct ShareSelectionView: View {
         )) {
             ActivityViewController(activityItems: shareItems)
         }
+        .onAppear {
+            // Pre-select Description, Article, and Summary by default
+            if selectedSections.isEmpty {
+                selectedSections = ["Description", "Article", "Summary"]
+            }
+        }
     }
 
     private func prepareShareContent() {
         var shareText = ""
-
         for section in getSections(from: content ?? [:], notification: notification) {
             if selectedSections.contains(section.header) {
                 if section.header != "Description" && section.header != "Article" {
-                    // Add header in all caps for emphasis, except for Description and Article
                     shareText += "\(section.header.uppercased())\n\n"
                 }
-
                 if let shareableContent = section.content as? String {
-                    // Add body content
                     shareText += "\(shareableContent)\n\n"
                 } else if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
-                    // Add Argus Details
                     shareText += formatArgusDetails(technicalData) + "\n\n"
                 }
             }
         }
 
-        shareItems = [shareText]
+        if formatText {
+            let formattedText = SwiftyMarkdown(string: shareText).attributedString()
+            shareItems = [formattedText]
+        } else {
+            shareItems = [shareText]
+        }
     }
 
     private func formatArgusDetails(_ technicalData: (String, Double, Date, String)) -> String {
