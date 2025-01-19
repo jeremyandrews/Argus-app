@@ -373,8 +373,22 @@ struct ShareSelectionView: View {
     let notification: NotificationData
     @Binding var selectedSections: Set<String>
     @Binding var isPresented: Bool
-    @State private var shareItems: [Any] = []
     @State private var formatText = true
+    @State private var shareItems: [Any] = []
+
+    private var isShareSheetPresented: Binding<Bool> {
+        Binding<Bool>(
+            get: { !self.shareItems.isEmpty },
+            set: { newValue in
+                if !newValue {
+                    self.shareItems = []
+                    self.isPresented = false
+                } else {
+                    self.prepareShareContent()
+                }
+            }
+        )
+    }
 
     var body: some View {
         NavigationView {
@@ -414,19 +428,17 @@ struct ShareSelectionView: View {
             .navigationBarItems(
                 leading: Button("Cancel") { isPresented = false },
                 trailing: Button("Share") {
-                    prepareShareContent()
+                    isShareSheetPresented.wrappedValue = true
                 }
                 .disabled(selectedSections.isEmpty)
             )
         }
-        .sheet(isPresented: Binding(
-            get: { !shareItems.isEmpty },
-            set: { if !$0 { shareItems = [] } }
-        )) {
-            ActivityViewController(activityItems: shareItems)
+        .sheet(isPresented: isShareSheetPresented) {
+            ActivityViewController(activityItems: shareItems) { _, _, _, _ in
+                isShareSheetPresented.wrappedValue = false
+            }
         }
         .onAppear {
-            // Pre-select Description, Article, and Summary by default
             if selectedSections.isEmpty {
                 selectedSections = ["Description", "Article", "Summary"]
             }
@@ -517,9 +529,11 @@ struct ShareSelectionView: View {
 
 struct ActivityViewController: UIViewControllerRepresentable {
     let activityItems: [Any]
+    let completion: UIActivityViewController.CompletionWithItemsHandler?
 
     func makeUIViewController(context _: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        controller.completionWithItemsHandler = completion
         return controller
     }
 
