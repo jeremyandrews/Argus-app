@@ -100,7 +100,7 @@ struct SubscriptionsView: View {
             for (topic, info) in subscriptions {
                 do {
                     if info.isSubscribed {
-                        try await performAPIRequest { try await subscribeToTopic(topic, token: $0) }
+                        try await performAPIRequest { try await subscribeToTopic(topic, token: $0, isHighPriority: info.isHighPriority) }
                     } else {
                         try await performAPIRequest { try await unsubscribeFromTopic(topic, token: $0) }
                     }
@@ -121,7 +121,7 @@ struct SubscriptionsView: View {
                 if info.isSubscribed {
                     try await performAPIRequest { try await unsubscribeFromTopic(topic, token: $0) }
                 } else {
-                    try await performAPIRequest { try await subscribeToTopic(topic, token: $0) }
+                    try await performAPIRequest { try await subscribeToTopic(topic, token: $0, isHighPriority: info.isHighPriority) }
                 }
                 subscriptions[topic] = SubscriptionInfo(isSubscribed: !info.isSubscribed, isHighPriority: info.isHighPriority)
                 saveSubscriptions(subscriptions)
@@ -131,12 +131,22 @@ struct SubscriptionsView: View {
         }
     }
 
+    private func updatePriorityOnServer(_ topic: String, isHighPriority: Bool) {
+        Task {
+            do {
+                try await performAPIRequest { try await subscribeToTopic(topic, token: $0, isHighPriority: isHighPriority) }
+            } catch {
+                errorMessage = ErrorWrapper(message: "Failed to update priority for \(topic): \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func togglePriority(_ topic: String, isHighPriority: Bool) {
         guard var info = subscriptions[topic] else { return }
         info.isHighPriority = isHighPriority
         subscriptions[topic] = info
         saveSubscriptions(subscriptions)
-        // You might want to add an API call here to update the priority on the server
+        updatePriorityOnServer(topic, isHighPriority: isHighPriority)
     }
 
     private func authenticateDevice() async throws -> String {
@@ -178,13 +188,14 @@ struct SubscriptionsView: View {
         }
     }
 
-    private func subscribeToTopic(_ topic: String, token: String) async throws {
+    private func subscribeToTopic(_ topic: String, token: String, isHighPriority: Bool) async throws {
         let url = URL(string: "https://api.arguspulse.com/subscribe")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["topic": topic])
+        let payload = ["topic": topic, "priority": isHighPriority ? "high" : "low"]
+        request.httpBody = try JSONEncoder().encode(payload)
 
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
