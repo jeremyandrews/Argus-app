@@ -434,15 +434,21 @@ struct ShareSelectionView: View {
         NavigationView {
             List {
                 Section(header: Text("Select the sections to share:").padding(.top)) {
-                    ForEach(sectionHeaders, id: \.self) { header in
-                        Button(action: {
-                            toggleSection(header)
-                        }) {
-                            HStack {
-                                Text(header)
-                                Spacer()
-                                if selectedSections.contains(header) {
-                                    Image(systemName: "checkmark")
+                    ForEach(getSections(from: content ?? [:]), id: \.header) { section in
+                        if section.header != "Article Preview" {
+                            Button(action: {
+                                if selectedSections.contains(section.header) {
+                                    selectedSections.remove(section.header)
+                                } else {
+                                    selectedSections.insert(section.header)
+                                }
+                            }) {
+                                HStack {
+                                    Text(section.header)
+                                    Spacer()
+                                    if selectedSections.contains(section.header) {
+                                        Image(systemName: "checkmark")
+                                    }
                                 }
                             }
                         }
@@ -475,28 +481,16 @@ struct ShareSelectionView: View {
         }
         .onAppear {
             if selectedSections.isEmpty {
-                selectedSections = ["Description", "Preview", "Summary"]
+                selectedSections = ["Description", "Article", "Summary"]
             }
-        }
-    }
-
-    private var sectionHeaders: [String] {
-        getSections(from: content ?? [:]).map { $0.header }
-    }
-
-    private func toggleSection(_ header: String) {
-        if selectedSections.contains(header) {
-            selectedSections.remove(header)
-        } else {
-            selectedSections.insert(header)
         }
     }
 
     private func prepareShareContent() {
         var shareText = ""
         for section in getSections(from: content ?? [:]) {
-            if selectedSections.contains(section.header) {
-                if section.header != "Description" && section.header != "Preview" {
+            if selectedSections.contains(section.header) && section.header != "Preview" {
+                if section.header != "Description" {
                     shareText += "\(section.header.uppercased())\n\n"
                 }
                 if let shareableContent = section.content as? String {
@@ -511,6 +505,18 @@ struct ShareSelectionView: View {
             shareItems = [formattedText]
         } else {
             shareItems = [shareText]
+        }
+    }
+
+    private var sectionHeaders: [String] {
+        getSections(from: content ?? [:]).map { $0.header }
+    }
+
+    private func toggleSection(_ header: String) {
+        if selectedSections.contains(header) {
+            selectedSections.remove(header)
+        } else {
+            selectedSections.insert(header)
         }
     }
 
@@ -550,6 +556,8 @@ struct ShareSelectionView: View {
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
         [
+            ContentSection(header: "Description", content: notification.body),
+            ContentSection(header: "Article", content: json["url"] as? String ?? ""),
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
             ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
             ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
@@ -564,7 +572,7 @@ struct ShareSelectionView: View {
                     json["stats"] as? String ?? "N/A"
                 )
             ),
-            ContentSection(header: "Preview", content: json["url"] as? String ?? ""),
+            ContentSection(header: "Article Preview", content: json["url"] as? String ?? ""),
         ]
     }
 }
