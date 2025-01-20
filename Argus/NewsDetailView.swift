@@ -1,3 +1,4 @@
+import SafariServices
 import SwiftData
 import SwiftUI
 import SwiftyMarkdown
@@ -232,11 +233,11 @@ struct NewsDetailView: View {
                 ArgusDetailsView(technicalData: technicalData)
             } else if section.header == "Preview" {
                 VStack {
-                    if let articleContent = articleContent {
-                        WebView(htmlString: articleContent)
+                    if let url = section.content as? String, let articleURL = URL(string: url) {
+                        SafariView(url: articleURL)
                             .frame(height: 450)
                     } else {
-                        ProgressView("Loading article preview...")
+                        Text("Invalid URL")
                             .frame(height: 450)
                     }
                     if let url = section.content as? String, let articleURL = URL(string: url) {
@@ -590,14 +591,14 @@ struct ActivityViewController: UIViewControllerRepresentable {
     func updateUIViewController(_: UIActivityViewController, context _: Context) {}
 }
 
-struct WebView: UIViewRepresentable {
-    let htmlString: String
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
 
-    func makeUIView(context _: Context) -> WKWebView {
-        return WKWebView()
+    func makeUIViewController(context _: Context) -> SFSafariViewController {
+        let configuration = SFSafariViewController.Configuration()
+        configuration.entersReaderIfAvailable = true
+        return SFSafariViewController(url: url, configuration: configuration)
     }
 
-    func updateUIView(_ uiView: WKWebView, context _: Context) {
-        uiView.loadHTMLString(htmlString, baseURL: nil)
-    }
+    func updateUIViewController(_: SFSafariViewController, context _: Context) {}
 }
