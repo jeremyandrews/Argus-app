@@ -15,11 +15,9 @@ struct SubscriptionsView: View {
     @State private var jwtToken: String? = nil
     @State private var errorMessage: ErrorWrapper? = nil
     @State private var isFirstLaunch: Bool = true
-
-    let listOfSubscriptions: [String] = ["Alert", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "EVs", "Global", "LLMs", "Longevity", "Music", "Rust", "Space", "Tuscany", "Vulnerability", "Test"]
+    let listOfSubscriptions: [String] = ["Alert: Direct", "Alert: Near", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "EVs", "Global", "LLMs", "Longevity", "Music", "Rust", "Space", "Tuscany", "Vulnerability", "Test"]
     let defaultAutoSubscriptions: [String] = ["Apple", "Bitcoins", "Drupal", "EVs", "Global", "LLMs", "Space", "Vulnerability"]
-    private let defaultAlertTopics: Set<String> = ["Alert", "Clients", "Global", "Vulnerability", "Test"]
-
+    private let defaultAlertTopics: Set<String> = ["Alert: Direct", "Clients", "Global", "Vulnerability", "Test"]
     var body: some View {
         NavigationView {
             List {
@@ -32,15 +30,12 @@ struct SubscriptionsView: View {
                             HStack {
                                 Image(systemName: subscription.isSubscribed ? "checkmark.square.fill" : "square")
                                     .foregroundColor(subscription.isSubscribed ? .blue : .gray)
-
                                 Text(topic)
                                     .foregroundColor(subscription.isSubscribed ? .primary : .gray)
                             }
                         }
                         .buttonStyle(PlainButtonStyle())
-
                         Spacer()
-
                         if subscription.isSubscribed {
                             Toggle(isOn: Binding(
                                 get: { subscription.isHighPriority },
@@ -107,7 +102,6 @@ struct SubscriptionsView: View {
             do {
                 let currentSubscription = subscriptions[topic]
                 let isFirstTimeEnable = currentSubscription == nil
-
                 if let subscription = currentSubscription, subscription.isSubscribed {
                     // Unsubscribing
                     try await performAPIRequest { try await unsubscribeFromTopic(topic, token: $0) }
@@ -122,11 +116,9 @@ struct SubscriptionsView: View {
                         // Re-enabling: use previous alert setting
                         isHighPriority = currentSubscription?.isHighPriority ?? false
                     }
-
                     try await performAPIRequest { try await subscribeToTopic(topic, priority: isHighPriority, token: $0) }
                     subscriptions[topic] = Subscription(isSubscribed: true, isHighPriority: isHighPriority)
                 }
-
                 saveSubscriptions()
             } catch {
                 errorMessage = ErrorWrapper(message: "Failed to update subscription for \(topic): \(error.localizedDescription)")
@@ -188,14 +180,11 @@ struct SubscriptionsView: View {
         request.httpMethod = "POST"
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-
         let payload = [
             "topic": topic,
             "priority": priority ? "high" : "low",
         ]
-
         request.httpBody = try JSONEncoder().encode(payload)
-
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
@@ -254,7 +243,6 @@ struct IconToggleStyle: ToggleStyle {
                 RoundedRectangle(cornerRadius: 15)
                     .fill(configuration.isOn ? Color.green : Color.red)
                     .frame(width: 50, height: 30)
-
                 HStack {
                     if configuration.isOn {
                         Image(systemName: "bell.fill")
