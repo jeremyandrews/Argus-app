@@ -29,13 +29,15 @@ struct SubscriptionsView: View {
                         Button(action: {
                             toggleSubscription(topic)
                         }) {
-                            Image(systemName: subscription.isSubscribed ? "checkmark.square.fill" : "square")
-                                .foregroundColor(subscription.isSubscribed ? .blue : .gray)
+                            HStack {
+                                Image(systemName: subscription.isSubscribed ? "checkmark.square.fill" : "square")
+                                    .foregroundColor(subscription.isSubscribed ? .blue : .gray)
+
+                                Text(topic)
+                                    .foregroundColor(subscription.isSubscribed ? .primary : .gray)
+                            }
                         }
                         .buttonStyle(PlainButtonStyle())
-
-                        Text(topic)
-                            .foregroundColor(subscription.isSubscribed ? .primary : .gray)
 
                         Spacer()
 
