@@ -1,6 +1,7 @@
 import SwiftData
 import SwiftUI
 import SwiftyMarkdown
+import WebKit
 
 struct NewsDetailView: View {
     @State private var showDeleteConfirmation = false
@@ -17,7 +18,7 @@ struct NewsDetailView: View {
     ]
     @State private var isSharePresented = false
     @State private var selectedSections: Set<String> = []
-
+    @State private var articleContent: String? = nil
     var notification: NotificationData
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -180,32 +181,71 @@ struct NewsDetailView: View {
                     .padding()
             } else if let content = additionalContent {
                 ForEach(getSections(from: content), id: \.header) { section in
-                    if section.header != "Article" {
-                        VStack {
-                            Divider()
-                            DisclosureGroup(
-                                isExpanded: Binding(
-                                    get: { expandedSections[section.header] ?? false },
-                                    set: { expandedSections[section.header] = $0 }
-                                )
-                            ) {
-                                sectionContent(for: section)
-                            } label: {
-                                Text(section.header)
-                                    .font(.headline)
-                            }
-                            .padding([.leading, .trailing, .top])
+                    VStack {
+                        Divider()
+                        DisclosureGroup(
+                            isExpanded: Binding(
+                                get: { expandedSections[section.header] ?? false },
+                                set: {
+                                    expandedSections[section.header] = $0
+                                    if section.header == "Preview", $0 {
+                                        loadArticleContent(url: section.content as? String ?? "")
+                                    }
+                                }
+                            )
+                        ) {
+                            sectionContent(for: section)
+                        } label: {
+                            Text(section.header)
+                                .font(.headline)
                         }
+                        .padding([.leading, .trailing, .top])
                     }
                 }
             }
         }
     }
 
+    private func getSections(from json: [String: Any]) -> [ContentSection] {
+        [
+            ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
+            ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
+            ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
+            ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
+            ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
+            ContentSection(
+                header: "Argus Details",
+                content: (
+                    json["model"] as? String ?? "Unknown",
+                    (json["elapsed_time"] as? Double) ?? 0.0,
+                    notification.date,
+                    json["stats"] as? String ?? "N/A"
+                )
+            ),
+            ContentSection(header: "Preview", content: json["url"] as? String ?? ""),
+        ]
+    }
+
     private func sectionContent(for section: ContentSection) -> some View {
         Group {
             if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
                 ArgusDetailsView(technicalData: technicalData)
+            } else if section.header == "Preview" {
+                VStack {
+                    if let articleContent = articleContent {
+                        WebView(htmlString: articleContent)
+                            .frame(height: 450)
+                    } else {
+                        ProgressView("Loading article preview...")
+                            .frame(height: 450)
+                    }
+                    if let url = section.content as? String, let articleURL = URL(string: url) {
+                        Button("Open in Browser") {
+                            UIApplication.shared.open(articleURL)
+                        }
+                        .padding(.top)
+                    }
+                }
             } else if let markdownContent = section.content as? String {
                 let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
                 Text(AttributedString(attributedMarkdown))
@@ -248,24 +288,24 @@ struct NewsDetailView: View {
         }
     }
 
-    private func getSections(from json: [String: Any]) -> [ContentSection] {
-        [
-            ContentSection(header: "Article", content: json["url"] as? String ?? ""),
-            ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
-            ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
-            ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
-            ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
-            ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
-            ContentSection(
-                header: "Argus Details",
-                content: (
-                    json["model"] as? String ?? "Unknown",
-                    (json["elapsed_time"] as? Double) ?? 0.0,
-                    notification.date,
-                    json["stats"] as? String ?? "N/A"
-                )
-            ),
-        ]
+    private func loadArticleContent(url: String) {
+        guard let url = URL(string: url) else { return }
+        articleContent = nil // Reset content to show loading indicator
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let htmlString = String(data: data, encoding: .utf8) {
+                    DispatchQueue.main.async {
+                        self.articleContent = htmlString
+                    }
+                }
+            } catch {
+                print("Failed to load article content: \(error)")
+                DispatchQueue.main.async {
+                    self.articleContent = "Failed to load article content. Please try again."
+                }
+            }
+        }
     }
 
     private func toggleReadStatus() {
@@ -394,25 +434,20 @@ struct ShareSelectionView: View {
         NavigationView {
             List {
                 Section(header: Text("Select the sections to share:").padding(.top)) {
-                    ForEach(getSections(from: content ?? [:], notification: notification), id: \.header) { section in
+                    ForEach(sectionHeaders, id: \.self) { header in
                         Button(action: {
-                            if selectedSections.contains(section.header) {
-                                selectedSections.remove(section.header)
-                            } else {
-                                selectedSections.insert(section.header)
-                            }
+                            toggleSection(header)
                         }) {
                             HStack {
-                                Text(section.header)
+                                Text(header)
                                 Spacer()
-                                if selectedSections.contains(section.header) {
+                                if selectedSections.contains(header) {
                                     Image(systemName: "checkmark")
                                 }
                             }
                         }
                     }
                 }
-
                 Section {
                     Toggle(isOn: $formatText) {
                         VStack(alignment: .leading) {
@@ -440,16 +475,28 @@ struct ShareSelectionView: View {
         }
         .onAppear {
             if selectedSections.isEmpty {
-                selectedSections = ["Description", "Article", "Summary"]
+                selectedSections = ["Description", "Preview", "Summary"]
             }
+        }
+    }
+
+    private var sectionHeaders: [String] {
+        getSections(from: content ?? [:]).map { $0.header }
+    }
+
+    private func toggleSection(_ header: String) {
+        if selectedSections.contains(header) {
+            selectedSections.remove(header)
+        } else {
+            selectedSections.insert(header)
         }
     }
 
     private func prepareShareContent() {
         var shareText = ""
-        for section in getSections(from: content ?? [:], notification: notification) {
+        for section in getSections(from: content ?? [:]) {
             if selectedSections.contains(section.header) {
-                if section.header != "Description" && section.header != "Article" {
+                if section.header != "Description" && section.header != "Preview" {
                     shareText += "\(section.header.uppercased())\n\n"
                 }
                 if let shareableContent = section.content as? String {
@@ -459,7 +506,6 @@ struct ShareSelectionView: View {
                 }
             }
         }
-
         if formatText {
             let formattedText = SwiftyMarkdown(string: shareText).attributedString()
             shareItems = [formattedText]
@@ -472,11 +518,8 @@ struct ShareSelectionView: View {
         let (model, elapsedTime, date, stats) = technicalData
         return """
         Generated with \(model) in \(String(format: "%.2f", elapsedTime)) seconds.
-
         Metrics:
-
         \(formattedStats(stats))
-
         Received from Argus on \(date.formatted(.dateTime.month(.wide).day().year().hour().minute().second()))
         """
     }
@@ -505,10 +548,8 @@ struct ShareSelectionView: View {
         return descriptions.joined(separator: "\n")
     }
 
-    private func getSections(from json: [String: Any], notification: NotificationData) -> [ContentSection] {
+    private func getSections(from json: [String: Any]) -> [ContentSection] {
         [
-            ContentSection(header: "Description", content: notification.body),
-            ContentSection(header: "Article", content: json["url"] as? String ?? ""),
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
             ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
             ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
@@ -523,6 +564,7 @@ struct ShareSelectionView: View {
                     json["stats"] as? String ?? "N/A"
                 )
             ),
+            ContentSection(header: "Preview", content: json["url"] as? String ?? ""),
         ]
     }
 }
@@ -538,4 +580,16 @@ struct ActivityViewController: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_: UIActivityViewController, context _: Context) {}
+}
+
+struct WebView: UIViewRepresentable {
+    let htmlString: String
+
+    func makeUIView(context _: Context) -> WKWebView {
+        return WKWebView()
+    }
+
+    func updateUIView(_ uiView: WKWebView, context _: Context) {
+        uiView.loadHTMLString(htmlString, baseURL: nil)
+    }
 }
