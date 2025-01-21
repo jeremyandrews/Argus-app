@@ -241,7 +241,7 @@ struct IconToggleStyle: ToggleStyle {
             Spacer()
             ZStack {
                 RoundedRectangle(cornerRadius: 15)
-                    .fill(configuration.isOn ? Color.green : Color.red)
+                    .fill(configuration.isOn ? Color.green : Color.gray)
                     .frame(width: 50, height: 30)
                 HStack {
                     if configuration.isOn {
