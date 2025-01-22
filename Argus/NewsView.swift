@@ -361,6 +361,9 @@ struct NewsView: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NotificationPermissionGranted"))) { _ in
             subscriptions = SubscriptionsView().loadSubscriptions()
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleArchived"))) { _ in
+            updateFilteredNotifications()
+        }
         .confirmationDialog(
             "Are you sure you want to delete \(selectedNotifications.count) articles?",
             isPresented: $showDeleteConfirmation,
@@ -383,6 +386,8 @@ struct NewsView: View {
 
     private func openArticle(_ notification: NotificationData) {
         let detailView = NewsDetailView(notification: notification)
+            .environment(\.modelContext, modelContext) // <-- inject the same context
+
         let hostingController = UIHostingController(rootView: detailView)
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first,

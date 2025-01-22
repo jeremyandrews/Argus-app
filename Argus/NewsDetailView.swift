@@ -331,6 +331,8 @@ struct NewsDetailView: View {
         notification.isArchived.toggle()
         do {
             try modelContext.save()
+            NotificationCenter.default.post(name: Notification.Name("ArticleArchived"), object: nil)
+            dismiss()
         } catch {
             print("Failed to toggle archive status: \(error)")
         }
