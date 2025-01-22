@@ -22,7 +22,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             self.updateBadgeCount()
         }
 
+        ensureDatabaseTablesCreated()
+
         return true
+    }
+
+    func applicationWillEnterForeground(_: UIApplication) {
+        Task {
+            await SyncManager.shared.sendRecentArticlesToServer()
+        }
     }
 
     func application(_: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
@@ -152,8 +160,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             try context.save()
             print("Notification saved: \(newNotification)")
             updateBadgeCount()
+
+            // Add entry to SeenArticle
+            if let json_url = json_url {
+                let seenArticle = SeenArticle(id: newNotification.id, json_url: json_url, date: newNotification.date)
+                context.insert(seenArticle)
+                try context.save()
+                print("SeenArticle entry created for notification: \(seenArticle)")
+            }
         } catch {
-            print("Failed to save notification: \(error)")
+            print("Failed to save notification or seen article: \(error)")
         }
     }
 
@@ -205,6 +221,103 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func getLocalFileURL(for notification: NotificationData) -> URL {
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return documentsDirectory.appendingPathComponent("\(notification.id).json")
+    }
+
+    private func ensureDatabaseTablesCreated() {
+        let context = ArgusApp.sharedModelContainer.mainContext
+
+        do {
+            // Check if the SeenArticle table exists by attempting a fetch
+            _ = try context.fetch(FetchDescriptor<SeenArticle>())
+            print("SeenArticle table is ready.")
+        } catch {
+            print("SeenArticle table missing. Creating and populating it.")
+            populateSeenArticlesFromNotificationData()
+        }
+    }
+
+    private func populateSeenArticlesFromNotificationData() {
+        let context = ArgusApp.sharedModelContainer.mainContext
+
+        do {
+            let notifications = try context.fetch(FetchDescriptor<NotificationData>())
+            print("Notifications fetched: \(notifications)")
+
+            for notification in notifications {
+                guard let json_url = notification.json_url else {
+                    print("Skipping notification with missing json_url: \(notification)")
+                    continue
+                }
+
+                let seenArticle = SeenArticle(id: notification.id, json_url: json_url, date: notification.date)
+                context.insert(seenArticle)
+                print("Inserted SeenArticle: \(seenArticle)")
+            }
+
+            do {
+                let articles = try context.fetch(FetchDescriptor<SeenArticle>())
+                print("SeenArticle entries after population: \(articles)")
+            } catch {
+                print("Failed to fetch SeenArticle entries: \(error)")
+            }
+
+            do {
+                try context.save()
+                print("Context saved successfully.")
+            } catch {
+                print("Failed to save context: \(error)")
+            }
+            print("SeenArticle table populated from NotificationData.")
+        } catch {
+            print("Failed to populate SeenArticle table: \(error)")
+        }
+    }
+
+    func saveSeenArticle(id: UUID, json_url: String, date: Date) {
+        let context = ArgusApp.sharedModelContainer.mainContext
+        let seenArticle = SeenArticle(id: id, json_url: json_url, date: date)
+
+        context.insert(seenArticle)
+
+        do {
+            try context.save()
+            print("Seen article saved: \(seenArticle)")
+        } catch {
+            print("Failed to save seen article: \(error)")
+        }
+    }
+
+    func cleanupOldArticles() {
+        let context = ArgusApp.sharedModelContainer.mainContext
+        let threeDaysAgo = Calendar.current.date(byAdding: .day, value: -3, to: Date()) ?? Date()
+
+        do {
+            let oldArticles = try context.fetch(
+                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date < threeDaysAgo })
+            )
+
+            for article in oldArticles {
+                context.delete(article)
+            }
+
+            try context.save()
+            print("Old articles cleaned up.")
+        } catch {
+            print("Error cleaning up old articles: \(error)")
+        }
+    }
+
+    private func authenticateDeviceIfNeeded() {
+        Task {
+            guard UserDefaults.standard.string(forKey: "jwtToken") == nil else { return }
+            do {
+                let token = try await APIClient.shared.authenticateDevice()
+                UserDefaults.standard.set(token, forKey: "jwtToken")
+                print("Device authenticated and token stored.")
+            } catch {
+                print("Failed to authenticate device: \(error)")
+            }
+        }
     }
 }
 
@@ -258,5 +371,18 @@ class NotificationData {
         self.domain = domain
         self.isViewed = isViewed
         self.isBookmarked = isBookmarked
+    }
+}
+
+@Model
+class SeenArticle {
+    @Attribute var id: UUID
+    @Attribute var json_url: String
+    @Attribute var date: Date
+
+    init(id: UUID, json_url: String, date: Date) {
+        self.id = id
+        self.json_url = json_url
+        self.date = date
     }
 }

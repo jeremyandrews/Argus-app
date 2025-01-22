@@ -48,6 +48,36 @@ struct NewsView: View {
         }
     }
 
+    private func getEmptyStateMessage() -> String {
+        let activeSubscriptions = subscriptions.filter { $0.value.isSubscribed }.keys.sorted()
+
+        if activeSubscriptions.isEmpty {
+            return "You are not currently subscribed to any topics. Click 'Subscriptions' below."
+        }
+
+        var message = "Please be patient, news will arrive automatically. You do not need to leave this application open.\n\nYou are currently subscribed to: \(activeSubscriptions.joined(separator: ", "))."
+
+        if isAnyFilterActive {
+            message += "\n\n"
+
+            if showUnreadOnly && showBookmarkedOnly {
+                message += "You are filtering to show only Unread articles that have also been Bookmarked."
+            } else if showUnreadOnly {
+                message += "You are filtering to show only Unread articles."
+            } else if showBookmarkedOnly {
+                message += "You are filtering to show only Bookmarked articles."
+            }
+
+            if !showArchivedContent {
+                message += "\n\nYou can enable the 'Show archived' filter to show articles you archived earlier."
+            }
+        } else if !showArchivedContent && allNotifications.contains(where: { $0.isArchived }) {
+            message += "\n\nYou can enable the 'Show archived' filter to show articles you archived earlier."
+        }
+
+        return message
+    }
+
     var body: some View {
         NavigationView {
             ZStack(alignment: .bottom) {
@@ -111,7 +141,7 @@ struct NewsView: View {
 
                     // Main content
                     if filteredNotifications.isEmpty {
-                        VStack {
+                        VStack(spacing: 16) {
                             Text("RSS Fed")
                                 .font(.title)
                                 .padding(.bottom, 8)
@@ -120,25 +150,19 @@ struct NewsView: View {
                                 .scaledToFit()
                                 .frame(width: 120, height: 120)
                                 .padding(.bottom, 8)
-                            Text("No news is good news.")
-                                .font(.headline)
-                                .foregroundColor(.gray)
-                            Text("Please be patient, news will arrive automatically. You do not need to leave this application open.")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.gray)
-                                .padding(.vertical, 6)
-                            let activeSubscriptions = subscriptions.filter { $0.value.isSubscribed }.keys.sorted()
-                            if !activeSubscriptions.isEmpty {
-                                Text("You are currently subscribed to: \(activeSubscriptions.joined(separator: ", ")).")
+
+                            VStack(spacing: 12) {
+                                Text("No news is good news.")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+
+                                Text(getEmptyStateMessage())
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(.gray)
-                                    .padding(.top, 6)
-                            } else {
-                                Text("You are not currently subscribed to any topics.")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.gray)
-                                    .padding(.top, 6)
+                                    .multilineTextAlignment(.center)
                             }
+                            .padding(.horizontal)
+
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, alignment: .top)
@@ -206,6 +230,11 @@ struct NewsView: View {
                             .onDelete(perform: deleteNotifications)
                         }
                         .listStyle(PlainListStyle())
+                        .refreshable {
+                            Task {
+                                await SyncManager.shared.sendRecentArticlesToServer()
+                            }
+                        }
                         .toolbar {
                             if isEditing {
                                 ToolbarItemGroup(placement: .bottomBar) {

@@ -8,6 +8,7 @@ struct ArgusApp: App {
     static let sharedModelContainer: ModelContainer = {
         let schema = Schema([
             NotificationData.self,
+            SeenArticle.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

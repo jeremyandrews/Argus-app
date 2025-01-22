@@ -65,9 +65,13 @@ struct SubscriptionsView: View {
     private func authenticateAndLoadSubscriptions() {
         Task {
             do {
-                jwtToken = try await authenticateDevice()
+                if UserDefaults.standard.string(forKey: "jwtToken") == nil {
+                    jwtToken = try await APIClient.shared.authenticateDevice()
+                    UserDefaults.standard.set(jwtToken, forKey: "jwtToken")
+                } else {
+                    jwtToken = UserDefaults.standard.string(forKey: "jwtToken")
+                }
                 subscriptions = loadSubscriptions()
-                // Check if it's the first launch and auto-subscribe
                 if isFirstLaunch {
                     isFirstLaunch = false
                     autoSubscribeToDefaultTopics()
@@ -139,34 +143,16 @@ struct SubscriptionsView: View {
         }
     }
 
-    private func authenticateDevice() async throws -> String {
-        guard let deviceToken = UserDefaults.standard.string(forKey: "deviceToken") else {
-            throw URLError(.userAuthenticationRequired, userInfo: [NSLocalizedDescriptionKey: "Device token not available."])
-        }
-        let url = URL(string: "https://api.arguspulse.com/authenticate")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["device_id": deviceToken])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
-        let jsonResponse = try JSONDecoder().decode([String: String].self, from: data)
-        guard let token = jsonResponse["token"] else {
-            throw URLError(.cannotParseResponse)
-        }
-        return token
-    }
-
     private func performAPIRequest(apiCall: (String) async throws -> Void) async throws {
         do {
-            guard let token = jwtToken else { throw URLError(.userAuthenticationRequired) }
+            guard let token = UserDefaults.standard.string(forKey: "jwtToken") else {
+                throw URLError(.userAuthenticationRequired)
+            }
             try await apiCall(token)
         } catch {
             if let urlError = error as? URLError, urlError.code == .userAuthenticationRequired {
-                jwtToken = try await authenticateDevice()
-                guard let newToken = jwtToken else { throw URLError(.userAuthenticationRequired) }
+                let newToken = try await APIClient.shared.authenticateDevice()
+                UserDefaults.standard.set(newToken, forKey: "jwtToken")
                 try await apiCall(newToken)
             } else {
                 throw error
