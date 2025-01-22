@@ -141,32 +141,37 @@ struct NewsView: View {
 
                     // Main content
                     if filteredNotifications.isEmpty {
-                        VStack(spacing: 16) {
-                            Text("RSS Fed")
-                                .font(.title)
-                                .padding(.bottom, 8)
-                            Image("Argus")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 120, height: 120)
-                                .padding(.bottom, 8)
+                        ScrollView {
+                            VStack(spacing: 16) {
+                                Text("RSS Fed")
+                                    .font(.title)
+                                    .padding(.bottom, 8)
+                                Image("Argus")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 120, height: 120)
+                                    .padding(.bottom, 8)
 
-                            VStack(spacing: 12) {
-                                Text("No news is good news.")
-                                    .font(.title2)
-                                    .fontWeight(.bold)
+                                VStack(spacing: 12) {
+                                    Text("No news is good news.")
+                                        .font(.title2)
+                                        .fontWeight(.bold)
 
-                                Text(getEmptyStateMessage())
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.gray)
-                                    .multilineTextAlignment(.center)
+                                    Text(getEmptyStateMessage())
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.gray)
+                                        .multilineTextAlignment(.center)
+                                }
+                                .padding(.horizontal)
                             }
-                            .padding(.horizontal)
-
-                            Spacer()
+                            .frame(maxWidth: .infinity, alignment: .top)
+                            .padding()
                         }
-                        .frame(maxWidth: .infinity, alignment: .top)
-                        .padding()
+                        .refreshable {
+                            Task {
+                                await SyncManager.shared.sendRecentArticlesToServer()
+                            }
+                        }
                     } else {
                         // Article list
                         List {
