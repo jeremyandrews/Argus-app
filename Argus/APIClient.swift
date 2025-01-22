@@ -21,13 +21,30 @@ class APIClient {
         guard let token = jsonResponse["token"] else {
             throw URLError(.cannotParseResponse)
         }
+        UserDefaults.standard.set(token, forKey: "jwtToken") // Save the new token
         return token
     }
 
     func performAuthenticatedRequest<T: Codable>(to url: URL, method: String = "POST", body: T? = nil) async throws -> Data {
-        guard let token = UserDefaults.standard.string(forKey: "jwtToken") else {
-            throw URLError(.userAuthenticationRequired)
+        // Try using the current token
+        if let token = UserDefaults.standard.string(forKey: "jwtToken") {
+            do {
+                return try await sendRequest(to: url, method: method, token: token, body: body)
+            } catch {
+                if let urlError = error as? URLError, urlError.code == .userAuthenticationRequired {
+                    print("Token expired. Re-authenticating...")
+                } else {
+                    throw error
+                }
+            }
         }
+
+        // If token is missing or expired, re-authenticate
+        let newToken = try await authenticateDevice()
+        return try await sendRequest(to: url, method: method, token: newToken, body: body)
+    }
+
+    private func sendRequest<T: Codable>(to url: URL, method: String, token: String, body: T?) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
