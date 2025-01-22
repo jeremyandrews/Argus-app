@@ -50,16 +50,14 @@ class SyncManager {
                 continue
             }
 
-            // Check if the URL already exists in either model
-            let existingNotification = try? context.fetch(
+            // Check if the URL already exists in either `NotificationData` or `SeenArticle`
+            let isDuplicate = (try? context.fetch(
                 FetchDescriptor<NotificationData>(predicate: #Predicate { $0.json_url == urlString })
-            ).first
-
-            let existingSeenArticle = try? context.fetch(
+            ).first) != nil || (try? context.fetch(
                 FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.json_url == urlString })
-            ).first
+            ).first) != nil
 
-            if existingNotification != nil || existingSeenArticle != nil {
+            if isDuplicate {
                 print("Duplicate json_url found, skipping: \(urlString)")
                 continue
             }
@@ -85,22 +83,17 @@ class SyncManager {
                 let article_url = json["url"] as? String ?? "none"
                 let domain = URL(string: article_url)?.host
 
-                // Create and save the new notification
-                let notification = NotificationData(
-                    date: Date(),
+                // Use saveNotification to save the notification and SeenArticle
+                saveNotification(
                     title: title,
                     body: body,
                     json_url: urlString,
                     topic: topic,
-                    article_title: articleTitle,
+                    articleTitle: articleTitle,
                     affected: affected,
                     domain: domain
                 )
 
-                context.insert(notification)
-
-                // Save to the context
-                try context.save()
                 print("Saved unseen article: \(title)")
             } catch {
                 print("Failed to fetch or save unseen article for URL \(urlString): \(error)")
