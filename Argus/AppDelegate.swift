@@ -143,34 +143,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func saveNotification(title: String, body: String, json_url: String?, topic: String?, articleTitle: String, affected: String, domain: String?) {
-        let context = ArgusApp.sharedModelContainer.mainContext
-        let newNotification = NotificationData(
-            date: Date(),
+        SyncManager.shared.saveNotification(
             title: title,
             body: body,
             json_url: json_url,
             topic: topic,
-            article_title: articleTitle,
+            articleTitle: articleTitle,
             affected: affected,
-            domain: domain // Add domain here
+            domain: domain
         )
-        context.insert(newNotification)
-
-        do {
-            try context.save()
-            print("Notification saved: \(newNotification)")
-            updateBadgeCount()
-
-            // Add entry to SeenArticle
-            if let json_url = json_url {
-                let seenArticle = SeenArticle(id: newNotification.id, json_url: json_url, date: newNotification.date)
-                context.insert(seenArticle)
-                try context.save()
-                print("SeenArticle entry created for notification: \(seenArticle)")
-            }
-        } catch {
-            print("Failed to save notification or seen article: \(error)")
-        }
     }
 
     func updateBadgeCount() {
