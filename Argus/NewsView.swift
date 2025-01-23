@@ -19,6 +19,19 @@ struct NewsView: View {
     @State private var filterViewHeight: CGFloat = 200
     @Binding var tabBarHeight: CGFloat
 
+    struct ArchivedPill: View {
+        var body: some View {
+            Text("ARCHIVED")
+                .font(.caption2)
+                .bold()
+                .foregroundColor(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.orange)
+                .cornerRadius(8)
+        }
+    }
+
     private var topics: [String] {
         return visibleTopics
     }
@@ -464,13 +477,18 @@ struct NewsView: View {
 
     private func rowContent(for notification: NotificationData) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            // If archived, show a small label/pill:
+            if notification.isArchived {
+                ArchivedPill()
+                    .padding(.horizontal, 10)
+            }
+
             let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
             Text(AttributedString(attributedTitle))
                 .font(.headline)
                 .lineLimit(2)
                 .foregroundColor(.primary)
 
-            // Display domain if available
             if let domain = notification.domain, !domain.isEmpty {
                 Text(domain)
                     .font(.system(size: 16, weight: .medium))
@@ -479,7 +497,6 @@ struct NewsView: View {
                     .padding(.horizontal, 10)
             }
 
-            // Display article title
             if !notification.article_title.isEmpty {
                 Text(notification.article_title)
                     .font(.system(size: 18, weight: .bold))
@@ -488,7 +505,6 @@ struct NewsView: View {
                     .padding(.horizontal, 10)
             }
 
-            // Display body text
             let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
             Text(AttributedString(attributedBody))
                 .font(.system(size: 14, weight: .light))
@@ -496,7 +512,6 @@ struct NewsView: View {
                 .multilineTextAlignment(.leading)
                 .padding(.horizontal, 16)
 
-            // Display affected text if not empty
             if !notification.affected.isEmpty {
                 Text(notification.affected)
                     .font(.system(size: 18, weight: .bold))
