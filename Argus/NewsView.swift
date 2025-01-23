@@ -5,7 +5,9 @@ import SwiftyMarkdown
 struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.editMode) private var editMode
+
     @Query(sort: \NotificationData.date, order: .reverse) private var allNotifications: [NotificationData]
+
     @State private var filteredNotifications: [NotificationData] = []
     @State private var selectedNotificationIDs: Set<NotificationData.ID> = []
     @State private var showUnreadOnly: Bool = false
@@ -17,6 +19,10 @@ struct NewsView: View {
     @State private var subscriptions: [String: Subscription] = [:]
     @State private var needsTopicReset: Bool = false
     @State private var filterViewHeight: CGFloat = 200
+    @State private var scrollProxy: ScrollViewProxy?
+    @State private var lastSelectedTopic: String = "All"
+    @State private var needsScrollReset: Bool = false
+
     @Binding var tabBarHeight: CGFloat
 
     private var topics: [String] {
@@ -61,7 +67,11 @@ struct NewsView: View {
             .onChange(of: allNotifications) { _, _ in
                 updateFilteredNotifications()
             }
-            .onChange(of: selectedTopic) { _, _ in
+            .onChange(of: selectedTopic) { _, newTopic in
+                if lastSelectedTopic != newTopic {
+                    needsScrollReset = true
+                    lastSelectedTopic = newTopic
+                }
                 updateFilteredNotifications()
             }
             .onChange(of: showArchivedContent) { _, _ in
@@ -178,7 +188,12 @@ struct NewsView: View {
             if filteredNotifications.isEmpty {
                 emptyStateView
             } else {
-                notificationsListView
+                ScrollViewReader { proxy in
+                    notificationsListView
+                        .onAppear {
+                            scrollProxy = proxy
+                        }
+                }
             }
         }
     }
@@ -217,65 +232,13 @@ struct NewsView: View {
 
     var notificationsListView: some View {
         List(filteredNotifications, id: \.id, selection: $selectedNotificationIDs) { notification in
-            HStack {
-                rowContent(for: notification)
-                Spacer()
-                Button {
-                    toggleBookmark(notification)
-                } label: {
-                    Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
-                        .foregroundColor(notification.isBookmarked ? .blue : .gray)
+            NotificationRow(notification: notification, editMode: editMode, selectedNotificationIDs: $selectedNotificationIDs)
+                .onTapGesture {
+                    handleTapGesture(for: notification)
                 }
-                .buttonStyle(.plain)
-            }
-            .padding(.vertical, 8)
-            .listRowBackground(
-                notification.isViewed
-                    ? Color.clear
-                    : Color.blue.opacity(0.2)
-            )
-            .cornerRadius(8)
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                Button {
-                    toggleArchive(notification)
-                } label: {
-                    Label(
-                        notification.isArchived ? "Unarchive" : "Archive",
-                        systemImage: notification.isArchived
-                            ? "tray.and.arrow.up.fill"
-                            : "archivebox"
-                    )
+                .onLongPressGesture {
+                    handleLongPressGesture(for: notification)
                 }
-                .tint(.orange)
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                Button(role: .destructive) {
-                    deleteNotification(notification)
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
-            .onTapGesture {
-                if editMode?.wrappedValue == .active {
-                    withAnimation {
-                        if selectedNotificationIDs.contains(notification.id) {
-                            selectedNotificationIDs.remove(notification.id)
-                        } else {
-                            selectedNotificationIDs.insert(notification.id)
-                        }
-                    }
-                } else {
-                    openArticle(notification)
-                }
-            }
-            .onLongPressGesture {
-                withAnimation {
-                    if editMode?.wrappedValue == .inactive {
-                        editMode?.wrappedValue = .active
-                        selectedNotificationIDs.insert(notification.id)
-                    }
-                }
-            }
         }
         .listStyle(PlainListStyle())
         .environment(\.editMode, editMode)
@@ -283,6 +246,91 @@ struct NewsView: View {
             Task {
                 await SyncManager.shared.sendRecentArticlesToServer()
             }
+        }
+        .onChange(of: filteredNotifications) { _, _ in
+            handleScrollReset()
+        }
+    }
+
+    private func NotificationRow(notification: NotificationData, editMode _: Binding<EditMode>?, selectedNotificationIDs _: Binding<Set<NotificationData.ID>>) -> some View {
+        HStack {
+            rowContent(for: notification)
+            Spacer()
+            BookmarkButton(notification: notification)
+        }
+        .padding(.vertical, 8)
+        .listRowBackground(notificationBackground(for: notification))
+        .cornerRadius(8)
+        .id(notification.id)
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            ArchiveButton(notification: notification)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            DeleteButton(notification: notification)
+        }
+    }
+
+    private func BookmarkButton(notification: NotificationData) -> some View {
+        Button {
+            toggleBookmark(notification)
+        } label: {
+            Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
+                .foregroundColor(notification.isBookmarked ? .blue : .gray)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func ArchiveButton(notification: NotificationData) -> some View {
+        Button {
+            toggleArchive(notification)
+        } label: {
+            Label(
+                notification.isArchived ? "Unarchive" : "Archive",
+                systemImage: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox"
+            )
+        }
+        .tint(.orange)
+    }
+
+    private func DeleteButton(notification: NotificationData) -> some View {
+        Button(role: .destructive) {
+            deleteNotification(notification)
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+
+    private func notificationBackground(for notification: NotificationData) -> Color {
+        notification.isViewed ? Color.clear : Color.blue.opacity(0.2)
+    }
+
+    private func handleTapGesture(for notification: NotificationData) {
+        if editMode?.wrappedValue == .active {
+            withAnimation {
+                if selectedNotificationIDs.contains(notification.id) {
+                    selectedNotificationIDs.remove(notification.id)
+                } else {
+                    selectedNotificationIDs.insert(notification.id)
+                }
+            }
+        } else {
+            openArticle(notification)
+        }
+    }
+
+    private func handleLongPressGesture(for notification: NotificationData) {
+        withAnimation {
+            if editMode?.wrappedValue == .inactive {
+                editMode?.wrappedValue = .active
+                selectedNotificationIDs.insert(notification.id)
+            }
+        }
+    }
+
+    private func handleScrollReset() {
+        if needsScrollReset {
+            scrollProxy?.scrollTo(filteredNotifications.first?.id, anchor: .top)
+            needsScrollReset = false
         }
     }
 
