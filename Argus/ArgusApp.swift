@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct ArgusApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
 
     static let sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -23,6 +24,13 @@ struct ArgusApp: App {
         WindowGroup {
             ContentView()
                 .modelContainer(ArgusApp.sharedModelContainer)
+                .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .active {
+                        Task {
+                            await SyncManager.shared.sendRecentArticlesToServer()
+                        }
+                    }
+                }
         }
     }
 }

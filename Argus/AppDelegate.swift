@@ -32,12 +32,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
-    func applicationWillEnterForeground(_: UIApplication) {
-        Task {
-            await SyncManager.shared.sendRecentArticlesToServer()
-        }
-    }
-
     func application(_: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         let context = ArgusApp.sharedModelContainer.mainContext
 
