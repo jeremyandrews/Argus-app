@@ -50,12 +50,13 @@ class SyncManager {
                 continue
             }
 
-            // Check if the URL already exists in either `NotificationData` or `SeenArticle`
+            // Check if the URL already exists in either NotificationData or SeenArticle
             let isDuplicate = (try? context.fetch(
                 FetchDescriptor<NotificationData>(predicate: #Predicate { $0.json_url == urlString })
-            ).first) != nil || (try? context.fetch(
-                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.json_url == urlString })
-            ).first) != nil
+            ).first) != nil ||
+                (try? context.fetch(
+                    FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.json_url == urlString })
+                ).first) != nil
 
             if isDuplicate {
                 print("Duplicate json_url found, skipping: \(urlString)")
@@ -69,7 +70,6 @@ class SyncManager {
                     continue
                 }
 
-                // Extract fields from the JSON blob
                 let title = json["tiny_title"] as? String ?? "Untitled"
                 let body = json["tiny_summary"] as? String ?? "No content available"
                 let topic = json["topic"] as? String
@@ -91,7 +91,8 @@ class SyncManager {
                     topic: topic,
                     articleTitle: articleTitle,
                     affected: affected,
-                    domain: domain
+                    domain: domain,
+                    suppressBadgeUpdate: true
                 )
 
                 print("Saved unseen article: \(title)")
@@ -99,9 +100,21 @@ class SyncManager {
                 print("Failed to fetch or save unseen article for URL \(urlString): \(error)")
             }
         }
+
+        // Now update the badge just once at the end:
+        NotificationUtils.updateAppBadgeCount()
     }
 
-    func saveNotification(title: String, body: String, json_url: String?, topic: String?, articleTitle: String, affected: String, domain: String?) {
+    func saveNotification(
+        title: String,
+        body: String,
+        json_url: String?,
+        topic: String?,
+        articleTitle: String,
+        affected: String,
+        domain: String?,
+        suppressBadgeUpdate: Bool = false
+    ) {
         let context = ArgusApp.sharedModelContainer.mainContext
         let newNotification = NotificationData(
             date: Date(),
@@ -119,10 +132,12 @@ class SyncManager {
             try context.save()
             print("Notification saved: \(newNotification)")
 
-            // Update badge count
-            NotificationUtils.updateAppBadgeCount()
+            // Only update the badge if we haven't suppressed it:
+            if !suppressBadgeUpdate {
+                NotificationUtils.updateAppBadgeCount()
+            }
 
-            // Add entry to SeenArticle if `json_url` exists
+            // Add a SeenArticle if there's a json_url
             if let json_url = json_url {
                 let seenArticle = SeenArticle(id: newNotification.id, json_url: json_url, date: newNotification.date)
                 context.insert(seenArticle)
