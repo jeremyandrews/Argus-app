@@ -412,7 +412,7 @@ struct NewsView: View {
             modelContext.delete(notification)
             do {
                 try modelContext.save()
-                AppDelegate().updateBadgeCount()
+                NotificationUtils.updateAppBadgeCount()
                 // Update filteredNotifications after deletion
                 updateFilteredNotifications()
             } catch {
@@ -456,7 +456,7 @@ struct NewsView: View {
     private func saveChanges() {
         do {
             try modelContext.save()
-            AppDelegate().updateBadgeCount()
+            NotificationUtils.updateAppBadgeCount()
         } catch {
             print("Failed to save changes: \(error)")
         }

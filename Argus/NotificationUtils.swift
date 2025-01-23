@@ -1,15 +1,37 @@
+import SwiftData
 import UIKit
 import UserNotifications
+
+class NotificationUtils {
+    @MainActor
+    static func updateAppBadgeCount() {
+        do {
+            let context = ArgusApp.sharedModelContainer.mainContext
+            let unviewedCount = try context.fetch(
+                FetchDescriptor<NotificationData>(
+                    predicate: #Predicate { !$0.isViewed && !$0.isArchived }
+                )
+            ).count
+
+            // Use the UNUserNotificationCenter extension to set the badge
+            UNUserNotificationCenter.current().updateBadgeCount(unviewedCount) { error in
+                if let error = error {
+                    print("Failed to set badge count: \(error)")
+                }
+            }
+        } catch {
+            print("Failed to fetch unviewed notifications: \(error)")
+        }
+    }
+}
 
 extension UNUserNotificationCenter {
     func updateBadgeCount(_ count: Int, completion: ((Error?) -> Void)? = nil) {
         if #available(iOS 17.0, *) {
-            // Use the new setBadgeCount API
-            self.setBadgeCount(count, withCompletionHandler: { error in
+            self.setBadgeCount(count) { error in
                 completion?(error)
-            })
+            }
         } else {
-            // Fallback for iOS versions prior to 17
             DispatchQueue.main.async {
                 UIApplication.shared.applicationIconBadgeNumber = count
                 completion?(nil)

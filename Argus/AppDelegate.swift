@@ -19,7 +19,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.updateBadgeCount()
+            NotificationUtils.updateAppBadgeCount()
         }
 
         ensureDatabaseTablesCreated()
@@ -53,11 +53,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
             // Indicate successful background fetch
             completionHandler(.newData)
-            updateBadgeCount()
+            NotificationUtils.updateAppBadgeCount()
         } catch {
             print("Failed to fetch unviewed notifications: \(error)")
             completionHandler(.failed)
-            updateBadgeCount()
+            NotificationUtils.updateAppBadgeCount()
         }
     }
 
@@ -110,7 +110,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             domain: domain // Pass domain here
         )
         completionHandler(.newData)
-        updateBadgeCount()
+        NotificationUtils.updateAppBadgeCount()
     }
 
     private func handleRemoteNotification(userInfo: [String: AnyObject]) {
@@ -152,24 +152,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             affected: affected,
             domain: domain
         )
-    }
-
-    func updateBadgeCount() {
-        do {
-            let context = ArgusApp.sharedModelContainer.mainContext
-            let unviewedCount = try context.fetch(
-                FetchDescriptor<NotificationData>(
-                    predicate: #Predicate { !$0.isViewed && !$0.isArchived }
-                )
-            ).count
-            UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
-                if let error = error {
-                    print("Failed to set badge count: \(error)")
-                }
-            }
-        } catch {
-            print("Failed to fetch unviewed notifications: \(error)")
-        }
     }
 
     func saveJSONLocally(notification: NotificationData) {

@@ -120,8 +120,7 @@ class SyncManager {
             print("Notification saved: \(newNotification)")
 
             // Update badge count
-            // TODO: Fixme
-            // AppDelegate.shared.updateBadgeCount()
+            NotificationUtils.updateAppBadgeCount()
 
             // Add entry to SeenArticle if `json_url` exists
             if let json_url = json_url {

@@ -343,7 +343,7 @@ struct NewsDetailView: View {
             notification.isViewed = true
             do {
                 try modelContext.save()
-                AppDelegate().updateBadgeCount()
+                NotificationUtils.updateAppBadgeCount()
             } catch {
                 print("Failed to mark notification as viewed: \(error)")
             }
@@ -355,7 +355,7 @@ struct NewsDetailView: View {
         modelContext.delete(notification)
         do {
             try modelContext.save()
-            AppDelegate().updateBadgeCount()
+            NotificationUtils.updateAppBadgeCount()
             dismiss()
         } catch {
             print("Failed to delete notification: \(error)")
