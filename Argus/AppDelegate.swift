@@ -24,6 +24,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         ensureDatabaseTablesCreated()
 
+        // Auto-sync with the server when the application launches.
+        Task {
+            await SyncManager.shared.sendRecentArticlesToServer()
+        }
+
         return true
     }
 
