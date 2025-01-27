@@ -17,7 +17,6 @@ class SyncManager {
                 FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date >= twentyFourHoursAgo })
             )
             let jsonUrls = recentArticles.map { $0.json_url }
-            print("Payload being sent: \(jsonUrls)")
 
             let url = URL(string: "https://api.arguspulse.com/articles/sync")!
             let payload = ["seen_articles": jsonUrls]
@@ -28,8 +27,6 @@ class SyncManager {
                 // Decode the server response
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
                 if let unseenUrls = serverResponse["unseen_articles"] {
-                    print("Unseen articles: \(unseenUrls)")
-                    await fetchAndSaveUnseenArticles(from: unseenUrls)
                 } else {
                     print("No unseen articles received.")
                 }
@@ -94,8 +91,6 @@ class SyncManager {
                     domain: domain,
                     suppressBadgeUpdate: true
                 )
-
-                print("Saved unseen article: \(title)")
             } catch {
                 print("Failed to fetch or save unseen article for URL \(urlString): \(error)")
             }
@@ -130,8 +125,6 @@ class SyncManager {
 
         do {
             try context.save()
-            print("Notification saved: \(newNotification)")
-
             // Only update the badge if we haven't suppressed it:
             if !suppressBadgeUpdate {
                 NotificationUtils.updateAppBadgeCount()
@@ -142,7 +135,6 @@ class SyncManager {
                 let seenArticle = SeenArticle(id: newNotification.id, json_url: json_url, date: newNotification.date)
                 context.insert(seenArticle)
                 try context.save()
-                print("SeenArticle entry created for notification: \(seenArticle)")
             }
         } catch {
             print("Failed to save notification or seen article: \(error)")

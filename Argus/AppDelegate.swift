@@ -161,7 +161,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 let (data, _) = try await URLSession.shared.data(from: url)
                 let fileURL = getLocalFileURL(for: notification)
                 try data.write(to: fileURL)
-                print("Saved JSON locally at: \(fileURL)")
             } catch {
                 print("Failed to save JSON locally: \(error)")
             }
@@ -173,7 +172,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         if FileManager.default.fileExists(atPath: fileURL.path) {
             do {
                 try FileManager.default.removeItem(at: fileURL)
-                print("Deleted local JSON at: \(fileURL)")
             } catch {
                 print("Failed to delete local JSON: \(error)")
             }
@@ -191,7 +189,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         do {
             // Check if the SeenArticle table exists by attempting a fetch
             _ = try context.fetch(FetchDescriptor<SeenArticle>())
-            print("SeenArticle table is ready.")
         } catch {
             print("SeenArticle table missing. Creating and populating it.")
             populateSeenArticlesFromNotificationData()
@@ -203,7 +200,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         do {
             let notifications = try context.fetch(FetchDescriptor<NotificationData>())
-            print("Notifications fetched: \(notifications)")
 
             for notification in notifications {
                 guard let json_url = notification.json_url else {
@@ -213,23 +209,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
                 let seenArticle = SeenArticle(id: notification.id, json_url: json_url, date: notification.date)
                 context.insert(seenArticle)
-                print("Inserted SeenArticle: \(seenArticle)")
             }
 
             do {
                 let articles = try context.fetch(FetchDescriptor<SeenArticle>())
-                print("SeenArticle entries after population: \(articles)")
             } catch {
                 print("Failed to fetch SeenArticle entries: \(error)")
             }
 
             do {
                 try context.save()
-                print("Context saved successfully.")
             } catch {
                 print("Failed to save context: \(error)")
             }
-            print("SeenArticle table populated from NotificationData.")
         } catch {
             print("Failed to populate SeenArticle table: \(error)")
         }
@@ -243,7 +235,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         do {
             try context.save()
-            print("Seen article saved: \(seenArticle)")
         } catch {
             print("Failed to save seen article: \(error)")
         }
@@ -263,7 +254,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
 
             try context.save()
-            print("Old articles cleaned up.")
         } catch {
             print("Error cleaning up old articles: \(error)")
         }
@@ -275,7 +265,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             do {
                 let token = try await APIClient.shared.authenticateDevice()
                 UserDefaults.standard.set(token, forKey: "jwtToken")
-                print("Device authenticated and token stored.")
             } catch {
                 print("Failed to authenticate device: \(error)")
             }
