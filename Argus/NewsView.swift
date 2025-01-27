@@ -531,10 +531,18 @@ struct NewsView: View {
 
     private func rowContent(for notification: NotificationData) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            if notification.isArchived {
-                ArchivedPill()
-                    .padding(.horizontal, 10)
+            HStack(spacing: 8) {
+                if let topic = notification.topic,
+                   !topic.isEmpty
+                {
+                    TopicPill(topic: topic)
+                }
+                if notification.isArchived {
+                    ArchivedPill()
+                }
             }
+            .padding(.horizontal, 10)
+
             let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
             Text(AttributedString(attributedTitle))
                 .font(.headline)
@@ -590,13 +598,32 @@ struct NewsView: View {
 
 struct ArchivedPill: View {
     var body: some View {
-        Text("ARCHIVED")
+        HStack(spacing: 4) {
+            Image(systemName: "archivebox.fill")
+                .font(.caption2)
+            Text("ARCHIVED")
+                .font(.caption2)
+                .bold()
+        }
+        .foregroundColor(.primary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color(uiColor: .systemOrange).opacity(0.3))
+        .cornerRadius(8)
+    }
+}
+
+struct TopicPill: View {
+    let topic: String
+
+    var body: some View {
+        Text(topic.uppercased())
             .font(.caption2)
             .bold()
-            .foregroundColor(.white)
+            .foregroundColor(.primary)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .background(Color.orange)
+            .background(Color(uiColor: .systemGray5))
             .cornerRadius(8)
     }
 }
