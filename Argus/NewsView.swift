@@ -14,7 +14,6 @@ struct NewsView: View {
     @State private var showBookmarkedOnly: Bool = false
     @State private var showArchivedContent: Bool = false
     @State private var isFilterViewPresented: Bool = false
-    @State private var showDeleteConfirmation: Bool = false
     @State private var selectedTopic: String = "All"
     @State private var subscriptions: [String: Subscription] = [:]
     @State private var needsTopicReset: Bool = false
@@ -22,8 +21,21 @@ struct NewsView: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var lastSelectedTopic: String = "All"
     @State private var needsScrollReset: Bool = false
+    @State private var showDeleteConfirmation = false
+    @State private var articleToDelete: NotificationData?
 
     @Binding var tabBarHeight: CGFloat
+
+    var deleteConfirmationMessage: String {
+        if articleToDelete != nil {
+            return "This article is bookmarked. Are you sure you want to delete it?"
+        } else {
+            let count = selectedNotificationIDs.count
+            return count == 1
+                ? "Are you sure you want to delete this article?"
+                : "Are you sure you want to delete \(count) articles?"
+        }
+    }
 
     private var topics: [String] {
         return visibleTopics
@@ -110,18 +122,23 @@ struct NewsView: View {
                 updateFilteredNotifications()
             }
             .confirmationDialog(
-                "Are you sure you want to delete \(selectedNotificationIDs.count) articles?",
+                deleteConfirmationMessage,
                 isPresented: $showDeleteConfirmation,
                 titleVisibility: .visible
             ) {
                 Button("Delete", role: .destructive) {
-                    deleteSelectedNotifications()
                     withAnimation {
-                        editMode?.wrappedValue = .inactive
-                        selectedNotificationIDs.removeAll()
+                        if let article = articleToDelete {
+                            deleteNotification(article)
+                            articleToDelete = nil
+                        } else {
+                            deleteSelectedNotifications()
+                        }
                     }
                 }
-                Button("Cancel", role: .cancel) {}
+                Button("Cancel", role: .cancel) {
+                    articleToDelete = nil
+                }
             }
         }
     }
@@ -265,8 +282,24 @@ struct NewsView: View {
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             ArchiveButton(notification: notification)
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            DeleteButton(notification: notification)
+        .swipeActions(edge: .trailing, allowsFullSwipe: !notification.isBookmarked) {
+            if notification.isBookmarked {
+                Button {
+                    articleToDelete = notification
+                    showDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .tint(.red)
+            } else {
+                Button(role: .destructive) {
+                    withAnimation {
+                        deleteNotification(notification)
+                    }
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
         }
     }
 
@@ -294,9 +327,50 @@ struct NewsView: View {
 
     private func DeleteButton(notification: NotificationData) -> some View {
         Button(role: .destructive) {
-            deleteNotification(notification)
+            if notification.isBookmarked {
+                articleToDelete = notification
+                showDeleteConfirmation = true
+            } else {
+                withAnimation {
+                    deleteNotification(notification)
+                }
+            }
         } label: {
             Label("Delete", systemImage: "trash")
+        }
+    }
+
+    private func handleEditModeDelete() {
+        if !selectedNotificationIDs.isEmpty {
+            articleToDelete = nil // Ensure we're in bulk delete mode
+            showDeleteConfirmation = true
+        }
+    }
+
+    private func deleteNotification(_ notification: NotificationData) {
+        AppDelegate().deleteLocalJSON(notification: notification)
+        modelContext.delete(notification)
+        do {
+            try modelContext.save()
+            NotificationUtils.updateAppBadgeCount()
+            updateFilteredNotifications()
+        } catch {
+            print("Failed to delete notification: \(error)")
+        }
+    }
+
+    private func deleteSelectedNotifications() {
+        withAnimation {
+            for id in selectedNotificationIDs {
+                if let notification = filteredNotifications.first(where: { $0.id == id }) {
+                    AppDelegate().deleteLocalJSON(notification: notification)
+                    modelContext.delete(notification)
+                }
+            }
+            saveChanges()
+            updateFilteredNotifications()
+            editMode?.wrappedValue = .inactive
+            selectedNotificationIDs.removeAll()
         }
     }
 
@@ -391,7 +465,7 @@ struct NewsView: View {
             toolbarButton(
                 icon: "trash",
                 label: "Delete",
-                action: { showDeleteConfirmation = true },
+                action: { handleEditModeDelete() },
                 isDestructive: true
             )
         }
@@ -473,33 +547,6 @@ struct NewsView: View {
            let rootViewController = window.rootViewController
         {
             rootViewController.present(hostingController, animated: true, completion: nil)
-        }
-    }
-
-    private func deleteNotification(_ notification: NotificationData) {
-        withAnimation {
-            AppDelegate().deleteLocalJSON(notification: notification)
-            modelContext.delete(notification)
-            do {
-                try modelContext.save()
-                NotificationUtils.updateAppBadgeCount()
-                updateFilteredNotifications()
-            } catch {
-                print("Failed to delete notification: \(error)")
-            }
-        }
-    }
-
-    private func deleteSelectedNotifications() {
-        withAnimation {
-            for id in selectedNotificationIDs {
-                if let notification = filteredNotifications.first(where: { $0.id == id }) {
-                    AppDelegate().deleteLocalJSON(notification: notification)
-                    modelContext.delete(notification)
-                }
-            }
-            saveChanges()
-            updateFilteredNotifications()
         }
     }
 
@@ -601,7 +648,7 @@ struct ArchivedPill: View {
         HStack(spacing: 4) {
             Image(systemName: "archivebox.fill")
                 .font(.caption2)
-            Text("ARCHIVED")
+            Text("Archived")
                 .font(.caption2)
                 .bold()
         }
@@ -617,7 +664,7 @@ struct TopicPill: View {
     let topic: String
 
     var body: some View {
-        Text(topic.uppercased())
+        Text(topic)
             .font(.caption2)
             .bold()
             .foregroundColor(.primary)
