@@ -27,6 +27,7 @@ class SyncManager {
                 // Decode the server response
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
                 if let unseenUrls = serverResponse["unseen_articles"] {
+                    await fetchAndSaveUnseenArticles(from: unseenUrls)
                 } else {
                     print("No unseen articles received.")
                 }
