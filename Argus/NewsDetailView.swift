@@ -271,8 +271,15 @@ struct NewsDetailView: View {
                 }
             }
         }
+
         // Fallback to downloading the content if not bookmarked or local file unavailable
-        guard let jsonURL = notification.json_url, let url = URL(string: jsonURL) else { return }
+        let jsonURL = notification.json_url // json_url is now guaranteed to be non-optional
+
+        guard let url = URL(string: jsonURL) else {
+            print("Error: Invalid JSON URL \(jsonURL)")
+            return
+        }
+
         isLoadingAdditionalContent = true
         Task {
             do {

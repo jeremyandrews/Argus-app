@@ -85,29 +85,35 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         // Extract data payload
-        let data = userInfo["data"] as? [String: AnyObject]
-        let json_url = data?["json_url"] as? String
-        let topic = data?["topic"] as? String
+        guard let data = userInfo["data"] as? [String: AnyObject],
+              let json_url = data["json_url"] as? String, !json_url.isEmpty
+        else {
+            print("Error: Missing or invalid json_url in push notification")
+            completionHandler(.failed)
+            return
+        }
+
+        let topic = data["topic"] as? String
 
         // Extract alert details, or fallback to data if alert is nil
         let alert = aps["alert"] as? [String: String]
-        let title = alert?["title"] ?? (data?["title"] as? String ?? "[no title]")
-        let body = alert?["body"] ?? (data?["body"] as? String ?? "[no body]")
-        let articleTitle = data?["article_title"] as? String ?? "[no article title]"
-        let affected = data?["affected"] as? String ?? ""
-        // Extract additional data from the `data` field
-        let domain = data?["domain"] as? String
+        let title = alert?["title"] ?? (data["title"] as? String ?? "[no title]")
+        let body = alert?["body"] ?? (data["body"] as? String ?? "[no body]")
+        let articleTitle = data["article_title"] as? String ?? "[no article title]"
+        let affected = data["affected"] as? String ?? ""
+        let domain = data["domain"] as? String
 
         // Save the notification with all extracted details
         saveNotification(
             title: title,
             body: body,
-            json_url: json_url,
+            json_url: json_url, // Now guaranteed to be non-optional
             topic: topic,
             articleTitle: articleTitle,
             affected: affected,
-            domain: domain // Pass domain here
+            domain: domain
         )
+
         completionHandler(.newData)
         NotificationUtils.updateAppBadgeCount()
     }
@@ -116,18 +122,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         guard let aps = userInfo["aps"] as? [String: AnyObject],
               let alert = aps["alert"] as? [String: String],
               let title = alert["title"],
-              let body = alert["body"]
+              let body = alert["body"],
+              let data = userInfo["data"] as? [String: AnyObject],
+              let json_url = data["json_url"] as? String, !json_url.isEmpty
         else {
+            print("Error: Missing required fields in push notification (title, body, or json_url)")
             return
         }
 
-        // Extract additional data from the `data` field
-        let data = userInfo["data"] as? [String: AnyObject]
-        let json_url = data?["json_url"] as? String
-        let topic = data?["topic"] as? String
-        let articleTitle = data?["article_title"] as? String ?? "[no article title]"
-        let affected = data?["affected"] as? String ?? ""
-        let domain = data?["domain"] as? String ?? "[unknown]"
+        let topic = data["topic"] as? String
+        let articleTitle = data["article_title"] as? String ?? "[no article title]"
+        let affected = data["affected"] as? String ?? ""
+        let domain = data["domain"] as? String ?? "[unknown]"
 
         // Save the notification with all extracted details
         saveNotification(
@@ -141,7 +147,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         )
     }
 
-    private func saveNotification(title: String, body: String, json_url: String?, topic: String?, articleTitle: String, affected: String, domain: String?) {
+    private func saveNotification(title: String, body: String, json_url: String, topic: String?, articleTitle: String, affected: String, domain: String?) {
         SyncManager.shared.saveNotification(
             title: title,
             body: body,
@@ -154,7 +160,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func saveJSONLocally(notification: NotificationData) {
-        guard let jsonURL = notification.json_url, let url = URL(string: jsonURL) else { return }
+        let jsonURL = notification.json_url // No need for optional binding
+
+        guard let url = URL(string: jsonURL) else {
+            print("Error: Invalid URL string \(jsonURL)")
+            return
+        }
 
         Task {
             do {
@@ -202,17 +213,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             let notifications = try context.fetch(FetchDescriptor<NotificationData>())
 
             for notification in notifications {
-                guard let json_url = notification.json_url else {
-                    print("Skipping notification with missing json_url: \(notification)")
-                    continue
-                }
-
-                let seenArticle = SeenArticle(id: notification.id, json_url: json_url, date: notification.date)
+                let seenArticle = SeenArticle(id: notification.id, json_url: notification.json_url, date: notification.date)
                 context.insert(seenArticle)
             }
 
             do {
-                let articles = try context.fetch(FetchDescriptor<SeenArticle>())
+                let _ = try context.fetch(FetchDescriptor<SeenArticle>())
             } catch {
                 print("Failed to fetch SeenArticle entries: \(error)")
             }
@@ -292,7 +298,7 @@ class NotificationData {
     @Attribute var isViewed: Bool
     @Attribute var isBookmarked: Bool
     @Attribute var isArchived: Bool = false
-    @Attribute var json_url: String?
+    @Attribute(.unique) var json_url: String
     @Attribute var topic: String?
     @Attribute var article_title: String
     @Attribute var affected: String
@@ -303,7 +309,7 @@ class NotificationData {
         date: Date,
         title: String,
         body: String,
-        json_url: String? = nil,
+        json_url: String,
         topic: String? = nil,
         article_title: String,
         affected: String,
@@ -328,7 +334,7 @@ class NotificationData {
 @Model
 class SeenArticle {
     @Attribute var id: UUID
-    @Attribute var json_url: String
+    @Attribute(.unique) var json_url: String
     @Attribute var date: Date
 
     init(id: UUID, json_url: String, date: Date) {

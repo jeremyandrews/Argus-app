@@ -22,7 +22,7 @@ struct SubscriptionsView: View {
         NavigationView {
             List {
                 ForEach(listOfSubscriptions, id: \.self) { topic in
-                    let subscription = subscriptions[topic] ?? Subscription(isSubscribed: false, isHighPriority: true)
+                    let subscription = subscriptions[topic] ?? Subscription(isSubscribed: false, isHighPriority: defaultAlertTopics.contains(topic))
                     HStack {
                         Button(action: {
                             toggleSubscription(topic)
@@ -38,9 +38,14 @@ struct SubscriptionsView: View {
                         Spacer()
                         if subscription.isSubscribed {
                             Toggle(isOn: Binding(
-                                get: { subscription.isHighPriority },
+                                get: { subscriptions[topic]?.isHighPriority ?? defaultAlertTopics.contains(topic) },
                                 set: { newValue in
-                                    subscriptions[topic]?.isHighPriority = newValue
+                                    if var existingSubscription = subscriptions[topic] {
+                                        existingSubscription.isHighPriority = newValue
+                                        subscriptions[topic] = existingSubscription
+                                    } else {
+                                        subscriptions[topic] = Subscription(isSubscribed: true, isHighPriority: newValue)
+                                    }
                                     updateSubscriptionPriority(topic: topic, isHighPriority: newValue)
                                 }
                             )) {
@@ -87,8 +92,9 @@ struct SubscriptionsView: View {
             for topic in defaultAutoSubscriptions {
                 guard subscriptions[topic]?.isSubscribed == false else { continue }
                 do {
-                    try await performAPIRequest { try await subscribeToTopic(topic, priority: true, token: $0) }
-                    subscriptions[topic] = Subscription(isSubscribed: true, isHighPriority: true)
+                    let isHighPriority = defaultAlertTopics.contains(topic) // Correct priority logic
+                    try await performAPIRequest { try await subscribeToTopic(topic, priority: isHighPriority, token: $0) }
+                    subscriptions[topic] = Subscription(isSubscribed: true, isHighPriority: isHighPriority)
                 } catch {
                     errorMessage = ErrorWrapper(message: "Failed to auto-subscribe to \(topic): \(error.localizedDescription)")
                 }
@@ -106,20 +112,15 @@ struct SubscriptionsView: View {
             do {
                 let currentSubscription = subscriptions[topic]
                 let isFirstTimeEnable = currentSubscription == nil
+
                 if let subscription = currentSubscription, subscription.isSubscribed {
                     // Unsubscribing
                     try await performAPIRequest { try await unsubscribeFromTopic(topic, token: $0) }
-                    subscriptions[topic] = Subscription(isSubscribed: false, isHighPriority: subscription.isHighPriority)
+                    subscriptions[topic] = Subscription(isSubscribed: false, isHighPriority: false) // Ensure proper reset
                 } else {
                     // Subscribing or re-subscribing
-                    let isHighPriority: Bool
-                    if isFirstTimeEnable {
-                        // First time enabling: use default alert setting
-                        isHighPriority = defaultAlertTopics.contains(topic)
-                    } else {
-                        // Re-enabling: use previous alert setting
-                        isHighPriority = currentSubscription?.isHighPriority ?? false
-                    }
+                    let isHighPriority = isFirstTimeEnable ? defaultAlertTopics.contains(topic) : (currentSubscription?.isHighPriority ?? false)
+
                     try await performAPIRequest { try await subscribeToTopic(topic, priority: isHighPriority, token: $0) }
                     subscriptions[topic] = Subscription(isSubscribed: true, isHighPriority: isHighPriority)
                 }
@@ -206,7 +207,8 @@ struct SubscriptionsView: View {
             // If no saved data, initialize with default values
             var defaultSubscriptions: [String: Subscription] = [:]
             for topic in listOfSubscriptions {
-                defaultSubscriptions[topic] = Subscription(isSubscribed: false, isHighPriority: true)
+                let isHighPriority = defaultAlertTopics.contains(topic)
+                defaultSubscriptions[topic] = Subscription(isSubscribed: false, isHighPriority: isHighPriority)
             }
             return defaultSubscriptions
         }
