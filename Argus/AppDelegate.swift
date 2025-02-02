@@ -77,10 +77,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        var taskID: UIBackgroundTaskIdentifier = .invalid
+
+        taskID = UIApplication.shared.beginBackgroundTask(withName: "SyncData") { [taskID] in
+            UIApplication.shared.endBackgroundTask(taskID)
+        }
+
         guard let aps = userInfo["aps"] as? [String: AnyObject],
               let contentAvailable = aps["content-available"] as? Int, contentAvailable == 1
         else {
             completionHandler(.noData)
+            UIApplication.shared.endBackgroundTask(taskID)
             return
         }
 
@@ -90,11 +97,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         else {
             print("Error: Missing or invalid json_url in push notification")
             completionHandler(.failed)
+            UIApplication.shared.endBackgroundTask(taskID)
             return
         }
 
         let topic = data["topic"] as? String
-
         // Extract alert details, or fallback to data if alert is nil
         let alert = aps["alert"] as? [String: String]
         let title = alert?["title"] ?? (data["title"] as? String ?? "[no title]")
@@ -103,19 +110,30 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let affected = data["affected"] as? String ?? ""
         let domain = data["domain"] as? String
 
+        // Create timeout task
+        let timeoutTask = Task {
+            try await Task.sleep(nanoseconds: 25_000_000_000) // 25 seconds
+            completionHandler(.failed)
+            UIApplication.shared.endBackgroundTask(taskID)
+        }
+
         // Save the notification with all extracted details
         saveNotification(
             title: title,
             body: body,
-            json_url: json_url, // Now guaranteed to be non-optional
+            json_url: json_url,
             topic: topic,
             articleTitle: articleTitle,
             affected: affected,
             domain: domain
         )
 
-        completionHandler(.newData)
-        NotificationUtils.updateAppBadgeCount()
+        Task { @MainActor in
+            NotificationUtils.updateAppBadgeCount()
+            timeoutTask.cancel()
+            completionHandler(.newData)
+            UIApplication.shared.endBackgroundTask(taskID)
+        }
     }
 
     private func handleRemoteNotification(userInfo: [String: AnyObject]) {
