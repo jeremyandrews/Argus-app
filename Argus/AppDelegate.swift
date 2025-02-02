@@ -148,15 +148,31 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func saveNotification(title: String, body: String, json_url: String, topic: String?, articleTitle: String, affected: String, domain: String?) {
-        SyncManager.shared.saveNotification(
-            title: title,
-            body: body,
-            json_url: json_url,
-            topic: topic,
-            articleTitle: articleTitle,
-            affected: affected,
-            domain: domain
-        )
+        let context = ArgusApp.sharedModelContainer.mainContext
+
+        // Check for existing notification with same json_url
+        do {
+            let existingNotifications = try context.fetch(
+                FetchDescriptor<NotificationData>(
+                    predicate: #Predicate<NotificationData> { $0.json_url == json_url }
+                )
+            )
+
+            if existingNotifications.isEmpty {
+                // Only save if no existing notification found
+                SyncManager.shared.saveNotification(
+                    title: title,
+                    body: body,
+                    json_url: json_url,
+                    topic: topic,
+                    articleTitle: articleTitle,
+                    affected: affected,
+                    domain: domain
+                )
+            }
+        } catch {
+            print("Error checking for existing notification: \(error)")
+        }
     }
 
     func saveJSONLocally(notification: NotificationData) {
@@ -291,17 +307,17 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 
 @Model
 class NotificationData {
-    @Attribute var id: UUID
-    @Attribute var date: Date
-    @Attribute var title: String
-    @Attribute var body: String
-    @Attribute var isViewed: Bool
-    @Attribute var isBookmarked: Bool
+    @Attribute var id: UUID = UUID()
+    @Attribute var date: Date = Date()
+    @Attribute var title: String = ""
+    @Attribute var body: String = ""
+    @Attribute var isViewed: Bool = false
+    @Attribute var isBookmarked: Bool = false
     @Attribute var isArchived: Bool = false
-    @Attribute(.unique) var json_url: String
+    @Attribute var json_url: String = ""
     @Attribute var topic: String?
-    @Attribute var article_title: String
-    @Attribute var affected: String
+    @Attribute var article_title: String = ""
+    @Attribute var affected: String = ""
     @Attribute var domain: String?
 
     init(
@@ -333,9 +349,9 @@ class NotificationData {
 
 @Model
 class SeenArticle {
-    @Attribute var id: UUID
-    @Attribute(.unique) var json_url: String
-    @Attribute var date: Date
+    @Attribute var id: UUID = UUID()
+    @Attribute var json_url: String = ""
+    @Attribute var date: Date = Date()
 
     init(id: UUID, json_url: String, date: Date) {
         self.id = id
