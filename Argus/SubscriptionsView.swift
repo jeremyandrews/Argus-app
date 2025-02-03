@@ -1,5 +1,14 @@
 import SwiftUI
 
+struct SubscriptionsResponse: Codable {
+    struct Subscription: Codable {
+        let topic: String
+        let priority: String
+    }
+
+    let subscriptions: [Subscription]
+}
+
 struct Subscription: Codable {
     var isSubscribed: Bool
     var isHighPriority: Bool
@@ -9,6 +18,8 @@ struct ErrorWrapper: Identifiable {
     let id = UUID()
     let message: String
 }
+
+private struct Empty: Codable {}
 
 struct SubscriptionsView: View {
     @State private var subscriptions: [String: Subscription] = [:]
@@ -59,7 +70,10 @@ struct SubscriptionsView: View {
             }
             .navigationTitle("Subscriptions")
             .onAppear {
-                authenticateAndLoadSubscriptions()
+                Task {
+                    await authenticateAndLoadSubscriptions()
+                    await syncSubscriptionsWithServer()
+                }
             }
             .alert(item: $errorMessage) { error in
                 Alert(title: Text("Error"), message: Text(error.message), dismissButton: .default(Text("OK")))
@@ -67,40 +81,36 @@ struct SubscriptionsView: View {
         }
     }
 
-    private func authenticateAndLoadSubscriptions() {
-        Task {
-            do {
-                if UserDefaults.standard.string(forKey: "jwtToken") == nil {
-                    jwtToken = try await APIClient.shared.authenticateDevice()
-                    UserDefaults.standard.set(jwtToken, forKey: "jwtToken")
-                } else {
-                    jwtToken = UserDefaults.standard.string(forKey: "jwtToken")
-                }
-                subscriptions = loadSubscriptions()
-                if isFirstLaunch {
-                    isFirstLaunch = false
-                    autoSubscribeToDefaultTopics()
-                }
-            } catch {
-                errorMessage = ErrorWrapper(message: "Failed to authenticate: \(error.localizedDescription)")
+    private func authenticateAndLoadSubscriptions() async {
+        do {
+            if UserDefaults.standard.string(forKey: "jwtToken") == nil {
+                jwtToken = try await APIClient.shared.authenticateDevice()
+                UserDefaults.standard.set(jwtToken, forKey: "jwtToken")
+            } else {
+                jwtToken = UserDefaults.standard.string(forKey: "jwtToken")
             }
+            subscriptions = loadSubscriptions()
+            if isFirstLaunch {
+                isFirstLaunch = false
+                await autoSubscribeToDefaultTopics()
+            }
+        } catch {
+            errorMessage = ErrorWrapper(message: "Failed to authenticate: \(error.localizedDescription)")
         }
     }
 
-    private func autoSubscribeToDefaultTopics() {
-        Task {
-            for topic in defaultAutoSubscriptions {
-                guard subscriptions[topic]?.isSubscribed == false else { continue }
-                do {
-                    let isHighPriority = defaultAlertTopics.contains(topic) // Correct priority logic
-                    try await performAPIRequest { try await subscribeToTopic(topic, priority: isHighPriority, token: $0) }
-                    subscriptions[topic] = Subscription(isSubscribed: true, isHighPriority: isHighPriority)
-                } catch {
-                    errorMessage = ErrorWrapper(message: "Failed to auto-subscribe to \(topic): \(error.localizedDescription)")
-                }
+    private func autoSubscribeToDefaultTopics() async {
+        for topic in defaultAutoSubscriptions {
+            guard subscriptions[topic]?.isSubscribed == false else { continue }
+            do {
+                let isHighPriority = defaultAlertTopics.contains(topic)
+                try await performAPIRequest { try await subscribeToTopic(topic, priority: isHighPriority, token: $0) }
+                subscriptions[topic] = Subscription(isSubscribed: true, isHighPriority: isHighPriority)
+            } catch {
+                errorMessage = ErrorWrapper(message: "Failed to auto-subscribe to \(topic): \(error.localizedDescription)")
             }
-            saveSubscriptions()
         }
+        saveSubscriptions()
     }
 
     private func toggleSubscription(_ topic: String) {
@@ -218,6 +228,61 @@ struct SubscriptionsView: View {
         let defaults = UserDefaults.standard
         if let encodedData = try? JSONEncoder().encode(subscriptions) {
             defaults.set(encodedData, forKey: "subscriptions")
+        }
+    }
+
+    private func syncSubscriptionsWithServer() async {
+        do {
+            // First, get current server subscriptions
+            let serverSubscriptions = try await fetchServerSubscriptions()
+
+            if serverSubscriptions.isEmpty {
+                // If server has no subscriptions, push defaults
+                await pushDefaultSubscriptionsToServer()
+            } else {
+                // Update local subscriptions to match server
+                updateLocalSubscriptions(from: serverSubscriptions)
+            }
+
+            // Save the synchronized subscriptions
+            saveSubscriptions()
+
+        } catch {
+            errorMessage = ErrorWrapper(message: "Failed to sync subscriptions: \(error.localizedDescription)")
+        }
+    }
+
+    private func fetchServerSubscriptions() async throws -> [(topic: String, priority: String)] {
+        let url = URL(string: "https://api.arguspulse.com/subscriptions")!
+        let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: Empty?.none)
+        let response = try JSONDecoder().decode(SubscriptionsResponse.self, from: data)
+        return response.subscriptions.map { ($0.topic, $0.priority) }
+    }
+
+    private func pushDefaultSubscriptionsToServer() async {
+        for topic in defaultAutoSubscriptions {
+            do {
+                let isHighPriority = defaultAlertTopics.contains(topic)
+                try await performAPIRequest { try await subscribeToTopic(topic, priority: isHighPriority, token: $0) }
+                subscriptions[topic] = Subscription(isSubscribed: true, isHighPriority: isHighPriority)
+            } catch {
+                errorMessage = ErrorWrapper(message: "Failed to push default subscription for \(topic): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func updateLocalSubscriptions(from serverSubscriptions: [(topic: String, priority: String)]) {
+        // Reset all subscriptions to unsubscribed
+        for topic in listOfSubscriptions {
+            subscriptions[topic] = Subscription(isSubscribed: false, isHighPriority: false)
+        }
+
+        // Update based on server data
+        for (topic, priority) in serverSubscriptions {
+            subscriptions[topic] = Subscription(
+                isSubscribed: true,
+                isHighPriority: priority == "high"
+            )
         }
     }
 }
