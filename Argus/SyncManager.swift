@@ -77,12 +77,7 @@ class SyncManager {
                 let body = json["tiny_summary"] as? String ?? "No content available"
                 let topic = json["topic"] as? String
                 let articleTitle = json["title"] as? String ?? "No article title"
-                let affected: String = {
-                    if topic == "Alert: Direct" {
-                        return json["relation_to_topic"] as? String ?? ""
-                    }
-                    return ""
-                }()
+                let affected = json["affected"] as? String ?? ""
                 let article_url = json["url"] as? String ?? "none"
                 let domain = URL(string: article_url)?.host
 
