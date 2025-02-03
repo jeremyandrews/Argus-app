@@ -152,6 +152,7 @@ struct NewsDetailView: View {
                     .foregroundColor(.primary)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, 10)
+                    .textSelection(.enabled)
             }
         }
     }
@@ -161,6 +162,7 @@ struct NewsDetailView: View {
         return Text(AttributedString(attributedBody))
             .font(.footnote)
             .padding([.leading, .trailing])
+            .textSelection(.enabled)
     }
 
     private var affectedTextView: some View {
@@ -171,6 +173,7 @@ struct NewsDetailView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
                     .padding([.leading, .trailing, .top])
+                    .textSelection(.enabled)
             }
         }
     }
@@ -252,6 +255,7 @@ struct NewsDetailView: View {
                 Text(AttributedString(attributedMarkdown))
                     .font(.body)
                     .padding(.top, 8)
+                    .textSelection(.enabled)
             }
         }
     }
