@@ -385,12 +385,16 @@ struct ArgusDetailsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
                 .font(.system(size: 14, weight: .regular, design: .monospaced))
+                .textSelection(.enabled)
             Text("Metrics:")
                 .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .textSelection(.enabled)
             Text(formattedStats(technicalData.3))
                 .font(.system(size: 12, weight: .regular, design: .monospaced))
                 .padding(.leading, 16)
+                .textSelection(.enabled)
             Text("Received from Argus on \(technicalData.2, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
+                .textSelection(.enabled)
         }
         .padding()
         .background(Color.gray.opacity(0.2))
