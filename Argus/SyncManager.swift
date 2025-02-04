@@ -9,12 +9,12 @@ class SyncManager {
 
     func sendRecentArticlesToServer() async {
         let context = ArgusApp.sharedModelContainer.mainContext
-        let threeDaysAgo = Calendar.current.date(byAdding: .hour, value: -72, to: Date()) ?? Date()
+        let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
 
         do {
             // Fetch recent SeenArticle entries
             let recentArticles = try context.fetch(
-                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date >= threeDaysAgo })
+                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date >= oneDayAgo })
             )
             let jsonUrls = recentArticles.map { $0.json_url }
 
@@ -44,26 +44,6 @@ class SyncManager {
         for urlString in urls {
             guard let url = URL(string: urlString) else {
                 print("Invalid URL: \(urlString)")
-                continue
-            }
-
-            // Check for duplicates in both tables
-            do {
-                // Try to fetch existing entries
-                let existingNotification = try context.fetch(
-                    FetchDescriptor<NotificationData>(predicate: #Predicate { $0.json_url == urlString })
-                ).first
-
-                let existingSeenArticle = try context.fetch(
-                    FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.json_url == urlString })
-                ).first
-
-                if existingNotification != nil || existingSeenArticle != nil {
-                    print("Duplicate json_url found, skipping: \(urlString)")
-                    continue
-                }
-            } catch {
-                print("Failed to check for duplicates: \(error)")
                 continue
             }
 
@@ -111,30 +91,50 @@ class SyncManager {
         suppressBadgeUpdate: Bool = false
     ) {
         let context = ArgusApp.sharedModelContainer.mainContext
-        let newNotification = NotificationData(
-            date: Date(),
-            title: title,
-            body: body,
-            json_url: json_url,
-            topic: topic,
-            article_title: articleTitle,
-            affected: affected,
-            domain: domain
-        )
-        context.insert(newNotification)
 
         do {
-            try context.save()
+            try context.transaction { [context] in
+                // Check for existing entries within the transaction
+                let existingNotification = try context.fetch(
+                    FetchDescriptor<NotificationData>(predicate: #Predicate { $0.json_url == json_url })
+                ).first
+
+                let existingSeenArticle = try context.fetch(
+                    FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.json_url == json_url })
+                ).first
+
+                guard existingNotification == nil, existingSeenArticle == nil else {
+                    print("Duplicate json_url found, skipping: \(json_url)")
+                    return
+                }
+
+                // Create and save the new notification
+                let newNotification = NotificationData(
+                    date: Date(),
+                    title: title,
+                    body: body,
+                    json_url: json_url,
+                    topic: topic,
+                    article_title: articleTitle,
+                    affected: affected,
+                    domain: domain
+                )
+
+                context.insert(newNotification)
+
+                // Add a SeenArticle entry
+                let seenArticle = SeenArticle(
+                    id: newNotification.id,
+                    json_url: json_url,
+                    date: newNotification.date
+                )
+                context.insert(seenArticle)
+            }
 
             // Only update the badge if we haven't suppressed it
             if !suppressBadgeUpdate {
                 NotificationUtils.updateAppBadgeCount()
             }
-
-            // Add a SeenArticle since json_url is always non-optional
-            let seenArticle = SeenArticle(id: newNotification.id, json_url: json_url, date: newNotification.date)
-            context.insert(seenArticle)
-            try context.save()
 
         } catch {
             print("Failed to save notification or seen article: \(error)")
