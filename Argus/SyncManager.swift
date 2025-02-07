@@ -40,7 +40,6 @@ class SyncManager {
     }
 
     func fetchAndSaveUnseenArticles(from urls: [String]) async {
-        let context = ArgusApp.sharedModelContainer.mainContext
         for urlString in urls {
             guard let url = URL(string: urlString) else {
                 print("Invalid URL: \(urlString)")
