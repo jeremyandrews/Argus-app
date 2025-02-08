@@ -29,6 +29,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             await SyncManager.shared.sendRecentArticlesToServer()
         }
 
+        // Call cleanup in the background, but use Task to perform the SwiftData
+        // work on the main actor.
+        DispatchQueue.global(qos: .background).async {
+            Task { @MainActor in
+                self.cleanupOldArticles()
+            }
+        }
+
         return true
     }
 
@@ -280,20 +288,49 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
+    @MainActor
     func cleanupOldArticles() {
         let context = ArgusApp.sharedModelContainer.mainContext
-        let threeDaysAgo = Calendar.current.date(byAdding: .day, value: -3, to: Date()) ?? Date()
+
+        // Read user's auto-delete preference (0 = disabled)
+        let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
+        guard daysSetting > 0 else { return }
+
+        let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date()) ?? Date()
 
         do {
-            let oldArticles = try context.fetch(
-                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date < threeDaysAgo })
+            // Fetch old SeenArticles
+            let oldSeenArticles = try context.fetch(
+                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date < cutoffDate })
             )
 
-            for article in oldArticles {
-                context.delete(article)
+            for seenArticle in oldSeenArticles {
+                let oldID = seenArticle.id
+
+                let matchingNotifications = try context.fetch(
+                    FetchDescriptor<NotificationData>(
+                        predicate: #Predicate { $0.id == oldID }
+                    )
+                )
+
+                guard let notification = matchingNotifications.first else {
+                    // No NotificationData? Just remove the old SeenArticle
+                    context.delete(seenArticle)
+                    continue
+                }
+
+                // Skip if bookmarked or archived
+                if notification.isBookmarked || notification.isArchived {
+                    continue
+                }
+
+                // Otherwise, remove both the NotificationData & SeenArticle
+                context.delete(notification)
+                context.delete(seenArticle)
             }
 
             try context.save()
+            print("Cleanup complete. Removed old, unbookmarked/unarchived articles.")
         } catch {
             print("Error cleaning up old articles: \(error)")
         }

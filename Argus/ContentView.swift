@@ -17,6 +17,13 @@ struct ContentView: View {
                         Image(systemName: "mail")
                         Text("Subscriptions")
                     }
+
+                // NEW TAB: Settings
+                SettingsView()
+                    .tabItem {
+                        Image(systemName: "gearshape")
+                        Text("Settings")
+                    }
             }
             .overlay(
                 GeometryReader { geometry in
