@@ -62,7 +62,6 @@ struct NewsDetailView: View {
         .sheet(isPresented: $isSharePresented) {
             ShareSelectionView(content: additionalContent, notification: notification, selectedSections: $selectedSections, isPresented: $isSharePresented)
         }
-        .navigationBarHidden(true)
         .gesture(
             DragGesture()
                 .onEnded { value in

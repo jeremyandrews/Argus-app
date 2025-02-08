@@ -542,6 +542,11 @@ struct NewsView: View {
         let detailView = NewsDetailView(notification: notification)
             .environment(\.modelContext, modelContext)
         let hostingController = UIHostingController(rootView: detailView)
+
+        // The line below forces a full-screen presentation on iPad
+        // so it looks consistent with the iPhone experience.
+        hostingController.modalPresentationStyle = .fullScreen
+
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first,
            let rootViewController = window.rootViewController
@@ -686,7 +691,11 @@ struct RoundedCorner: Shape {
     var corners: UIRectCorner = .allCorners
 
     func path(in rect: CGRect) -> Path {
-        let path = UIBezierPath(roundedRect: rect, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius))
+        let path = UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        )
         return Path(path.cgPath)
     }
 }
