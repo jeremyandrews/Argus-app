@@ -24,6 +24,9 @@ struct NewsView: View {
     @State private var showDeleteConfirmation = false
     @State private var articleToDelete: NotificationData?
 
+    @AppStorage("sortOrder") private var sortOrder: String = "newest"
+    @AppStorage("groupingStyle") private var groupingStyle: String = "none"
+
     @Binding var tabBarHeight: CGFloat
 
     var deleteConfirmationMessage: String {
@@ -54,6 +57,44 @@ struct NewsView: View {
         }
         let topics = Set(filtered.compactMap { $0.topic })
         return ["All"] + topics.sorted()
+    }
+
+    private var sortedAndGroupedNotifications: [(key: String, notifications: [NotificationData])] {
+        let sorted = filteredNotifications.sorted { n1, n2 in
+            switch sortOrder {
+            case "oldest":
+                return n1.date < n2.date
+            case "bookmarked":
+                if n1.isBookmarked != n2.isBookmarked {
+                    return n1.isBookmarked
+                }
+                return n1.date > n2.date
+            default: // "newest"
+                return n1.date > n2.date
+            }
+        }
+
+        switch groupingStyle {
+        case "date":
+            return Dictionary(grouping: sorted) { notification in
+                notification.date.formatted(date: .abbreviated, time: .omitted)
+            }
+            .map { (key: $0.key, notifications: $0.value) }
+            .sorted {
+                // Flip the sort order of the groups based on the sortOrder
+                sortOrder == "oldest" ? $0.key < $1.key : $0.key > $1.key
+            }
+
+        case "topic":
+            return Dictionary(grouping: sorted) { notification in
+                notification.topic ?? "Uncategorized"
+            }
+            .map { (key: $0.key, notifications: $0.value) }
+            .sorted { $0.key < $1.key }
+
+        default:
+            return [("", sorted)]
+        }
     }
 
     var body: some View {
@@ -248,14 +289,78 @@ struct NewsView: View {
     }
 
     var notificationsListView: some View {
-        List(filteredNotifications, id: \.id, selection: $selectedNotificationIDs) { notification in
-            NotificationRow(notification: notification, editMode: editMode, selectedNotificationIDs: $selectedNotificationIDs)
-                .onTapGesture {
-                    handleTapGesture(for: notification)
+        List(selection: $selectedNotificationIDs) {
+            ForEach(sortedAndGroupedNotifications, id: \.key) { group in
+                if !group.key.isEmpty {
+                    // If we have a group key (date or topic), create a section
+                    Section(header: Text(group.key)) {
+                        ForEach(group.notifications, id: \.id) { notification in
+                            NotificationRow(notification: notification, editMode: editMode, selectedNotificationIDs: $selectedNotificationIDs)
+                                .onTapGesture {
+                                    handleTapGesture(for: notification)
+                                }
+                                .onLongPressGesture {
+                                    handleLongPressGesture(for: notification)
+                                }
+                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                    ArchiveButton(notification: notification)
+                                }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: !notification.isBookmarked) {
+                                    if notification.isBookmarked {
+                                        Button {
+                                            articleToDelete = notification
+                                            showDeleteConfirmation = true
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                        .tint(.red)
+                                    } else {
+                                        Button(role: .destructive) {
+                                            withAnimation {
+                                                deleteNotification(notification)
+                                            }
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
+                                }
+                        }
+                    }
+                } else {
+                    // If no group key, show notifications directly
+                    ForEach(group.notifications, id: \.id) { notification in
+                        NotificationRow(notification: notification, editMode: editMode, selectedNotificationIDs: $selectedNotificationIDs)
+                            .onTapGesture {
+                                handleTapGesture(for: notification)
+                            }
+                            .onLongPressGesture {
+                                handleLongPressGesture(for: notification)
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                ArchiveButton(notification: notification)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: !notification.isBookmarked) {
+                                if notification.isBookmarked {
+                                    Button {
+                                        articleToDelete = notification
+                                        showDeleteConfirmation = true
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    .tint(.red)
+                                } else {
+                                    Button(role: .destructive) {
+                                        withAnimation {
+                                            deleteNotification(notification)
+                                        }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                            }
+                    }
                 }
-                .onLongPressGesture {
-                    handleLongPressGesture(for: notification)
-                }
+            }
         }
         .listStyle(PlainListStyle())
         .environment(\.editMode, editMode)

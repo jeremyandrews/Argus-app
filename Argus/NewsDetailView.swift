@@ -609,10 +609,11 @@ struct ActivityViewController: UIViewControllerRepresentable {
 
 struct SafariView: UIViewControllerRepresentable {
     let url: URL
+    @AppStorage("useReaderMode") private var useReaderMode: Bool = true
 
     func makeUIViewController(context _: Context) -> SFSafariViewController {
         let configuration = SFSafariViewController.Configuration()
-        configuration.entersReaderIfAvailable = true
+        configuration.entersReaderIfAvailable = useReaderMode
         return SFSafariViewController(url: url, configuration: configuration)
     }
 

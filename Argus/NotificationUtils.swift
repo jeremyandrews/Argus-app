@@ -5,6 +5,11 @@ import UserNotifications
 class NotificationUtils {
     @MainActor
     static func updateAppBadgeCount() {
+        guard UserDefaults.standard.bool(forKey: "showBadge") else {
+            UNUserNotificationCenter.current().updateBadgeCount(0)
+            return
+        }
+
         do {
             let context = ArgusApp.sharedModelContainer.mainContext
             let unviewedCount = try context.fetch(
