@@ -302,28 +302,6 @@ struct NewsView: View {
                                 .onLongPressGesture {
                                     handleLongPressGesture(for: notification)
                                 }
-                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    ArchiveButton(notification: notification)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: !notification.isBookmarked) {
-                                    if notification.isBookmarked {
-                                        Button {
-                                            articleToDelete = notification
-                                            showDeleteConfirmation = true
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
-                                        .tint(.red)
-                                    } else {
-                                        Button(role: .destructive) {
-                                            withAnimation {
-                                                deleteNotification(notification)
-                                            }
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
-                                    }
-                                }
                         }
                     }
                 } else {
