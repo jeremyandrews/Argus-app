@@ -2,36 +2,58 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var tabBarHeight: CGFloat = 0
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            TabView {
-                NewsView(tabBarHeight: $tabBarHeight)
-                    .tabItem {
-                        Image(systemName: "newspaper")
-                        Text("News")
+        if horizontalSizeClass == .regular {
+            // iPad Layout
+            NavigationSplitView {
+                List {
+                    NavigationLink(destination: NewsView(tabBarHeight: $tabBarHeight)) {
+                        Label("News", systemImage: "newspaper")
                     }
-
-                SubscriptionsView()
-                    .tabItem {
-                        Image(systemName: "mail")
-                        Text("Subscriptions")
+                    NavigationLink(destination: SubscriptionsView()) {
+                        Label("Subscriptions", systemImage: "mail")
                     }
-
-                // NEW TAB: Settings
-                SettingsView()
-                    .tabItem {
-                        Image(systemName: "gearshape")
-                        Text("Settings")
+                    NavigationLink(destination: SettingsView()) {
+                        Label("Settings", systemImage: "gearshape")
                     }
-            }
-            .overlay(
-                GeometryReader { geometry in
-                    Color.clear.preference(key: TabBarHeightPreferenceKey.self, value: geometry.safeAreaInsets.bottom)
                 }
-            )
-            .onPreferenceChange(TabBarHeightPreferenceKey.self) { value in
-                tabBarHeight = value
+                .navigationTitle("Argus")
+            } detail: {
+                NewsView(tabBarHeight: $tabBarHeight)
+            }
+        } else {
+            // iPhone Layout (existing TabView)
+            ZStack(alignment: .bottom) {
+                TabView {
+                    NewsView(tabBarHeight: $tabBarHeight)
+                        .tabItem {
+                            Image(systemName: "newspaper")
+                            Text("News")
+                        }
+                    SubscriptionsView()
+                        .tabItem {
+                            Image(systemName: "mail")
+                            Text("Subscriptions")
+                        }
+                    SettingsView()
+                        .tabItem {
+                            Image(systemName: "gearshape")
+                            Text("Settings")
+                        }
+                }
+                .overlay(
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: TabBarHeightPreferenceKey.self,
+                            value: geometry.safeAreaInsets.bottom
+                        )
+                    }
+                )
+                .onPreferenceChange(TabBarHeightPreferenceKey.self) { value in
+                    tabBarHeight = value
+                }
             }
         }
     }
