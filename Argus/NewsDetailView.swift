@@ -323,6 +323,7 @@ struct NewsDetailView: View {
         notification.isViewed.toggle()
         do {
             try modelContext.save()
+            NotificationUtils.updateAppBadgeCount()
         } catch {
             print("Failed to toggle read status: \(error)")
         }
@@ -332,6 +333,7 @@ struct NewsDetailView: View {
         notification.isBookmarked.toggle()
         do {
             try modelContext.save()
+            NotificationUtils.updateAppBadgeCount()
         } catch {
             print("Failed to toggle bookmark: \(error)")
         }
@@ -341,22 +343,11 @@ struct NewsDetailView: View {
         notification.isArchived.toggle()
         do {
             try modelContext.save()
+            NotificationUtils.updateAppBadgeCount()
             NotificationCenter.default.post(name: Notification.Name("ArticleArchived"), object: nil)
             dismiss()
         } catch {
             print("Failed to toggle archive status: \(error)")
-        }
-    }
-
-    private func markAsViewed() {
-        if !notification.isViewed {
-            notification.isViewed = true
-            do {
-                try modelContext.save()
-                NotificationUtils.updateAppBadgeCount()
-            } catch {
-                print("Failed to mark notification as viewed: \(error)")
-            }
         }
     }
 
@@ -369,6 +360,18 @@ struct NewsDetailView: View {
             dismiss()
         } catch {
             print("Failed to delete notification: \(error)")
+        }
+    }
+
+    private func markAsViewed() {
+        if !notification.isViewed {
+            notification.isViewed = true
+            do {
+                try modelContext.save()
+                NotificationUtils.updateAppBadgeCount()
+            } catch {
+                print("Failed to mark notification as viewed: \(error)")
+            }
         }
     }
 }

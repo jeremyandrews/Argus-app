@@ -4,7 +4,16 @@ struct SettingsView: View {
     @AppStorage("autoDeleteDays") private var autoDeleteDays: Int = UserDefaults.standard.object(forKey: "autoDeleteDays") == nil ? 3 : UserDefaults.standard.integer(forKey: "autoDeleteDays")
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "date"
-    @AppStorage("showBadge") private var showBadge: Bool = true
+    @AppStorage("showBadge") private var showBadge: Bool = true {
+        didSet {
+            if showBadge {
+                NotificationUtils.updateAppBadgeCount()
+            } else {
+                UNUserNotificationCenter.current().updateBadgeCount(0)
+            }
+        }
+    }
+
     @AppStorage("useReaderMode") private var useReaderMode: Bool = true
 
     var body: some View {

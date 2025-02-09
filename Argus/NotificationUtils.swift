@@ -18,7 +18,6 @@ class NotificationUtils {
                 )
             ).count
 
-            // Use the UNUserNotificationCenter extension to set the badge
             UNUserNotificationCenter.current().updateBadgeCount(unviewedCount) { error in
                 if let error = error {
                     print("Failed to set badge count: \(error)")
