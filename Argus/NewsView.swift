@@ -324,7 +324,7 @@ struct NewsView: View {
     ) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 8) {
-                // TOPIC + ARCHIVED PILL
+                // TOPIC + ARCHIVED
                 HStack(spacing: 8) {
                     if let topic = notification.topic, !topic.isEmpty {
                         TopicPill(topic: topic)
@@ -381,8 +381,8 @@ struct NewsView: View {
             }
         }
         .padding()
-        .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.1)) // Highlight unread articles
-        .cornerRadius(8)
+        .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.15))
+        .cornerRadius(10)
         .id(notification.id)
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
