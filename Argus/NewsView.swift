@@ -319,23 +319,71 @@ struct NewsView: View {
 
     private func NotificationRow(
         notification: NotificationData,
-        editMode _: Binding<EditMode>?,
+        editMode: Binding<EditMode>?,
         selectedNotificationIDs: Binding<Set<NotificationData.ID>>
     ) -> some View {
         HStack {
-            rowContent(for: notification)
+            VStack(alignment: .leading, spacing: 8) {
+                // TOPIC + ARCHIVED PILL
+                HStack(spacing: 8) {
+                    if let topic = notification.topic, !topic.isEmpty {
+                        TopicPill(topic: topic)
+                    }
+                    if notification.isArchived {
+                        ArchivedPill()
+                    }
+                }
+
+                // TITLE (bold if unread)
+                let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
+                Text(AttributedString(attributedTitle))
+                    .font(.headline)
+                    .fontWeight(notification.isViewed ? .regular : .bold)
+
+                // DOMAIN
+                if let domain = notification.domain, !domain.isEmpty {
+                    Text(domain)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.blue)
+                        .lineLimit(1)
+                }
+
+                // BODY
+                let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
+                Text(AttributedString(attributedBody))
+                    .font(.system(size: 14, weight: .light))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+
+                // AFFECTED
+                if !notification.affected.isEmpty {
+                    Text(notification.affected)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+
             Spacer()
+
+            // Bookmark icon on the far trailing side
             BookmarkButton(notification: notification)
+
+            // Checkmark if in Edit mode
+            if editMode?.wrappedValue == .active {
+                if selectedNotificationIDs.wrappedValue.contains(notification.id) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.blue)
+                } else {
+                    Image(systemName: "circle")
+                        .foregroundColor(.gray)
+                }
+            }
         }
-        .padding(.vertical, 8)
-        // Highlight row if selected in Edit mode
-        .background(selectedNotificationIDs.wrappedValue.contains(notification.id)
-            ? Color.blue.opacity(0.3)
-            : Color.clear
-        )
+        .padding()
+        .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.1)) // Highlight unread articles
         .cornerRadius(8)
         .id(notification.id)
-        // Standard iOS swipe actions
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
                 toggleArchive(notification)
@@ -364,10 +412,19 @@ struct NewsView: View {
                 }
             }
         }
-        // Make the entire row tappable (tap vs. scroll is handled automatically by iOS)
         .contentShape(Rectangle())
         .onTapGesture {
-            handleTapGesture(for: notification)
+            if editMode?.wrappedValue == .active {
+                withAnimation {
+                    if selectedNotificationIDs.wrappedValue.contains(notification.id) {
+                        selectedNotificationIDs.wrappedValue.remove(notification.id)
+                    } else {
+                        selectedNotificationIDs.wrappedValue.insert(notification.id)
+                    }
+                }
+            } else {
+                handleTapGesture(for: notification)
+            }
         }
         .onLongPressGesture {
             handleLongPressGesture(for: notification)
