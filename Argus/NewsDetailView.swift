@@ -148,7 +148,6 @@ struct NewsDetailView: View {
 
             toolbarButton(icon: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox", label: "Archive") {
                 toggleArchive()
-                dismiss()
             }
 
             Spacer()
@@ -410,20 +409,42 @@ struct NewsDetailView: View {
     }
 
     private func toggleArchive() {
+        let wasArchived = notification.isArchived
         notification.isArchived.toggle()
         saveModel()
         NotificationUtils.updateAppBadgeCount()
+
+        // Only move to next article if we're archiving (not unarchiving)
+        if !wasArchived { // If it wasn't archived before (meaning we just archived it)
+            // If there are more articles after this one, move to next
+            if currentIndex < notifications.count - 1 {
+                currentIndex += 1
+                markAsViewed()
+                loadAdditionalContent()
+            } else {
+                // No more articles, dismiss the view
+                dismiss()
+            }
+        }
     }
 
     private func deleteNotification() {
         let context = ArgusApp.sharedModelContainer.mainContext
-
         AppDelegate().deleteLocalJSON(notification: notification)
         context.delete(notification)
         do {
             try modelContext.save()
             NotificationUtils.updateAppBadgeCount()
-            dismiss()
+
+            // If there are more articles after this one, move to next
+            if currentIndex < notifications.count - 1 {
+                currentIndex += 1
+                markAsViewed()
+                loadAdditionalContent()
+            } else {
+                // No more articles, dismiss the view
+                dismiss()
+            }
         } catch {
             print("Failed to delete notification: \(error)")
         }
