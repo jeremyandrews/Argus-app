@@ -40,10 +40,6 @@ struct NewsView: View {
         }
     }
 
-    private var topics: [String] {
-        return visibleTopics
-    }
-
     private var isAnyFilterActive: Bool {
         showUnreadOnly || showBookmarkedOnly || showArchivedContent
     }
@@ -66,8 +62,10 @@ struct NewsView: View {
                 return n1.date < n2.date
             case "bookmarked":
                 if n1.isBookmarked != n2.isBookmarked {
+                    // Bookmarked items appear first
                     return n1.isBookmarked
                 }
+                // Otherwise sort by date descending
                 return n1.date > n2.date
             default: // "newest"
                 return n1.date > n2.date
@@ -81,7 +79,7 @@ struct NewsView: View {
             }
             .map { (key: $0.key, notifications: $0.value) }
             .sorted {
-                // Flip the sort order of the groups based on the sortOrder
+                // Flip the sort order of the group titles based on 'sortOrder'
                 sortOrder == "oldest" ? $0.key < $1.key : $0.key > $1.key
             }
 
@@ -93,6 +91,7 @@ struct NewsView: View {
             .sorted { $0.key < $1.key }
 
         default:
+            // No grouping, single group
             return [("", sorted)]
         }
     }
@@ -100,89 +99,150 @@ struct NewsView: View {
     var body: some View {
         NavigationView {
             ZStack(alignment: .bottom) {
-                VStack {
-                    headerView
-                    topicsBar
-                    mainContentView
+                // A single List that includes our header, topic bar, and then the notifications
+                List(selection: $selectedNotificationIDs) {
+                    // Place the header & filter button at the top so it scrolls away
+                    Section {
+                        headerView
+                            // Remove the extra padding/spacing that Lists normally add:
+                            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowSeparator(.hidden)
+
+                        topicsBar
+                            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowSeparator(.hidden)
+                    }
+
+                    // Main content: either empty state or the grouped notifications
+                    if filteredNotifications.isEmpty {
+                        Section {
+                            emptyStateView
+                                // Keep it flush to edges in the list
+                                .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                .listRowSeparator(.hidden)
+                        }
+                    } else {
+                        // Build each group as a section
+                        ForEach(sortedAndGroupedNotifications, id: \.key) { group in
+                            if !group.key.isEmpty {
+                                Section(header: Text(group.key)) {
+                                    ForEach(group.notifications, id: \.id) { notification in
+                                        NotificationRow(
+                                            notification: notification,
+                                            editMode: editMode,
+                                            selectedNotificationIDs: $selectedNotificationIDs
+                                        )
+                                    }
+                                }
+                            } else {
+                                // Single group with no header
+                                ForEach(group.notifications, id: \.id) { notification in
+                                    NotificationRow(
+                                        notification: notification,
+                                        editMode: editMode,
+                                        selectedNotificationIDs: $selectedNotificationIDs
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
+                .listStyle(.plain)
+                .environment(\.editMode, editMode)
+                // Pull-to-refresh for the entire list
+                .refreshable {
+                    Task {
+                        await SyncManager.shared.sendRecentArticlesToServer()
+                    }
+                }
+                .onChange(of: allNotifications) { _, _ in
+                    updateFilteredNotifications()
+                }
+                .onChange(of: selectedTopic) { _, newTopic in
+                    // If we changed topics, reset scroll if desired
+                    if lastSelectedTopic != newTopic {
+                        needsScrollReset = true
+                        lastSelectedTopic = newTopic
+                    }
+                    updateFilteredNotifications()
+                }
+                .onChange(of: showArchivedContent) { _, _ in
+                    needsTopicReset = true
+                    updateFilteredNotifications()
+                }
+                .onChange(of: showUnreadOnly) { _, _ in
+                    needsTopicReset = true
+                    updateFilteredNotifications()
+                }
+                .onChange(of: showBookmarkedOnly) { _, _ in
+                    needsTopicReset = true
+                    updateFilteredNotifications()
+                }
+                .onChange(of: visibleTopics) { _, _ in
+                    if needsTopicReset {
+                        if !visibleTopics.contains(selectedTopic) {
+                            selectedTopic = "All"
+                        }
+                        needsTopicReset = false
+                    }
+                }
+                .onChange(of: editMode?.wrappedValue) { _, newValue in
+                    if newValue == .inactive {
+                        selectedNotificationIDs.removeAll()
+                    }
+                }
+                .onAppear {
+                    subscriptions = SubscriptionsView().loadSubscriptions()
+                    updateFilteredNotifications()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NotificationPermissionGranted"))) { _ in
+                    subscriptions = SubscriptionsView().loadSubscriptions()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleArchived"))) { _ in
+                    updateFilteredNotifications()
+                }
+                .confirmationDialog(
+                    deleteConfirmationMessage,
+                    isPresented: $showDeleteConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete", role: .destructive) {
+                        withAnimation {
+                            if let article = articleToDelete {
+                                deleteNotification(article)
+                                articleToDelete = nil
+                            } else {
+                                deleteSelectedNotifications()
+                            }
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {
+                        articleToDelete = nil
+                    }
+                }
+
+                // The filter sheet slides up from the bottom
                 if isFilterViewPresented {
                     filterSheet
+                        .zIndex(1)
                 }
+
+                // The custom bottom toolbar for Edit mode
                 if editMode?.wrappedValue == .active {
                     editToolbar
+                        .zIndex(1)
                 }
             }
+            // A trailing nav bar button to toggle Edit mode
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     customEditButton()
                 }
             }
-            .onChange(of: allNotifications) { _, _ in
-                updateFilteredNotifications()
-            }
-            .onChange(of: selectedTopic) { _, newTopic in
-                if lastSelectedTopic != newTopic {
-                    needsScrollReset = true
-                    lastSelectedTopic = newTopic
-                }
-                updateFilteredNotifications()
-            }
-            .onChange(of: showArchivedContent) { _, _ in
-                needsTopicReset = true
-                updateFilteredNotifications()
-            }
-            .onChange(of: showUnreadOnly) { _, _ in
-                needsTopicReset = true
-                updateFilteredNotifications()
-            }
-            .onChange(of: showBookmarkedOnly) { _, _ in
-                needsTopicReset = true
-                updateFilteredNotifications()
-            }
-            .onChange(of: visibleTopics) { _, _ in
-                if needsTopicReset {
-                    if !visibleTopics.contains(selectedTopic) {
-                        selectedTopic = "All"
-                    }
-                    needsTopicReset = false
-                }
-            }
-            .onChange(of: editMode?.wrappedValue) { _, newValue in
-                if newValue == .inactive {
-                    selectedNotificationIDs.removeAll()
-                }
-            }
-            .onAppear {
-                subscriptions = SubscriptionsView().loadSubscriptions()
-                updateFilteredNotifications()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NotificationPermissionGranted"))) { _ in
-                subscriptions = SubscriptionsView().loadSubscriptions()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleArchived"))) { _ in
-                updateFilteredNotifications()
-            }
-            .confirmationDialog(
-                deleteConfirmationMessage,
-                isPresented: $showDeleteConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    withAnimation {
-                        if let article = articleToDelete {
-                            deleteNotification(article)
-                            articleToDelete = nil
-                        } else {
-                            deleteSelectedNotifications()
-                        }
-                    }
-                }
-                Button("Cancel", role: .cancel) {
-                    articleToDelete = nil
-                }
-            }
         }
     }
+
+    // MARK: - Subviews
 
     var headerView: some View {
         HStack {
@@ -201,16 +261,11 @@ struct NewsView: View {
             }) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .foregroundColor(isAnyFilterActive ? .blue : .primary)
-                    .overlay(
-                        Circle()
-                            .fill(isAnyFilterActive ? .blue : .clear)
-                            .frame(width: 8, height: 8)
-                            .offset(x: 10, y: -10)
-                    )
                     .padding(.leading, 8)
             }
         }
-        .padding(.horizontal)
+        .padding()
+        .background(Color(UIColor.systemBackground))
     }
 
     var topicsBar: some View {
@@ -223,14 +278,8 @@ struct NewsView: View {
                         Text(topic)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(
-                                selectedTopic == topic
-                                    ? Color.blue
-                                    : Color.gray.opacity(0.2)
-                            )
-                            .foregroundColor(
-                                selectedTopic == topic ? .white : .primary
-                            )
+                            .background(selectedTopic == topic ? Color.blue : Color.gray.opacity(0.2))
+                            .foregroundColor(selectedTopic == topic ? .white : .primary)
                             .cornerRadius(8)
                     }
                 }
@@ -241,129 +290,62 @@ struct NewsView: View {
         .background(Color(UIColor.systemGray6))
     }
 
-    var mainContentView: some View {
-        Group {
-            if filteredNotifications.isEmpty {
-                emptyStateView
-            } else {
-                ScrollViewReader { proxy in
-                    notificationsListView
-                        .onAppear {
-                            scrollProxy = proxy
-                        }
-                }
-            }
-        }
-    }
-
     var emptyStateView: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                Text("RSS Fed")
-                    .font(.title)
-                    .padding(.bottom, 8)
-                Image("Argus")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 120, height: 120)
-                    .padding(.bottom, 8)
-                VStack(spacing: 12) {
-                    Text("No news is good news.")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    Text(getEmptyStateMessage())
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal)
+        VStack(spacing: 16) {
+            Text("RSS Fed")
+                .font(.title)
+                .padding(.bottom, 8)
+            Image("Argus")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 120, height: 120)
+                .padding(.bottom, 8)
+            VStack(spacing: 12) {
+                Text("No news is good news.")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Text(getEmptyStateMessage())
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
             }
-            .frame(maxWidth: .infinity, alignment: .top)
-            .padding()
+            .padding(.horizontal)
         }
-        .refreshable {
-            Task {
-                await SyncManager.shared.sendRecentArticlesToServer()
-            }
-        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .padding()
     }
 
-    var notificationsListView: some View {
-        List(selection: $selectedNotificationIDs) {
-            ForEach(sortedAndGroupedNotifications, id: \.key) { group in
-                if !group.key.isEmpty {
-                    // If we have a group key (date or topic), create a section
-                    Section(header: Text(group.key)) {
-                        ForEach(group.notifications, id: \.id) { notification in
-                            NotificationRow(notification: notification, editMode: editMode, selectedNotificationIDs: $selectedNotificationIDs)
-                                .onTapGesture {
-                                    handleTapGesture(for: notification)
-                                }
-                                .onLongPressGesture {
-                                    handleLongPressGesture(for: notification)
-                                }
-                        }
-                    }
-                } else {
-                    // If no group key, show notifications directly
-                    ForEach(group.notifications, id: \.id) { notification in
-                        NotificationRow(notification: notification, editMode: editMode, selectedNotificationIDs: $selectedNotificationIDs)
-                            .onTapGesture {
-                                handleTapGesture(for: notification)
-                            }
-                            .onLongPressGesture {
-                                handleLongPressGesture(for: notification)
-                            }
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                ArchiveButton(notification: notification)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: !notification.isBookmarked) {
-                                if notification.isBookmarked {
-                                    Button {
-                                        articleToDelete = notification
-                                        showDeleteConfirmation = true
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                    .tint(.red)
-                                } else {
-                                    Button(role: .destructive) {
-                                        withAnimation {
-                                            deleteNotification(notification)
-                                        }
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                            }
-                    }
-                }
-            }
-        }
-        .listStyle(PlainListStyle())
-        .environment(\.editMode, editMode)
-        .refreshable {
-            Task {
-                await SyncManager.shared.sendRecentArticlesToServer()
-            }
-        }
-        .onChange(of: filteredNotifications) { _, _ in
-            handleScrollReset()
-        }
-    }
+    // MARK: - Row building
 
-    private func NotificationRow(notification: NotificationData, editMode _: Binding<EditMode>?, selectedNotificationIDs _: Binding<Set<NotificationData.ID>>) -> some View {
+    private func NotificationRow(
+        notification: NotificationData,
+        editMode _: Binding<EditMode>?,
+        selectedNotificationIDs: Binding<Set<NotificationData.ID>>
+    ) -> some View {
         HStack {
             rowContent(for: notification)
             Spacer()
             BookmarkButton(notification: notification)
         }
         .padding(.vertical, 8)
-        .listRowBackground(notificationBackground(for: notification))
+        // Highlight row if selected in Edit mode
+        .background(selectedNotificationIDs.wrappedValue.contains(notification.id)
+            ? Color.blue.opacity(0.3)
+            : Color.clear
+        )
         .cornerRadius(8)
         .id(notification.id)
+        // Standard iOS swipe actions
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            ArchiveButton(notification: notification)
+            Button {
+                toggleArchive(notification)
+            } label: {
+                Label(
+                    notification.isArchived ? "Unarchive" : "Archive",
+                    systemImage: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox"
+                )
+            }
+            .tint(.orange)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: !notification.isBookmarked) {
             if notification.isBookmarked {
@@ -376,16 +358,23 @@ struct NewsView: View {
                 .tint(.red)
             } else {
                 Button(role: .destructive) {
-                    withAnimation {
-                        deleteNotification(notification)
-                    }
+                    deleteNotification(notification)
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
             }
         }
+        // Make the entire row tappable (tap vs. scroll is handled automatically by iOS)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            handleTapGesture(for: notification)
+        }
+        .onLongPressGesture {
+            handleLongPressGesture(for: notification)
+        }
     }
 
+    // Simplified bookmark icon on the trailing side
     private func BookmarkButton(notification: NotificationData) -> some View {
         Button {
             toggleBookmark(notification)
@@ -396,100 +385,7 @@ struct NewsView: View {
         .buttonStyle(.plain)
     }
 
-    private func ArchiveButton(notification: NotificationData) -> some View {
-        Button {
-            toggleArchive(notification)
-        } label: {
-            Label(
-                notification.isArchived ? "Unarchive" : "Archive",
-                systemImage: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox"
-            )
-        }
-        .tint(.orange)
-    }
-
-    private func DeleteButton(notification: NotificationData) -> some View {
-        Button(role: .destructive) {
-            if notification.isBookmarked {
-                articleToDelete = notification
-                showDeleteConfirmation = true
-            } else {
-                withAnimation {
-                    deleteNotification(notification)
-                }
-            }
-        } label: {
-            Label("Delete", systemImage: "trash")
-        }
-    }
-
-    private func handleEditModeDelete() {
-        if !selectedNotificationIDs.isEmpty {
-            articleToDelete = nil // Ensure we're in bulk delete mode
-            showDeleteConfirmation = true
-        }
-    }
-
-    private func deleteNotification(_ notification: NotificationData) {
-        AppDelegate().deleteLocalJSON(notification: notification)
-        modelContext.delete(notification)
-        do {
-            try modelContext.save()
-            NotificationUtils.updateAppBadgeCount()
-            updateFilteredNotifications()
-        } catch {
-            print("Failed to delete notification: \(error)")
-        }
-    }
-
-    private func deleteSelectedNotifications() {
-        withAnimation {
-            for id in selectedNotificationIDs {
-                if let notification = filteredNotifications.first(where: { $0.id == id }) {
-                    AppDelegate().deleteLocalJSON(notification: notification)
-                    modelContext.delete(notification)
-                }
-            }
-            saveChanges()
-            updateFilteredNotifications()
-            editMode?.wrappedValue = .inactive
-            selectedNotificationIDs.removeAll()
-        }
-    }
-
-    private func notificationBackground(for notification: NotificationData) -> Color {
-        notification.isViewed ? Color.clear : Color.blue.opacity(0.2)
-    }
-
-    private func handleTapGesture(for notification: NotificationData) {
-        if editMode?.wrappedValue == .active {
-            withAnimation {
-                if selectedNotificationIDs.contains(notification.id) {
-                    selectedNotificationIDs.remove(notification.id)
-                } else {
-                    selectedNotificationIDs.insert(notification.id)
-                }
-            }
-        } else {
-            openArticle(notification)
-        }
-    }
-
-    private func handleLongPressGesture(for notification: NotificationData) {
-        withAnimation {
-            if editMode?.wrappedValue == .inactive {
-                editMode?.wrappedValue = .active
-                selectedNotificationIDs.insert(notification.id)
-            }
-        }
-    }
-
-    private func handleScrollReset() {
-        if needsScrollReset {
-            scrollProxy?.scrollTo(filteredNotifications.first?.id, anchor: .top)
-            needsScrollReset = false
-        }
-    }
+    // MARK: - Toolbar and Filter Sheet
 
     var filterSheet: some View {
         VStack(spacing: 0) {
@@ -529,28 +425,32 @@ struct NewsView: View {
         HStack {
             toolbarButton(
                 icon: "envelope.badge",
-                label: "Toggle Read",
-                action: { performActionOnSelection { $0.isViewed.toggle() } }
-            )
+                label: "Toggle Read"
+            ) {
+                performActionOnSelection { $0.isViewed.toggle() }
+            }
             Spacer()
             toolbarButton(
                 icon: "bookmark",
-                label: "Bookmark",
-                action: { performActionOnSelection { toggleBookmark($0) } }
-            )
+                label: "Bookmark"
+            ) {
+                performActionOnSelection { toggleBookmark($0) }
+            }
             Spacer()
             toolbarButton(
                 icon: "archivebox",
-                label: "Archive",
-                action: { performActionOnSelection { toggleArchive($0) } }
-            )
+                label: "Archive"
+            ) {
+                performActionOnSelection { toggleArchive($0) }
+            }
             Spacer()
             toolbarButton(
                 icon: "trash",
                 label: "Delete",
-                action: { handleEditModeDelete() },
                 isDestructive: true
-            )
+            ) {
+                handleEditModeDelete()
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -559,7 +459,12 @@ struct NewsView: View {
         .shadow(radius: 10)
     }
 
-    private func toolbarButton(icon: String, label: String, action: @escaping () -> Void, isDestructive: Bool = false) -> some View {
+    private func toolbarButton(
+        icon: String,
+        label: String,
+        isDestructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
@@ -567,9 +472,9 @@ struct NewsView: View {
                 Text(label)
                     .font(.system(size: 10))
             }
+            .foregroundColor(isDestructive ? .red : .primary)
+            .frame(minWidth: 60)
         }
-        .foregroundColor(isDestructive ? .red : .primary)
-        .frame(minWidth: 60)
     }
 
     private func customEditButton() -> some View {
@@ -587,13 +492,136 @@ struct NewsView: View {
         }
     }
 
+    // MARK: - Logic / Helpers
+
+    private func handleTapGesture(for notification: NotificationData) {
+        // If in Edit mode, toggle selection
+        if editMode?.wrappedValue == .active {
+            withAnimation {
+                if selectedNotificationIDs.contains(notification.id) {
+                    selectedNotificationIDs.remove(notification.id)
+                } else {
+                    selectedNotificationIDs.insert(notification.id)
+                }
+            }
+        } else {
+            // Otherwise, open article
+            openArticle(notification)
+        }
+    }
+
+    private func handleLongPressGesture(for notification: NotificationData) {
+        // Long-press triggers Edit mode and selects the row
+        withAnimation {
+            if editMode?.wrappedValue == .inactive {
+                editMode?.wrappedValue = .active
+                selectedNotificationIDs.insert(notification.id)
+            }
+        }
+    }
+
+    private func handleEditModeDelete() {
+        if !selectedNotificationIDs.isEmpty {
+            // If user is deleting multiple selected rows
+            articleToDelete = nil
+            showDeleteConfirmation = true
+        }
+    }
+
+    private func deleteNotification(_ notification: NotificationData) {
+        AppDelegate().deleteLocalJSON(notification: notification)
+        modelContext.delete(notification)
+        do {
+            try modelContext.save()
+            NotificationUtils.updateAppBadgeCount()
+            updateFilteredNotifications()
+        } catch {
+            print("Failed to delete notification: \(error)")
+        }
+    }
+
+    private func deleteSelectedNotifications() {
+        withAnimation {
+            for id in selectedNotificationIDs {
+                if let notification = filteredNotifications.first(where: { $0.id == id }) {
+                    AppDelegate().deleteLocalJSON(notification: notification)
+                    modelContext.delete(notification)
+                }
+            }
+            saveChanges()
+            updateFilteredNotifications()
+            editMode?.wrappedValue = .inactive
+            selectedNotificationIDs.removeAll()
+        }
+    }
+
+    private func toggleBookmark(_ notification: NotificationData) {
+        notification.isBookmarked.toggle()
+        if notification.isBookmarked {
+            AppDelegate().saveJSONLocally(notification: notification)
+        } else {
+            AppDelegate().deleteLocalJSON(notification: notification)
+        }
+        saveChanges()
+        updateFilteredNotifications()
+    }
+
+    private func toggleArchive(_ notification: NotificationData) {
+        withAnimation {
+            notification.isArchived.toggle()
+            saveChanges()
+            updateFilteredNotifications()
+        }
+    }
+
+    private func performActionOnSelection(action: (NotificationData) -> Void) {
+        if !selectedNotificationIDs.isEmpty {
+            for id in selectedNotificationIDs {
+                if let notification = filteredNotifications.first(where: { $0.id == id }) {
+                    action(notification)
+                }
+            }
+            saveChanges()
+            updateFilteredNotifications()
+
+            withAnimation {
+                editMode?.wrappedValue = .inactive
+                selectedNotificationIDs.removeAll()
+            }
+        }
+    }
+
+    private func saveChanges() {
+        do {
+            try modelContext.save()
+            NotificationUtils.updateAppBadgeCount()
+        } catch {
+            print("Failed to save changes: \(error)")
+        }
+    }
+
     private func updateFilteredNotifications() {
         filteredNotifications = allNotifications.filter { notification in
-            let topicCondition = selectedTopic == "All" || notification.topic == selectedTopic
+            let topicCondition = (selectedTopic == "All" || notification.topic == selectedTopic)
             let archivedCondition = showArchivedContent || !notification.isArchived
             let unreadCondition = !showUnreadOnly || !notification.isViewed
             let bookmarkedCondition = !showBookmarkedOnly || notification.isBookmarked
             return topicCondition && archivedCondition && unreadCondition && bookmarkedCondition
+        }
+    }
+
+    private func openArticle(_ notification: NotificationData) {
+        let detailView = NewsDetailView(notification: notification)
+            .environment(\.modelContext, modelContext)
+        let hostingController = UIHostingController(rootView: detailView)
+        // Force full-screen on iPad for consistency
+        hostingController.modalPresentationStyle = .fullScreen
+
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController
+        {
+            rootViewController.present(hostingController, animated: true)
         }
     }
 
@@ -621,55 +649,13 @@ struct NewsView: View {
         return message
     }
 
-    private func openArticle(_ notification: NotificationData) {
-        let detailView = NewsDetailView(notification: notification)
-            .environment(\.modelContext, modelContext)
-        let hostingController = UIHostingController(rootView: detailView)
-
-        // The line below forces a full-screen presentation on iPad
-        // so it looks consistent with the iPhone experience.
-        hostingController.modalPresentationStyle = .fullScreen
-
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController
-        {
-            rootViewController.present(hostingController, animated: true, completion: nil)
-        }
-    }
-
-    private func toggleBookmark(_ notification: NotificationData) {
-        notification.isBookmarked.toggle()
-        if notification.isBookmarked {
-            AppDelegate().saveJSONLocally(notification: notification)
-        } else {
-            AppDelegate().deleteLocalJSON(notification: notification)
-        }
-        saveChanges()
-        updateFilteredNotifications()
-    }
-
-    private func toggleArchive(_ notification: NotificationData) {
-        notification.isArchived.toggle()
-        saveChanges()
-        updateFilteredNotifications()
-    }
-
-    private func saveChanges() {
-        do {
-            try modelContext.save()
-            NotificationUtils.updateAppBadgeCount()
-        } catch {
-            print("Failed to save changes: \(error)")
-        }
-    }
+    // MARK: - Row Content Helpers
 
     private func rowContent(for notification: NotificationData) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Top row: topic pill + archived pill
             HStack(spacing: 8) {
-                if let topic = notification.topic,
-                   !topic.isEmpty
-                {
+                if let topic = notification.topic, !topic.isEmpty {
                     TopicPill(topic: topic)
                 }
                 if notification.isArchived {
@@ -678,11 +664,15 @@ struct NewsView: View {
             }
             .padding(.horizontal, 10)
 
+            // Title
             let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
             Text(AttributedString(attributedTitle))
                 .font(.headline)
                 .lineLimit(2)
                 .foregroundColor(.primary)
+                .padding(.horizontal, 10)
+
+            // Domain (optional)
             if let domain = notification.domain, !domain.isEmpty {
                 Text(domain)
                     .font(.system(size: 16, weight: .medium))
@@ -690,46 +680,28 @@ struct NewsView: View {
                     .lineLimit(1)
                     .padding(.horizontal, 10)
             }
-            if !notification.article_title.isEmpty {
-                Text(notification.article_title)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.primary)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, 10)
-            }
+
+            // Body
             let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
             Text(AttributedString(attributedBody))
                 .font(.system(size: 14, weight: .light))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.leading)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 10)
+
+            // Affected (optional)
             if !notification.affected.isEmpty {
                 Text(notification.affected)
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, 18)
             }
         }
     }
-
-    private func performActionOnSelection(action: (NotificationData) -> Void) {
-        if !selectedNotificationIDs.isEmpty {
-            for id in selectedNotificationIDs {
-                if let notification = filteredNotifications.first(where: { $0.id == id }) {
-                    action(notification)
-                }
-            }
-            saveChanges()
-            updateFilteredNotifications()
-
-            withAnimation {
-                editMode?.wrappedValue = .inactive
-                selectedNotificationIDs.removeAll()
-            }
-        }
-    }
 }
+
+// MARK: - Pills
 
 struct ArchivedPill: View {
     var body: some View {
@@ -763,25 +735,7 @@ struct TopicPill: View {
     }
 }
 
-extension View {
-    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
-        clipShape(RoundedCorner(radius: radius, corners: corners))
-    }
-}
-
-struct RoundedCorner: Shape {
-    var radius: CGFloat = .infinity
-    var corners: UIRectCorner = .allCorners
-
-    func path(in rect: CGRect) -> Path {
-        let path = UIBezierPath(
-            roundedRect: rect,
-            byRoundingCorners: corners,
-            cornerRadii: CGSize(width: radius, height: radius)
-        )
-        return Path(path.cgPath)
-    }
-}
+// MARK: - FilterView
 
 struct FilterView: View {
     @Binding var showUnreadOnly: Bool
@@ -801,5 +755,27 @@ struct FilterView: View {
         .background(Color(UIColor.systemBackground))
         .cornerRadius(15, corners: [.topLeft, .topRight])
         .shadow(radius: 10)
+    }
+}
+
+// MARK: - RoundedCorner Utility
+
+extension View {
+    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
+        clipShape(RoundedCorner(radius: radius, corners: corners))
+    }
+}
+
+struct RoundedCorner: Shape {
+    var radius: CGFloat = .infinity
+    var corners: UIRectCorner = .allCorners
+
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        )
+        return Path(path.cgPath)
     }
 }
