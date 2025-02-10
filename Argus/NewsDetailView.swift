@@ -5,6 +5,17 @@ import SwiftyMarkdown
 import WebKit
 
 struct NewsDetailView: View {
+    // Instead of a single NotificationData, we now hold the entire
+    // array of filtered notifications plus the current index:
+    @State private var notifications: [NotificationData]
+    @State private var currentIndex: Int
+
+    // The currently displayed article
+    private var notification: NotificationData {
+        notifications[currentIndex]
+    }
+
+    // Additional logic carried over from original
     @State private var showDeleteConfirmation = false
     @State private var additionalContent: [String: Any]? = nil
     @State private var isLoadingAdditionalContent = false
@@ -20,35 +31,37 @@ struct NewsDetailView: View {
     @State private var isSharePresented = false
     @State private var selectedSections: Set<String> = []
     @State private var articleContent: String? = nil
-    var notification: NotificationData
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    struct ContentView: View {
-        var body: some View {
-            ArgusDetailsView(technicalData: (
-                "ArgusModel v1.0",
-                0.1234,
-                Date(),
-                "200066:16514:419:0:0:1"
-            ))
-        }
-    }
-
-    // Preview
-    struct ContentView_Previews: PreviewProvider {
-        static var previews: some View {
-            ContentView()
-        }
+    init(notifications: [NotificationData], currentIndex: Int) {
+        // We must store them in State so we can mutate currentIndex
+        _notifications = State(initialValue: notifications)
+        _currentIndex = State(initialValue: currentIndex)
     }
 
     var body: some View {
-        VStack {
-            topBar
-            titleView
-            contentScrollView
-            Spacer()
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Top bar with Back, Previous, Next
+                topBar
+
+                // The main scrollable content
+                ScrollView {
+                    // Render article info in a style similar to how
+                    // rows are displayed in NewsView.
+                    articleHeaderStyle
+
+                    // Load any additional sections from the JSON
+                    additionalSectionsView
+                }
+
+                // The bottom toolbar
+                bottomToolbar
+            }
         }
+        .navigationBarHidden(true)
         .onAppear {
             markAsViewed()
             loadAdditionalContent()
@@ -60,9 +73,16 @@ struct NewsDetailView: View {
             Button("Cancel", role: .cancel) {}
         }
         .sheet(isPresented: $isSharePresented) {
-            ShareSelectionView(content: additionalContent, notification: notification, selectedSections: $selectedSections, isPresented: $isSharePresented)
+            // Reuse the original share logic
+            ShareSelectionView(
+                content: additionalContent,
+                notification: notification,
+                selectedSections: $selectedSections,
+                isPresented: $isSharePresented
+            )
         }
         .gesture(
+            // Allow swiping from left edge to dismiss (optional)
             DragGesture()
                 .onEnded { value in
                     if value.translation.width > 100 {
@@ -72,113 +92,147 @@ struct NewsDetailView: View {
         )
     }
 
+    // MARK: - Top Bar
+
     private var topBar: some View {
-        HStack(spacing: 16) {
+        HStack {
             Button(action: { dismiss() }) {
-                Image(systemName: "chevron.left")
-                    .font(.title2)
-                    .foregroundColor(.primary)
+                Image(systemName: "xmark")
             }
+            .padding(.leading, 8)
+
             Spacer()
-            Button(action: { toggleReadStatus() }) {
-                Image(systemName: notification.isViewed ? "envelope.open" : "envelope.badge")
-                    .foregroundColor(notification.isViewed ? .gray : .blue)
-            }
-            Button(action: { toggleBookmark() }) {
-                Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
-                    .foregroundColor(notification.isBookmarked ? .blue : .gray)
-            }
-            Button(action: { isSharePresented = true }) {
-                Image(systemName: "square.and.arrow.up")
-                    .foregroundColor(.blue)
-            }
-            Button(action: { toggleArchive() }) {
-                Image(systemName: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox")
-                    .foregroundColor(notification.isArchived ? .orange : .gray)
-            }
-            Button(role: .destructive, action: { showDeleteConfirmation = true }) {
-                Image(systemName: "trash")
-                    .foregroundColor(.red)
-            }
-        }
-        .padding()
-    }
 
-    private var titleView: some View {
-        Group {
-            if let content = additionalContent, let articleURL = content["url"] as? String, let link = URL(string: articleURL) {
-                Button(action: { UIApplication.shared.open(link) }) {
-                    Text(notification.title)
-                        .font(.title3)
-                        .bold()
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 16) {
+                Button {
+                    goToPrevious()
+                } label: {
+                    Image(systemName: "chevron.left")
                 }
-                .padding([.leading, .trailing])
+                .disabled(currentIndex == 0)
+
+                Button {
+                    goToNext()
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .disabled(currentIndex == notifications.count - 1)
             }
+            .padding(.trailing, 8)
+        }
+        .padding(.vertical, 8)
+        .background(Color(UIColor.systemBackground))
+    }
+
+    // MARK: - Bottom Toolbar
+
+    private var bottomToolbar: some View {
+        HStack {
+            toolbarButton(icon: "envelope.badge", label: "Read") {
+                toggleReadStatus()
+            }
+
+            Spacer()
+
+            toolbarButton(icon: notification.isBookmarked ? "bookmark.fill" : "bookmark", label: "Bookmark") {
+                toggleBookmark()
+            }
+
+            Spacer()
+
+            toolbarButton(icon: "square.and.arrow.up", label: "Share") {
+                isSharePresented = true
+            }
+
+            Spacer()
+
+            toolbarButton(icon: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox", label: "Archive") {
+                toggleArchive()
+                dismiss()
+            }
+
+            Spacer()
+
+            toolbarButton(icon: "trash", label: "Delete", isDestructive: true) {
+                showDeleteConfirmation = true
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Color(UIColor.systemBackground))
+    }
+
+    private func toolbarButton(
+        icon: String,
+        label: String,
+        isDestructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 22))
+                Text(label)
+                    .font(.system(size: 10))
+            }
+            .foregroundColor(isDestructive ? .red : .primary)
+            .frame(minWidth: 60)
         }
     }
 
-    private var contentScrollView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                domainView
-                articleTitleView
-                bodyContentView
-                affectedTextView
-                additionalContentView
-            }
-        }
-    }
+    // MARK: - Main Article Header (Similar to NotificationRow layout)
 
-    private var domainView: some View {
-        Group {
+    private var articleHeaderStyle: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Topic pill + "Archived" pill, if needed
+            HStack(spacing: 8) {
+                if let topic = notification.topic, !topic.isEmpty {
+                    // Uses the TopicPill from NewsView.swift
+                    TopicPill(topic: topic)
+                }
+                if notification.isArchived {
+                    // Uses the ArchivedPill from NewsView.swift
+                    ArchivedPill()
+                }
+            }
+
+            // Title (bold if unread)
+            let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
+            Text(AttributedString(attributedTitle))
+                .font(.headline)
+                .fontWeight(notification.isViewed ? .regular : .bold)
+
+            // Domain
             if let domain = notification.domain, !domain.isEmpty {
                 Text(domain)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.blue)
-                    .lineLimit(1)
-                    .padding(.horizontal, 10)
             }
-        }
-    }
 
-    private var articleTitleView: some View {
-        Group {
-            if !notification.article_title.isEmpty {
-                Text(notification.article_title)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.primary)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, 10)
-                    .textSelection(.enabled)
-            }
-        }
-    }
+            // Body
+            let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
+            Text(AttributedString(attributedBody))
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.leading)
 
-    private var bodyContentView: some View {
-        let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
-        return Text(AttributedString(attributedBody))
-            .font(.footnote)
-            .padding([.leading, .trailing])
-            .textSelection(.enabled)
-    }
-
-    private var affectedTextView: some View {
-        Group {
+            // Affected (optional)
             if !notification.affected.isEmpty {
                 Text(notification.affected)
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
-                    .padding([.leading, .trailing, .top])
-                    .textSelection(.enabled)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.15))
     }
 
-    private var additionalContentView: some View {
-        Group {
+    // MARK: - Additional Sections
+
+    private var additionalSectionsView: some View {
+        VStack(alignment: .leading, spacing: 8) {
             if isLoadingAdditionalContent {
                 ProgressView("Loading additional content...")
                     .padding()
@@ -210,6 +264,7 @@ struct NewsDetailView: View {
     }
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
+        // Same logic as original
         [
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
             ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
@@ -235,18 +290,16 @@ struct NewsDetailView: View {
                 ArgusDetailsView(technicalData: technicalData)
             } else if section.header == "Preview" {
                 VStack {
-                    if let url = section.content as? String, let articleURL = URL(string: url) {
+                    if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
                         SafariView(url: articleURL)
                             .frame(height: 450)
-                    } else {
-                        Text("Invalid URL")
-                            .frame(height: 450)
-                    }
-                    if let url = section.content as? String, let articleURL = URL(string: url) {
                         Button("Open in Browser") {
                             UIApplication.shared.open(articleURL)
                         }
                         .padding(.top)
+                    } else {
+                        Text("Invalid URL")
+                            .frame(height: 450)
                     }
                 }
             } else if let markdownContent = section.content as? String {
@@ -259,7 +312,10 @@ struct NewsDetailView: View {
         }
     }
 
+    // MARK: - Loading Additional Content
+
     private func loadAdditionalContent() {
+        // Keep all your original logic
         if notification.isBookmarked {
             let localFileURL = AppDelegate().getLocalFileURL(for: notification)
             if FileManager.default.fileExists(atPath: localFileURL.path) {
@@ -275,9 +331,8 @@ struct NewsDetailView: View {
             }
         }
 
-        // Fallback to downloading the content if not bookmarked or local file unavailable
-        let jsonURL = notification.json_url // json_url is now guaranteed to be non-optional
-
+        // If not bookmarked or local file is missing, fetch from network
+        let jsonURL = notification.json_url
         guard let url = URL(string: jsonURL) else {
             print("Error: Invalid JSON URL \(jsonURL)")
             return
@@ -301,7 +356,7 @@ struct NewsDetailView: View {
 
     private func loadArticleContent(url: String) {
         guard let url = URL(string: url) else { return }
-        articleContent = nil // Reset content to show loading indicator
+        articleContent = nil
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
@@ -319,41 +374,52 @@ struct NewsDetailView: View {
         }
     }
 
+    // MARK: - Prev/Next Navigation
+
+    private func goToPrevious() {
+        guard currentIndex > 0 else { return }
+        currentIndex -= 1
+        markAsViewed()
+        loadAdditionalContent()
+    }
+
+    private func goToNext() {
+        guard currentIndex < notifications.count - 1 else { return }
+        currentIndex += 1
+        markAsViewed()
+        loadAdditionalContent()
+    }
+
+    // MARK: - Action Buttons
+
     private func toggleReadStatus() {
         notification.isViewed.toggle()
-        do {
-            try modelContext.save()
-            NotificationUtils.updateAppBadgeCount()
-        } catch {
-            print("Failed to toggle read status: \(error)")
-        }
+        saveModel()
+        NotificationUtils.updateAppBadgeCount()
     }
 
     private func toggleBookmark() {
         notification.isBookmarked.toggle()
-        do {
-            try modelContext.save()
-            NotificationUtils.updateAppBadgeCount()
-        } catch {
-            print("Failed to toggle bookmark: \(error)")
+        if notification.isBookmarked {
+            AppDelegate().saveJSONLocally(notification: notification)
+        } else {
+            AppDelegate().deleteLocalJSON(notification: notification)
         }
+        saveModel()
+        NotificationUtils.updateAppBadgeCount()
     }
 
     private func toggleArchive() {
         notification.isArchived.toggle()
-        do {
-            try modelContext.save()
-            NotificationUtils.updateAppBadgeCount()
-            NotificationCenter.default.post(name: Notification.Name("ArticleArchived"), object: nil)
-            dismiss()
-        } catch {
-            print("Failed to toggle archive status: \(error)")
-        }
+        saveModel()
+        NotificationUtils.updateAppBadgeCount()
     }
 
     private func deleteNotification() {
+        let context = ArgusApp.sharedModelContainer.mainContext
+
         AppDelegate().deleteLocalJSON(notification: notification)
-        modelContext.delete(notification)
+        context.delete(notification)
         do {
             try modelContext.save()
             NotificationUtils.updateAppBadgeCount()
@@ -363,18 +429,26 @@ struct NewsDetailView: View {
         }
     }
 
+    // Mark as viewed on appear or after switching items
     private func markAsViewed() {
         if !notification.isViewed {
             notification.isViewed = true
-            do {
-                try modelContext.save()
-                NotificationUtils.updateAppBadgeCount()
-            } catch {
-                print("Failed to mark notification as viewed: \(error)")
-            }
+            saveModel()
+            NotificationUtils.updateAppBadgeCount()
+        }
+    }
+
+    // Helper
+    private func saveModel() {
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to save context: \(error)")
         }
     }
 }
+
+// MARK: - ContentSection and Utility Views (unchanged from original)
 
 struct ContentSection {
     let header: String

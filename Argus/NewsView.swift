@@ -693,10 +693,17 @@ struct NewsView: View {
     }
 
     private func openArticle(_ notification: NotificationData) {
-        let detailView = NewsDetailView(notification: notification)
-            .environment(\.modelContext, modelContext)
+        guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
+            return
+        }
+
+        let detailView = NewsDetailView(
+            notifications: filteredNotifications,
+            currentIndex: index
+        )
+        .environment(\.modelContext, modelContext)
+
         let hostingController = UIHostingController(rootView: detailView)
-        // Force full-screen on iPad for consistency
         hostingController.modalPresentationStyle = .fullScreen
 
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
