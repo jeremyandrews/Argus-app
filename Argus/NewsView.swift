@@ -351,15 +351,14 @@ struct NewsView: View {
                     .font(.headline)
                     .fontWeight(notification.isViewed ? .regular : .bold)
 
-                // DOMAIN
-                if let domain = notification.domain, !domain.isEmpty {
-                    Text(domain)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.blue)
-                        .lineLimit(1)
+                // PUBLICATION DATE
+                if let pubDate = notification.pub_date {
+                    Text(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
 
-                // BODY
+                // SUMMARY
                 let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
                 Text(AttributedString(attributedBody))
                     .font(.system(size: 14, weight: .light))
@@ -369,9 +368,17 @@ struct NewsView: View {
                 // AFFECTED
                 if !notification.affected.isEmpty {
                     Text(notification.affected)
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
+                }
+
+                // DOMAIN
+                if let domain = notification.domain, !domain.isEmpty {
+                    Text(domain)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.blue)
+                        .lineLimit(1)
                 }
             }
 

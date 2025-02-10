@@ -52,6 +52,7 @@ class SyncManager {
                     print("Invalid JSON structure for URL: \(urlString)")
                     continue
                 }
+
                 let title = json["tiny_title"] as? String ?? "Untitled"
                 let body = json["tiny_summary"] as? String ?? "No content available"
                 let topic = json["topic"] as? String
@@ -60,7 +61,15 @@ class SyncManager {
                 let article_url = json["url"] as? String ?? "none"
                 let domain = URL(string: article_url)?.host
 
-                // Use saveNotification to save the notification and SeenArticle
+                var pubDate: Date?
+                if let pubDateString = json["pub_date"] as? String {
+                    let isoFormatter = ISO8601DateFormatter()
+                    if let parsed = isoFormatter.date(from: pubDateString) {
+                        pubDate = parsed
+                    }
+                }
+
+                // Then pass it to saveNotification
                 saveNotification(
                     title: title,
                     body: body,
@@ -69,13 +78,15 @@ class SyncManager {
                     articleTitle: articleTitle,
                     affected: affected,
                     domain: domain,
+                    pubDate: pubDate,
                     suppressBadgeUpdate: true
                 )
             } catch {
                 print("Failed to fetch or save unseen article for URL \(urlString): \(error)")
             }
         }
-        // Now update the badge just once at the end:
+
+        // Update the badge just once at the end:
         NotificationUtils.updateAppBadgeCount()
     }
 
@@ -87,13 +98,14 @@ class SyncManager {
         articleTitle: String,
         affected: String,
         domain: String?,
+        pubDate: Date? = nil, // new parameter
         suppressBadgeUpdate: Bool = false
     ) {
         let context = ArgusApp.sharedModelContainer.mainContext
 
         do {
             try context.transaction { [context] in
-                // Check for existing entries within the transaction
+                // Check for existing
                 let existingNotification = try context.fetch(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { $0.json_url == json_url })
                 ).first
@@ -107,21 +119,22 @@ class SyncManager {
                     return
                 }
 
-                // Create and save the new notification
+                // Create the new NotificationData
                 let newNotification = NotificationData(
-                    date: Date(),
+                    date: Date(), // the date Argus received it
                     title: title,
                     body: body,
                     json_url: json_url,
                     topic: topic,
                     article_title: articleTitle,
                     affected: affected,
-                    domain: domain
+                    domain: domain,
+                    pub_date: pubDate ?? Date()
                 )
 
                 context.insert(newNotification)
 
-                // Add a SeenArticle entry
+                // Also create a SeenArticle entry
                 let seenArticle = SeenArticle(
                     id: newNotification.id,
                     json_url: json_url,
@@ -130,7 +143,6 @@ class SyncManager {
                 context.insert(seenArticle)
             }
 
-            // Only update the badge if we haven't suppressed it
             if !suppressBadgeUpdate {
                 NotificationUtils.updateAppBadgeCount()
             }

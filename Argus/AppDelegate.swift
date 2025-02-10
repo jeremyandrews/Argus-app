@@ -118,6 +118,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let affected = data["affected"] as? String ?? ""
         let domain = data["domain"] as? String
 
+        // Extract pub_date
+        var pubDate: Date? = nil
+        if let pubDateString = data["pub_date"] as? String {
+            let isoFormatter = ISO8601DateFormatter()
+            pubDate = isoFormatter.date(from: pubDateString)
+        }
+
         // Create timeout task
         let timeoutTask = Task {
             try await Task.sleep(nanoseconds: 25_000_000_000) // 25 seconds
@@ -133,7 +140,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             topic: topic,
             articleTitle: articleTitle,
             affected: affected,
-            domain: domain
+            domain: domain,
+            pubDate: pubDate
         )
 
         Task { @MainActor in
@@ -161,6 +169,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let affected = data["affected"] as? String ?? ""
         let domain = data["domain"] as? String ?? "[unknown]"
 
+        // Extract pub_date
+        var pubDate: Date? = nil
+        if let pubDateString = data["pub_date"] as? String {
+            let isoFormatter = ISO8601DateFormatter()
+            pubDate = isoFormatter.date(from: pubDateString)
+        }
+
         // Save the notification with all extracted details
         saveNotification(
             title: title,
@@ -169,11 +184,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             topic: topic,
             articleTitle: articleTitle,
             affected: affected,
-            domain: domain
+            domain: domain,
+            pubDate: pubDate
         )
     }
 
-    private func saveNotification(title: String, body: String, json_url: String, topic: String?, articleTitle: String, affected: String, domain: String?) {
+    private func saveNotification(title: String, body: String, json_url: String, topic: String?, articleTitle: String, affected: String, domain: String?, pubDate: Date? = nil, suppressBadgeUpdate _: Bool = false) {
         let context = ArgusApp.sharedModelContainer.mainContext
 
         // Check for existing notification with same json_url
@@ -193,7 +209,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                     topic: topic,
                     articleTitle: articleTitle,
                     affected: affected,
-                    domain: domain
+                    domain: domain,
+                    pubDate: pubDate ?? Date()
                 )
             }
         } catch {
@@ -374,6 +391,7 @@ class NotificationData {
     @Attribute var article_title: String = ""
     @Attribute var affected: String = ""
     @Attribute var domain: String?
+    @Attribute var pub_date: Date?
 
     init(
         id: UUID = UUID(),
@@ -386,7 +404,8 @@ class NotificationData {
         affected: String,
         domain: String? = nil,
         isViewed: Bool = false,
-        isBookmarked: Bool = false
+        isBookmarked: Bool = false,
+        pub_date: Date? = nil
     ) {
         self.id = id
         self.date = date
@@ -399,6 +418,7 @@ class NotificationData {
         self.domain = domain
         self.isViewed = isViewed
         self.isBookmarked = isBookmarked
+        self.pub_date = pub_date
     }
 }
 

@@ -218,11 +218,11 @@ struct NewsDetailView: View {
                 .font(.headline)
                 .fontWeight(notification.isViewed ? .regular : .bold)
 
-            // Domain
-            if let domain = notification.domain, !domain.isEmpty {
-                Text(domain)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.blue)
+            // Publication Date
+            if let pubDate = notification.pub_date {
+                Text("Published: \(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
             }
 
             // Body
@@ -238,6 +238,13 @@ struct NewsDetailView: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
+            }
+
+            // Domain
+            if let domain = notification.domain, !domain.isEmpty {
+                Text(domain)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
             }
         }
         .padding(.horizontal, 16)
