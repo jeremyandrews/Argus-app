@@ -2,11 +2,17 @@ import SwiftData
 import SwiftUI
 import SwiftyMarkdown
 
+extension Date {
+    var dayOnly: Date {
+        Calendar.current.startOfDay(for: self)
+    }
+}
+
 struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.editMode) private var editMode
 
-    @Query(sort: \NotificationData.date, order: .reverse) private var allNotifications: [NotificationData]
+    @Query private var allNotifications: [NotificationData]
 
     @State private var filteredNotifications: [NotificationData] = []
     @State private var selectedNotificationIDs: Set<NotificationData.ID> = []
@@ -74,21 +80,26 @@ struct NewsView: View {
 
         switch groupingStyle {
         case "date":
-            return Dictionary(grouping: sorted) { notification in
-                notification.date.formatted(date: .abbreviated, time: .omitted)
+            let groupedByDay = Dictionary(grouping: sorted) { $0.date.dayOnly }
+
+            // Sort day-keys ascending for "oldest", descending otherwise:
+            let sortedDayKeys = groupedByDay.keys.sorted { d1, d2 in
+                sortOrder == "oldest" ? (d1 < d2) : (d1 > d2)
             }
-            .map { (key: $0.key, notifications: $0.value) }
-            .sorted {
-                // Flip the sort order of the group titles based on 'sortOrder'
-                sortOrder == "oldest" ? $0.key < $1.key : $0.key > $1.key
+
+            // Map each day -> a (key: string, notifications: [NotificationData])
+            return sortedDayKeys.map { dateKey in
+                let sectionTitle = dateKey.formatted(.dateTime.month(.abbreviated).day().year())
+                let items = groupedByDay[dateKey] ?? []
+                return (key: sectionTitle, notifications: items)
             }
 
         case "topic":
-            return Dictionary(grouping: sorted) { notification in
-                notification.topic ?? "Uncategorized"
-            }
-            .map { (key: $0.key, notifications: $0.value) }
-            .sorted { $0.key < $1.key }
+            // Unchanged from original
+            let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
+            return groupedByTopic
+                .map { (key: $0.key, notifications: $0.value) }
+                .sorted { $0.key < $1.key } // Alphabetical
 
         default:
             // No grouping, single group
