@@ -424,7 +424,11 @@ struct NewsView: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture {
+        .onTapGesture(count: 2) {
+            // Double-tap toggles read/unread
+            toggleReadStatus(notification)
+        }
+        .onTapGesture(count: 1) {
             if editMode?.wrappedValue == .active {
                 withAnimation {
                     if selectedNotificationIDs.wrappedValue.contains(notification.id) {
@@ -620,6 +624,16 @@ struct NewsView: View {
             updateFilteredNotifications()
             editMode?.wrappedValue = .inactive
             selectedNotificationIDs.removeAll()
+        }
+    }
+
+    private func toggleReadStatus(_ notification: NotificationData) {
+        notification.isViewed.toggle()
+        do {
+            try modelContext.save()
+            NotificationUtils.updateAppBadgeCount()
+        } catch {
+            print("Failed to toggle read status: \(error)")
         }
     }
 
