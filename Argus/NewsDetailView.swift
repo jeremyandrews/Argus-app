@@ -174,8 +174,25 @@ struct NewsDetailView: View {
                 Text(label)
                     .font(.system(size: 10))
             }
-            .foregroundColor(isDestructive ? .red : .primary)
+            .foregroundColor(buttonColor(label: label, isDestructive: isDestructive))
             .frame(minWidth: 60)
+        }
+    }
+
+    private func buttonColor(label: String, isDestructive: Bool) -> Color {
+        if isDestructive {
+            return .red
+        }
+
+        switch label {
+        case "Read":
+            return notification.isViewed ? .primary : Color.blue.opacity(0.6)
+        case "Bookmark":
+            return notification.isBookmarked ? .blue : .primary
+        case "Archive":
+            return notification.isArchived ? .orange : .primary
+        default:
+            return .primary
         }
     }
 
