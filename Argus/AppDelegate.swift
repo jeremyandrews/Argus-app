@@ -383,13 +383,11 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             // Get json_url, check if priority is "high"
             if
                 let data = userInfo["data"] as? [String: AnyObject],
-                let jsonURL = data["json_url"] as? String,
-                let priority = data["priority"] as? String,
-                priority.lowercased() == "high"
+                let jsonURL = data["json_url"] as? String
             {
                 // Dispatch onto the main queue to update the UI
                 DispatchQueue.main.async {
-                    self.presentHighPriorityArticle(jsonURL: jsonURL)
+                    self.presentArticle(jsonURL: jsonURL)
                 }
             }
         }
@@ -397,21 +395,17 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         completionHandler()
     }
 
-    private func presentHighPriorityArticle(jsonURL: String) {
-        // 1) Attempt to look up the NotificationData by json_url in SwiftData:
+    private func presentArticle(jsonURL: String) {
+        // 1) Look up the NotificationData:
         let context = ArgusApp.sharedModelContainer.mainContext
-        let matchingNotificationData = try? context.fetch(
+        guard let notification = try? context.fetch(
             FetchDescriptor<NotificationData>(predicate: #Predicate { $0.json_url == jsonURL })
-        ).first
-
-        guard let notification = matchingNotificationData else {
-            // If it doesn’t yet exist in SwiftData for some reason, you could
-            // either fetch from the network or show an alert. For brevity:
-            print("No matching NotificationData found with json_url=\(jsonURL)")
+        ).first else {
+            print("No matching NotificationData found for json_url=\(jsonURL)")
             return
         }
 
-        // 2) Dismiss any currently presented view, if necessary
+        // 2) Dismiss any existing models
         guard
             let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
             let window = windowScene.windows.first,
@@ -434,7 +428,6 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 
         let hostingController = UIHostingController(rootView: detailView)
         hostingController.modalPresentationStyle = .fullScreen
-
         rootVC.present(hostingController, animated: true, completion: nil)
     }
 }
