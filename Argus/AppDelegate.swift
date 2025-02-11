@@ -371,9 +371,71 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound])
     }
 
-    func userNotificationCenter(_: UNUserNotificationCenter, didReceive _: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        // No saving here, as the notification should already be saved in the background
+    func userNotificationCenter(
+        _: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+
+        // If the user actually tapped on a push, parse out the relevant data.
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            // Get json_url, check if priority is "high"
+            if
+                let data = userInfo["data"] as? [String: AnyObject],
+                let jsonURL = data["json_url"] as? String,
+                let priority = data["priority"] as? String,
+                priority.lowercased() == "high"
+            {
+                // Dispatch onto the main queue to update the UI
+                DispatchQueue.main.async {
+                    self.presentHighPriorityArticle(jsonURL: jsonURL)
+                }
+            }
+        }
+
         completionHandler()
+    }
+
+    private func presentHighPriorityArticle(jsonURL: String) {
+        // 1) Attempt to look up the NotificationData by json_url in SwiftData:
+        let context = ArgusApp.sharedModelContainer.mainContext
+        let matchingNotificationData = try? context.fetch(
+            FetchDescriptor<NotificationData>(predicate: #Predicate { $0.json_url == jsonURL })
+        ).first
+
+        guard let notification = matchingNotificationData else {
+            // If it doesn’t yet exist in SwiftData for some reason, you could
+            // either fetch from the network or show an alert. For brevity:
+            print("No matching NotificationData found with json_url=\(jsonURL)")
+            return
+        }
+
+        // 2) Dismiss any currently presented view, if necessary
+        guard
+            let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+            let window = windowScene.windows.first,
+            let rootVC = window.rootViewController
+        else {
+            return
+        }
+
+        if let presented = rootVC.presentedViewController {
+            // If something is already presented (e.g. a NewsDetailView), dismiss it
+            presented.dismiss(animated: false)
+        }
+
+        // 3) Create and present the NewsDetailView for this article
+        let detailView = NewsDetailView(
+            notifications: [notification], // or the whole array if you prefer
+            currentIndex: 0
+        )
+        .environment(\.modelContext, context)
+
+        let hostingController = UIHostingController(rootView: detailView)
+        hostingController.modalPresentationStyle = .fullScreen
+
+        rootVC.present(hostingController, animated: true, completion: nil)
     }
 }
 
