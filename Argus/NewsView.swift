@@ -625,6 +625,7 @@ struct NewsView: View {
                 if let notification = filteredNotifications.first(where: { $0.id == id }) {
                     AppDelegate().deleteLocalJSON(notification: notification)
                     modelContext.delete(notification)
+                    AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
                 }
             }
             saveChanges()
@@ -639,6 +640,8 @@ struct NewsView: View {
         do {
             try modelContext.save()
             NotificationUtils.updateAppBadgeCount()
+            // Also clean up related notification, if any.
+            AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
         } catch {
             print("Failed to toggle read status: \(error)")
         }
@@ -660,6 +663,8 @@ struct NewsView: View {
             notification.isArchived.toggle()
             saveChanges()
             updateFilteredNotifications()
+            // Also delete notification if exists.
+            AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
         }
     }
 

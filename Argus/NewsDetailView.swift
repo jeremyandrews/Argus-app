@@ -481,6 +481,8 @@ struct NewsDetailView: View {
             saveModel()
             NotificationUtils.updateAppBadgeCount()
         }
+        // Also clean up related notification, if any.
+        AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
     }
 
     // Helper

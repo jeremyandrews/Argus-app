@@ -353,6 +353,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
+    @MainActor
+    func removeNotificationIfExists(jsonURL: String) {
+        UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
+            // Filter the delivered notifications to find matches
+            let matchingIDs = notifications
+                .compactMap { delivered -> String? in
+                    guard
+                        let data = delivered.request.content.userInfo["data"] as? [String: Any],
+                        let deliveredURL = data["json_url"] as? String
+                    else {
+                        return nil
+                    }
+                    return deliveredURL == jsonURL ? delivered.request.identifier : nil
+                }
+
+            // Remove by request identifier
+            if !matchingIDs.isEmpty {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: matchingIDs)
+            }
+        }
+    }
+
     private func authenticateDeviceIfNeeded() {
         Task {
             guard UserDefaults.standard.string(forKey: "jwtToken") == nil else { return }
