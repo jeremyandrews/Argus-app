@@ -26,8 +26,8 @@ struct SubscriptionsView: View {
     @State private var jwtToken: String? = nil
     @State private var errorMessage: ErrorWrapper? = nil
     @State private var isFirstLaunch: Bool = true
-    let listOfSubscriptions: [String] = ["Alert: Direct", "Alert: Near", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "Entertainment, Books", "Entertainment, Movies", "Entertainment, Music", "Entertainment, Other", "EVs", "Global", "LLMs", "Longevity", "Politics, US", "Politics, Italy", "Politics, World", "Rust", "Space", "Tuscany", "Vulnerability", "Test"]
-    let defaultAutoSubscriptions: [String] = ["Apple", "Bitcoins", "Drupal", "EVs", "Global", "LLMs", "Space", "Vulnerability"]
+    let listOfSubscriptions: [String] = ["Alert: Direct", "Alert: Near", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "Entertainment, Books", "Entertainment, Movies", "Entertainment, Music", "Entertainment, Other", "EVs", "Fitness", "Global", "LLMs", "Longevity", "Politics, US", "Politics, Italy", "Politics, World", "Rust", "Space", "Tuscany", "Vulnerability", "Test"]
+    let defaultAutoSubscriptions: [String] = ["Apple", "Bitcoins", "Drupal", "EVs", "Fitness", "Global", "LLMs", "Space", "Vulnerability"]
     private let defaultAlertTopics: Set<String> = ["Alert: Direct", "Clients", "Global", "Vulnerability", "Test"]
     var body: some View {
         NavigationView {
