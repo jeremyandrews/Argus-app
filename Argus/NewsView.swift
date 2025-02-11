@@ -614,6 +614,7 @@ struct NewsView: View {
             try modelContext.save()
             NotificationUtils.updateAppBadgeCount()
             updateFilteredNotifications()
+            selectedNotificationIDs.removeAll()
         } catch {
             print("Failed to delete notification: \(error)")
         }
