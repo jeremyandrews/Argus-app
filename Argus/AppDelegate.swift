@@ -189,32 +189,33 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         )
     }
 
-    private func saveNotification(title: String, body: String, json_url: String, topic: String?, articleTitle: String, affected: String, domain: String?, pubDate: Date? = nil, suppressBadgeUpdate _: Bool = false) {
-        let context = ArgusApp.sharedModelContainer.mainContext
-
-        // Check for existing notification with same json_url
-        do {
-            let existingNotifications = try context.fetch(
-                FetchDescriptor<NotificationData>(
-                    predicate: #Predicate<NotificationData> { $0.json_url == json_url }
-                )
-            )
-
-            if existingNotifications.isEmpty {
-                // Only save if no existing notification found
-                SyncManager.shared.saveNotification(
+    private func saveNotification(
+        title: String,
+        body: String,
+        json_url: String,
+        topic: String?,
+        articleTitle: String,
+        affected: String,
+        domain: String?,
+        pubDate: Date? = nil,
+        suppressBadgeUpdate: Bool = false
+    ) {
+        Task {
+            do {
+                try await SyncManager.shared.addOrUpdateArticle(
                     title: title,
                     body: body,
-                    json_url: json_url,
+                    jsonURL: json_url,
                     topic: topic,
                     articleTitle: articleTitle,
                     affected: affected,
                     domain: domain,
-                    pubDate: pubDate ?? Date()
+                    pubDate: pubDate,
+                    suppressBadgeUpdate: suppressBadgeUpdate
                 )
+            } catch {
+                print("Failed to save notification: \(error)")
             }
-        } catch {
-            print("Error checking for existing notification: \(error)")
         }
     }
 
