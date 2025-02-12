@@ -330,10 +330,67 @@ struct NewsDetailView: View {
         ]
     }
 
+    private func formatDomainInSourceAnalysis(_ content: String) -> AttributedString {
+        // Look for the domain pattern at the start of the text
+        if let domainRange = content.range(of: "Domain Name: ([^\\s\\n]+)", options: .regularExpression) {
+            let fullMatch = String(content[domainRange])
+            let domain = fullMatch.replacingOccurrences(of: "Domain Name: ", with: "")
+
+            // Create attributed string with the full content
+            var attributedContent = AttributedString(content)
+
+            // Find the range of the domain in the attributed string
+            if let startIndex = content.range(of: domain)?.lowerBound {
+                let domainNSRange = NSRange(startIndex..., in: content)
+                if let attributedRange = Range(domainNSRange, in: attributedContent) {
+                    // Apply blue color and link attributes
+                    attributedContent[attributedRange].foregroundColor = .blue
+                    attributedContent[attributedRange].link = URL(string: "https://\(domain)")
+                }
+            }
+
+            return attributedContent
+        }
+
+        // Return plain attributed string if no domain found
+        return AttributedString(content)
+    }
+
     private func sectionContent(for section: ContentSection) -> some View {
         Group {
-            if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
+            if section.header == "Source Analysis", let content = section.content as? String {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Add domain header and domain
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Article Domain:")
+                            if let domain = notification.domain?.replacingOccurrences(of: "www.", with: ""),
+                               !domain.isEmpty
+                            {
+                                Text(domain)
+                                    .foregroundColor(.blue)
+                                    .onTapGesture {
+                                        if let url = URL(string: "https://\(domain)") {
+                                            UIApplication.shared.open(url)
+                                        }
+                                    }
+                            }
+                            Text("") // blank line for spacing
+                        }
+                        Spacer() // This will force left alignment
+                    }
+
+                    // Process the remaining content
+                    let processedContent = processSourceAnalysisContent(content)
+                    let attributedContent = SwiftyMarkdown(string: processedContent).attributedString()
+                    Text(AttributedString(attributedContent))
+                }
+                .font(.body)
+                .padding(.top, 8)
+                .textSelection(.enabled)
+            } else if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
                 ArgusDetailsView(technicalData: technicalData)
+
             } else if section.header == "Preview" {
                 VStack {
                     if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
@@ -356,6 +413,35 @@ struct NewsDetailView: View {
                     .textSelection(.enabled)
             }
         }
+    }
+
+    private func processSourceAnalysisContent(_ content: String) -> String {
+        let lines = content.components(separatedBy: .newlines)
+        guard lines.count >= 2 else { return content }
+
+        // Look for either "Publication Date" or "Published" line
+        var pubDateIndex = -1
+        for (index, line) in lines.enumerated() {
+            let lowercaseLine = line.lowercased()
+            if lowercaseLine.starts(with: "publication date") || lowercaseLine.starts(with: "published") {
+                pubDateIndex = index
+                break
+            }
+        }
+
+        // If we found the publication line and it's within reasonable distance
+        if pubDateIndex > 0 && pubDateIndex <= 5 {
+            return lines[pubDateIndex...].joined(separator: "\n")
+        }
+
+        // Fallback: if we didn't find the publication line or it was too far,
+        // just use the original domain removal logic
+        let firstLine = lines[0].lowercased()
+        if firstLine.contains("domain") && firstLine.contains("name") {
+            return lines.dropFirst(3).joined(separator: "\n")
+        }
+
+        return content
     }
 
     // MARK: - Loading Additional Content
