@@ -212,11 +212,25 @@ struct NewsDetailView: View {
                 }
             }
 
-            // Title (bold if unread)
-            let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
-            Text(AttributedString(attributedTitle))
-                .font(.headline)
-                .fontWeight(notification.isViewed ? .regular : .bold)
+            // Title
+            if let content = additionalContent,
+               let articleURLString = content["url"] as? String,
+               let articleURL = URL(string: articleURLString)
+            {
+                Link(destination: articleURL) {
+                    Text(notification.title) // Use plain text instead of AttributedString
+                        .font(.headline)
+                        .fontWeight(notification.isViewed ? .regular : .bold)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
+                        .foregroundColor(.blue)
+                }
+            } else {
+                Text(notification.title) // Use plain text here too
+                    .font(.headline)
+                    .fontWeight(notification.isViewed ? .regular : .bold)
+                    .foregroundColor(.primary)
+            }
 
             // Publication Date
             if let pubDate = notification.pub_date {
@@ -241,7 +255,16 @@ struct NewsDetailView: View {
             }
 
             // Domain
-            if let domain = notification.domain, !domain.isEmpty {
+            if let domain = notification.domain,
+               !domain.isEmpty,
+               let content = additionalContent,
+               let articleURLString = content["url"] as? String,
+               let articleURL = URL(string: articleURLString)
+            {
+                Link(domain, destination: articleURL)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+            } else if let domain = notification.domain, !domain.isEmpty {
                 Text(domain)
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.blue)
