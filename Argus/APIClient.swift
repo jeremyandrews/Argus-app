@@ -34,12 +34,14 @@ class APIClient {
                 if let urlError = error as? URLError, urlError.code == .userAuthenticationRequired {
                     print("Token expired. Re-authenticating...")
                 } else {
+                    print("Request failed with error: \(error.localizedDescription)")
                     throw error
                 }
             }
         }
 
         // If token is missing or expired, re-authenticate
+        print("No token found or expired. Authenticating...")
         let newToken = try await authenticateDevice()
         return try await sendRequest(to: url, method: method, token: newToken, body: body)
     }
@@ -49,16 +51,29 @@ class APIClient {
         request.httpMethod = method
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
         if let body = body {
-            request.httpBody = try JSONEncoder().encode(body)
+            let encoder = JSONEncoder()
+            request.httpBody = try encoder.encode(body)
         }
+
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
+
+        if let httpResponse = response as? HTTPURLResponse {
+            print("Response status code: \(httpResponse.statusCode)")
+
+            if httpResponse.statusCode == 401 {
                 throw URLError(.userAuthenticationRequired)
             }
-            throw URLError(.badServerResponse)
+
+            guard httpResponse.statusCode == 200 else {
+                if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    print("Server error details: \(errorJson)")
+                }
+                throw URLError(.badServerResponse)
+            }
         }
+
         return data
     }
 }

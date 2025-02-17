@@ -8,6 +8,53 @@ extension Date {
     }
 }
 
+@Observable
+class ContentCache: @unchecked Sendable {
+    static let shared = ContentCache()
+    private var cache: [String: [String: Any]] = [:]
+    private var loadingTasks: [String: Task<Void, Never>] = [:]
+    private let queue = DispatchQueue(label: "com.argus.contentcache", attributes: .concurrent)
+
+    func getContent(for url: String) -> [String: Any]? {
+        queue.sync(flags: .barrier) {
+            cache[url]
+        }
+    }
+
+    func loadContent(for jsonURL: String) {
+        // Skip if already cached or loading
+        let shouldLoad = queue.sync {
+            guard cache[jsonURL] == nil, loadingTasks[jsonURL] == nil else {
+                return false
+            }
+            return true
+        }
+
+        guard shouldLoad, let url = URL(string: jsonURL) else { return }
+
+        let task = Task { @MainActor in
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    await MainActor.run {
+                        self.cache[jsonURL] = json
+                        self.loadingTasks[jsonURL] = nil
+                    }
+                }
+            } catch {
+                print("Failed to load content for \(jsonURL): \(error)")
+                await MainActor.run {
+                    self.loadingTasks[jsonURL] = nil
+                }
+            }
+        }
+
+        queue.async(flags: .barrier) { [weak self] in
+            self?.loadingTasks[jsonURL] = task
+        }
+    }
+}
+
 struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.editMode) private var editMode
@@ -375,10 +422,21 @@ struct NewsView: View {
 
                 // DOMAIN
                 if let domain = notification.domain, !domain.isEmpty {
-                    Text(domain)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.blue)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 16) { // Changed from 4 to 16
+                        Text(domain)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.blue)
+                            .lineLimit(1)
+
+                        if let content = ContentCache.shared.getContent(for: notification.json_url) {
+                            QualityBadges(
+                                sourcesQuality: content["sources_quality"] as? Int,
+                                argumentQuality: content["argument_quality"] as? Int,
+                                sourceType: content["source_type"] as? String,
+                                scrollToSection: .constant(nil)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -451,6 +509,45 @@ struct NewsView: View {
         .onLongPressGesture {
             handleLongPressGesture(for: notification)
         }
+        .onAppear {
+            ContentCache.shared.loadContent(for: notification.json_url)
+        }
+    }
+
+    private func openArticleWithSection(_ notification: NotificationData, _ content: [String: Any]) {
+        guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
+            return
+        }
+
+        let detailView = NewsDetailView(
+            notifications: filteredNotifications,
+            currentIndex: index,
+            initiallyExpandedSection: determineSection(content)
+        )
+        .environment(\.modelContext, modelContext)
+
+        let hostingController = UIHostingController(rootView: detailView)
+        hostingController.modalPresentationStyle = .fullScreen
+
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController
+        {
+            rootViewController.present(hostingController, animated: true)
+        }
+    }
+
+    private func determineSection(_ content: [String: Any]) -> String? {
+        if content["sources_quality"] != nil {
+            return "Source Analysis"
+        }
+        if content["argument_quality"] != nil {
+            return "Logical Fallacies"
+        }
+        if content["source_type"] != nil {
+            return "Source Analysis"
+        }
+        return nil
     }
 
     // Simplified bookmark icon on the trailing side

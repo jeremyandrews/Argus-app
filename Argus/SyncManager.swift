@@ -15,8 +15,9 @@ class SyncManager {
                 FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date >= oneDayAgo })
             )
             let jsonUrls = recentArticles.map { $0.json_url }
-            let url = URL(string: "https://api.arguspulse.com/articles/sync ")!
+            let url = URL(string: "https://api.arguspulse.com/articles/sync")! // Removed space after sync
             let payload = ["seen_articles": jsonUrls]
+
             do {
                 let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
                 // Decode the server response
@@ -27,10 +28,13 @@ class SyncManager {
                     print("No unseen articles received.")
                 }
             } catch {
-                print("Failed to sync articles: (error)")
+                print("Failed to sync articles: \(error.localizedDescription)")
+                if let apiError = error as? URLError {
+                    print("API Error details: \(apiError)")
+                }
             }
         } catch {
-            print("Failed to fetch recent articles: (error)")
+            print("Failed to fetch recent articles: \(error.localizedDescription)")
         }
     }
 

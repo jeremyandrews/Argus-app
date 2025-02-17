@@ -9,6 +9,9 @@ struct NewsDetailView: View {
     // array of filtered notifications plus the current index:
     @State private var notifications: [NotificationData]
     @State private var currentIndex: Int
+    @State private var scrollToSection: String? = nil
+
+    let initiallyExpandedSection: String?
 
     // The currently displayed article
     private var notification: NotificationData {
@@ -35,10 +38,15 @@ struct NewsDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    init(notifications: [NotificationData], currentIndex: Int) {
+    init(
+        notifications: [NotificationData],
+        currentIndex: Int,
+        initiallyExpandedSection: String? = nil
+    ) {
         // We must store them in State so we can mutate currentIndex
         _notifications = State(initialValue: notifications)
         _currentIndex = State(initialValue: currentIndex)
+        self.initiallyExpandedSection = initiallyExpandedSection
     }
 
     var body: some View {
@@ -65,6 +73,10 @@ struct NewsDetailView: View {
         .onAppear {
             markAsViewed()
             loadAdditionalContent()
+
+            if let section = initiallyExpandedSection {
+                expandedSections[section] = true
+            }
         }
         .alert("Are you sure you want to delete this article?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
@@ -255,19 +267,22 @@ struct NewsDetailView: View {
             }
 
             // Domain
-            if let domain = notification.domain,
-               !domain.isEmpty,
-               let content = additionalContent,
-               let articleURLString = content["url"] as? String,
-               let articleURL = URL(string: articleURLString)
-            {
-                Link(domain, destination: articleURL)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.blue)
-            } else if let domain = notification.domain, !domain.isEmpty {
-                Text(domain)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.blue)
+            if let domain = notification.domain, !domain.isEmpty {
+                VStack(alignment: .leading, spacing: 16) { // Changed from 4 to 16
+                    Text(domain)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.blue)
+                        .lineLimit(1)
+
+                    if let content = additionalContent {
+                        QualityBadges(
+                            sourcesQuality: content["sources_quality"] as? Int,
+                            argumentQuality: content["argument_quality"] as? Int,
+                            sourceType: content["source_type"] as? String,
+                            scrollToSection: $scrollToSection
+                        )
+                    }
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -283,26 +298,33 @@ struct NewsDetailView: View {
                 ProgressView("Loading additional content...")
                     .padding()
             } else if let content = additionalContent {
-                ForEach(getSections(from: content), id: \.header) { section in
-                    VStack {
-                        Divider()
-                        DisclosureGroup(
-                            isExpanded: Binding(
-                                get: { expandedSections[section.header] ?? false },
-                                set: {
-                                    expandedSections[section.header] = $0
-                                    if section.header == "Preview", $0 {
-                                        loadArticleContent(url: section.content as? String ?? "")
-                                    }
-                                }
-                            )
-                        ) {
-                            sectionContent(for: section)
-                        } label: {
-                            Text(section.header)
-                                .font(.headline)
+                ScrollViewReader { proxy in
+                    ForEach(getSections(from: content), id: \.header) { section in
+                        VStack {
+                            Divider()
+                            DisclosureGroup(
+                                isExpanded: Binding(
+                                    get: { expandedSections[section.header] ?? false },
+                                    set: { expandedSections[section.header] = $0 }
+                                )
+                            ) {
+                                sectionContent(for: section)
+                            } label: {
+                                Text(section.header)
+                                    .font(.headline)
+                            }
+                            .id(section.header) // Add id for scrolling
+                            .padding([.leading, .trailing, .top])
                         }
-                        .padding([.leading, .trailing, .top])
+                    }
+                    .onChange(of: scrollToSection) { _, newSection in
+                        if let section = newSection {
+                            expandedSections[section] = true
+                            withAnimation {
+                                proxy.scrollTo(section, anchor: .top)
+                            }
+                            scrollToSection = nil
+                        }
                     }
                 }
             }
