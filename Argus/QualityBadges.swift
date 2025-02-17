@@ -5,6 +5,66 @@ struct QualityBadges: View {
     let argumentQuality: Int?
     let sourceType: String?
     @Binding var scrollToSection: String?
+    var onBadgeTap: ((String) -> Void)?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let sourcesQuality = sourcesQuality {
+                let (text, color) = qualityText(sourcesQuality)
+                Text("Proof: \(text)")
+                    .font(.caption2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(color.opacity(0.2))
+                    .foregroundColor(color)
+                    .cornerRadius(4)
+                    .onTapGesture {
+                        if let onBadgeTap = onBadgeTap {
+                            onBadgeTap("Critical Analysis")
+                        } else {
+                            scrollToSection = "Critical Analysis"
+                        }
+                    }
+            }
+
+            if let argumentQuality = argumentQuality {
+                let (text, color) = qualityText(argumentQuality)
+                Text("Logic: \(text)")
+                    .font(.caption2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(color.opacity(0.2))
+                    .foregroundColor(color)
+                    .cornerRadius(4)
+                    .onTapGesture {
+                        if let onBadgeTap = onBadgeTap {
+                            onBadgeTap("Logical Fallacies")
+                        } else {
+                            scrollToSection = "Logical Fallacies"
+                        }
+                    }
+            }
+
+            if let sourceType = sourceType, sourceType != "none" {
+                let (text, color) = sourceTypeText(sourceType)
+                Text(text)
+                    .font(.caption2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(color.opacity(0.2))
+                    .foregroundColor(color)
+                    .cornerRadius(4)
+                    .onTapGesture {
+                        if let onBadgeTap = onBadgeTap {
+                            onBadgeTap("Source Analysis")
+                        } else {
+                            scrollToSection = "Source Analysis"
+                        }
+                    }
+            }
+        }
+        .padding(.horizontal, 4)
+    }
 
     private func qualityText(_ quality: Int?) -> (String, Color) {
         guard let quality = quality else { return ("", .clear) }
@@ -27,53 +87,6 @@ struct QualityBadges: View {
         case "questionable": return ("Quest", .red)
         default: return ("", .clear)
         }
-    }
-
-    var body: some View {
-        HStack(spacing: 4) {
-            if let sourcesQuality = sourcesQuality {
-                let (text, color) = qualityText(sourcesQuality)
-                Text("Proof: \(text)")
-                    .font(.caption2)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(color.opacity(0.2))
-                    .foregroundColor(color)
-                    .cornerRadius(4)
-                    .onTapGesture {
-                        scrollToSection = "Critical Analysis"
-                    }
-            }
-
-            if let argumentQuality = argumentQuality {
-                let (text, color) = qualityText(argumentQuality)
-                Text("Logic: \(text)")
-                    .font(.caption2)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(color.opacity(0.2))
-                    .foregroundColor(color)
-                    .cornerRadius(4)
-                    .onTapGesture {
-                        scrollToSection = "Logical Fallacies"
-                    }
-            }
-
-            if let sourceType = sourceType, sourceType != "none" {
-                let (text, color) = sourceTypeText(sourceType)
-                Text(text)
-                    .font(.caption2)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(color.opacity(0.2))
-                    .foregroundColor(color)
-                    .cornerRadius(4)
-                    .onTapGesture {
-                        scrollToSection = "Source Analysis"
-                    }
-            }
-        }
-        .padding(.horizontal, 4)
     }
 
     private func expandSourcesSection(quality _: Int) {

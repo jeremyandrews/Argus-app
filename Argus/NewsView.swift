@@ -433,11 +433,30 @@ struct NewsView: View {
                                 sourcesQuality: content["sources_quality"] as? Int,
                                 argumentQuality: content["argument_quality"] as? Int,
                                 sourceType: content["source_type"] as? String,
-                                scrollToSection: .constant(nil)
+                                scrollToSection: .constant(nil),
+                                onBadgeTap: { section in
+                                    guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
+                                        return
+                                    }
+
+                                    let detailView = NewsDetailView(
+                                        notifications: filteredNotifications,
+                                        currentIndex: index,
+                                        initiallyExpandedSection: section
+                                    )
+                                    .environment(\.modelContext, modelContext)
+
+                                    let hostingController = UIHostingController(rootView: detailView)
+                                    hostingController.modalPresentationStyle = .fullScreen
+
+                                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                       let window = windowScene.windows.first,
+                                       let rootViewController = window.rootViewController
+                                    {
+                                        rootViewController.present(hostingController, animated: true)
+                                    }
+                                }
                             )
-                            .onTapGesture {
-                                openArticleWithSection(notification, content)
-                            }
                         }
                     }
                 }
@@ -517,7 +536,7 @@ struct NewsView: View {
         }
     }
 
-    private func openArticleWithSection(_ notification: NotificationData, _ content: [String: Any]) {
+    private func openArticleWithSection(_ notification: NotificationData, _: [String: Any], _ section: String? = nil) {
         guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
             return
         }
@@ -525,7 +544,7 @@ struct NewsView: View {
         let detailView = NewsDetailView(
             notifications: filteredNotifications,
             currentIndex: index,
-            initiallyExpandedSection: determineSection(content)
+            initiallyExpandedSection: section
         )
         .environment(\.modelContext, modelContext)
 
