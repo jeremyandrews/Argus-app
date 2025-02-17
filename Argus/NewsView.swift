@@ -435,6 +435,9 @@ struct NewsView: View {
                                 sourceType: content["source_type"] as? String,
                                 scrollToSection: .constant(nil)
                             )
+                            .onTapGesture {
+                                openArticleWithSection(notification, content)
+                            }
                         }
                     }
                 }
