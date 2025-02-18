@@ -69,23 +69,31 @@ struct QualityBadges: View {
     private func sourceTypeText(_ type: String?) -> (String, Color) {
         guard let type = type else { return ("", .clear) }
         switch type {
-        case "official": return ("Official", .blue)
-        case "academic": return ("Academic", Color(uiColor: .systemGray3))
-        case "press": return ("Media", Color(uiColor: .systemGray3))
-        case "corporate": return ("Business", Color(uiColor: .systemGray3))
-        case "nonprofit": return ("NGO", Color(uiColor: .systemGray3))
-        case "questionable": return ("Unreliable", Color(uiColor: .systemGray3))
-        default: return ("", .clear)
+        case "official":
+            return ("Official", .blue)
+        case "academic", "press", "corporate", "nonprofit":
+            return (
+                type.capitalized,
+                Color(uiColor: .systemGray)
+            )
+        case "questionable":
+            return ("Unreliable", Color(uiColor: .systemGray))
+        default:
+            return ("", .clear)
         }
     }
 
     private func qualityText(_ quality: Int?) -> (String, Color) {
         guard let quality = quality else { return ("", .clear) }
         switch quality {
-        case 1: return ("Weak", Color(red: 0.95, green: 0.50, blue: 0.50))
-        case 2: return ("Fair", Color(red: 0.95, green: 0.80, blue: 0.40))
-        case 3: return ("Strong", Color(red: 0.50, green: 0.85, blue: 0.50))
-        default: return ("", .clear)
+        case 1:
+            return ("Weak", Color(red: 0.8, green: 0.2, blue: 0.2))
+        case 2:
+            return ("Fair", Color(red: 0.8, green: 0.6, blue: 0.0))
+        case 3:
+            return ("Strong", Color(red: 0.2, green: 0.6, blue: 0.2))
+        default:
+            return ("", .clear)
         }
     }
 
