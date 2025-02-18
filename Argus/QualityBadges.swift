@@ -15,7 +15,7 @@ struct QualityBadges: View {
                     .font(.caption2)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
-                    .background(color.opacity(0.2))
+                    .background(color.opacity(0.15))
                     .foregroundColor(color)
                     .cornerRadius(4)
                     .onTapGesture {
@@ -82,9 +82,9 @@ struct QualityBadges: View {
     private func qualityText(_ quality: Int?) -> (String, Color) {
         guard let quality = quality else { return ("", .clear) }
         switch quality {
-        case 1: return ("Weak", Color.red.opacity(0.7))
-        case 2: return ("Fair", Color.yellow.opacity(0.7))
-        case 3: return ("Strong", Color.green.opacity(0.6))
+        case 1: return ("Weak", Color(red: 0.95, green: 0.50, blue: 0.50))
+        case 2: return ("Fair", Color(red: 0.95, green: 0.80, blue: 0.40))
+        case 3: return ("Strong", Color(red: 0.50, green: 0.85, blue: 0.50))
         default: return ("", .clear)
         }
     }

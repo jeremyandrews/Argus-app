@@ -946,17 +946,6 @@ struct LazyLoadingQualityBadges: View {
                     .onAppear {
                         if ContentCache.shared.getContent(for: jsonURL) == nil {
                             ContentCache.shared.loadContent(for: jsonURL)
-
-                            // Listen for content updates
-                            Task {
-                                // Add a short delay to allow content to load
-                                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-                                if let loadedContent = ContentCache.shared.getContent(for: jsonURL) {
-                                    await MainActor.run {
-                                        self.content = loadedContent
-                                    }
-                                }
-                            }
                         }
                     }
             }
@@ -966,6 +955,11 @@ struct LazyLoadingQualityBadges: View {
             if content == nil {
                 content = ContentCache.shared.getContent(for: jsonURL)
             }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .init("ContentLoaded-\(jsonURL)"))
+        ) { _ in
+            self.content = ContentCache.shared.getContent(for: jsonURL)
         }
     }
 }
