@@ -338,7 +338,6 @@ struct NewsDetailView: View {
     }
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
-        // Same logic as original
         [
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
             ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
@@ -351,7 +350,8 @@ struct NewsDetailView: View {
                     json["model"] as? String ?? "Unknown",
                     (json["elapsed_time"] as? Double) ?? 0.0,
                     notification.date,
-                    json["stats"] as? String ?? "N/A"
+                    json["stats"] as? String ?? "N/A",
+                    json["system_info"] as? [String: Any]
                 )
             ),
             ContentSection(header: "Preview", content: json["url"] as? String ?? ""),
@@ -416,9 +416,8 @@ struct NewsDetailView: View {
                 .font(.body)
                 .padding(.top, 8)
                 .textSelection(.enabled)
-            } else if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
-                ArgusDetailsView(technicalData: technicalData)
-
+            } else if section.header == "Argus Details", let details = section.argusDetails {
+                ArgusDetailsView(data: details)
             } else if section.header == "Preview" {
                 VStack {
                     if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
@@ -634,26 +633,76 @@ struct NewsDetailView: View {
 
 // MARK: - ContentSection and Utility Views (unchanged from original)
 
+struct ArgusDetailsData {
+    let model: String
+    let elapsedTime: Double
+    let date: Date
+    let stats: String
+    let systemInfo: [String: Any]?
+}
+
 struct ContentSection {
     let header: String
     let content: Any
+
+    var argusDetails: ArgusDetailsData? {
+        if case let (model, elapsedTime, date, stats, systemInfo) as (String, Double, Date, String, [String: Any]?) = content {
+            return ArgusDetailsData(
+                model: model,
+                elapsedTime: elapsedTime,
+                date: date,
+                stats: stats,
+                systemInfo: systemInfo
+            )
+        }
+        return nil
+    }
 }
 
 struct ArgusDetailsView: View {
-    let technicalData: (String, Double, Date, String)
+    let data: ArgusDetailsData
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Generated with \(technicalData.0) in \(String(format: "%.2f", technicalData.1)) seconds.")
+            Text("Generated with \(data.model) in \(String(format: "%.2f", data.elapsedTime)) seconds.")
                 .font(.system(size: 14, weight: .regular, design: .monospaced))
                 .textSelection(.enabled)
+
             Text("Metrics:")
                 .font(.system(size: 14, weight: .bold, design: .monospaced))
                 .textSelection(.enabled)
-            Text(formattedStats(technicalData.3))
+            Text(formattedStats(data.stats))
                 .font(.system(size: 12, weight: .regular, design: .monospaced))
                 .padding(.leading, 16)
                 .textSelection(.enabled)
-            Text("Received from Argus on \(technicalData.2, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
+
+            // System Info section (if available)
+            if let sysInfo = data.systemInfo {
+                Text("System Information:")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(.top, 8)
+
+                if let buildInfo = sysInfo["build_info"] as? [String: Any] {
+                    VStack(alignment: .leading) {
+                        Text("Build Details:")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        FormatBuildInfo(buildInfo)
+                    }
+                    .padding(.leading, 16)
+                }
+
+                if let runtimeMetrics = sysInfo["runtime_metrics"] as? [String: Any] {
+                    VStack(alignment: .leading) {
+                        Text("Runtime Metrics:")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        FormatRuntimeMetrics(runtimeMetrics)
+                    }
+                    .padding(.leading, 16)
+                }
+            }
+
+            Text("Received from Argus on \(data.date, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
                 .textSelection(.enabled)
         }
         .padding()
@@ -683,6 +732,73 @@ struct ArgusDetailsView: View {
             "Clients: \(formattedNumber(parts[5]))",
         ]
         return descriptions.joined(separator: "\n")
+    }
+
+    struct FormatBuildInfo: View {
+        let buildInfo: [String: Any]
+
+        init(_ buildInfo: [String: Any]) {
+            self.buildInfo = buildInfo
+        }
+
+        var body: some View {
+            VStack(alignment: .leading) {
+                if let version = buildInfo["version"] as? String {
+                    Text("Version: \(version)")
+                }
+                if let rustVersion = buildInfo["rust_version"] as? String {
+                    Text("Rust: \(rustVersion)")
+                }
+                if let targetOs = buildInfo["target_os"] as? String {
+                    Text("OS: \(targetOs)")
+                }
+                if let targetArch = buildInfo["target_arch"] as? String {
+                    Text("Arch: \(targetArch)")
+                }
+            }
+            .font(.system(size: 12, weight: .regular, design: .monospaced))
+        }
+    }
+
+    struct FormatRuntimeMetrics: View {
+        let metrics: [String: Any]
+
+        init(_ metrics: [String: Any]) {
+            self.metrics = metrics
+        }
+
+        var body: some View {
+            VStack(alignment: .leading) {
+                if let cpuUsage = metrics["cpu_usage_percent"] as? Double {
+                    Text("CPU: \(String(format: "%.2f%%", cpuUsage))")
+                }
+                if let memoryTotal = metrics["memory_total_kb"] as? Int {
+                    Text("Total Memory: \(formatMemory(memoryTotal))")
+                }
+                if let memoryUsage = metrics["memory_usage_kb"] as? Int {
+                    Text("Used Memory: \(formatMemory(memoryUsage))")
+                }
+                if let threadCount = metrics["thread_count"] as? Int {
+                    Text("Threads: \(threadCount)")
+                }
+                if let uptime = metrics["uptime_seconds"] as? Int {
+                    Text("Uptime: \(formatUptime(uptime))")
+                }
+            }
+            .font(.system(size: 12, weight: .regular, design: .monospaced))
+        }
+
+        private func formatMemory(_ kb: Int) -> String {
+            let gb = Double(kb) / 1_048_576.0
+            return String(format: "%.2f GB", gb)
+        }
+
+        private func formatUptime(_ seconds: Int) -> String {
+            let hours = seconds / 3600
+            let minutes = (seconds % 3600) / 60
+            let secs = seconds % 60
+            return String(format: "%02d:%02d:%02d", hours, minutes, secs)
+        }
     }
 }
 
@@ -834,8 +950,6 @@ struct ShareSelectionView: View {
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
         [
-            ContentSection(header: "Description", content: notification.body),
-            ContentSection(header: "Article", content: json["url"] as? String ?? ""),
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
             ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
             ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
@@ -847,10 +961,11 @@ struct ShareSelectionView: View {
                     json["model"] as? String ?? "Unknown",
                     (json["elapsed_time"] as? Double) ?? 0.0,
                     notification.date,
-                    json["stats"] as? String ?? "N/A"
+                    json["stats"] as? String ?? "N/A",
+                    json["system_info"] as? [String: Any]
                 )
             ),
-            ContentSection(header: "Article Preview", content: json["url"] as? String ?? ""),
+            ContentSection(header: "Preview", content: json["url"] as? String ?? ""),
         ]
     }
 }
