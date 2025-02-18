@@ -110,16 +110,20 @@ struct NewsDetailView: View {
         HStack {
             Button(action: { dismiss() }) {
                 Image(systemName: "xmark")
+                    .font(.system(size: 20)) // Slightly larger
+                    .frame(width: 44, height: 44) // Minimum touch target size
             }
             .padding(.leading, 8)
 
             Spacer()
 
-            HStack(spacing: 16) {
+            HStack(spacing: 32) {
                 Button {
                     goToPrevious()
                 } label: {
                     Image(systemName: "chevron.left")
+                        .font(.system(size: 22))
+                        .frame(width: 44, height: 44)
                 }
                 .disabled(currentIndex == 0)
 
@@ -127,6 +131,8 @@ struct NewsDetailView: View {
                     goToNext()
                 } label: {
                     Image(systemName: "chevron.right")
+                        .font(.system(size: 22))
+                        .frame(width: 44, height: 44)
                 }
                 .disabled(currentIndex == notifications.count - 1)
             }
