@@ -9,47 +9,56 @@ extension Date {
 }
 
 @Observable
-class ContentCache: @unchecked Sendable {
+final class ContentCache: @unchecked Sendable {
     static let shared = ContentCache()
-    private var cache: [String: [String: Any]] = [:]
+
+    private let cache = NSCache<NSString, NSDictionary>()
     private var loadingTasks: [String: Task<Void, Never>] = [:]
     private let queue = DispatchQueue(label: "com.argus.contentcache", attributes: .concurrent)
 
+    private init() {
+        cache.countLimit = 200
+        cache.totalCostLimit = 50 * 1024 * 1024 // 50MB
+    }
+
     func getContent(for url: String) -> [String: Any]? {
-        queue.sync(flags: .barrier) {
-            cache[url]
-        }
+        cache.object(forKey: url as NSString) as? [String: Any]
     }
 
     func loadContent(for jsonURL: String) {
-        // Skip if already cached or loading
-        let shouldLoad = queue.sync {
-            guard cache[jsonURL] == nil, loadingTasks[jsonURL] == nil else {
-                return false
+        queue.async(flags: .barrier) { [weak self] in
+            guard self?.cache.object(forKey: jsonURL as NSString) == nil,
+                  self?.loadingTasks[jsonURL] == nil
+            else {
+                return
             }
-            return true
-        }
 
-        guard shouldLoad, let url = URL(string: jsonURL) else { return }
-
-        let task = Task { @MainActor in
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    await MainActor.run {
-                        self.cache[jsonURL] = json
-                        self.loadingTasks[jsonURL] = nil
+            let task = Task { @MainActor in
+                defer {
+                    self?.queue.async(flags: .barrier) { [weak self] in
+                        self?.loadingTasks[jsonURL] = nil
                     }
                 }
-            } catch {
-                print("Failed to load content for \(jsonURL): \(error)")
-                await MainActor.run {
-                    self.loadingTasks[jsonURL] = nil
+
+                guard let url = URL(string: jsonURL) else { return }
+
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        // Access cache directly since NSCache is thread-safe
+                        self?.cache.setObject(json as NSDictionary, forKey: jsonURL as NSString)
+
+                        // Notify observers that content is available
+                        NotificationCenter.default.post(
+                            name: Notification.Name("ContentLoaded-\(jsonURL)"),
+                            object: nil
+                        )
+                    }
+                } catch {
+                    print("Failed to load content for \(jsonURL): \(error)")
                 }
             }
-        }
 
-        queue.async(flags: .barrier) { [weak self] in
             self?.loadingTasks[jsonURL] = task
         }
     }
@@ -422,42 +431,34 @@ struct NewsView: View {
 
                 // DOMAIN
                 if let domain = notification.domain, !domain.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) { // Changed from 4 to 16
+                    VStack(alignment: .leading, spacing: 16) {
                         Text(domain)
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.blue)
                             .lineLimit(1)
 
-                        if let content = ContentCache.shared.getContent(for: notification.json_url) {
-                            QualityBadges(
-                                sourcesQuality: content["sources_quality"] as? Int,
-                                argumentQuality: content["argument_quality"] as? Int,
-                                sourceType: content["source_type"] as? String,
-                                scrollToSection: .constant(nil),
-                                onBadgeTap: { section in
-                                    guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
-                                        return
-                                    }
-
-                                    let detailView = NewsDetailView(
-                                        notifications: filteredNotifications,
-                                        currentIndex: index,
-                                        initiallyExpandedSection: section
-                                    )
-                                    .environment(\.modelContext, modelContext)
-
-                                    let hostingController = UIHostingController(rootView: detailView)
-                                    hostingController.modalPresentationStyle = .fullScreen
-
-                                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                                       let window = windowScene.windows.first,
-                                       let rootViewController = window.rootViewController
-                                    {
-                                        rootViewController.present(hostingController, animated: true)
-                                    }
+                        LazyLoadingQualityBadges(
+                            jsonURL: notification.json_url,
+                            onBadgeTap: { section in
+                                guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
+                                    return
                                 }
-                            )
-                        }
+                                let detailView = NewsDetailView(
+                                    notifications: filteredNotifications,
+                                    currentIndex: index,
+                                    initiallyExpandedSection: section
+                                )
+                                .environment(\.modelContext, modelContext)
+                                let hostingController = UIHostingController(rootView: detailView)
+                                hostingController.modalPresentationStyle = .fullScreen
+                                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                   let window = windowScene.windows.first,
+                                   let rootViewController = window.rootViewController
+                                {
+                                    rootViewController.present(hostingController, animated: true)
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -477,6 +478,9 @@ struct NewsView: View {
                         .foregroundColor(.gray)
                 }
             }
+        }
+        .onAppear {
+            ContentCache.shared.loadContent(for: notification.json_url)
         }
         .padding()
         .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.15))
@@ -917,6 +921,50 @@ struct NewsView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, 18)
+            }
+        }
+    }
+}
+
+struct LazyLoadingQualityBadges: View {
+    let jsonURL: String
+    @State private var content: [String: Any]? = nil
+    var onBadgeTap: ((String) -> Void)?
+
+    var body: some View {
+        Group {
+            if let content = content ?? ContentCache.shared.getContent(for: jsonURL) {
+                QualityBadges(
+                    sourcesQuality: content["sources_quality"] as? Int,
+                    argumentQuality: content["argument_quality"] as? Int,
+                    sourceType: content["source_type"] as? String,
+                    scrollToSection: .constant(nil),
+                    onBadgeTap: onBadgeTap
+                )
+            } else {
+                Color.clear.frame(height: 20)
+                    .onAppear {
+                        if ContentCache.shared.getContent(for: jsonURL) == nil {
+                            ContentCache.shared.loadContent(for: jsonURL)
+
+                            // Listen for content updates
+                            Task {
+                                // Add a short delay to allow content to load
+                                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                                if let loadedContent = ContentCache.shared.getContent(for: jsonURL) {
+                                    await MainActor.run {
+                                        self.content = loadedContent
+                                    }
+                                }
+                            }
+                        }
+                    }
+            }
+        }
+        .onAppear {
+            // Try to load content immediately if available
+            if content == nil {
+                content = ContentCache.shared.getContent(for: jsonURL)
             }
         }
     }
