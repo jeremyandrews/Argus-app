@@ -66,25 +66,25 @@ struct QualityBadges: View {
         .padding(.horizontal, 4)
     }
 
-    private func qualityText(_ quality: Int?) -> (String, Color) {
-        guard let quality = quality else { return ("", .clear) }
-        switch quality {
-        case 1: return ("Weak", .red)
-        case 2: return ("Fair", .yellow)
-        case 3: return ("Strong", .green)
-        default: return ("", .clear)
-        }
-    }
-
     private func sourceTypeText(_ type: String?) -> (String, Color) {
         guard let type = type else { return ("", .clear) }
         switch type {
         case "official": return ("Official", .blue)
-        case "academic": return ("Academic", .purple)
-        case "press": return ("Press", .green)
-        case "corporate": return ("Corp", .orange)
-        case "nonprofit": return ("NGO", .teal)
-        case "questionable": return ("Quest", .red)
+        case "academic": return ("Academic", Color(uiColor: .systemGray3))
+        case "press": return ("Media", Color(uiColor: .systemGray3))
+        case "corporate": return ("Business", Color(uiColor: .systemGray3))
+        case "nonprofit": return ("NGO", Color(uiColor: .systemGray3))
+        case "questionable": return ("Unreliable", Color(uiColor: .systemGray3))
+        default: return ("", .clear)
+        }
+    }
+
+    private func qualityText(_ quality: Int?) -> (String, Color) {
+        guard let quality = quality else { return ("", .clear) }
+        switch quality {
+        case 1: return ("Weak", Color.red.opacity(0.7))
+        case 2: return ("Fair", Color.yellow.opacity(0.7))
+        case 3: return ("Strong", Color.green.opacity(0.6))
         default: return ("", .clear)
         }
     }
