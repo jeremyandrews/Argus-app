@@ -875,7 +875,7 @@ struct ShareSelectionView: View {
         }
         .onAppear {
             if selectedSections.isEmpty {
-                selectedSections = ["Description", "Article", "Summary"]
+                selectedSections = ["Title", "Brief Summary", "Summary", "Article URL"]
             }
         }
     }
@@ -883,17 +883,77 @@ struct ShareSelectionView: View {
     private func prepareShareContent() {
         var shareText = ""
         for section in getSections(from: content ?? [:]) {
-            if selectedSections.contains(section.header) && section.header != "Preview" {
-                if section.header != "Description" {
+            if selectedSections.contains(section.header) {
+                if section.header == "Article URL" {
+                    if let url = section.content as? String {
+                        shareText += "\(url)\n\n"
+                    }
+                } else if section.header == "Title" || section.header == "Brief Summary" {
+                    if let shareableContent = section.content as? String {
+                        shareText += "\(shareableContent)\n\n"
+                    }
+                } else if section.header == "Argus Details" {
+                    if let details = section.argusDetails {
+                        shareText += "ARGUS DETAILS\n\n"
+                        shareText += """
+                        Generated with \(details.model) in \(String(format: "%.2f", details.elapsedTime)) seconds.
+
+                        Metrics:
+                        \(formattedStats(details.stats))
+
+                        """
+
+                        if let sysInfo = details.systemInfo {
+                            shareText += "System Information:\n"
+
+                            if let buildInfo = sysInfo["build_info"] as? [String: Any] {
+                                shareText += "\nBuild Details:\n"
+                                if let version = buildInfo["version"] as? String {
+                                    shareText += "Version: \(version)\n"
+                                }
+                                if let rustVersion = buildInfo["rust_version"] as? String {
+                                    shareText += "Rust: \(rustVersion)\n"
+                                }
+                                if let targetOs = buildInfo["target_os"] as? String {
+                                    shareText += "OS: \(targetOs)\n"
+                                }
+                                if let targetArch = buildInfo["target_arch"] as? String {
+                                    shareText += "Arch: \(targetArch)\n"
+                                }
+                            }
+
+                            if let runtimeMetrics = sysInfo["runtime_metrics"] as? [String: Any] {
+                                shareText += "\nRuntime Metrics:\n"
+                                if let cpuUsage = runtimeMetrics["cpu_usage_percent"] as? Double {
+                                    shareText += "CPU: \(String(format: "%.2f%%", cpuUsage))\n"
+                                }
+                                if let memoryTotal = runtimeMetrics["memory_total_kb"] as? Int {
+                                    shareText += "Total Memory: \(formatMemory(memoryTotal))\n"
+                                }
+                                if let memoryUsage = runtimeMetrics["memory_usage_kb"] as? Int {
+                                    shareText += "Used Memory: \(formatMemory(memoryUsage))\n"
+                                }
+                                if let threadCount = runtimeMetrics["thread_count"] as? Int {
+                                    shareText += "Threads: \(threadCount)\n"
+                                }
+                                if let uptime = runtimeMetrics["uptime_seconds"] as? Int {
+                                    shareText += "Uptime: \(formatUptime(uptime))\n"
+                                }
+                            }
+                            shareText += "\n"
+                        }
+
+                        shareText += "Received from Argus on \(details.date.formatted(.dateTime.month(.wide).day().year().hour().minute().second()))\n\n"
+                    }
+                } else if section.header != "Description" {
                     shareText += "\(section.header.uppercased())\n\n"
-                }
-                if let shareableContent = section.content as? String {
-                    shareText += "\(shareableContent)\n\n"
-                } else if section.header == "Argus Details", let technicalData = section.content as? (String, Double, Date, String) {
-                    shareText += formatArgusDetails(technicalData) + "\n\n"
+                    if let shareableContent = section.content as? String {
+                        shareText += "\(shareableContent)\n\n"
+                    }
                 }
             }
         }
+
         if formatText {
             let formattedText = SwiftyMarkdown(string: shareText).attributedString()
             shareItems = [formattedText]
@@ -950,6 +1010,9 @@ struct ShareSelectionView: View {
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
         [
+            ContentSection(header: "Title", content: json["tiny_title"] as? String ?? ""),
+            ContentSection(header: "Brief Summary", content: json["tiny_summary"] as? String ?? ""),
+            ContentSection(header: "Article URL", content: json["url"] as? String ?? ""),
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
             ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
             ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
@@ -965,8 +1028,19 @@ struct ShareSelectionView: View {
                     json["system_info"] as? [String: Any]
                 )
             ),
-            ContentSection(header: "Preview", content: json["url"] as? String ?? ""),
         ]
+    }
+
+    private func formatMemory(_ kb: Int) -> String {
+        let gb = Double(kb) / 1_048_576.0
+        return String(format: "%.2f GB", gb)
+    }
+
+    private func formatUptime(_ seconds: Int) -> String {
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        let secs = seconds % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, secs)
     }
 }
 
