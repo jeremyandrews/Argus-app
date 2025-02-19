@@ -1,40 +1,41 @@
 import Foundation
 import SwiftData
 
-@MainActor
 class SyncManager {
     static let shared = SyncManager()
     private init() {}
 
     func sendRecentArticlesToServer() async {
-        let context = ArgusApp.sharedModelContainer.mainContext
         let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
-        do {
-            // Fetch recent SeenArticle entries
-            let recentArticles = try context.fetch(
-                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date >= oneDayAgo })
-            )
-            let jsonUrls = recentArticles.map { $0.json_url }
-            let url = URL(string: "https://api.arguspulse.com/articles/sync")! // Removed space after sync
-            let payload = ["seen_articles": jsonUrls]
 
-            do {
-                let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
-                // Decode the server response
-                let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
-                if let unseenUrls = serverResponse["unseen_articles"] {
-                    await fetchAndSaveUnseenArticles(from: unseenUrls)
-                } else {
-                    print("No unseen articles received.")
-                }
-            } catch {
-                print("Failed to sync articles: \(error.localizedDescription)")
-                if let apiError = error as? URLError {
-                    print("API Error details: \(apiError)")
-                }
+        // Fetch recent articles inside MainActor to access ModelContext, handling errors safely with try?
+        let recentArticles: [SeenArticle] = await MainActor.run {
+            let context = ArgusApp.sharedModelContainer.mainContext
+            return (try? context.fetch(
+                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date >= oneDayAgo })
+            )) ?? [] // Failure returns empty list but does not throw
+        }
+
+        let jsonUrls = recentArticles.map { $0.json_url }
+        let url = URL(string: "https://api.arguspulse.com/articles/sync")!
+        let payload = ["seen_articles": jsonUrls]
+
+        do {
+            let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
+
+            // Decode response
+            let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
+
+            if let unseenUrls = serverResponse["unseen_articles"] {
+                await fetchAndSaveUnseenArticles(from: unseenUrls)
+            } else {
+                print("No unseen articles received.")
             }
         } catch {
-            print("Failed to fetch recent articles: \(error.localizedDescription)")
+            print("Failed to sync articles: \(error.localizedDescription)")
+            if let apiError = error as? URLError {
+                print("API Error details: \(apiError)")
+            }
         }
     }
 
@@ -71,65 +72,61 @@ class SyncManager {
         domain: String?,
         pubDate: Date?
     )], suppressBadgeUpdate: Bool = false) async throws {
-        let context = ArgusApp.sharedModelContainer.mainContext
+        await MainActor.run {
+            do {
+                let context = ArgusApp.sharedModelContainer.mainContext
 
-        // First, fetch all existing URLs in one go
-        let existingURLs = try context.fetch(
-            FetchDescriptor<NotificationData>()
-        ).map { $0.json_url }
+                let existingURLs = (try? context.fetch(FetchDescriptor<NotificationData>()))?.map { $0.json_url } ?? []
+                let existingSeenURLs = (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
 
-        let existingSeenURLs = try context.fetch(
-            FetchDescriptor<SeenArticle>()
-        ).map { $0.json_url }
+                var newNotifications: [NotificationData] = []
+                var newSeenArticles: [SeenArticle] = []
 
-        // Prepare arrays for batch insertion
-        var newNotifications: [NotificationData] = []
-        var newSeenArticles: [SeenArticle] = []
-
-        // Filter and prepare new articles
-        for article in articles {
-            if !existingURLs.contains(article.jsonURL), !existingSeenURLs.contains(article.jsonURL) {
-                let notification = NotificationData(
-                    date: Date(),
-                    title: article.title,
-                    body: article.body,
-                    json_url: article.jsonURL,
-                    topic: article.topic,
-                    article_title: article.articleTitle,
-                    affected: article.affected,
-                    domain: article.domain,
-                    pub_date: article.pubDate ?? Date()
-                )
-
-                let seenArticle = SeenArticle(
-                    id: notification.id,
-                    json_url: article.jsonURL,
-                    date: notification.date
-                )
-
-                newNotifications.append(notification)
-                newSeenArticles.append(seenArticle)
-            }
-        }
-
-        // Single transaction for batch insertion
-        if !newNotifications.isEmpty {
-            try context.transaction {
-                for notification in newNotifications {
-                    context.insert(notification)
+                for article in articles {
+                    if !existingURLs.contains(article.jsonURL), !existingSeenURLs.contains(article.jsonURL) {
+                        let notification = NotificationData(
+                            date: Date(),
+                            title: article.title,
+                            body: article.body,
+                            json_url: article.jsonURL,
+                            topic: article.topic,
+                            article_title: article.articleTitle,
+                            affected: article.affected,
+                            domain: article.domain,
+                            pub_date: article.pubDate ?? Date()
+                        )
+                        let seenArticle = SeenArticle(
+                            id: notification.id,
+                            json_url: article.jsonURL,
+                            date: notification.date
+                        )
+                        newNotifications.append(notification)
+                        newSeenArticles.append(seenArticle)
+                    }
                 }
-                for seenArticle in newSeenArticles {
-                    context.insert(seenArticle)
-                }
-            }
-        }
 
-        if !suppressBadgeUpdate {
-            NotificationUtils.updateAppBadgeCount()
+                if !newNotifications.isEmpty {
+                    try context.transaction {
+                        for notification in newNotifications {
+                            context.insert(notification)
+                        }
+                        for seenArticle in newSeenArticles {
+                            context.insert(seenArticle)
+                        }
+                    }
+                }
+
+                if !suppressBadgeUpdate {
+                    Task { @MainActor in
+                        NotificationUtils.updateAppBadgeCount()
+                    }
+                }
+            } catch {
+                print("Failed to insert articles: \(error)")
+            }
         }
     }
 
-    // fetchAndSaveUnseenArticles now just collects and calls addOrUpdateArticles
     func fetchAndSaveUnseenArticles(from urls: [String]) async {
         var articlesToInsert: [(
             title: String,
@@ -162,8 +159,8 @@ class SyncManager {
                 let affected = json["affected"] as? String ?? ""
                 let articleURL = json["url"] as? String ?? "none"
                 let domain = URL(string: articleURL)?.host
-
                 var pubDate: Date?
+
                 if let pubDateString = json["pub_date"] as? String {
                     let isoFormatter = ISO8601DateFormatter()
                     pubDate = isoFormatter.date(from: pubDateString)
@@ -179,12 +176,12 @@ class SyncManager {
                     domain: domain,
                     pubDate: pubDate
                 ))
+
             } catch {
                 print("Failed to fetch or process article \(urlString): \(error)")
             }
         }
 
-        // Use the same insertion path as single articles
         do {
             try await addOrUpdateArticles(articlesToInsert)
         } catch {
