@@ -309,48 +309,61 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     @MainActor
     func cleanupOldArticles() {
         let context = ArgusApp.sharedModelContainer.mainContext
-
-        // Read user's auto-delete preference (0 = disabled)
         let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
         guard daysSetting > 0 else { return }
 
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date()) ?? Date()
+        Task(priority: .utility) {
+            let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date()) ?? Date()
 
-        do {
-            // Fetch old SeenArticles
-            let oldSeenArticles = try context.fetch(
+            // Get articles to clean up
+            guard let articlesToClean = try? context.fetch(
                 FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date < cutoffDate })
-            )
-
-            for seenArticle in oldSeenArticles {
-                let oldID = seenArticle.id
-
-                let matchingNotifications = try context.fetch(
-                    FetchDescriptor<NotificationData>(
-                        predicate: #Predicate { $0.id == oldID }
-                    )
-                )
-
-                guard let notification = matchingNotifications.first else {
-                    // No NotificationData? Just remove the old SeenArticle
-                    context.delete(seenArticle)
-                    continue
-                }
-
-                // Skip if bookmarked or archived
-                if notification.isBookmarked || notification.isArchived {
-                    continue
-                }
-
-                // Otherwise, remove both the NotificationData & SeenArticle
-                context.delete(notification)
-                context.delete(seenArticle)
+            ) else {
+                print("Error fetching old articles")
+                return
             }
 
-            try context.save()
-            print("Cleanup complete. Removed old, unbookmarked/unarchived articles.")
-        } catch {
-            print("Error cleaning up old articles: \(error)")
+            // Process in smaller batches to avoid memory pressure
+            let batchSize = 50
+            for batch in articlesToClean.chunked(into: batchSize) {
+                for seenArticle in batch {
+                    do {
+                        let oldID = seenArticle.id
+                        let matchingNotifications = try context.fetch(
+                            FetchDescriptor<NotificationData>(
+                                predicate: #Predicate { $0.id == oldID }
+                            )
+                        )
+
+                        guard let notification = matchingNotifications.first else {
+                            context.delete(seenArticle)
+                            continue
+                        }
+
+                        // Skip protected articles
+                        if notification.isBookmarked || notification.isArchived {
+                            continue
+                        }
+
+                        // Post pre-deletion notification
+                        NotificationCenter.default.post(
+                            name: .willDeleteArticle,
+                            object: nil,
+                            userInfo: ["articleID": oldID]
+                        )
+
+                        context.delete(notification)
+                        context.delete(seenArticle)
+
+                        try context.save()
+
+                        // Brief pause between deletions
+                        try await Task.sleep(nanoseconds: 1_000_000) // 1ms
+                    } catch {
+                        print("Error processing article \(seenArticle.id): \(error)")
+                    }
+                }
+            }
         }
     }
 
@@ -387,6 +400,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
         }
     }
+}
+
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map {
+            Array(self[$0 ..< Swift.min($0 + size, count)])
+        }
+    }
+}
+
+extension Notification.Name {
+    static let willDeleteArticle = Notification.Name("willDeleteArticle")
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {

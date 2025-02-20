@@ -5,11 +5,10 @@ import SwiftyMarkdown
 import WebKit
 
 struct NewsDetailView: View {
-    // Instead of a single NotificationData, we now hold the entire
-    // array of filtered notifications plus the current index:
     @State private var notifications: [NotificationData]
     @State private var currentIndex: Int
     @State private var scrollToSection: String? = nil
+    @State private var deletedIDs: Set<UUID> = []
 
     let initiallyExpandedSection: String?
 
@@ -71,6 +70,7 @@ struct NewsDetailView: View {
         }
         .navigationBarHidden(true)
         .onAppear {
+            setupDeletionHandling()
             markAsViewed()
             loadAdditionalContent()
 
@@ -102,6 +102,12 @@ struct NewsDetailView: View {
                     }
                 }
         )
+        .onChange(of: deletedIDs) { _, _ in
+            // Refresh UI when deletions occur
+            if !isArticleValid(currentIndex) {
+                tryNavigateToValidArticle()
+            }
+        }
     }
 
     // MARK: - Top Bar
@@ -535,18 +541,64 @@ struct NewsDetailView: View {
 
     // MARK: - Prev/Next Navigation
 
-    private func goToPrevious() {
-        guard currentIndex > 0 else { return }
-        currentIndex -= 1
-        markAsViewed()
-        loadAdditionalContent()
+    private func setupDeletionHandling() {
+        NotificationCenter.default.addObserver(
+            forName: .willDeleteArticle,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let articleID = notification.userInfo?["articleID"] as? UUID else { return }
+            deletedIDs.insert(articleID)
+
+            // If current article is deleted, try to navigate to next valid article
+            if self.notification.id == articleID {
+                tryNavigateToValidArticle()
+            }
+        }
+    }
+
+    private func tryNavigateToValidArticle() {
+        // Look for next non-deleted article
+        for offset in 0 ..< notifications.count {
+            let index = (currentIndex + offset) % notifications.count
+            if !deletedIDs.contains(notifications[index].id) {
+                currentIndex = index
+                return
+            }
+        }
+        // If no valid articles found, dismiss
+        dismiss()
+    }
+
+    private func isArticleValid(_ index: Int) -> Bool {
+        guard index >= 0 && index < notifications.count else { return false }
+        return !deletedIDs.contains(notifications[index].id)
     }
 
     private func goToNext() {
-        guard currentIndex < notifications.count - 1 else { return }
-        currentIndex += 1
-        markAsViewed()
-        loadAdditionalContent()
+        var nextIndex = currentIndex + 1
+        while nextIndex < notifications.count {
+            if isArticleValid(nextIndex) {
+                currentIndex = nextIndex
+                markAsViewed()
+                loadAdditionalContent()
+                return
+            }
+            nextIndex += 1
+        }
+    }
+
+    private func goToPrevious() {
+        var prevIndex = currentIndex - 1
+        while prevIndex >= 0 {
+            if isArticleValid(prevIndex) {
+                currentIndex = prevIndex
+                markAsViewed()
+                loadAdditionalContent()
+                return
+            }
+            prevIndex -= 1
+        }
     }
 
     // MARK: - Action Buttons
