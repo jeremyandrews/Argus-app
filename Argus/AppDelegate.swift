@@ -41,30 +41,31 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        let context = ArgusApp.sharedModelContainer.mainContext
+        Task { @MainActor in
+            do {
+                let context = ArgusApp.sharedModelContainer.mainContext
+                // Fetch unviewed notifications
+                let unviewedCount = try context.fetch(
+                    FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
+                ).count
 
-        do {
-            // Fetch unviewed notifications
-            let unviewedCount = try context.fetch(
-                FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
-            ).count
-
-            // Update the app's badge count
-            UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
-                if let error = error {
-                    print("Failed to update badge count during background fetch: \(error)")
-                    completionHandler(.failed)
-                    return
+                // Update the app's badge count
+                UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
+                    if let error = error {
+                        print("Failed to update badge count during background fetch: \(error)")
+                        completionHandler(.failed)
+                        return
+                    }
                 }
-            }
 
-            // Indicate successful background fetch
-            completionHandler(.newData)
-            NotificationUtils.updateAppBadgeCount()
-        } catch {
-            print("Failed to fetch unviewed notifications: \(error)")
-            completionHandler(.failed)
-            NotificationUtils.updateAppBadgeCount()
+                // Indicate successful background fetch
+                completionHandler(.newData)
+                NotificationUtils.updateAppBadgeCount()
+            } catch {
+                print("Failed to fetch unviewed notifications: \(error)")
+                completionHandler(.failed)
+                NotificationUtils.updateAppBadgeCount()
+            }
         }
     }
 
