@@ -31,6 +31,7 @@ struct NewsDetailView: View {
         "Critical Analysis": false,
         "Logical Fallacies": false,
         "Source Analysis": false,
+        "AI Insights": false,
         "Argus Details": false,
     ]
 
@@ -567,24 +568,32 @@ struct NewsDetailView: View {
     }
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
-        [
+        var sections = [
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
             ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
             ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
             ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
             ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
-            ContentSection(
-                header: "Argus Details",
-                content: (
-                    json["model"] as? String ?? "Unknown",
-                    (json["elapsed_time"] as? Double) ?? 0.0,
-                    currentNotification?.date ?? Date(),
-                    json["stats"] as? String ?? "N/A",
-                    json["system_info"] as? [String: Any]
-                )
-            ),
-            ContentSection(header: "Preview", content: json["url"] as? String ?? ""),
         ]
+
+        if let insights = json["additional_insights"] as? String, !insights.isEmpty {
+            sections.append(ContentSection(header: "AI Insights", content: insights))
+        }
+
+        sections.append(ContentSection(
+            header: "Argus Details",
+            content: (
+                json["model"] as? String ?? "Unknown",
+                (json["elapsed_time"] as? Double) ?? 0.0,
+                currentNotification?.date ?? Date(),
+                json["stats"] as? String ?? "N/A",
+                json["system_info"] as? [String: Any]
+            )
+        ))
+
+        sections.append(ContentSection(header: "Preview", content: json["url"] as? String ?? ""))
+
+        return sections
     }
 
     private func sectionContent(for section: ContentSection) -> some View {
@@ -1008,7 +1017,7 @@ struct ShareSelectionView: View {
     }
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
-        [
+        var sections = [
             ContentSection(header: "Title", content: json["tiny_title"] as? String ?? ""),
             ContentSection(header: "Brief Summary", content: json["tiny_summary"] as? String ?? ""),
             ContentSection(header: "Article URL", content: json["url"] as? String ?? ""),
@@ -1017,17 +1026,24 @@ struct ShareSelectionView: View {
             ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
             ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
             ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
-            ContentSection(
-                header: "Argus Details",
-                content: (
-                    json["model"] as? String ?? "Unknown",
-                    (json["elapsed_time"] as? Double) ?? 0.0,
-                    notification.date,
-                    json["stats"] as? String ?? "N/A",
-                    json["system_info"] as? [String: Any]
-                )
-            ),
         ]
+
+        if let insights = json["additional_insights"] as? String, !insights.isEmpty {
+            sections.append(ContentSection(header: "AI Insights", content: insights))
+        }
+
+        sections.append(ContentSection(
+            header: "Argus Details",
+            content: (
+                json["model"] as? String ?? "Unknown",
+                (json["elapsed_time"] as? Double) ?? 0.0,
+                notification.date,
+                json["stats"] as? String ?? "N/A",
+                json["system_info"] as? [String: Any]
+            )
+        ))
+
+        return sections
     }
 
     private func formatMemory(_ kb: Int) -> String {
