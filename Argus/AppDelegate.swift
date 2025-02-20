@@ -86,8 +86,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
         var taskID: UIBackgroundTaskIdentifier = .invalid
-
-        taskID = UIApplication.shared.beginBackgroundTask(withName: "SyncData") { [taskID] in
+        taskID = UIApplication.shared.beginBackgroundTask {
+            completionHandler(.failed)
             UIApplication.shared.endBackgroundTask(taskID)
         }
 
@@ -99,7 +99,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // Extract data payload
         guard let data = userInfo["data"] as? [String: AnyObject],
               let json_url = data["json_url"] as? String, !json_url.isEmpty
         else {
@@ -110,7 +109,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         let topic = data["topic"] as? String
-        // Extract alert details, or fallback to data if alert is nil
         let alert = aps["alert"] as? [String: String]
         let title = alert?["title"] ?? (data["title"] as? String ?? "[no title]")
         let body = alert?["body"] ?? (data["body"] as? String ?? "[no body]")
@@ -118,37 +116,36 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let affected = data["affected"] as? String ?? ""
         let domain = data["domain"] as? String
 
-        // Extract pub_date
         var pubDate: Date? = nil
         if let pubDateString = data["pub_date"] as? String {
             let isoFormatter = ISO8601DateFormatter()
             pubDate = isoFormatter.date(from: pubDateString)
         }
 
-        // Create timeout task
-        let timeoutTask = Task {
-            try await Task.sleep(nanoseconds: 25_000_000_000) // 25 seconds
-            completionHandler(.failed)
-            UIApplication.shared.endBackgroundTask(taskID)
-        }
-
-        // Save the notification with all extracted details
-        saveNotification(
-            title: title,
-            body: body,
-            json_url: json_url,
-            topic: topic,
-            articleTitle: articleTitle,
-            affected: affected,
-            domain: domain,
-            pubDate: pubDate
-        )
-
         Task { @MainActor in
-            NotificationUtils.updateAppBadgeCount()
-            timeoutTask.cancel()
-            completionHandler(.newData)
-            UIApplication.shared.endBackgroundTask(taskID)
+            defer {
+                UIApplication.shared.endBackgroundTask(taskID)
+            }
+
+            do {
+                try await SyncManager.shared.addOrUpdateArticle(
+                    title: title,
+                    body: body,
+                    jsonURL: json_url,
+                    topic: topic,
+                    articleTitle: articleTitle,
+                    affected: affected,
+                    domain: domain,
+                    pubDate: pubDate
+                )
+
+                NotificationUtils.updateAppBadgeCount()
+                completionHandler(.newData)
+
+            } catch {
+                print("Background task failed: \(error)")
+                completionHandler(.failed)
+            }
         }
     }
 
@@ -315,50 +312,66 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         Task(priority: .utility) {
             let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date()) ?? Date()
 
-            // Get articles to clean up
-            guard let articlesToClean = try? context.fetch(
-                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date < cutoffDate })
-            ) else {
-                print("Error fetching old articles")
+            // Fetch the IDs on a background thread first
+            let articlesToClean: [SeenArticle]
+            do {
+                articlesToClean = try await withCheckedThrowingContinuation { continuation in
+                    Task { @MainActor in
+                        do {
+                            let articles = try context.fetch(
+                                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date < cutoffDate })
+                            )
+                            continuation.resume(returning: articles)
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                }
+            } catch {
+                print("Error fetching old articles: \(error)")
                 return
             }
 
-            // Process in smaller batches to avoid memory pressure
             let batchSize = 50
             for batch in articlesToClean.chunked(into: batchSize) {
                 for seenArticle in batch {
+                    // Brief yield to allow UI to remain responsive
+                    await Task.yield()
+
                     do {
-                        let oldID = seenArticle.id
-                        let matchingNotifications = try context.fetch(
-                            FetchDescriptor<NotificationData>(
-                                predicate: #Predicate { $0.id == oldID }
+                        // Switch to main actor for each individual operation
+                        try await MainActor.run {
+                            let oldID = seenArticle.id
+                            let matchingNotifications = try context.fetch(
+                                FetchDescriptor<NotificationData>(
+                                    predicate: #Predicate { $0.id == oldID }
+                                )
                             )
-                        )
 
-                        guard let notification = matchingNotifications.first else {
+                            guard let notification = matchingNotifications.first else {
+                                context.delete(seenArticle)
+                                try context.save()
+                                return
+                            }
+
+                            if notification.isBookmarked || notification.isArchived {
+                                return
+                            }
+
+                            NotificationCenter.default.post(
+                                name: .willDeleteArticle,
+                                object: nil,
+                                userInfo: ["articleID": oldID]
+                            )
+
+                            context.delete(notification)
                             context.delete(seenArticle)
-                            continue
+                            try context.save()
                         }
 
-                        // Skip protected articles
-                        if notification.isBookmarked || notification.isArchived {
-                            continue
-                        }
+                        // Sleep between operations to prevent overwhelming the system
+                        try await Task.sleep(for: .milliseconds(50))
 
-                        // Post pre-deletion notification
-                        NotificationCenter.default.post(
-                            name: .willDeleteArticle,
-                            object: nil,
-                            userInfo: ["articleID": oldID]
-                        )
-
-                        context.delete(notification)
-                        context.delete(seenArticle)
-
-                        try context.save()
-
-                        // Brief pause between deletions
-                        try await Task.sleep(nanoseconds: 1_000_000) // 1ms
                     } catch {
                         print("Error processing article \(seenArticle.id): \(error)")
                     }

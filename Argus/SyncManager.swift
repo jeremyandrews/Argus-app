@@ -6,28 +6,33 @@ class SyncManager {
     private init() {}
 
     func sendRecentArticlesToServer() async {
-        Task.detached(priority: .utility) {
+        // Move this to the main actor to ensure safe SwiftData access
+        @MainActor func fetchRecentArticles() async throws -> [SeenArticle] {
             let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
+            let context = ArgusApp.sharedModelContainer.mainContext
+            return try context.fetch(FetchDescriptor<SeenArticle>(
+                predicate: #Predicate { $0.date >= oneDayAgo }
+            ))
+        }
 
-            let recentArticles = await MainActor.run {
-                let context = ArgusApp.sharedModelContainer.mainContext
-                return (try? context.fetch(FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date >= oneDayAgo }))) ?? []
-            }
+        do {
+            // Fetch on main actor
+            let recentArticles = try await fetchRecentArticles()
 
+            // Process data in background
             let jsonUrls = recentArticles.map { $0.json_url }
+
             let url = URL(string: "https://api.arguspulse.com/articles/sync")!
             let payload = ["seen_articles": jsonUrls]
 
-            do {
-                let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
-                let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
+            let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
+            let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
 
-                if let unseenUrls = serverResponse["unseen_articles"] {
-                    await self.fetchAndSaveUnseenArticles(from: unseenUrls)
-                }
-            } catch {
-                print("Failed to sync articles: \(error)")
+            if let unseenUrls = serverResponse["unseen_articles"] {
+                await fetchAndSaveUnseenArticles(from: unseenUrls)
             }
+        } catch {
+            print("Failed to sync articles: \(error)")
         }
     }
 

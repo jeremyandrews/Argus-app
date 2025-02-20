@@ -11,10 +11,9 @@ extension Date {
 @Observable
 final class ContentCache: @unchecked Sendable {
     static let shared = ContentCache()
-
     private let cache = NSCache<NSString, NSDictionary>()
-    private var loadingTasks: [String: Task<Void, Never>] = [:]
     private let queue = DispatchQueue(label: "com.argus.contentcache", attributes: .concurrent)
+    private var loadingTasks: [String: Task<Void, Never>] = [:]
 
     private init() {
         cache.countLimit = 200
@@ -22,7 +21,9 @@ final class ContentCache: @unchecked Sendable {
     }
 
     func getContent(for url: String) -> [String: Any]? {
-        cache.object(forKey: url as NSString) as? [String: Any]
+        queue.sync {
+            cache.object(forKey: url as NSString) as? [String: Any]
+        }
     }
 
     func loadContent(for jsonURL: String) {
@@ -44,11 +45,10 @@ final class ContentCache: @unchecked Sendable {
 
                 do {
                     let (data, _) = try await URLSession.shared.data(from: url)
+
                     if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        // Access cache directly since NSCache is thread-safe
                         self?.cache.setObject(json as NSDictionary, forKey: jsonURL as NSString)
 
-                        // Notify observers that content is available
                         NotificationCenter.default.post(
                             name: Notification.Name("ContentLoaded-\(jsonURL)"),
                             object: nil
