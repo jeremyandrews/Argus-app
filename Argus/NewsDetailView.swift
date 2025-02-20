@@ -31,7 +31,7 @@ struct NewsDetailView: View {
         "Critical Analysis": false,
         "Logical Fallacies": false,
         "Source Analysis": false,
-        "AI Insights": false,
+        "Argus Insights": false,
         "Argus Details": false,
     ]
 
@@ -577,7 +577,7 @@ struct NewsDetailView: View {
         ]
 
         if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-            sections.append(ContentSection(header: "AI Insights", content: insights))
+            sections.append(ContentSection(header: "Argus Insights", content: insights))
         }
 
         sections.append(ContentSection(
@@ -1029,7 +1029,7 @@ struct ShareSelectionView: View {
         ]
 
         if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-            sections.append(ContentSection(header: "AI Insights", content: insights))
+            sections.append(ContentSection(header: "Argus Insights", content: insights))
         }
 
         sections.append(ContentSection(
