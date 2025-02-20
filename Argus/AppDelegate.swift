@@ -86,21 +86,30 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        // Create a flag to ensure we only call the completion handler once
+        var hasCompleted = false
+        func complete(_ result: UIBackgroundFetchResult) {
+            guard !hasCompleted else { return }
+            hasCompleted = true
+            completionHandler(result)
+        }
+
         var backgroundTask: UIBackgroundTaskIdentifier = .invalid
         backgroundTask = UIApplication.shared.beginBackgroundTask {
-            completionHandler(.failed)
+            complete(.failed)
             if backgroundTask != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
                 backgroundTask = .invalid
             }
         }
 
+        // Validate push notification data
         guard let aps = userInfo["aps"] as? [String: AnyObject],
               let contentAvailable = aps["content-available"] as? Int, contentAvailable == 1,
               let data = userInfo["data"] as? [String: AnyObject],
               let json_url = data["json_url"] as? String, !json_url.isEmpty
         else {
-            completionHandler(.noData)
+            complete(.noData)
             if backgroundTask != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
             }
@@ -122,6 +131,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         Task { @MainActor in
+            defer {
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                    backgroundTask = .invalid
+                }
+            }
+
             do {
                 try await SyncManager.shared.addOrUpdateArticle(
                     title: title,
@@ -135,15 +151,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 )
 
                 NotificationUtils.updateAppBadgeCount()
-                completionHandler(.newData)
+                complete(.newData)
             } catch {
                 print("Background task failed: \(error)")
-                completionHandler(.failed)
-            }
-
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-                backgroundTask = .invalid
+                complete(.failed)
             }
         }
     }
