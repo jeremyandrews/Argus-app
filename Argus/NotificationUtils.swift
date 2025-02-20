@@ -18,11 +18,7 @@ class NotificationUtils {
                 )
             ).count
 
-            UNUserNotificationCenter.current().updateBadgeCount(unviewedCount) { error in
-                if let error = error {
-                    print("Failed to set badge count: \(error)")
-                }
-            }
+            UNUserNotificationCenter.current().updateBadgeCount(unviewedCount)
         } catch {
             print("Failed to fetch unviewed notifications: \(error)")
         }

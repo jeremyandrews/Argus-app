@@ -86,26 +86,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        var taskID: UIBackgroundTaskIdentifier = .invalid
-        taskID = UIApplication.shared.beginBackgroundTask {
+        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+        backgroundTask = UIApplication.shared.beginBackgroundTask {
             completionHandler(.failed)
-            UIApplication.shared.endBackgroundTask(taskID)
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
         }
 
         guard let aps = userInfo["aps"] as? [String: AnyObject],
-              let contentAvailable = aps["content-available"] as? Int, contentAvailable == 1
-        else {
-            completionHandler(.noData)
-            UIApplication.shared.endBackgroundTask(taskID)
-            return
-        }
-
-        guard let data = userInfo["data"] as? [String: AnyObject],
+              let contentAvailable = aps["content-available"] as? Int, contentAvailable == 1,
+              let data = userInfo["data"] as? [String: AnyObject],
               let json_url = data["json_url"] as? String, !json_url.isEmpty
         else {
-            print("Error: Missing or invalid json_url in push notification")
-            completionHandler(.failed)
-            UIApplication.shared.endBackgroundTask(taskID)
+            completionHandler(.noData)
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+            }
             return
         }
 
@@ -124,10 +122,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         Task { @MainActor in
-            defer {
-                UIApplication.shared.endBackgroundTask(taskID)
-            }
-
             do {
                 try await SyncManager.shared.addOrUpdateArticle(
                     title: title,
@@ -142,10 +136,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
                 NotificationUtils.updateAppBadgeCount()
                 completionHandler(.newData)
-
             } catch {
                 print("Background task failed: \(error)")
                 completionHandler(.failed)
+            }
+
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
             }
         }
     }
