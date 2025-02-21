@@ -860,33 +860,27 @@ struct NewsView: View {
         }
 
         let newGroupingData: [(key: String, displayKey: String, notifications: [NotificationData])]
-
         switch groupingStyle {
         case "date":
             let groupedByDay = Dictionary(grouping: sorted) { $0.date.dayOnly }
-
             let sortedDayKeys = groupedByDay.keys.sorted(by: >) // Ensure correct sorting
-
-            newGroupingData = sortedDayKeys.map { dateKey in
-                let displayKey = dateKey.formatted(.dateTime.month(.abbreviated).day().year()) // UI-visible
-                let uniqueKey = "\(displayKey)-\(UUID().uuidString)" // Unique for SwiftUI refresh
-                let items = groupedByDay[dateKey] ?? []
-                return (key: uniqueKey, displayKey: displayKey, notifications: items)
+            newGroupingData = sortedDayKeys.map { dateKey -> (String, String, [NotificationData]) in
+                let displayKey = dateKey.formatted(.dateTime.month(.abbreviated).day().year())
+                // Just use displayKey as the key - no more UUID
+                return (key: displayKey, displayKey: displayKey, notifications: groupedByDay[dateKey] ?? [])
             }
-
         case "topic":
             let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
             newGroupingData = groupedByTopic
                 .map { (key: $0.key, displayKey: $0.key, notifications: $0.value) }
                 .sorted { $0.key < $1.key } // Alphabetical
-
         default:
             newGroupingData = [("", "", sorted)]
         }
 
         DispatchQueue.main.async {
             if !areGroupingArraysEqual(sortedAndGroupedNotifications, newGroupingData.map { ($0.key, $0.notifications) }) {
-                sortedAndGroupedNotifications = newGroupingData.map { ($0.displayKey, $0.notifications) } // Keep UI clean
+                sortedAndGroupedNotifications = newGroupingData.map { ($0.displayKey, $0.notifications) }
             }
         }
     }
