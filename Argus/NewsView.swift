@@ -831,15 +831,19 @@ struct NewsView: View {
     }
 
     private func loadMoreNotificationsIfNeeded(currentItem: NotificationData) {
-        guard let lastItem = filteredNotifications.last else { return }
-
-        if currentItem.id == lastItem.id {
+        guard let currentIndex = filteredNotifications.firstIndex(where: { $0.id == currentItem.id }) else {
+            return
+        }
+        // When the user is within 5 rows of the bottom, load more
+        let thresholdIndex = filteredNotifications.count - 5
+        if currentIndex == thresholdIndex {
             let nextBatchSize = filteredNotifications.count + 50
+            // Ensure we don't go out of bounds
             if nextBatchSize <= totalNotifications.count {
                 withAnimation {
                     filteredNotifications = Array(totalNotifications.prefix(nextBatchSize))
                 }
-                updateGrouping() // ✅ Ensure grouping updates dynamically
+                updateGrouping()
             }
         }
     }
@@ -862,7 +866,10 @@ struct NewsView: View {
         let newGroupingData: [(key: String, displayKey: String, notifications: [NotificationData])]
         switch groupingStyle {
         case "date":
-            let groupedByDay = Dictionary(grouping: sorted) { $0.date.dayOnly }
+            let groupedByDay = Dictionary(grouping: sorted) {
+                // Fall back to `notification.date` or a distantPast if `pub_date` is nil
+                $0.pub_date?.dayOnly ?? $0.date.dayOnly
+            }
             let sortedDayKeys = groupedByDay.keys.sorted(by: >) // Ensure correct sorting
             newGroupingData = sortedDayKeys.map { dateKey -> (String, String, [NotificationData]) in
                 let displayKey = dateKey.formatted(.dateTime.month(.abbreviated).day().year())
