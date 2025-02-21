@@ -821,29 +821,41 @@ struct NewsView: View {
 
     @MainActor
     private func updateFilteredNotifications() {
-        // Capture the values we need before going to background
-        let currentTopic = selectedTopic
-        let showArchived = showArchivedContent
-        let showUnread = showUnreadOnly
-        let showBookmarked = showBookmarkedOnly
-        let notifications = allNotifications
+        let context = ArgusApp.sharedModelContainer.mainContext
 
-        Task.detached {
-            // Do the filtering work in the background with our captured values
-            let filtered = notifications.filter { notification in
-                let topicCondition = (currentTopic == "All" || notification.topic == currentTopic)
-                let archivedCondition = showArchived || !notification.isArchived
-                let unreadCondition = !showUnread || !notification.isViewed
-                let bookmarkedCondition = !showBookmarked || notification.isBookmarked
-                return topicCondition && archivedCondition && unreadCondition && bookmarkedCondition
-            }
+        let topicPredicate = selectedTopic == "All" ? nil :
+            #Predicate<NotificationData> { $0.topic == selectedTopic }
 
-            // Update the UI on the main thread
-            await MainActor.run {
-                withAnimation {
-                    filteredNotifications = filtered
+        let archivedPredicate = showArchivedContent ? nil :
+            #Predicate<NotificationData> { !$0.isArchived }
+
+        let unreadPredicate = showUnreadOnly ?
+            #Predicate<NotificationData> { !$0.isViewed } : nil
+
+        let bookmarkedPredicate = showBookmarkedOnly ?
+            #Predicate<NotificationData> { $0.isBookmarked } : nil
+
+        // Combine active predicates
+        var combinedPredicate: Predicate<NotificationData>? = nil
+
+        for predicate in [topicPredicate, archivedPredicate, unreadPredicate, bookmarkedPredicate].compactMap({ $0 }) {
+            if let existing = combinedPredicate {
+                combinedPredicate = #Predicate<NotificationData> {
+                    existing.evaluate($0) && predicate.evaluate($0)
                 }
+            } else {
+                combinedPredicate = predicate
             }
+        }
+
+        do {
+            let descriptor = FetchDescriptor<NotificationData>(
+                predicate: combinedPredicate
+            )
+            filteredNotifications = try context.fetch(descriptor)
+        } catch {
+            print("Failed to fetch filtered notifications: \(error)")
+            filteredNotifications = []
         }
     }
 
