@@ -31,8 +31,8 @@ struct NewsDetailView: View {
         "Critical Analysis": false,
         "Logical Fallacies": false,
         "Source Analysis": false,
-        "Argus Speaks": false,
-        "Neural Core Stats": false,
+        "In My Opinion...": false,
+        "Argus Engine Stats": false,
     ]
 
     @State private var isSharePresented = false
@@ -577,11 +577,11 @@ struct NewsDetailView: View {
         ]
 
         if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-            sections.append(ContentSection(header: "Argus Speaks", content: insights))
+            sections.append(ContentSection(header: "In My Opinion...", content: insights))
         }
 
         sections.append(ContentSection(
-            header: "Neural Core Stats",
+            header: "Argus Engine Stats",
             content: (
                 json["model"] as? String ?? "Unknown",
                 (json["elapsed_time"] as? Double) ?? 0.0,
@@ -626,7 +626,7 @@ struct NewsDetailView: View {
                 .font(.body)
                 .padding(.top, 8)
                 .textSelection(.enabled)
-            } else if section.header == "Neural Core Stats", let details = section.argusDetails {
+            } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
                 ArgusDetailsView(data: details)
             } else if section.header == "Preview" {
                 VStack {
@@ -953,9 +953,9 @@ struct ShareSelectionView: View {
                     if let shareableContent = section.content as? String {
                         shareText += "\(shareableContent)\n\n"
                     }
-                } else if section.header == "Neural Core Stats" {
+                } else if section.header == "Argus Engine Stats" {
                     if let details = section.argusDetails {
-                        shareText += "NEURAL CORE STATS\n\n"
+                        shareText += "ARGUS ENGINE STATS\n\n"
                         shareText += """
                         Generated with \(details.model) in \(String(format: "%.2f", details.elapsedTime)) seconds.
                         Metrics:
@@ -1037,11 +1037,11 @@ struct ShareSelectionView: View {
         ]
 
         if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-            sections.append(ContentSection(header: "Argus Speaks", content: insights))
+            sections.append(ContentSection(header: "In My Opinion...", content: insights))
         }
 
         sections.append(ContentSection(
-            header: "Neural Core Stats",
+            header: "Argus Engine Stats",
             content: (
                 json["model"] as? String ?? "Unknown",
                 (json["elapsed_time"] as? Double) ?? 0.0,
