@@ -85,6 +85,8 @@ struct NewsView: View {
     @State private var needsScrollReset: Bool = false
     @State private var showDeleteConfirmation = false
     @State private var articleToDelete: NotificationData?
+    @State private var totalNotifications: [NotificationData] = []
+    @State private var batchSize: Int = 50 // Start by displaying 50 items
 
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "none"
@@ -877,20 +879,37 @@ struct NewsView: View {
 
                 let nonBookmarkedNotifications: [NotificationData] = try context.fetch(nonBookmarkedDescriptor)
 
-                // Concatenate the two lists
-                filteredNotifications = bookmarkedNotifications + nonBookmarkedNotifications
+                // Store all fetched notifications
+                totalNotifications = bookmarkedNotifications + nonBookmarkedNotifications
             } else {
-                // Fetch normally with a single query
                 let descriptor = FetchDescriptor<NotificationData>(
                     predicate: combinedPredicate,
                     sortBy: [dateSortDescriptor]
                 )
 
-                filteredNotifications = try context.fetch(descriptor)
+                totalNotifications = try context.fetch(descriptor)
             }
+
+            // Load the first batch of notifications for pagination
+            filteredNotifications = Array(totalNotifications.prefix(batchSize))
+
         } catch {
             print("Failed to fetch filtered notifications: \(error)")
             filteredNotifications = []
+            totalNotifications = []
+        }
+    }
+
+    private func loadMoreNotificationsIfNeeded(currentItem: NotificationData) {
+        guard let lastItem = filteredNotifications.last else { return }
+
+        if currentItem.id == lastItem.id {
+            let nextBatchSize = filteredNotifications.count + 50 // Increase by 50 items
+            if nextBatchSize <= totalNotifications.count {
+                withAnimation {
+                    filteredNotifications = Array(totalNotifications.prefix(nextBatchSize))
+                }
+            }
         }
     }
 
