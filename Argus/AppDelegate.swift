@@ -86,38 +86,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        // Create a flag to ensure we only call the completion handler once
-        var hasCompleted = false
-        func complete(_ result: UIBackgroundFetchResult) {
-            guard !hasCompleted else { return }
-            hasCompleted = true
-            completionHandler(result)
-        }
-
-        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-        backgroundTask = UIApplication.shared.beginBackgroundTask {
-            if !hasCompleted {
-                complete(.failed)
-            }
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-                backgroundTask = .invalid
-            }
-        }
-
-        // Validate push notification data
-        guard let aps = userInfo["aps"] as? [String: AnyObject],
-              let contentAvailable = aps["content-available"] as? Int, contentAvailable == 1,
-              let data = userInfo["data"] as? [String: AnyObject],
-              let json_url = data["json_url"] as? String, !json_url.isEmpty
+        // 1. Validate push data
+        guard
+            let aps = userInfo["aps"] as? [String: AnyObject],
+            let contentAvailable = aps["content-available"] as? Int,
+            contentAvailable == 1,
+            let data = userInfo["data"] as? [String: AnyObject],
+            let jsonURL = data["json_url"] as? String,
+            !jsonURL.isEmpty
         else {
-            complete(.noData)
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-            }
+            completionHandler(.noData)
             return
         }
 
+        // 2. Extract optional fields
         let topic = data["topic"] as? String
         let alert = aps["alert"] as? [String: String]
         let title = alert?["title"] ?? (data["title"] as? String ?? "[no title]")
@@ -125,38 +107,30 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let articleTitle = data["article_title"] as? String ?? "[no article title]"
         let affected = data["affected"] as? String ?? ""
         let domain = data["domain"] as? String
-
         var pubDate: Date? = nil
         if let pubDateString = data["pub_date"] as? String {
             let isoFormatter = ISO8601DateFormatter()
             pubDate = isoFormatter.date(from: pubDateString)
         }
 
+        // 3. Perform async processing
         Task { @MainActor in
-            defer {
-                if backgroundTask != .invalid {
-                    UIApplication.shared.endBackgroundTask(backgroundTask)
-                    backgroundTask = .invalid
-                }
-            }
-
             do {
                 try await SyncManager.shared.addOrUpdateArticle(
                     title: title,
                     body: body,
-                    jsonURL: json_url,
+                    jsonURL: jsonURL,
                     topic: topic,
                     articleTitle: articleTitle,
                     affected: affected,
                     domain: domain,
                     pubDate: pubDate
                 )
-
                 NotificationUtils.updateAppBadgeCount()
-                complete(.newData)
+                completionHandler(.newData)
             } catch {
                 print("Background task failed: \(error)")
-                complete(.failed)
+                completionHandler(.failed)
             }
         }
     }
