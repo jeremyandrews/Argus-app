@@ -848,11 +848,46 @@ struct NewsView: View {
             }
         }
 
+        // Define sort descriptor explicitly
+        let dateSortDescriptor = SortDescriptor<NotificationData>(\.date, order: .reverse)
+
         do {
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: combinedPredicate
-            )
-            filteredNotifications = try context.fetch(descriptor)
+            if sortOrder == "bookmarked" {
+                // Fetch bookmarked notifications first
+                let bookmarkedPredicate = combinedPredicate != nil ?
+                    #Predicate<NotificationData> { combinedPredicate!.evaluate($0) && $0.isBookmarked } :
+                    #Predicate<NotificationData> { $0.isBookmarked }
+
+                let bookmarkedDescriptor = FetchDescriptor<NotificationData>(
+                    predicate: bookmarkedPredicate,
+                    sortBy: [dateSortDescriptor]
+                )
+
+                let bookmarkedNotifications: [NotificationData] = try context.fetch(bookmarkedDescriptor)
+
+                // Fetch non-bookmarked notifications second
+                let nonBookmarkedPredicate = combinedPredicate != nil ?
+                    #Predicate<NotificationData> { combinedPredicate!.evaluate($0) && !$0.isBookmarked } :
+                    #Predicate<NotificationData> { !$0.isBookmarked }
+
+                let nonBookmarkedDescriptor = FetchDescriptor<NotificationData>(
+                    predicate: nonBookmarkedPredicate,
+                    sortBy: [dateSortDescriptor]
+                )
+
+                let nonBookmarkedNotifications: [NotificationData] = try context.fetch(nonBookmarkedDescriptor)
+
+                // Concatenate the two lists
+                filteredNotifications = bookmarkedNotifications + nonBookmarkedNotifications
+            } else {
+                // Fetch normally with a single query
+                let descriptor = FetchDescriptor<NotificationData>(
+                    predicate: combinedPredicate,
+                    sortBy: [dateSortDescriptor]
+                )
+
+                filteredNotifications = try context.fetch(descriptor)
+            }
         } catch {
             print("Failed to fetch filtered notifications: \(error)")
             filteredNotifications = []
