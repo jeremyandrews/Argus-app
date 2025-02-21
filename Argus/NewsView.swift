@@ -72,6 +72,7 @@ struct NewsView: View {
 
     @State private var filteredNotifications: [NotificationData] = []
     @State private var selectedNotificationIDs: Set<NotificationData.ID> = []
+    @State private var sortedAndGroupedNotifications: [(key: String, notifications: [NotificationData])] = []
     @State private var showUnreadOnly: Bool = false
     @State private var showBookmarkedOnly: Bool = false
     @State private var showArchivedContent: Bool = false
@@ -119,52 +120,6 @@ struct NewsView: View {
         return ["All"] + topics.sorted()
     }
 
-    private var sortedAndGroupedNotifications: [(key: String, notifications: [NotificationData])] {
-        let sorted = filteredNotifications.sorted { n1, n2 in
-            switch sortOrder {
-            case "oldest":
-                return n1.date < n2.date
-            case "bookmarked":
-                if n1.isBookmarked != n2.isBookmarked {
-                    // Bookmarked items appear first
-                    return n1.isBookmarked
-                }
-                // Otherwise sort by date descending
-                return n1.date > n2.date
-            default: // "newest"
-                return n1.date > n2.date
-            }
-        }
-
-        switch groupingStyle {
-        case "date":
-            let groupedByDay = Dictionary(grouping: sorted) { $0.date.dayOnly }
-
-            // Sort day-keys ascending for "oldest", descending otherwise:
-            let sortedDayKeys = groupedByDay.keys.sorted { d1, d2 in
-                sortOrder == "oldest" ? (d1 < d2) : (d1 > d2)
-            }
-
-            // Map each day -> a (key: string, notifications: [NotificationData])
-            return sortedDayKeys.map { dateKey in
-                let sectionTitle = dateKey.formatted(.dateTime.month(.abbreviated).day().year())
-                let items = groupedByDay[dateKey] ?? []
-                return (key: sectionTitle, notifications: items)
-            }
-
-        case "topic":
-            // Unchanged from original
-            let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
-            return groupedByTopic
-                .map { (key: $0.key, notifications: $0.value) }
-                .sorted { $0.key < $1.key } // Alphabetical
-
-        default:
-            // No grouping, single group
-            return [("", sorted)]
-        }
-    }
-
     var body: some View {
         NavigationView {
             ZStack(alignment: .bottom) {
@@ -201,6 +156,9 @@ struct NewsView: View {
                                             editMode: editMode,
                                             selectedNotificationIDs: $selectedNotificationIDs
                                         )
+                                        .onAppear {
+                                            loadMoreNotificationsIfNeeded(currentItem: notification)
+                                        }
                                     }
                                 }
                             } else {
@@ -211,6 +169,9 @@ struct NewsView: View {
                                         editMode: editMode,
                                         selectedNotificationIDs: $selectedNotificationIDs
                                     )
+                                    .onAppear {
+                                        loadMoreNotificationsIfNeeded(currentItem: notification)
+                                    }
                                 }
                             }
                         }
@@ -837,7 +798,6 @@ struct NewsView: View {
         let bookmarkedPredicate = showBookmarkedOnly ?
             #Predicate<NotificationData> { $0.isBookmarked } : nil
 
-        // Combine active predicates
         var combinedPredicate: Predicate<NotificationData>? = nil
 
         for predicate in [topicPredicate, archivedPredicate, unreadPredicate, bookmarkedPredicate].compactMap({ $0 }) {
@@ -850,48 +810,18 @@ struct NewsView: View {
             }
         }
 
-        // Define sort descriptor explicitly
         let dateSortDescriptor = SortDescriptor<NotificationData>(\.date, order: .reverse)
 
         do {
-            if sortOrder == "bookmarked" {
-                // Fetch bookmarked notifications first
-                let bookmarkedPredicate = combinedPredicate != nil ?
-                    #Predicate<NotificationData> { combinedPredicate!.evaluate($0) && $0.isBookmarked } :
-                    #Predicate<NotificationData> { $0.isBookmarked }
+            let descriptor = FetchDescriptor<NotificationData>(
+                predicate: combinedPredicate,
+                sortBy: [dateSortDescriptor]
+            )
 
-                let bookmarkedDescriptor = FetchDescriptor<NotificationData>(
-                    predicate: bookmarkedPredicate,
-                    sortBy: [dateSortDescriptor]
-                )
+            totalNotifications = try context.fetch(descriptor)
 
-                let bookmarkedNotifications: [NotificationData] = try context.fetch(bookmarkedDescriptor)
-
-                // Fetch non-bookmarked notifications second
-                let nonBookmarkedPredicate = combinedPredicate != nil ?
-                    #Predicate<NotificationData> { combinedPredicate!.evaluate($0) && !$0.isBookmarked } :
-                    #Predicate<NotificationData> { !$0.isBookmarked }
-
-                let nonBookmarkedDescriptor = FetchDescriptor<NotificationData>(
-                    predicate: nonBookmarkedPredicate,
-                    sortBy: [dateSortDescriptor]
-                )
-
-                let nonBookmarkedNotifications: [NotificationData] = try context.fetch(nonBookmarkedDescriptor)
-
-                // Store all fetched notifications
-                totalNotifications = bookmarkedNotifications + nonBookmarkedNotifications
-            } else {
-                let descriptor = FetchDescriptor<NotificationData>(
-                    predicate: combinedPredicate,
-                    sortBy: [dateSortDescriptor]
-                )
-
-                totalNotifications = try context.fetch(descriptor)
-            }
-
-            // Load the first batch of notifications for pagination
             filteredNotifications = Array(totalNotifications.prefix(batchSize))
+            updateGrouping()
 
         } catch {
             print("Failed to fetch filtered notifications: \(error)")
@@ -904,13 +834,76 @@ struct NewsView: View {
         guard let lastItem = filteredNotifications.last else { return }
 
         if currentItem.id == lastItem.id {
-            let nextBatchSize = filteredNotifications.count + 50 // Increase by 50 items
+            let nextBatchSize = filteredNotifications.count + 50
             if nextBatchSize <= totalNotifications.count {
                 withAnimation {
                     filteredNotifications = Array(totalNotifications.prefix(nextBatchSize))
                 }
+                updateGrouping() // ✅ Ensure grouping updates dynamically
             }
         }
+    }
+
+    private func updateGrouping() {
+        let sorted = filteredNotifications.sorted { n1, n2 in
+            switch sortOrder {
+            case "oldest":
+                return n1.date < n2.date
+            case "bookmarked":
+                if n1.isBookmarked != n2.isBookmarked {
+                    return n1.isBookmarked
+                }
+                return n1.date > n2.date
+            default: // "newest"
+                return n1.date > n2.date
+            }
+        }
+
+        let newGroupingData: [(key: String, displayKey: String, notifications: [NotificationData])]
+
+        switch groupingStyle {
+        case "date":
+            let groupedByDay = Dictionary(grouping: sorted) { $0.date.dayOnly }
+
+            let sortedDayKeys = groupedByDay.keys.sorted(by: >) // Ensure correct sorting
+
+            newGroupingData = sortedDayKeys.map { dateKey in
+                let displayKey = dateKey.formatted(.dateTime.month(.abbreviated).day().year()) // UI-visible
+                let uniqueKey = "\(displayKey)-\(UUID().uuidString)" // Unique for SwiftUI refresh
+                let items = groupedByDay[dateKey] ?? []
+                return (key: uniqueKey, displayKey: displayKey, notifications: items)
+            }
+
+        case "topic":
+            let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
+            newGroupingData = groupedByTopic
+                .map { (key: $0.key, displayKey: $0.key, notifications: $0.value) }
+                .sorted { $0.key < $1.key } // Alphabetical
+
+        default:
+            newGroupingData = [("", "", sorted)]
+        }
+
+        DispatchQueue.main.async {
+            if !areGroupingArraysEqual(sortedAndGroupedNotifications, newGroupingData.map { ($0.key, $0.notifications) }) {
+                sortedAndGroupedNotifications = newGroupingData.map { ($0.displayKey, $0.notifications) } // Keep UI clean
+            }
+        }
+    }
+
+    private func areGroupingArraysEqual(
+        _ lhs: [(key: String, notifications: [NotificationData])],
+        _ rhs: [(key: String, notifications: [NotificationData])]
+    ) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+
+        for (index, leftGroup) in lhs.enumerated() {
+            let rightGroup = rhs[index]
+            if leftGroup.key != rightGroup.key || leftGroup.notifications.map(\.id) != rightGroup.notifications.map(\.id) {
+                return false
+            }
+        }
+        return true
     }
 
     private func openArticle(_ notification: NotificationData) {
