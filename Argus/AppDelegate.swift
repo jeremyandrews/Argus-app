@@ -96,7 +96,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         var backgroundTask: UIBackgroundTaskIdentifier = .invalid
         backgroundTask = UIApplication.shared.beginBackgroundTask {
-            complete(.failed)
+            if !hasCompleted {
+                complete(.failed)
+            }
             if backgroundTask != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
                 backgroundTask = .invalid
