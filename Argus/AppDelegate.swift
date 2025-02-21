@@ -86,15 +86,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        // Create a background task identifier
+        // Store completion handler in an optional that we'll nil out after first use
+        var completion: ((UIBackgroundFetchResult) -> Void)? = completionHandler
         var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-        backgroundTask = UIApplication.shared.beginBackgroundTask {
-            // If we're about to hit the system timeout, clean up and complete
-            completionHandler(.failed)
+
+        // Helper function to ensure we only complete once
+        func finish(_ result: UIBackgroundFetchResult) {
+            guard let c = completion else { return }
+            completion = nil
+            c(result)
             if backgroundTask != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
                 backgroundTask = .invalid
             }
+        }
+
+        backgroundTask = UIApplication.shared.beginBackgroundTask {
+            // If we're about to hit the system timeout, clean up and complete
+            finish(.failed)
         }
 
         // 1. Validate push data
@@ -106,10 +115,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             let jsonURL = data["json_url"] as? String,
             !jsonURL.isEmpty
         else {
-            completionHandler(.noData)
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-            }
+            finish(.noData)
             return
         }
 
@@ -130,11 +136,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Set a manual timeout that's shorter than the system watchdog
         let timeoutTask = Task {
             try? await Task.sleep(nanoseconds: 10 * 1_000_000_000) // 10 seconds
-            completionHandler(.failed)
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-                backgroundTask = .invalid
-            }
+            finish(.failed)
         }
 
         // 3. Perform async processing
@@ -156,25 +158,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
                 // Cancel timeout task since we completed successfully
                 timeoutTask.cancel()
-                completionHandler(.newData)
-                if backgroundTask != .invalid {
-                    UIApplication.shared.endBackgroundTask(backgroundTask)
-                    backgroundTask = .invalid
-                }
+                finish(.newData)
             } catch is TimeoutError {
                 print("Background processing timed out after 10 seconds")
-                completionHandler(.failed)
-                if backgroundTask != .invalid {
-                    UIApplication.shared.endBackgroundTask(backgroundTask)
-                    backgroundTask = .invalid
-                }
+                finish(.failed)
             } catch {
                 print("Background task failed: \(error)")
-                completionHandler(.failed)
-                if backgroundTask != .invalid {
-                    UIApplication.shared.endBackgroundTask(backgroundTask)
-                    backgroundTask = .invalid
-                }
+                finish(.failed)
             }
         }
     }
