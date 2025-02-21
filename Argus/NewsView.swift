@@ -222,28 +222,21 @@ struct NewsView: View {
                         await SyncManager.shared.sendRecentArticlesToServer()
                     }
                 }
-                .onChange(of: allNotifications) { _, _ in
-                    updateFilteredNotifications()
-                }
                 .onChange(of: selectedTopic) { _, newTopic in
                     // If we changed topics, reset scroll if desired
                     if lastSelectedTopic != newTopic {
                         needsScrollReset = true
                         lastSelectedTopic = newTopic
                     }
-                    updateFilteredNotifications()
                 }
                 .onChange(of: showArchivedContent) { _, _ in
                     needsTopicReset = true
-                    updateFilteredNotifications()
                 }
                 .onChange(of: showUnreadOnly) { _, _ in
                     needsTopicReset = true
-                    updateFilteredNotifications()
                 }
                 .onChange(of: showBookmarkedOnly) { _, _ in
                     needsTopicReset = true
-                    updateFilteredNotifications()
                 }
                 .onChange(of: visibleTopics) { _, _ in
                     if needsTopicReset {
@@ -257,6 +250,9 @@ struct NewsView: View {
                     if newValue == .inactive {
                         selectedNotificationIDs.removeAll()
                     }
+                }
+                .onChange(of: allNotifications) { _, _ in
+                    updateFilteredNotifications()
                 }
                 .onAppear {
                     subscriptions = SubscriptionsView().loadSubscriptions()
@@ -340,7 +336,12 @@ struct NewsView: View {
             HStack(spacing: 16) {
                 ForEach(visibleTopics, id: \.self) { topic in
                     Button {
-                        selectedTopic = topic
+                        // Update the selected topic immediately
+                        withAnimation {
+                            selectedTopic = topic
+                        }
+                        // Then trigger the filter update
+                        updateFilteredNotifications()
                     } label: {
                         Text(topic)
                             .padding(.horizontal, 12)
@@ -818,13 +819,31 @@ struct NewsView: View {
         }
     }
 
+    @MainActor
     private func updateFilteredNotifications() {
-        filteredNotifications = allNotifications.filter { notification in
-            let topicCondition = (selectedTopic == "All" || notification.topic == selectedTopic)
-            let archivedCondition = showArchivedContent || !notification.isArchived
-            let unreadCondition = !showUnreadOnly || !notification.isViewed
-            let bookmarkedCondition = !showBookmarkedOnly || notification.isBookmarked
-            return topicCondition && archivedCondition && unreadCondition && bookmarkedCondition
+        // Capture the values we need before going to background
+        let currentTopic = selectedTopic
+        let showArchived = showArchivedContent
+        let showUnread = showUnreadOnly
+        let showBookmarked = showBookmarkedOnly
+        let notifications = allNotifications
+
+        Task.detached {
+            // Do the filtering work in the background with our captured values
+            let filtered = notifications.filter { notification in
+                let topicCondition = (currentTopic == "All" || notification.topic == currentTopic)
+                let archivedCondition = showArchived || !notification.isArchived
+                let unreadCondition = !showUnread || !notification.isViewed
+                let bookmarkedCondition = !showBookmarked || notification.isBookmarked
+                return topicCondition && archivedCondition && unreadCondition && bookmarkedCondition
+            }
+
+            // Update the UI on the main thread
+            await MainActor.run {
+                withAnimation {
+                    filteredNotifications = filtered
+                }
+            }
         }
     }
 
