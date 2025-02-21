@@ -86,6 +86,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        // Create a background task identifier
+        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+        backgroundTask = UIApplication.shared.beginBackgroundTask {
+            // If we're about to hit the system timeout, clean up and complete
+            completionHandler(.failed)
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+
         // 1. Validate push data
         guard
             let aps = userInfo["aps"] as? [String: AnyObject],
@@ -96,6 +107,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             !jsonURL.isEmpty
         else {
             completionHandler(.noData)
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+            }
             return
         }
 
@@ -113,24 +127,54 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             pubDate = isoFormatter.date(from: pubDateString)
         }
 
+        // Set a manual timeout that's shorter than the system watchdog
+        let timeoutTask = Task {
+            try? await Task.sleep(nanoseconds: 10 * 1_000_000_000) // 10 seconds
+            completionHandler(.failed)
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+
         // 3. Perform async processing
         Task { @MainActor in
             do {
-                try await SyncManager.shared.addOrUpdateArticle(
-                    title: title,
-                    body: body,
-                    jsonURL: jsonURL,
-                    topic: topic,
-                    articleTitle: articleTitle,
-                    affected: affected,
-                    domain: domain,
-                    pubDate: pubDate
-                )
-                NotificationUtils.updateAppBadgeCount()
+                try await withTimeout(seconds: 10) {
+                    try await SyncManager.shared.addOrUpdateArticle(
+                        title: title,
+                        body: body,
+                        jsonURL: jsonURL,
+                        topic: topic,
+                        articleTitle: articleTitle,
+                        affected: affected,
+                        domain: domain,
+                        pubDate: pubDate
+                    )
+                    NotificationUtils.updateAppBadgeCount()
+                }
+
+                // Cancel timeout task since we completed successfully
+                timeoutTask.cancel()
                 completionHandler(.newData)
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                    backgroundTask = .invalid
+                }
+            } catch is TimeoutError {
+                print("Background processing timed out after 10 seconds")
+                completionHandler(.failed)
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                    backgroundTask = .invalid
+                }
             } catch {
                 print("Background task failed: \(error)")
                 completionHandler(.failed)
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                    backgroundTask = .invalid
+                }
             }
         }
     }

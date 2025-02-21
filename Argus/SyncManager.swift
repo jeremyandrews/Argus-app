@@ -1,12 +1,37 @@
 import Foundation
 import SwiftData
 
+extension Task where Success == Never, Failure == Never {
+    static func timeout(seconds: Double) async throws {
+        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        throw TimeoutError()
+    }
+}
+
+struct TimeoutError: Error {}
+
+func withTimeout<T>(seconds: Double, operation: @escaping () async throws -> T) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            try await operation()
+        }
+
+        group.addTask {
+            try await Task.timeout(seconds: seconds)
+            fatalError("Timeout task should never complete normally")
+        }
+
+        let result = try await group.next()!
+        group.cancelAll()
+        return result
+    }
+}
+
 class SyncManager {
     static let shared = SyncManager()
     private init() {}
 
     func sendRecentArticlesToServer() async {
-        // Move this to the main actor to ensure safe SwiftData access
         @MainActor func fetchRecentArticles() async throws -> [SeenArticle] {
             let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
             let context = ArgusApp.sharedModelContainer.mainContext
@@ -16,21 +41,22 @@ class SyncManager {
         }
 
         do {
-            // Fetch on main actor
+            // Only wrap the network call in timeout, not the whole function
             let recentArticles = try await fetchRecentArticles()
-
-            // Process data in background
             let jsonUrls = recentArticles.map { $0.json_url }
 
-            let url = URL(string: "https://api.arguspulse.com/articles/sync")!
-            let payload = ["seen_articles": jsonUrls]
+            try await withTimeout(seconds: 10) {
+                let url = URL(string: "https://api.arguspulse.com/articles/sync")!
+                let payload = ["seen_articles": jsonUrls]
+                let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
+                let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
 
-            let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
-            let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
-
-            if let unseenUrls = serverResponse["unseen_articles"] {
-                await fetchAndSaveUnseenArticles(from: unseenUrls)
+                if let unseenUrls = serverResponse["unseen_articles"] {
+                    await self.fetchAndSaveUnseenArticles(from: unseenUrls)
+                }
             }
+        } catch is TimeoutError {
+            print("Sync operation timed out after 10 seconds")
         } catch {
             print("Failed to sync articles: \(error)")
         }
@@ -72,7 +98,6 @@ class SyncManager {
         await MainActor.run {
             do {
                 let context = ArgusApp.sharedModelContainer.mainContext
-
                 let existingURLs = (try? context.fetch(FetchDescriptor<NotificationData>()))?.map { $0.json_url } ?? []
                 let existingSeenURLs = (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
 
@@ -92,11 +117,13 @@ class SyncManager {
                             domain: article.domain,
                             pub_date: article.pubDate ?? Date()
                         )
+
                         let seenArticle = SeenArticle(
                             id: notification.id,
                             json_url: article.jsonURL,
                             date: notification.date
                         )
+
                         newNotifications.append(notification)
                         newSeenArticles.append(seenArticle)
                     }
@@ -128,11 +155,17 @@ class SyncManager {
         await withTaskGroup(of: (String, Data?).self) { group in
             for urlString in urls {
                 group.addTask {
-                    guard let url = URL(string: urlString) else { return (urlString, nil) }
+                    guard let url = URL(string: urlString) else {
+                        return (urlString, nil as Data?)
+                    }
+                    // Timeout only the network call, not the processing
                     do {
-                        let (data, _) = try await URLSession.shared.data(from: url)
+                        let (data, _) = try await withTimeout(seconds: 10) {
+                            try await URLSession.shared.data(from: url)
+                        }
                         return (urlString, data)
                     } catch {
+                        print("Network request timed out or failed for \(urlString): \(error)")
                         return (urlString, nil)
                     }
                 }
@@ -140,7 +173,6 @@ class SyncManager {
 
             var articlesToInsert: [(title: String, body: String, jsonURL: String, topic: String?, articleTitle: String, affected: String, domain: String?, pubDate: Date?)] = []
 
-            // Process fetched data
             for await (urlString, data) in group {
                 guard let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
 
@@ -155,12 +187,8 @@ class SyncManager {
                 articlesToInsert.append((title, body, urlString, topic, articleTitle, affected, domain, pubDate))
             }
 
-            // Insert into database
-            do {
-                try await addOrUpdateArticles(articlesToInsert)
-            } catch {
-                print("Failed batch-inserting articles: \(error)")
-            }
+            // Database operations shouldn't have timeouts
+            try? await self.addOrUpdateArticles(articlesToInsert)
         }
     }
 }
