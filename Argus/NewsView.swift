@@ -348,14 +348,15 @@ struct NewsView: View {
 
     // MARK: - Row building
 
-    private func NotificationRow(
-        notification: NotificationData,
-        editMode: Binding<EditMode>?,
-        selectedNotificationIDs: Binding<Set<NotificationData.ID>>
-    ) -> some View {
-        HStack {
+    private struct NotificationContentView: View {
+        let notification: NotificationData
+        let modelContext: ModelContext
+        let filteredNotifications: [NotificationData]
+        let totalNotifications: [NotificationData]
+
+        var body: some View {
             VStack(alignment: .leading, spacing: 8) {
-                // TOPIC + ARCHIVED
+                // Topic and Archive pills
                 HStack(spacing: 8) {
                     if let topic = notification.topic, !topic.isEmpty {
                         TopicPill(topic: topic)
@@ -365,27 +366,27 @@ struct NewsView: View {
                     }
                 }
 
-                // TITLE (bold if unread)
+                // Title
                 let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
                 Text(AttributedString(attributedTitle))
                     .font(.headline)
                     .fontWeight(notification.isViewed ? .regular : .bold)
 
-                // PUBLICATION DATE
+                // Publication Date
                 if let pubDate = notification.pub_date {
                     Text(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
 
-                // SUMMARY
+                // Summary
                 let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
                 Text(AttributedString(attributedBody))
                     .font(.system(size: 14, weight: .light))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
 
-                // AFFECTED
+                // Affected
                 if !notification.affected.isEmpty {
                     Text(notification.affected)
                         .font(.system(size: 12, weight: .bold))
@@ -393,53 +394,88 @@ struct NewsView: View {
                         .multilineTextAlignment(.leading)
                 }
 
-                // DOMAIN
+                // Domain
                 if let domain = notification.domain, !domain.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(domain)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.blue)
-                            .lineLimit(1)
-
-                        LazyLoadingQualityBadges(
-                            jsonURL: notification.json_url,
-                            onBadgeTap: { section in
-                                guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
-                                    return
-                                }
-                                let detailView = NewsDetailView(
-                                    notifications: filteredNotifications,
-                                    currentIndex: index,
-                                    initiallyExpandedSection: section
-                                )
-                                .environment(\.modelContext, modelContext)
-                                let hostingController = UIHostingController(rootView: detailView)
-                                hostingController.modalPresentationStyle = .fullScreen
-                                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                                   let window = windowScene.windows.first,
-                                   let rootViewController = window.rootViewController
-                                {
-                                    rootViewController.present(hostingController, animated: true)
-                                }
-                            }
-                        )
-                    }
+                    DomainView(
+                        domain: domain,
+                        notification: notification,
+                        modelContext: modelContext,
+                        filteredNotifications: filteredNotifications,
+                        totalNotifications: totalNotifications
+                    )
                 }
             }
+        }
+    }
+
+    private struct DomainView: View {
+        let domain: String
+        let notification: NotificationData
+        let modelContext: ModelContext
+        let filteredNotifications: [NotificationData]
+        let totalNotifications: [NotificationData]
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(domain)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+
+                LazyLoadingQualityBadges(
+                    jsonURL: notification.json_url,
+                    onBadgeTap: { section in
+                        guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
+                            return
+                        }
+                        let detailView = NewsDetailView(
+                            notifications: filteredNotifications,
+                            allNotifications: totalNotifications,
+                            currentIndex: index,
+                            initiallyExpandedSection: section
+                        )
+                        .environment(\.modelContext, modelContext)
+                        let hostingController = UIHostingController(rootView: detailView)
+                        hostingController.modalPresentationStyle = .fullScreen
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let window = windowScene.windows.first,
+                           let rootViewController = window.rootViewController
+                        {
+                            rootViewController.present(hostingController, animated: true)
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    private func NotificationRow(
+        notification: NotificationData,
+        editMode: Binding<EditMode>?,
+        selectedNotificationIDs: Binding<Set<NotificationData.ID>>
+    ) -> some View {
+        HStack {
+            NotificationContentView(
+                notification: notification,
+                modelContext: modelContext,
+                filteredNotifications: filteredNotifications,
+                totalNotifications: totalNotifications
+            )
 
             Spacer()
 
-            // Bookmark icon on the far trailing side
-            BookmarkButton(notification: notification)
+            // Right-side controls
+            VStack {
+                BookmarkButton(notification: notification)
 
-            // Checkmark if in Edit mode
-            if editMode?.wrappedValue == .active {
-                if selectedNotificationIDs.wrappedValue.contains(notification.id) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.blue)
-                } else {
-                    Image(systemName: "circle")
-                        .foregroundColor(.gray)
+                if editMode?.wrappedValue == .active {
+                    if selectedNotificationIDs.wrappedValue.contains(notification.id) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.blue)
+                    } else {
+                        Image(systemName: "circle")
+                            .foregroundColor(.gray)
+                    }
                 }
             }
         }
@@ -480,7 +516,6 @@ struct NewsView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            // Double-tap toggles read/unread
             toggleReadStatus(notification)
         }
         .onTapGesture(count: 1) {
@@ -499,20 +534,41 @@ struct NewsView: View {
         .onLongPressGesture {
             handleLongPressGesture(for: notification)
         }
-        .onAppear {
-            ContentCache.shared.loadContent(for: notification.json_url)
-        }
     }
 
-    private func openArticleWithSection(_ notification: NotificationData, _: [String: Any], _ section: String? = nil) {
+    private func openArticleWithSection(_ notification: NotificationData, _: [String: Any], section: String? = nil) {
         guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
             return
         }
 
         let detailView = NewsDetailView(
             notifications: filteredNotifications,
+            allNotifications: totalNotifications,
             currentIndex: index,
             initiallyExpandedSection: section
+        )
+        .environment(\.modelContext, modelContext)
+
+        let hostingController = UIHostingController(rootView: detailView)
+        hostingController.modalPresentationStyle = .fullScreen
+
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController
+        {
+            rootViewController.present(hostingController, animated: true)
+        }
+    }
+
+    private func openArticle(_ notification: NotificationData) {
+        guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
+            return
+        }
+
+        let detailView = NewsDetailView(
+            notifications: filteredNotifications,
+            allNotifications: totalNotifications,
+            currentIndex: index
         )
         .environment(\.modelContext, modelContext)
 
@@ -905,28 +961,6 @@ struct NewsView: View {
             }
         }
         return true
-    }
-
-    private func openArticle(_ notification: NotificationData) {
-        guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
-            return
-        }
-
-        let detailView = NewsDetailView(
-            notifications: filteredNotifications,
-            currentIndex: index
-        )
-        .environment(\.modelContext, modelContext)
-
-        let hostingController = UIHostingController(rootView: detailView)
-        hostingController.modalPresentationStyle = .fullScreen
-
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController
-        {
-            rootViewController.present(hostingController, animated: true)
-        }
     }
 
     private func getEmptyStateMessage() -> String {

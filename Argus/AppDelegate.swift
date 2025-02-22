@@ -502,7 +502,8 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 
         // 3) Create and present the NewsDetailView for this article
         let detailView = NewsDetailView(
-            notifications: [notification], // or the whole array if you prefer
+            notifications: [notification],
+            allNotifications: [notification],
             currentIndex: 0
         )
         .environment(\.modelContext, context)

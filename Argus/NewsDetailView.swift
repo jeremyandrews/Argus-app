@@ -6,8 +6,10 @@ import WebKit
 
 struct NewsDetailView: View {
     @State private var notifications: [NotificationData]
+    @State private var allNotifications: [NotificationData]
     @State private var currentIndex: Int
     @State private var deletedIDs: Set<UUID> = []
+    @State private var batchSize: Int = 50
 
     private var isCurrentIndexValid: Bool {
         currentIndex >= 0 && currentIndex < notifications.count
@@ -31,7 +33,7 @@ struct NewsDetailView: View {
         "Critical Analysis": false,
         "Logical Fallacies": false,
         "Source Analysis": false,
-        "In My Opinion...": false,
+        "Context & Perspective": false,
         "Argus Engine Stats": false,
     ]
 
@@ -44,10 +46,12 @@ struct NewsDetailView: View {
 
     init(
         notifications: [NotificationData],
+        allNotifications: [NotificationData],
         currentIndex: Int,
         initiallyExpandedSection: String? = nil
     ) {
         _notifications = State(initialValue: notifications)
+        _allNotifications = State(initialValue: allNotifications)
         _currentIndex = State(initialValue: currentIndex)
         self.initiallyExpandedSection = initiallyExpandedSection
     }
@@ -267,10 +271,17 @@ struct NewsDetailView: View {
         dismiss()
     }
 
-    // SAFETY: Updated navigation methods with validation
     private func goToNext() {
         guard isCurrentIndexValid else { return }
         var nextIndex = currentIndex + 1
+
+        // If we're near the end of our loaded notifications, load more
+        if nextIndex >= notifications.count - 5 {
+            let nextBatchSize = notifications.count + 50
+            if nextBatchSize <= allNotifications.count {
+                notifications = Array(allNotifications.prefix(nextBatchSize))
+            }
+        }
 
         while nextIndex < notifications.count {
             if !deletedIDs.contains(notifications[nextIndex].id) {
@@ -286,6 +297,17 @@ struct NewsDetailView: View {
     private func goToPrevious() {
         guard isCurrentIndexValid else { return }
         var prevIndex = currentIndex - 1
+
+        // If we're near the start and there are more notifications to load
+        if prevIndex <= 5 && notifications.count < allNotifications.count {
+            let additionalItems = 50
+            let startIndex = max(0, notifications.count - additionalItems)
+            let newItems = Array(allNotifications[startIndex ..< min(startIndex + additionalItems, allNotifications.count)])
+            notifications = newItems + notifications
+            // Adjust currentIndex to account for the newly prepended items
+            currentIndex += newItems.count
+            prevIndex += newItems.count
+        }
 
         while prevIndex >= 0 {
             if !deletedIDs.contains(notifications[prevIndex].id) {
@@ -577,7 +599,7 @@ struct NewsDetailView: View {
         ]
 
         if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-            sections.append(ContentSection(header: "In My Opinion...", content: insights))
+            sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
 
         sections.append(ContentSection(
@@ -1037,7 +1059,7 @@ struct ShareSelectionView: View {
         ]
 
         if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-            sections.append(ContentSection(header: "In My Opinion...", content: insights))
+            sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
 
         sections.append(ContentSection(
