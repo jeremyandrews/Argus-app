@@ -73,11 +73,7 @@ struct NewsView: View {
     @State private var filteredNotifications: [NotificationData] = []
     @State private var selectedNotificationIDs: Set<NotificationData.ID> = []
     @State private var sortedAndGroupedNotifications: [(key: String, notifications: [NotificationData])] = []
-    @State private var showUnreadOnly: Bool = false
-    @State private var showBookmarkedOnly: Bool = false
-    @State private var showArchivedContent: Bool = false
     @State private var isFilterViewPresented: Bool = false
-    @State private var selectedTopic: String = "All"
     @State private var subscriptions: [String: Subscription] = [:]
     @State private var needsTopicReset: Bool = false
     @State private var filterViewHeight: CGFloat = 200
@@ -91,6 +87,10 @@ struct NewsView: View {
 
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "none"
+    @AppStorage("showUnreadOnly") private var showUnreadOnly: Bool = false
+    @AppStorage("showBookmarkedOnly") private var showBookmarkedOnly: Bool = false
+    @AppStorage("showArchivedContent") private var showArchivedContent: Bool = false
+    @AppStorage("selectedTopic") private var selectedTopic: String = "All"
 
     @Binding var tabBarHeight: CGFloat
 
@@ -841,6 +841,12 @@ struct NewsView: View {
     @MainActor
     private func updateFilteredNotifications() {
         let context = ArgusApp.sharedModelContainer.mainContext
+
+        // If the selected topic no longer exists in visible topics, reset to "All"
+        if !visibleTopics.contains(selectedTopic) {
+            UserDefaults.standard.set("All", forKey: "selectedTopic")
+            selectedTopic = "All"
+        }
 
         let topicPredicate = selectedTopic == "All" ? nil :
             #Predicate<NotificationData> { $0.topic == selectedTopic }
