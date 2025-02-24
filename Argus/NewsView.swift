@@ -83,7 +83,7 @@ struct NewsView: View {
     @State private var showDeleteConfirmation = false
     @State private var articleToDelete: NotificationData?
     @State private var totalNotifications: [NotificationData] = []
-    @State private var batchSize: Int = 50 // Start by displaying 50 items
+    @State private var batchSize: Int = 30
 
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "none"
@@ -933,45 +933,54 @@ struct NewsView: View {
     }
 
     private func updateGrouping() {
-        let sorted = filteredNotifications.sorted { n1, n2 in
-            switch sortOrder {
-            case "oldest":
-                return n1.date < n2.date
-            case "bookmarked":
-                if n1.isBookmarked != n2.isBookmarked {
-                    return n1.isBookmarked
+        Task.detached(priority: .userInitiated) { [sortOrder, groupingStyle] in // Capture values
+            // First get the sorted array
+            let sorted = await MainActor.run {
+                self.filteredNotifications.sorted { n1, n2 in
+                    switch sortOrder {
+                    case "oldest":
+                        return n1.date < n2.date
+                    case "bookmarked":
+                        if n1.isBookmarked != n2.isBookmarked {
+                            return n1.isBookmarked
+                        }
+                        return n1.date > n2.date
+                    default: // "newest"
+                        return n1.date > n2.date
+                    }
                 }
-                return n1.date > n2.date
-            default: // "newest"
-                return n1.date > n2.date
             }
-        }
 
-        let newGroupingData: [(key: String, displayKey: String, notifications: [NotificationData])]
-        switch groupingStyle {
-        case "date":
-            let groupedByDay = Dictionary(grouping: sorted) {
-                // Fall back to `notification.date` or a distantPast if `pub_date` is nil
-                $0.pub_date?.dayOnly ?? $0.date.dayOnly
-            }
-            let sortedDayKeys = groupedByDay.keys.sorted(by: >) // Ensure correct sorting
-            newGroupingData = sortedDayKeys.map { dateKey -> (String, String, [NotificationData]) in
-                let displayKey = dateKey.formatted(.dateTime.month(.abbreviated).day().year())
-                // Just use displayKey as the key - no more UUID
-                return (key: displayKey, displayKey: displayKey, notifications: groupedByDay[dateKey] ?? [])
-            }
-        case "topic":
-            let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
-            newGroupingData = groupedByTopic
-                .map { (key: $0.key, displayKey: $0.key, notifications: $0.value) }
-                .sorted { $0.key < $1.key } // Alphabetical
-        default:
-            newGroupingData = [("", "", sorted)]
-        }
+            let newGroupingData: [(key: String, displayKey: String, notifications: [NotificationData])]
 
-        DispatchQueue.main.async {
-            if !areGroupingArraysEqual(sortedAndGroupedNotifications, newGroupingData.map { ($0.key, $0.notifications) }) {
-                sortedAndGroupedNotifications = newGroupingData.map { ($0.displayKey, $0.notifications) }
+            switch groupingStyle {
+            case "date":
+                let groupedByDay = Dictionary(grouping: sorted) {
+                    $0.pub_date?.dayOnly ?? $0.date.dayOnly
+                }
+                let sortedDayKeys = groupedByDay.keys.sorted(by: >)
+                newGroupingData = sortedDayKeys.map { dateKey in
+                    let displayKey = dateKey.formatted(.dateTime.month(.abbreviated).day().year())
+                    return (key: displayKey, displayKey: displayKey, notifications: groupedByDay[dateKey] ?? [])
+                }
+
+            case "topic":
+                let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
+                newGroupingData = groupedByTopic
+                    .map { (key: $0.key, displayKey: $0.key, notifications: $0.value) }
+                    .sorted { $0.key < $1.key }
+
+            default:
+                newGroupingData = [("", "", sorted)]
+            }
+
+            // Update UI on main thread with final result
+            await MainActor.run {
+                if !self.areGroupingArraysEqual(self.sortedAndGroupedNotifications,
+                                                newGroupingData.map { ($0.displayKey, $0.notifications) })
+                {
+                    self.sortedAndGroupedNotifications = newGroupingData.map { ($0.displayKey, $0.notifications) }
+                }
             }
         }
     }
