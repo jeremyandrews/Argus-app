@@ -21,9 +21,6 @@ struct ArgusApp: App {
         do {
             let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
 
-            // Ensure indexes are created at launch
-            ensureDatabaseIndexes()
-
             return container
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
@@ -43,37 +40,118 @@ struct ArgusApp: App {
                 }
         }
     }
-}
 
-// MARK: - SQLite Index Creation
-
-func ensureDatabaseIndexes() {
-    guard let containerURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-        print("Failed to get application support directory")
-        return
-    }
-
-    let databaseURL = containerURL.appendingPathComponent("Argus.sqlite") // Ensure this is your correct SQLite filename
-
-    var db: OpaquePointer?
-
-    if sqlite3_open(databaseURL.path, &db) == SQLITE_OK {
-        let createIndexesQuery = """
-        CREATE INDEX IF NOT EXISTS idx_notification_date ON NotificationData(date);
-        CREATE INDEX IF NOT EXISTS idx_notification_bookmarked ON NotificationData(isBookmarked);
-        CREATE INDEX IF NOT EXISTS idx_notification_viewed ON NotificationData(isViewed);
-        CREATE INDEX IF NOT EXISTS idx_notification_archived ON NotificationData(isArchived);
-        CREATE INDEX IF NOT EXISTS idx_notification_topic ON NotificationData(topic);
-        """
-
-        if sqlite3_exec(db, createIndexesQuery, nil, nil, nil) == SQLITE_OK {
-            print("Database indexes created successfully")
-        } else {
-            print("Failed to create indexes: \(String(cString: sqlite3_errmsg(db)))")
+    static func ensureDatabaseIndexes() throws -> Bool {
+        guard let dbURL = sharedModelContainer.configurations.first?.url else {
+            throw DatabaseError.databaseNotFound
         }
 
-        sqlite3_close(db)
-    } else {
-        print("Failed to open database: \(String(cString: sqlite3_errmsg(db ?? nil)))")
+        var db: OpaquePointer?
+        defer {
+            if db != nil {
+                sqlite3_close(db)
+            }
+        }
+
+        if sqlite3_open(dbURL.path, &db) != SQLITE_OK {
+            throw DatabaseError.openError(String(cString: sqlite3_errmsg(db)))
+        }
+
+        // Get the actual table names
+        let tableCheckQuery = """
+            SELECT name FROM sqlite_master
+            WHERE type='table'
+            AND (name LIKE '%NOTIFICATIONDATA' OR name LIKE '%SEENARTICLE');
+        """
+
+        var statement: OpaquePointer?
+        var notificationTableName: String?
+        var seenArticleTableName: String?
+
+        if sqlite3_prepare_v2(db, tableCheckQuery, -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let tableNameCString = sqlite3_column_text(statement, 0) {
+                    let tableName = String(cString: tableNameCString)
+                    if tableName.contains("NOTIFICATIONDATA") {
+                        notificationTableName = tableName
+                    } else if tableName.contains("SEENARTICLE") {
+                        seenArticleTableName = tableName
+                    }
+                }
+            }
+        }
+        sqlite3_finalize(statement)
+
+        guard let actualNotificationTableName = notificationTableName,
+              let actualSeenArticleTableName = seenArticleTableName
+        else {
+            throw DatabaseError.tableNotFound
+        }
+
+        // Define indexes for NotificationData
+        let notificationIndexes = [
+            // Main filtering and sorting indexes
+            ("idx_notification_date", "ZDATE"),
+            ("idx_notification_pubdate", "ZPUB_DATE"),
+            ("idx_notification_bookmarked", "ZISBOOKMARKED"),
+            ("idx_notification_viewed", "ZISVIEWED"),
+            ("idx_notification_archived", "ZISARCHIVED"),
+            ("idx_notification_topic", "ZTOPIC"),
+            ("idx_notification_id", "ZID"),
+            ("idx_notification_json_url", "ZJSON_URL"),
+
+            // Composite indexes for common query combinations
+            ("idx_notification_archived_date", "(ZISARCHIVED, ZDATE)"),
+            ("idx_notification_viewed_date", "(ZISVIEWED, ZDATE)"),
+            ("idx_notification_bookmarked_date", "(ZISBOOKMARKED, ZDATE)"),
+            ("idx_notification_topic_date", "(ZTOPIC, ZDATE)"),
+
+            // Additional indexes for detail view operations
+            ("idx_notification_domain", "ZDOMAIN"),
+            ("idx_notification_title", "ZTITLE"),
+        ]
+
+        // Define indexes for SeenArticle
+        let seenArticleIndexes = [
+            ("idx_seenarticle_date", "ZDATE"),
+            ("idx_seenarticle_id", "ZID"),
+            ("idx_seenarticle_json_url", "ZJSON_URL"),
+        ]
+
+        // Create NotificationData indexes
+        for (indexName, column) in notificationIndexes {
+            let createIndexQuery = """
+            CREATE INDEX IF NOT EXISTS \(indexName)
+            ON \(actualNotificationTableName) (\(column));
+            """
+
+            if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
+                print("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
+                continue
+            }
+        }
+
+        // Create SeenArticle indexes
+        for (indexName, column) in seenArticleIndexes {
+            let createIndexQuery = """
+            CREATE INDEX IF NOT EXISTS \(indexName)
+            ON \(actualSeenArticleTableName) (\(column));
+            """
+
+            if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
+                print("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
+                continue
+            }
+        }
+
+        return true
+    }
+
+    // Error definitions
+    enum DatabaseError: Error {
+        case containerNotFound
+        case databaseNotFound
+        case openError(String)
+        case tableNotFound
     }
 }

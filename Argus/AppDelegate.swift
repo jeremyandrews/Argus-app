@@ -1,3 +1,4 @@
+import SQLite3
 import SwiftData
 import SwiftUI
 import UIKit
@@ -22,7 +23,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             NotificationUtils.updateAppBadgeCount()
         }
 
-        ensureDatabaseTablesCreated()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            do {
+                let success = try ArgusApp.ensureDatabaseIndexes()
+                if success {
+                    print("Database indexes verified successfully")
+                }
+            } catch {
+                print("Database index creation failed: \(error)")
+            }
+        }
 
         // Auto-sync with the server when the application launches.
         Task {
@@ -269,18 +279,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func getLocalFileURL(for notification: NotificationData) -> URL {
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return documentsDirectory.appendingPathComponent("\(notification.id).json")
-    }
-
-    private func ensureDatabaseTablesCreated() {
-        let context = ArgusApp.sharedModelContainer.mainContext
-
-        do {
-            // Check if the SeenArticle table exists by attempting a fetch
-            _ = try context.fetch(FetchDescriptor<SeenArticle>())
-        } catch {
-            print("SeenArticle table missing. Creating and populating it.")
-            populateSeenArticlesFromNotificationData()
-        }
     }
 
     private func populateSeenArticlesFromNotificationData() {
