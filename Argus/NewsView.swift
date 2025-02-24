@@ -476,20 +476,7 @@ struct NewsView: View {
 
             Spacer()
 
-            // Right-side controls
-            VStack {
-                BookmarkButton(notification: notification)
-
-                if editMode?.wrappedValue == .active {
-                    if selectedNotificationIDs.wrappedValue.contains(notification.id) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.blue)
-                    } else {
-                        Image(systemName: "circle")
-                            .foregroundColor(.gray)
-                    }
-                }
-            }
+            BookmarkButton(notification: notification)
         }
         .onAppear {
             ContentCache.shared.loadContent(for: notification.json_url)
