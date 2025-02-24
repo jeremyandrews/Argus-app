@@ -840,28 +840,34 @@ struct NewsView: View {
 
     @MainActor
     private func updateFilteredNotifications() {
-        let context = ArgusApp.sharedModelContainer.mainContext
+        Task {
+            // Fetch data on the main actor
+            var descriptor = FetchDescriptor<NotificationData>(
+                predicate: buildPredicate()
+            )
+            descriptor.fetchLimit = 200
 
-        // If the selected topic no longer exists in visible topics, reset to "All"
-        if !visibleTopics.contains(selectedTopic) {
-            UserDefaults.standard.set("All", forKey: "selectedTopic")
-            selectedTopic = "All"
+            // Perform the fetch on main actor
+            let fetchedNotifications = try? modelContext.fetch(descriptor)
+
+            // Move heavy processing to background
+            await processNotifications(fetchedNotifications ?? [])
         }
+    }
 
+    @MainActor
+    private func buildPredicate() -> Predicate<NotificationData>? {
         let topicPredicate = selectedTopic == "All" ? nil :
             #Predicate<NotificationData> { $0.topic == selectedTopic }
-
         let archivedPredicate = showArchivedContent ? nil :
             #Predicate<NotificationData> { !$0.isArchived }
-
         let unreadPredicate = showUnreadOnly ?
             #Predicate<NotificationData> { !$0.isViewed } : nil
-
         let bookmarkedPredicate = showBookmarkedOnly ?
             #Predicate<NotificationData> { $0.isBookmarked } : nil
 
+        // Combine predicates
         var combinedPredicate: Predicate<NotificationData>? = nil
-
         for predicate in [topicPredicate, archivedPredicate, unreadPredicate, bookmarkedPredicate].compactMap({ $0 }) {
             if let existing = combinedPredicate {
                 combinedPredicate = #Predicate<NotificationData> {
@@ -871,25 +877,41 @@ struct NewsView: View {
                 combinedPredicate = predicate
             }
         }
+        return combinedPredicate
+    }
 
-        let dateSortDescriptor = SortDescriptor<NotificationData>(\.date, order: .reverse)
+    private func processNotifications(_ notifications: [NotificationData]) async {
+        // Move to background for heavy processing
+        return await Task.detached {
+            // Capture needed values
+            let currentSortOrder = await self.sortOrder
+            let currentBatchSize = await self.batchSize
 
-        do {
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: combinedPredicate,
-                sortBy: [dateSortDescriptor]
-            )
+            // Sort based on captured sortOrder
+            let sortedNotifications = notifications.sorted { n1, n2 in
+                switch currentSortOrder {
+                case "oldest":
+                    return n1.date < n2.date
+                case "bookmarked":
+                    if n1.isBookmarked != n2.isBookmarked {
+                        return n1.isBookmarked
+                    }
+                    return n1.date > n2.date
+                default: // "newest"
+                    return n1.date > n2.date
+                }
+            }
 
-            totalNotifications = try context.fetch(descriptor)
+            // Create the batched array
+            let batchedNotifications = Array(sortedNotifications.prefix(currentBatchSize))
 
-            filteredNotifications = Array(totalNotifications.prefix(batchSize))
-            updateGrouping()
-
-        } catch {
-            print("Failed to fetch filtered notifications: \(error)")
-            filteredNotifications = []
-            totalNotifications = []
-        }
+            // Update UI on main thread with copied arrays
+            await MainActor.run {
+                self.totalNotifications = sortedNotifications
+                self.filteredNotifications = batchedNotifications
+                self.updateGrouping()
+            }
+        }.value
     }
 
     private func loadMoreNotificationsIfNeeded(currentItem: NotificationData) {
