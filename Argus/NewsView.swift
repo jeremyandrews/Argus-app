@@ -84,6 +84,9 @@ struct NewsView: View {
     @State private var articleToDelete: NotificationData?
     @State private var totalNotifications: [NotificationData] = []
     @State private var batchSize: Int = 30
+    @State private var lastUpdateTime: Date = .distantPast
+    @State private var isUpdating: Bool = false
+    @State private var backgroundRefreshTask: Task<Void, Never>?
 
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "none"
@@ -218,8 +221,17 @@ struct NewsView: View {
                     updateFilteredNotifications()
                 }
                 .onAppear {
-                    subscriptions = SubscriptionsView().loadSubscriptions()
-                    updateFilteredNotifications()
+                    if subscriptions.isEmpty {
+                        subscriptions = SubscriptionsView().loadSubscriptions()
+                    }
+                    if filteredNotifications.isEmpty {
+                        updateFilteredNotifications()
+                    }
+                    startBackgroundRefresh()
+                }
+                .onDisappear {
+                    backgroundRefreshTask?.cancel()
+                    backgroundRefreshTask = nil
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NotificationPermissionGranted"))) { _ in
                     subscriptions = SubscriptionsView().loadSubscriptions()
@@ -839,19 +851,32 @@ struct NewsView: View {
     }
 
     @MainActor
-    private func updateFilteredNotifications() {
+    private func updateFilteredNotifications(isBackgroundUpdate: Bool = false) {
+        let updateInterval: TimeInterval = 2.0 // Minimum seconds between updates
+        let now = Date()
+
+        if isBackgroundUpdate {
+            guard now.timeIntervalSince(lastUpdateTime) > updateInterval,
+                  !isUpdating
+            else {
+                return
+            }
+        }
+
         Task {
-            // Fetch data on the main actor
+            isUpdating = true
+            defer { isUpdating = false }
+
             var descriptor = FetchDescriptor<NotificationData>(
                 predicate: buildPredicate()
             )
             descriptor.fetchLimit = 200
 
-            // Perform the fetch on main actor
             let fetchedNotifications = try? modelContext.fetch(descriptor)
 
-            // Move heavy processing to background
             await processNotifications(fetchedNotifications ?? [])
+
+            lastUpdateTime = now
         }
     }
 
@@ -878,6 +903,17 @@ struct NewsView: View {
             }
         }
         return combinedPredicate
+    }
+
+    private func startBackgroundRefresh() {
+        backgroundRefreshTask = Task {
+            while !Task.isCancelled {
+                Task { @MainActor in
+                    updateFilteredNotifications(isBackgroundUpdate: true)
+                }
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000) // 30 seconds
+            }
+        }
     }
 
     private func processNotifications(_ notifications: [NotificationData]) async {
