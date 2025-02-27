@@ -745,6 +745,8 @@ struct SimilarArticleRow: View {
     @Binding var currentIndex: Int
     @Environment(\.modelContext) private var modelContext
     @State private var showError = false
+    @State private var showDetailView = false
+    @State private var selectedNotification: NotificationData?
 
     var body: some View {
         // Extract original values from JSON
@@ -770,23 +772,19 @@ struct SimilarArticleRow: View {
         }
 
         return VStack(alignment: .leading, spacing: 4) {
-            // If json_url exists, make the title a clickable link
-            if let jsonURLString = jsonURLString {
-                Button(action: {
-                    openSimilarArticle(jsonURL: jsonURLString)
-                }) {
-                    Text(processedTitle)
-                        .font(.headline)
-                        .foregroundColor(.blue)
-                        .underline() // Makes it visually clear as a link
+            // Make the title clickable to show the overlay
+            Button(action: {
+                if let jsonURL = jsonURLString {
+                    loadSimilarArticle(jsonURL: jsonURL)
+                } else {
+                    showError = true
                 }
-                .alert("Sorry, this article doesn't exist.", isPresented: $showError) {
-                    Button("OK", role: .cancel) {}
-                }
-            } else {
-                // Regular title (not clickable)
+            }) {
                 Text(processedTitle)
                     .font(.headline)
+                    .foregroundColor(.blue)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.leading)
             }
 
             // Published Date (matching NewsDetailView format)
@@ -796,7 +794,7 @@ struct SimilarArticleRow: View {
                     .foregroundColor(.secondary)
             }
 
-            // Topic styled as a pill (not blue/clickable)
+            // Topic styled as a pill
             if !category.isEmpty {
                 Text(category.uppercased())
                     .font(.caption)
@@ -807,12 +805,11 @@ struct SimilarArticleRow: View {
                     .cornerRadius(8)
             }
 
-            // Summary with Markdown formatting (fallback to raw summary if markdown fails)
+            // Summary with Markdown formatting (no line limit to show full summary)
             if !processedSummary.isEmpty {
                 Text(processedSummary)
                     .font(.footnote)
                     .foregroundColor(.secondary)
-                    .lineLimit(4)
             }
 
             // Quality Score (Converted to descriptive text)
@@ -830,6 +827,21 @@ struct SimilarArticleRow: View {
         .padding(8)
         .background(Color(uiColor: .systemGray6))
         .cornerRadius(8)
+        .alert("Sorry, this article doesn't exist.", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        }
+        .sheet(isPresented: $showDetailView, onDismiss: {
+            selectedNotification = nil
+        }) {
+            if let notification = selectedNotification {
+                // Create a new array with just this notification for the overlay
+                NewsDetailView(
+                    notifications: [notification],
+                    allNotifications: [notification],
+                    currentIndex: 0
+                )
+            }
+        }
     }
 
     // Helper function to apply Markdown formatting with a fallback
@@ -850,8 +862,8 @@ struct SimilarArticleRow: View {
         }
     }
 
-    // Queries the database to find and load the article using json_url
-    private func openSimilarArticle(jsonURL: String) {
+    // Loads a similar article and presents it in an overlay
+    private func loadSimilarArticle(jsonURL: String) {
         let fetchRequest = FetchDescriptor<NotificationData>(
             predicate: #Predicate { $0.json_url == jsonURL }
         )
@@ -859,12 +871,8 @@ struct SimilarArticleRow: View {
         do {
             let results = try modelContext.fetch(fetchRequest)
             if let foundArticle = results.first {
-                if !notifications.contains(where: { $0.id == foundArticle.id }) {
-                    notifications.append(foundArticle)
-                }
-                if let newIndex = notifications.firstIndex(where: { $0.id == foundArticle.id }) {
-                    currentIndex = newIndex
-                }
+                selectedNotification = foundArticle
+                showDetailView = true
             } else {
                 showError = true
             }
