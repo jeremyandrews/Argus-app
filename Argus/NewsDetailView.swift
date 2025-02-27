@@ -35,6 +35,7 @@ struct NewsDetailView: View {
         "Source Analysis": false,
         "Context & Perspective": false,
         "Argus Engine Stats": false,
+        "Vector WIP": false,
     ]
 
     @State private var isSharePresented = false
@@ -338,18 +339,26 @@ struct NewsDetailView: View {
             }
 
             // Title
-            if let notification = currentNotification,
-               let content = additionalContent,
-               let articleURLString = content["url"] as? String,
-               let articleURL = URL(string: articleURLString)
-            {
-                Link(destination: articleURL) {
-                    Text(notification.title)
+            if let notification = currentNotification {
+                let processedTitle = SwiftyMarkdown(string: notification.title).attributedString()
+
+                if let content = additionalContent,
+                   let articleURLString = content["url"] as? String,
+                   let articleURL = URL(string: articleURLString)
+                {
+                    Link(destination: articleURL) {
+                        Text(AttributedString(processedTitle))
+                            .font(.headline)
+                            .fontWeight(notification.isViewed ? .regular : .bold)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
+                            .foregroundColor(.blue)
+                    }
+                } else {
+                    Text(AttributedString(processedTitle))
                         .font(.headline)
                         .fontWeight(notification.isViewed ? .regular : .bold)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .multilineTextAlignment(.leading)
-                        .foregroundColor(.blue)
+                        .foregroundColor(.primary)
                 }
             } else if let notification = currentNotification {
                 Text(notification.title)
@@ -615,6 +624,10 @@ struct NewsDetailView: View {
 
         sections.append(ContentSection(header: "Preview", content: json["url"] as? String ?? ""))
 
+        if let similarArray = json["similar_articles"] as? [[String: Any]], !similarArray.isEmpty {
+            sections.append(ContentSection(header: "Vector WIP", content: similarArray))
+        }
+
         return sections
     }
 
@@ -648,6 +661,27 @@ struct NewsDetailView: View {
                 .font(.body)
                 .padding(.top, 8)
                 .textSelection(.enabled)
+            } else if section.header == "Vector WIP",
+                      let similarArticles = section.content as? [[String: Any]]
+            {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("You've discovered an Easter Egg! This is a work in progress section that will impact the entire Argus experience when it's reliably working.")
+                        .font(.subheadline)
+                        .padding(.bottom, 5)
+
+                    // Use a ScrollViewReader+LazyVStack or simply a LazyVStack
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            ForEach(similarArticles.indices, id: \.self) { index in
+                                let article = similarArticles[index]
+                                SimilarArticleRow(articleDict: article)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    .frame(maxHeight: 400)
+                }
+                .padding(.top, 8)
             } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
                 ArgusDetailsView(data: details)
             } else if section.header == "Preview" {
@@ -701,6 +735,73 @@ struct NewsDetailView: View {
 }
 
 // MARK: - Supporting Structures
+
+struct SimilarArticleRow: View {
+    let articleDict: [String: Any]
+
+    var body: some View {
+        let rawTitle = articleDict["title"] as? String ?? "Untitled"
+        let processedTitle = SwiftyMarkdown(string: rawTitle).attributedString()
+
+        let urlString = articleDict["url"] as? String ?? ""
+        let date = articleDict["published_date"] as? String ?? ""
+        let category = articleDict["category"] as? String ?? ""
+        let summary = articleDict["tiny_summary"] as? String ?? ""
+        let qualityScore = articleDict["quality_score"] as? Int ?? 0
+        let similarityScore = articleDict["similarity_score"] as? Double ?? 0.0
+
+        return VStack(alignment: .leading, spacing: 4) {
+            // Title with Markdown formatting
+            Text(AttributedString(processedTitle))
+                .font(.headline)
+
+            if !date.isEmpty {
+                Text(date).font(.caption).foregroundColor(.secondary)
+            }
+            if !category.isEmpty {
+                Text(category).font(.caption2).foregroundColor(.blue)
+            }
+            if !summary.isEmpty {
+                Text(summary)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .lineLimit(4)
+            }
+
+            // Quality Score (Converted to descriptive text)
+            if qualityScore > 0 {
+                Text("Quality: \(qualityDescription(for: qualityScore))")
+                    .font(.caption)
+                    .foregroundColor(.primary)
+            }
+
+            // Similarity Score (Displayed as a percentage)
+            Text("Similarity: \(String(format: "%.3f", similarityScore * 100))%")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if let linkURL = URL(string: urlString), !urlString.isEmpty {
+                Link("Read More", destination: linkURL)
+                    .font(.footnote)
+                    .foregroundColor(.blue)
+            }
+        }
+        .padding(8)
+        .background(Color(uiColor: .systemGray6))
+        .cornerRadius(8)
+    }
+
+    // Helper function to convert quality score to a descriptive label
+    private func qualityDescription(for score: Int) -> String {
+        switch score {
+        case 1: return "Poor"
+        case 2: return "Fair"
+        case 3: return "Good"
+        case 4: return "Excellent"
+        default: return "Invalid"
+        }
+    }
+}
 
 struct ArgusDetailsData {
     let model: String
