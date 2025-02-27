@@ -666,10 +666,6 @@ struct NewsDetailView: View {
                           let similarArticles = section.content as? [[String: Any]]
                 {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("This is work-in-progress that will impact the entire Argus experience when it's reliably working.")
-                            .font(.subheadline)
-                            .padding(.bottom, 5)
-
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 12) {
                                 ForEach(similarArticles.indices, id: \.self) { index in
@@ -680,6 +676,10 @@ struct NewsDetailView: View {
                             .padding(.horizontal)
                         }
                         .frame(maxHeight: 400)
+
+                        Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
+                            .font(.subheadline)
+                            .padding(.top, 5)
                     }
                     .padding(.top, 8)
                 } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
@@ -822,7 +822,8 @@ struct SimilarArticleRow: View {
             // Similarity Score (Displayed as a percentage)
             Text("Similarity: \(String(format: "%.3f", similarityScore * 100))%")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(similarityScore >= 0.95 ? .red : .secondary)
+                .fontWeight(similarityScore >= 0.98 ? .bold : .regular)
         }
         .padding(8)
         .background(Color(uiColor: .systemGray6))
