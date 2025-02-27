@@ -857,7 +857,7 @@ struct NewsView: View {
             var descriptor = FetchDescriptor<NotificationData>(
                 predicate: buildPredicate()
             )
-            descriptor.fetchLimit = 200
+            descriptor.fetchLimit = 30
 
             let fetchedNotifications = try? modelContext.fetch(descriptor)
 

@@ -631,10 +631,30 @@ struct NewsDetailView: View {
         return sections
     }
 
+    struct ContentSection {
+        let header: String
+        let content: Any
+        var similarArticlesLoaded: Bool = false // New property to track loading state
+
+        var argusDetails: ArgusDetailsData? {
+            if case let (model, elapsedTime, date, stats, systemInfo) as (String, Double, Date, String, [String: Any]?) = content {
+                return ArgusDetailsData(
+                    model: model,
+                    elapsedTime: elapsedTime,
+                    date: date,
+                    stats: stats,
+                    systemInfo: systemInfo
+                )
+            }
+            return nil
+        }
+    }
+
     private func sectionContent(for section: ContentSection) -> some View {
         AnyView(
             Group {
-                if section.header == "Source Analysis", let content = section.content as? String {
+                if section.header == "Source Analysis", let sourceContent = section.content as? String {
+                    // Source Analysis section content
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             VStack(alignment: .leading) {
@@ -655,27 +675,71 @@ struct NewsDetailView: View {
                             Spacer()
                         }
 
-                        let processedContent = processSourceAnalysisContent(content)
+                        let processedContent = processSourceAnalysisContent(sourceContent)
                         let attributedContent = SwiftyMarkdown(string: processedContent).attributedString()
                         Text(AttributedString(attributedContent))
                     }
                     .font(.body)
                     .padding(.top, 8)
                     .textSelection(.enabled)
-                } else if section.header == "Vector WIP",
-                          let similarArticles = section.content as? [[String: Any]]
-                {
+                } else if section.header == "Vector WIP" {
                     VStack(alignment: .leading, spacing: 10) {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 12) {
-                                ForEach(similarArticles.indices, id: \.self) { index in
-                                    let article = similarArticles[index]
+                        if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
+                            // Show preview of a few articles by default
+                            let previewArticles = Array(similarArticles.prefix(3))
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Preview of Similar Articles")
+                                    .font(.headline)
+                                    .padding(.bottom, 4)
+
+                                ForEach(previewArticles.indices, id: \.self) { index in
+                                    let article = previewArticles[index]
                                     SimilarArticleRow(articleDict: article, notifications: $notifications, currentIndex: $currentIndex)
                                 }
+
+                                if similarArticles.count > 3 {
+                                    Button(action: {
+                                        // Load all articles when the button is tapped
+                                        expandedSections["Vector WIP Full"] = true
+                                    }) {
+                                        Text("Show All \(similarArticles.count) Similar Articles")
+                                            .font(.headline)
+                                            .padding()
+                                            .frame(maxWidth: .infinity)
+                                            .background(Color.blue)
+                                            .foregroundColor(.white)
+                                            .cornerRadius(8)
+                                    }
+                                    .padding(.top, 8)
+
+                                    if expandedSections["Vector WIP Full"] == true {
+                                        ScrollView {
+                                            LazyVStack(alignment: .leading, spacing: 12) {
+                                                ForEach(3 ..< similarArticles.count, id: \.self) { index in
+                                                    let article = similarArticles[index]
+                                                    SimilarArticleRow(articleDict: article, notifications: $notifications, currentIndex: $currentIndex)
+                                                }
+                                            }
+                                        }
+                                        .frame(maxHeight: 400)
+                                    }
+                                }
                             }
-                            .padding(.horizontal)
+                        } else {
+                            Button(action: {
+                                // Trigger loading of Vector WIP articles
+                                loadVectorWIPArticles()
+                            }) {
+                                Text("Load Vector WIP Articles")
+                                    .font(.headline)
+                                    .padding()
+                                    .frame(maxWidth: .infinity)
+                                    .background(Color.blue)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(8)
+                            }
                         }
-                        .frame(maxHeight: 400)
 
                         Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
                             .font(.subheadline)
@@ -685,6 +749,7 @@ struct NewsDetailView: View {
                 } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
                     ArgusDetailsView(data: details)
                 } else if section.header == "Preview" {
+                    // Preview section content
                     VStack {
                         if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
                             SafariView(url: articleURL)
@@ -699,6 +764,7 @@ struct NewsDetailView: View {
                         }
                     }
                 } else if let markdownContent = section.content as? String {
+                    // Default markdown content display
                     let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
                     Text(AttributedString(attributedMarkdown))
                         .font(.body)
@@ -709,6 +775,35 @@ struct NewsDetailView: View {
                 }
             }
         )
+    }
+
+    private func loadVectorWIPArticles() {
+        guard let content = additionalContent,
+              let _ = content["similar_articles"] as? [[String: Any]]
+        else {
+            return
+        }
+
+        // Create a mutable copy of additionalContent
+        let updatedContent = content
+
+        // Process the similar articles in a background thread
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Here we'd do any expensive processing like markdown conversion, date parsing, etc.
+            // For now, we're just passing the array as-is
+
+            // Update the UI on the main thread
+            DispatchQueue.main.async {
+                // Update the additionalContent with the processed similar articles
+                self.additionalContent = updatedContent
+
+                // Mark the Vector WIP section as loaded
+                if self.getSections(from: updatedContent).contains(where: { $0.header == "Vector WIP" }) {
+                    // We need to ensure expandedSections is updated to show the content
+                    self.expandedSections["Vector WIP"] = true
+                }
+            }
+        }
     }
 
     private func processSourceAnalysisContent(_ content: String) -> String {
@@ -748,33 +843,16 @@ struct SimilarArticleRow: View {
     @State private var showDetailView = false
     @State private var selectedNotification: NotificationData?
 
+    // Cache for processed content
+    @State private var processedTitle: String = ""
+    @State private var processedSummary: String = ""
+    @State private var formattedDate: String = ""
+
     var body: some View {
-        // Extract original values from JSON
-        let rawTitle = articleDict["title"] as? String ?? "Untitled"
-        let rawSummary = articleDict["tiny_summary"] as? String ?? ""
-
-        // Apply Markdown formatting
-        let processedTitle = markdownFormatted(rawTitle) ?? rawTitle
-        let processedSummary = markdownFormatted(rawSummary) ?? rawSummary
-
-        let jsonURLString = articleDict["json_url"] as? String
-        let rawDate = articleDict["published_date"] as? String ?? ""
-        let category = articleDict["category"] as? String ?? ""
-        let qualityScore = articleDict["quality_score"] as? Int ?? 0
-        let similarityScore = articleDict["similarity_score"] as? Double ?? 0.0
-
-        // Convert timestamp to match NewsDetailView's "Published: " format
-        let formattedDate: String
-        if let date = parseDate(from: rawDate) {
-            formattedDate = date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
-        } else {
-            formattedDate = rawDate // Fallback if parsing fails
-        }
-
-        return VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
             // Make the title clickable to show the overlay
             Button(action: {
-                if let jsonURL = jsonURLString {
+                if let jsonURL = articleDict["json_url"] as? String {
                     loadSimilarArticle(jsonURL: jsonURL)
                 } else {
                     showError = true
@@ -787,7 +865,7 @@ struct SimilarArticleRow: View {
                     .multilineTextAlignment(.leading)
             }
 
-            // Published Date (matching NewsDetailView format)
+            // Published Date
             if !formattedDate.isEmpty {
                 Text("Published: \(formattedDate)")
                     .font(.footnote)
@@ -795,7 +873,7 @@ struct SimilarArticleRow: View {
             }
 
             // Topic styled as a pill
-            if !category.isEmpty {
+            if let category = articleDict["category"] as? String, !category.isEmpty {
                 Text(category.uppercased())
                     .font(.caption)
                     .padding(.horizontal, 8)
@@ -805,25 +883,27 @@ struct SimilarArticleRow: View {
                     .cornerRadius(8)
             }
 
-            // Summary with Markdown formatting (no line limit to show full summary)
+            // Summary with Markdown formatting
             if !processedSummary.isEmpty {
                 Text(processedSummary)
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
 
-            // Quality Score (Converted to descriptive text)
-            if qualityScore > 0 {
+            // Quality Score
+            if let qualityScore = articleDict["quality_score"] as? Int, qualityScore > 0 {
                 Text("Quality: \(qualityDescription(for: qualityScore))")
                     .font(.caption)
                     .foregroundColor(.primary)
             }
 
-            // Similarity Score (Displayed as a percentage)
-            Text("Similarity: \(String(format: "%.3f", similarityScore * 100))%")
-                .font(.caption)
-                .foregroundColor(similarityScore >= 0.95 ? .red : .secondary)
-                .fontWeight(similarityScore >= 0.98 ? .bold : .regular)
+            // Similarity Score
+            if let similarityScore = articleDict["similarity_score"] as? Double {
+                Text("Similarity: \(String(format: "%.3f", similarityScore * 100))%")
+                    .font(.caption)
+                    .foregroundColor(similarityScore >= 0.95 ? .red : .secondary)
+                    .fontWeight(similarityScore >= 0.98 ? .bold : .regular)
+            }
         }
         .padding(8)
         .background(Color(uiColor: .systemGray6))
@@ -835,13 +915,35 @@ struct SimilarArticleRow: View {
             selectedNotification = nil
         }) {
             if let notification = selectedNotification {
-                // Create a new array with just this notification for the overlay
                 NewsDetailView(
                     notifications: [notification],
                     allNotifications: [notification],
                     currentIndex: 0
                 )
             }
+        }
+        .onAppear {
+            // Process content once when the view appears
+            processContent()
+        }
+    }
+
+    // Process content in a separate function to avoid doing it in the view body
+    private func processContent() {
+        // Extract and process title
+        let rawTitle = articleDict["title"] as? String ?? "Untitled"
+        processedTitle = markdownFormatted(rawTitle) ?? rawTitle
+
+        // Extract and process summary
+        let rawSummary = articleDict["tiny_summary"] as? String ?? ""
+        processedSummary = markdownFormatted(rawSummary) ?? rawSummary
+
+        // Process date
+        let rawDate = articleDict["published_date"] as? String ?? ""
+        if let date = parseDate(from: rawDate) {
+            formattedDate = date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+        } else {
+            formattedDate = rawDate
         }
     }
 
@@ -863,23 +965,35 @@ struct SimilarArticleRow: View {
         }
     }
 
-    // Loads a similar article and presents it in an overlay
+    // Loads a similar article with optimized fetch
     private func loadSimilarArticle(jsonURL: String) {
-        let fetchRequest = FetchDescriptor<NotificationData>(
-            predicate: #Predicate { $0.json_url == jsonURL }
-        )
+        // Store the jsonURL to use in the task
+        let urlToFetch = jsonURL
 
-        do {
-            let results = try modelContext.fetch(fetchRequest)
-            if let foundArticle = results.first {
-                selectedNotification = foundArticle
-                showDetailView = true
-            } else {
-                showError = true
+        Task {
+            do {
+                // Perform the fetch on the main actor since ModelContext is main actor-isolated
+                let results = try await MainActor.run {
+                    try modelContext.fetch(FetchDescriptor<NotificationData>(
+                        predicate: #Predicate { $0.json_url == urlToFetch }
+                    ))
+                }
+
+                // Update UI on main thread
+                await MainActor.run {
+                    if let foundArticle = results.first {
+                        selectedNotification = foundArticle
+                        showDetailView = true
+                    } else {
+                        showError = true
+                    }
+                }
+            } catch {
+                print("Failed to fetch similar article: \(error)")
+                await MainActor.run {
+                    showError = true
+                }
             }
-        } catch {
-            print("Failed to fetch similar article: \(error)")
-            showError = true
         }
     }
 
@@ -907,6 +1021,7 @@ struct ArgusDetailsData {
 struct ContentSection {
     let header: String
     let content: Any
+    var similarArticlesLoaded: Bool = false // New property to track loading state
 
     var argusDetails: ArgusDetailsData? {
         if case let (model, elapsedTime, date, stats, systemInfo) as (String, Double, Date, String, [String: Any]?) = content {
