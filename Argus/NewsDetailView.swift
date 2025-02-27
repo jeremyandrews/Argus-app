@@ -666,7 +666,7 @@ struct NewsDetailView: View {
                           let similarArticles = section.content as? [[String: Any]]
                 {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("You've discovered an Easter Egg! This is a work in progress section that will impact the entire Argus experience when it's reliably working.")
+                        Text("This is work-in-progress that will impact the entire Argus experience when it's reliably working.")
                             .font(.subheadline)
                             .padding(.bottom, 5)
 
