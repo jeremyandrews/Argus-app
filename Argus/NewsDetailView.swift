@@ -685,59 +685,45 @@ struct NewsDetailView: View {
                 } else if section.header == "Vector WIP" {
                     VStack(alignment: .leading, spacing: 10) {
                         if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
-                            // Show preview of a few articles by default
-                            let previewArticles = Array(similarArticles.prefix(3))
-
+                            // Show all articles in a scrollable LazyVStack
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Preview of Similar Articles")
+                                Text("Similar Articles")
                                     .font(.headline)
                                     .padding(.bottom, 4)
 
-                                ForEach(previewArticles.indices, id: \.self) { index in
-                                    let article = previewArticles[index]
-                                    SimilarArticleRow(articleDict: article, notifications: $notifications, currentIndex: $currentIndex)
-                                }
-
-                                if similarArticles.count > 3 {
-                                    Button(action: {
-                                        // Load all articles when the button is tapped
-                                        expandedSections["Vector WIP Full"] = true
-                                    }) {
-                                        Text("Show All \(similarArticles.count) Similar Articles")
-                                            .font(.headline)
-                                            .padding()
-                                            .frame(maxWidth: .infinity)
-                                            .background(Color.blue)
-                                            .foregroundColor(.white)
-                                            .cornerRadius(8)
-                                    }
-                                    .padding(.top, 8)
-
-                                    if expandedSections["Vector WIP Full"] == true {
-                                        ScrollView {
-                                            LazyVStack(alignment: .leading, spacing: 12) {
-                                                ForEach(3 ..< similarArticles.count, id: \.self) { index in
-                                                    let article = similarArticles[index]
-                                                    SimilarArticleRow(articleDict: article, notifications: $notifications, currentIndex: $currentIndex)
+                                ScrollView {
+                                    LazyVStack(alignment: .leading, spacing: 12) {
+                                        ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
+                                            SimilarArticleRow(
+                                                articleDict: article,
+                                                notifications: $notifications,
+                                                currentIndex: $currentIndex,
+                                                isLastItem: index == similarArticles.count - 1
+                                            )
+                                            .onAppear {
+                                                // When the third item appears, load the Vector WIP content
+                                                if index == 2 {
+                                                    loadVectorWIPArticles()
                                                 }
                                             }
                                         }
-                                        .frame(maxHeight: 400)
                                     }
                                 }
+                                .frame(maxHeight: 400)
                             }
                         } else {
-                            Button(action: {
-                                // Trigger loading of Vector WIP articles
-                                loadVectorWIPArticles()
-                            }) {
-                                Text("Load Vector WIP Articles")
-                                    .font(.headline)
+                            // Initial loading state - show a placeholder or loading indicator
+                            VStack {
+                                ProgressView()
                                     .padding()
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color.blue)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(8)
+                                Text("Loading similar articles...")
+                                    .font(.caption)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .onAppear {
+                                // Trigger loading when this view appears
+                                loadVectorWIPArticles()
                             }
                         }
 
@@ -778,30 +764,25 @@ struct NewsDetailView: View {
     }
 
     private func loadVectorWIPArticles() {
+        // Only load if we haven't already loaded the content
+        if expandedSections["Vector WIP"] == true {
+            return // Already loaded
+        }
+
         guard let content = additionalContent,
               let _ = content["similar_articles"] as? [[String: Any]]
         else {
             return
         }
 
-        // Create a mutable copy of additionalContent
-        let updatedContent = content
-
         // Process the similar articles in a background thread
         DispatchQueue.global(qos: .userInitiated).async {
             // Here we'd do any expensive processing like markdown conversion, date parsing, etc.
-            // For now, we're just passing the array as-is
 
             // Update the UI on the main thread
             DispatchQueue.main.async {
-                // Update the additionalContent with the processed similar articles
-                self.additionalContent = updatedContent
-
                 // Mark the Vector WIP section as loaded
-                if self.getSections(from: updatedContent).contains(where: { $0.header == "Vector WIP" }) {
-                    // We need to ensure expandedSections is updated to show the content
-                    self.expandedSections["Vector WIP"] = true
-                }
+                self.expandedSections["Vector WIP"] = true
             }
         }
     }
@@ -838,6 +819,8 @@ struct SimilarArticleRow: View {
     let articleDict: [String: Any]
     @Binding var notifications: [NotificationData]
     @Binding var currentIndex: Int
+    var isLastItem: Bool = false // Add this parameter
+
     @Environment(\.modelContext) private var modelContext
     @State private var showError = false
     @State private var showDetailView = false
