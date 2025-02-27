@@ -632,80 +632,83 @@ struct NewsDetailView: View {
     }
 
     private func sectionContent(for section: ContentSection) -> some View {
-        Group {
-            if section.header == "Source Analysis", let content = section.content as? String {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text("Article Domain:")
-                            if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
-                               !domain.isEmpty
-                            {
-                                Text(domain)
-                                    .foregroundColor(.blue)
-                                    .onTapGesture {
-                                        if let url = URL(string: "https://\(domain)") {
-                                            UIApplication.shared.open(url)
+        AnyView(
+            Group {
+                if section.header == "Source Analysis", let content = section.content as? String {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text("Article Domain:")
+                                if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
+                                   !domain.isEmpty
+                                {
+                                    Text(domain)
+                                        .foregroundColor(.blue)
+                                        .onTapGesture {
+                                            if let url = URL(string: "https://\(domain)") {
+                                                UIApplication.shared.open(url)
+                                            }
                                         }
-                                    }
+                                }
+                                Text("") // blank line for spacing
                             }
-                            Text("") // blank line for spacing
+                            Spacer()
                         }
-                        Spacer()
-                    }
 
-                    let processedContent = processSourceAnalysisContent(content)
-                    let attributedContent = SwiftyMarkdown(string: processedContent).attributedString()
-                    Text(AttributedString(attributedContent))
-                }
-                .font(.body)
-                .padding(.top, 8)
-                .textSelection(.enabled)
-            } else if section.header == "Vector WIP",
-                      let similarArticles = section.content as? [[String: Any]]
-            {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("You've discovered an Easter Egg! This is a work in progress section that will impact the entire Argus experience when it's reliably working.")
-                        .font(.subheadline)
-                        .padding(.bottom, 5)
-
-                    // Use a ScrollViewReader+LazyVStack or simply a LazyVStack
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            ForEach(similarArticles.indices, id: \.self) { index in
-                                let article = similarArticles[index]
-                                SimilarArticleRow(articleDict: article)
-                            }
-                        }
-                        .padding(.horizontal)
+                        let processedContent = processSourceAnalysisContent(content)
+                        let attributedContent = SwiftyMarkdown(string: processedContent).attributedString()
+                        Text(AttributedString(attributedContent))
                     }
-                    .frame(maxHeight: 400)
-                }
-                .padding(.top, 8)
-            } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
-                ArgusDetailsView(data: details)
-            } else if section.header == "Preview" {
-                VStack {
-                    if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
-                        SafariView(url: articleURL)
-                            .frame(height: 450)
-                        Button("Open in Browser") {
-                            UIApplication.shared.open(articleURL)
-                        }
-                        .padding(.top)
-                    } else {
-                        Text("Invalid URL")
-                            .frame(height: 450)
-                    }
-                }
-            } else if let markdownContent = section.content as? String {
-                let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
-                Text(AttributedString(attributedMarkdown))
                     .font(.body)
                     .padding(.top, 8)
                     .textSelection(.enabled)
+                } else if section.header == "Vector WIP",
+                          let similarArticles = section.content as? [[String: Any]]
+                {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("You've discovered an Easter Egg! This is a work in progress section that will impact the entire Argus experience when it's reliably working.")
+                            .font(.subheadline)
+                            .padding(.bottom, 5)
+
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 12) {
+                                ForEach(similarArticles.indices, id: \.self) { index in
+                                    let article = similarArticles[index]
+                                    SimilarArticleRow(articleDict: article, notifications: $notifications, currentIndex: $currentIndex)
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                        .frame(maxHeight: 400)
+                    }
+                    .padding(.top, 8)
+                } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
+                    ArgusDetailsView(data: details)
+                } else if section.header == "Preview" {
+                    VStack {
+                        if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
+                            SafariView(url: articleURL)
+                                .frame(height: 450)
+                            Button("Open in Browser") {
+                                UIApplication.shared.open(articleURL)
+                            }
+                            .padding(.top)
+                        } else {
+                            Text("Invalid URL")
+                                .frame(height: 450)
+                        }
+                    }
+                } else if let markdownContent = section.content as? String {
+                    let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
+                    Text(AttributedString(attributedMarkdown))
+                        .font(.body)
+                        .padding(.top, 8)
+                        .textSelection(.enabled)
+                } else {
+                    EmptyView() // Ensures consistent return type
+                }
             }
-        }
+        )
     }
 
     private func processSourceAnalysisContent(_ content: String) -> String {
@@ -738,31 +741,75 @@ struct NewsDetailView: View {
 
 struct SimilarArticleRow: View {
     let articleDict: [String: Any]
+    @Binding var notifications: [NotificationData]
+    @Binding var currentIndex: Int
+    @Environment(\.modelContext) private var modelContext
+    @State private var showError = false
 
     var body: some View {
+        // Extract original values from JSON
         let rawTitle = articleDict["title"] as? String ?? "Untitled"
-        let processedTitle = SwiftyMarkdown(string: rawTitle).attributedString()
+        let rawSummary = articleDict["tiny_summary"] as? String ?? ""
 
-        let urlString = articleDict["url"] as? String ?? ""
-        let date = articleDict["published_date"] as? String ?? ""
+        // Apply Markdown formatting
+        let processedTitle = markdownFormatted(rawTitle) ?? rawTitle
+        let processedSummary = markdownFormatted(rawSummary) ?? rawSummary
+
+        let jsonURLString = articleDict["json_url"] as? String
+        let rawDate = articleDict["published_date"] as? String ?? ""
         let category = articleDict["category"] as? String ?? ""
-        let summary = articleDict["tiny_summary"] as? String ?? ""
         let qualityScore = articleDict["quality_score"] as? Int ?? 0
         let similarityScore = articleDict["similarity_score"] as? Double ?? 0.0
 
-        return VStack(alignment: .leading, spacing: 4) {
-            // Title with Markdown formatting
-            Text(AttributedString(processedTitle))
-                .font(.headline)
+        // Convert timestamp to match NewsDetailView's "Published: " format
+        let formattedDate: String
+        if let date = parseDate(from: rawDate) {
+            formattedDate = date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+        } else {
+            formattedDate = rawDate // Fallback if parsing fails
+        }
 
-            if !date.isEmpty {
-                Text(date).font(.caption).foregroundColor(.secondary)
+        return VStack(alignment: .leading, spacing: 4) {
+            // If json_url exists, make the title a clickable link
+            if let jsonURLString = jsonURLString {
+                Button(action: {
+                    openSimilarArticle(jsonURL: jsonURLString)
+                }) {
+                    Text(processedTitle)
+                        .font(.headline)
+                        .foregroundColor(.blue)
+                        .underline() // Makes it visually clear as a link
+                }
+                .alert("Sorry, this article doesn't exist.", isPresented: $showError) {
+                    Button("OK", role: .cancel) {}
+                }
+            } else {
+                // Regular title (not clickable)
+                Text(processedTitle)
+                    .font(.headline)
             }
+
+            // Published Date (matching NewsDetailView format)
+            if !formattedDate.isEmpty {
+                Text("Published: \(formattedDate)")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+
+            // Topic styled as a pill (not blue/clickable)
             if !category.isEmpty {
-                Text(category).font(.caption2).foregroundColor(.blue)
+                Text(category.uppercased())
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.gray.opacity(0.6))
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
             }
-            if !summary.isEmpty {
-                Text(summary)
+
+            // Summary with Markdown formatting (fallback to raw summary if markdown fails)
+            if !processedSummary.isEmpty {
+                Text(processedSummary)
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .lineLimit(4)
@@ -779,16 +826,17 @@ struct SimilarArticleRow: View {
             Text("Similarity: \(String(format: "%.3f", similarityScore * 100))%")
                 .font(.caption)
                 .foregroundColor(.secondary)
-
-            if let linkURL = URL(string: urlString), !urlString.isEmpty {
-                Link("Read More", destination: linkURL)
-                    .font(.footnote)
-                    .foregroundColor(.blue)
-            }
         }
         .padding(8)
         .background(Color(uiColor: .systemGray6))
         .cornerRadius(8)
+    }
+
+    // Helper function to apply Markdown formatting with a fallback
+    private func markdownFormatted(_ text: String) -> String? {
+        let markdown = SwiftyMarkdown(string: text)
+        let attributed = markdown.attributedString()
+        return attributed.string.isEmpty ? nil : attributed.string
     }
 
     // Helper function to convert quality score to a descriptive label
@@ -798,8 +846,44 @@ struct SimilarArticleRow: View {
         case 2: return "Fair"
         case 3: return "Good"
         case 4: return "Excellent"
-        default: return "Invalid"
+        default: return "Unknown"
         }
+    }
+
+    // Queries the database to find and load the article using json_url
+    private func openSimilarArticle(jsonURL: String) {
+        let fetchRequest = FetchDescriptor<NotificationData>(
+            predicate: #Predicate { $0.json_url == jsonURL }
+        )
+
+        do {
+            let results = try modelContext.fetch(fetchRequest)
+            if let foundArticle = results.first {
+                if !notifications.contains(where: { $0.id == foundArticle.id }) {
+                    notifications.append(foundArticle)
+                }
+                if let newIndex = notifications.firstIndex(where: { $0.id == foundArticle.id }) {
+                    currentIndex = newIndex
+                }
+            } else {
+                showError = true
+            }
+        } catch {
+            print("Failed to fetch similar article: \(error)")
+            showError = true
+        }
+    }
+
+    // Helper function to parse a date string into a Date object
+    private func parseDate(from dateString: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: dateString) {
+            return date
+        }
+
+        let altFormatter = DateFormatter()
+        altFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+        return altFormatter.date(from: dateString)
     }
 }
 
