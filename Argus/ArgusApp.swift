@@ -33,6 +33,9 @@ struct ArgusApp: App {
                 .modelContainer(ArgusApp.sharedModelContainer)
                 .onChange(of: scenePhase) { _, newPhase in
                     if newPhase == .active {
+                        Task { @MainActor in
+                            self.appDelegate.cleanupOldArticles()
+                        }
                         Task {
                             await SyncManager.shared.sendRecentArticlesToServer()
                         }

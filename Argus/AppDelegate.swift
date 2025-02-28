@@ -321,79 +321,42 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
-    @MainActor
     func cleanupOldArticles() {
-        let context = ArgusApp.sharedModelContainer.mainContext
         let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
         guard daysSetting > 0 else { return }
 
-        Task(priority: .utility) {
-            let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date()) ?? Date()
+        let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date())!
 
-            // Fetch the IDs on a background thread first
-            let articlesToClean: [SeenArticle]
+        Task { @MainActor in // Ensure everything runs in the MainActor context
+            let context = ArgusApp.sharedModelContainer.mainContext
+
             do {
-                articlesToClean = try await withCheckedThrowingContinuation { continuation in
-                    Task { @MainActor in
-                        do {
-                            let articles = try context.fetch(
-                                FetchDescriptor<SeenArticle>(predicate: #Predicate { $0.date < cutoffDate })
-                            )
-                            continuation.resume(returning: articles)
-                        } catch {
-                            continuation.resume(throwing: error)
+                // **Fetch all expired NotificationData in one query**
+                let notificationsToDelete = try context.fetch(
+                    FetchDescriptor<NotificationData>(
+                        predicate: #Predicate { notification in
+                            notification.date < cutoffDate &&
+                                !notification.isBookmarked &&
+                                !notification.isArchived
                         }
-                    }
+                    )
+                )
+
+                guard !notificationsToDelete.isEmpty else { return } // No old notifications
+
+                // **Delete all fetched notifications in a batch**
+                for notification in notificationsToDelete {
+                    context.delete(notification)
                 }
+
+                // **Save the deletions**
+                try context.save()
+
+                // **Update badge count**
+                NotificationUtils.updateAppBadgeCount()
+
             } catch {
-                print("Error fetching old articles: \(error)")
-                return
-            }
-
-            let batchSize = 50
-            for batch in articlesToClean.chunked(into: batchSize) {
-                for seenArticle in batch {
-                    // Brief yield to allow UI to remain responsive
-                    await Task.yield()
-
-                    do {
-                        // Switch to main actor for each individual operation
-                        try await MainActor.run {
-                            let oldID = seenArticle.id
-                            let matchingNotifications = try context.fetch(
-                                FetchDescriptor<NotificationData>(
-                                    predicate: #Predicate { $0.id == oldID }
-                                )
-                            )
-
-                            guard let notification = matchingNotifications.first else {
-                                context.delete(seenArticle)
-                                try context.save()
-                                return
-                            }
-
-                            if notification.isBookmarked || notification.isArchived {
-                                return
-                            }
-
-                            NotificationCenter.default.post(
-                                name: .willDeleteArticle,
-                                object: nil,
-                                userInfo: ["articleID": oldID]
-                            )
-
-                            context.delete(notification)
-                            context.delete(seenArticle)
-                            try context.save()
-                        }
-
-                        // Sleep between operations to prevent overwhelming the system
-                        try await Task.sleep(for: .milliseconds(50))
-
-                    } catch {
-                        print("Error processing article \(seenArticle.id): \(error)")
-                    }
-                }
+                print("Cleanup error: \(error)")
             }
         }
     }
