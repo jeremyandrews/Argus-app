@@ -1,3 +1,4 @@
+import BackgroundTasks
 import Network
 import SQLite3
 import SwiftData
@@ -9,6 +10,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     private let networkMonitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "NetworkMonitor")
     private var currentNetworkType: NetworkType = .unknown
+
+    // Background task identifiers
+    private let backgroundFetchIdentifier = "com.arguspulse.backgroundFetch"
 
     // Enum to track network connection type
     private enum NetworkType {
@@ -23,6 +27,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // Start monitoring network type
         startNetworkMonitoring()
+
+        // Set up background refresh
+        setupBackgroundRefresh()
 
         // Request notification permissions
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -85,6 +92,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 let unviewedCount = try context.fetch(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
                 ).count
+
+                // Use the existing sync function
+                await SyncManager.shared.sendRecentArticlesToServer()
 
                 // Update the app's badge count
                 UNUserNotificationCenter.current().setBadgeCount(unviewedCount) { error in
@@ -203,6 +213,62 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 print("Background task failed: \(error)")
                 finish(.failed)
             }
+        }
+    }
+
+    // Set up background refresh capabilities
+    private func setupBackgroundRefresh() {
+        if #available(iOS 13.0, *) {
+            // Register for background tasks (iOS 13+)
+            BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundFetchIdentifier, using: nil) { task in
+                self.handleBackgroundFetch(task: task as! BGAppRefreshTask)
+            }
+
+            // Schedule the initial background task
+            scheduleAppRefresh()
+        } else {
+            // Legacy approach for iOS 12 and earlier
+            UIApplication.shared.setMinimumBackgroundFetchInterval(3600) // 1 hour
+        }
+    }
+
+    // Schedule the app refresh task
+    @available(iOS 13.0, *)
+    private func scheduleAppRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: backgroundFetchIdentifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 3600) // 1 hour from now
+
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            print("Scheduled app refresh task for background sync")
+        } catch {
+            print("Could not schedule app refresh: \(error)")
+        }
+    }
+
+    // Handle the app refresh task
+    @available(iOS 13.0, *)
+    private func handleBackgroundFetch(task: BGAppRefreshTask) {
+        // Schedule the next refresh before doing work
+        scheduleAppRefresh()
+
+        // Create a task to handle the sync
+        let syncTask = Task {
+            // Check if we should sync based on network conditions
+            if shouldAllowSync() {
+                // Use the existing sync function
+                await SyncManager.shared.sendRecentArticlesToServer()
+                NotificationUtils.updateAppBadgeCount()
+                task.setTaskCompleted(success: true)
+            } else {
+                print("Skipping background fetch - waiting for WiFi or user permission for cellular data")
+                task.setTaskCompleted(success: false)
+            }
+        }
+
+        // Set up task expiration handler
+        task.expirationHandler = {
+            syncTask.cancel()
         }
     }
 
