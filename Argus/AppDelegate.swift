@@ -1,3 +1,4 @@
+import Network
 import SQLite3
 import SwiftData
 import SwiftUI
@@ -5,8 +6,23 @@ import UIKit
 import UserNotifications
 
 class AppDelegate: UIResponder, UIApplicationDelegate {
+    private let networkMonitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "NetworkMonitor")
+    private var currentNetworkType: NetworkType = .unknown
+
+    // Enum to track network connection type
+    private enum NetworkType {
+        case wifi
+        case cellular
+        case other
+        case unknown
+    }
+
     func application(_: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+
+        // Start monitoring network type
+        startNetworkMonitoring()
 
         // Request notification permissions
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -34,9 +50,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
         }
 
-        // Auto-sync with the server when the application launches.
+        // Auto-sync with the server when the application launches, but only if network conditions allow
         Task {
-            await SyncManager.shared.sendRecentArticlesToServer()
+            if shouldAllowSync() {
+                await SyncManager.shared.sendRecentArticlesToServer()
+            } else {
+                print("Skipping initial sync - waiting for WiFi or user permission for cellular data")
+            }
         }
 
         // Call cleanup in the background, but use Task to perform the SwiftData
@@ -53,6 +73,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         Task { @MainActor in
             do {
+                // Check if we should sync based on network conditions
+                if !shouldAllowSync() {
+                    print("Skipping background fetch - waiting for WiFi or user permission for cellular data")
+                    completionHandler(.noData)
+                    return
+                }
+
                 let context = ArgusApp.sharedModelContainer.mainContext
                 // Fetch unviewed notifications
                 let unviewedCount = try context.fetch(
@@ -176,6 +203,45 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 print("Background task failed: \(error)")
                 finish(.failed)
             }
+        }
+    }
+
+    // Start monitoring network type
+    private func startNetworkMonitoring() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            guard let self = self else { return }
+
+            if path.usesInterfaceType(.wifi) {
+                self.currentNetworkType = .wifi
+
+                // If we've switched to WiFi, trigger a sync
+                DispatchQueue.main.async {
+                    Task {
+                        await SyncManager.shared.sendRecentArticlesToServer()
+                    }
+                }
+            } else if path.usesInterfaceType(.cellular) {
+                self.currentNetworkType = .cellular
+            } else if path.status == .satisfied {
+                self.currentNetworkType = .other
+            } else {
+                self.currentNetworkType = .unknown
+            }
+        }
+        networkMonitor.start(queue: monitorQueue)
+    }
+
+    // Check if we should sync based on network type and settings
+    private func shouldAllowSync() -> Bool {
+        switch currentNetworkType {
+        case .wifi:
+            return true
+        case .cellular:
+            return UserDefaults.standard.bool(forKey: "allowCellularSync")
+        case .other, .unknown:
+            // For other connection types (like ethernet) or unknown,
+            // we'll use the same setting as cellular
+            return UserDefaults.standard.bool(forKey: "allowCellularSync")
         }
     }
 

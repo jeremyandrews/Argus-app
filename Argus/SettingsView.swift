@@ -15,6 +15,7 @@ struct SettingsView: View {
     }
 
     @AppStorage("useReaderMode") private var useReaderMode: Bool = true
+    @AppStorage("allowCellularSync") private var allowCellularSync: Bool = false
 
     var body: some View {
         NavigationView {
@@ -85,6 +86,15 @@ struct SettingsView: View {
                         Toggle("Show Unread Count on App Icon", isOn: $showBadge)
 
                         Text("When enabled, a red badge showing the number of unread articles appears on the Argus app icon. This count excludes archived articles.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 5)
+                    }
+
+                    VStack(alignment: .leading) {
+                        Toggle("Allow Sync on Cellular Data", isOn: $allowCellularSync)
+
+                        Text("When disabled, articles will only be synchronized when connected to WiFi to save data. High-priority notifications will still be delivered immediately.")
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .padding(.top, 5)
