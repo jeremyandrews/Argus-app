@@ -87,6 +87,10 @@ struct NewsView: View {
     @State private var lastUpdateTime: Date = .distantPast
     @State private var isUpdating: Bool = false
     @State private var backgroundRefreshTask: Task<Void, Never>?
+    @State private var lastLoadedDate: Date? = nil
+    @State private var isLoadingMorePages: Bool = false
+    @State private var pageSize: Int = 30
+    @State private var hasMoreContent: Bool = true
 
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "none"
@@ -860,21 +864,140 @@ struct NewsView: View {
             isUpdating = true
             defer { isUpdating = false }
 
+            // Reset pagination state when filters change
+            self.lastLoadedDate = nil
+            self.hasMoreContent = true
+            self.totalNotifications = []
+            self.filteredNotifications = []
+
+            // Load the first page
+            await loadPage(isInitialLoad: true)
+            lastUpdateTime = now
+        }
+    }
+
+    @MainActor
+    private func loadPage(isInitialLoad: Bool = false) async {
+        guard !isLoadingMorePages && (isInitialLoad || hasMoreContent) else { return }
+
+        isLoadingMorePages = true
+        defer { isLoadingMorePages = false }
+
+        do {
+            // Create the base predicate from filters
+            let basePredicate = buildPredicate()
+
+            // Create date boundary predicate if this isn't the first page
+            var datePredicateWrapper: Predicate<NotificationData>? = nil
+            if let oldestSoFar = lastLoadedDate, !isInitialLoad {
+                // This predicate finds items older than the last one we loaded
+                datePredicateWrapper = #Predicate<NotificationData> {
+                    // Handle both pub_date and date with a fallback
+                    ($0.pub_date ?? $0.date) < oldestSoFar
+                }
+            }
+
+            // Combine the base predicate with the date boundary
+            var combinedPredicate: Predicate<NotificationData>?
+            if let basePredicate = basePredicate {
+                if let datePredicateWrapper = datePredicateWrapper {
+                    combinedPredicate = #Predicate<NotificationData> {
+                        basePredicate.evaluate($0) && datePredicateWrapper.evaluate($0)
+                    }
+                } else {
+                    combinedPredicate = basePredicate
+                }
+            } else {
+                combinedPredicate = datePredicateWrapper
+            }
+
+            // Create the fetch descriptor with our combined predicate
             var descriptor = FetchDescriptor<NotificationData>(
-                predicate: buildPredicate()
+                predicate: combinedPredicate
             )
+
+            // Always sort by date in descending order
             descriptor.sortBy = [
                 SortDescriptor(\.pub_date, order: .reverse),
                 SortDescriptor(\.date, order: .reverse),
             ]
-            descriptor.fetchLimit = 30
 
-            do {
-                let fetchedNotifications = try modelContext.fetch(descriptor)
-                await processNotifications(fetchedNotifications)
-                lastUpdateTime = now
-            } catch {
-                print("Error fetching notifications: \(error)")
+            // Limit the number of results per page
+            descriptor.fetchLimit = pageSize
+
+            // Fetch the notifications
+            let fetchedNotifications = try modelContext.fetch(descriptor)
+
+            // Update last loaded date for next pagination
+            if let lastItem = fetchedNotifications.last {
+                lastLoadedDate = lastItem.pub_date ?? lastItem.date
+                print("Updated lastLoadedDate to: \(lastLoadedDate?.description ?? "nil")")
+            }
+
+            // Determine if we have more content to load
+            hasMoreContent = !fetchedNotifications.isEmpty && fetchedNotifications.count == pageSize
+
+            // Process the fetched notifications
+            if isInitialLoad {
+                // For initial load, replace the current content
+                await processInitialPage(fetchedNotifications)
+            } else {
+                // For pagination, append the new content
+                await processNextPage(fetchedNotifications)
+            }
+        } catch {
+            print("Error fetching notifications: \(error)")
+        }
+    }
+
+    @MainActor
+    private func processInitialPage(_ notifications: [NotificationData]) async {
+        // Sort the new page based on current sort order
+        let sortedNotifications = sortNotifications(notifications)
+
+        // Update the UI
+        withAnimation(.easeInOut(duration: 0.3)) {
+            self.totalNotifications = sortedNotifications
+            self.filteredNotifications = sortedNotifications
+        }
+
+        updateGrouping()
+    }
+
+    @MainActor
+    private func processNextPage(_ newNotifications: [NotificationData]) async {
+        // Don't process if there's nothing new
+        guard !newNotifications.isEmpty else {
+            print("No more notifications to load")
+            return
+        }
+
+        // Sort the combined results
+        let combinedNotifications = totalNotifications + newNotifications
+        let sortedCombined = sortNotifications(combinedNotifications)
+
+        // Update the UI
+        withAnimation(.easeInOut(duration: 0.3)) {
+            self.totalNotifications = sortedCombined
+            self.filteredNotifications = sortedCombined
+        }
+
+        updateGrouping()
+        print("Added \(newNotifications.count) more notifications, total: \(sortedCombined.count)")
+    }
+
+    private func sortNotifications(_ notifications: [NotificationData]) -> [NotificationData] {
+        return notifications.sorted { n1, n2 in
+            switch sortOrder {
+            case "oldest":
+                return (n1.pub_date ?? n1.date) < (n2.pub_date ?? n2.date)
+            case "bookmarked":
+                if n1.isBookmarked != n2.isBookmarked {
+                    return n1.isBookmarked
+                }
+                return (n1.pub_date ?? n1.date) > (n2.pub_date ?? n2.date)
+            default: // "newest"
+                return (n1.pub_date ?? n1.date) > (n2.pub_date ?? n2.date)
             }
         }
     }
@@ -1065,16 +1188,13 @@ struct NewsView: View {
         guard let currentIndex = filteredNotifications.firstIndex(where: { $0.id == currentItem.id }) else {
             return
         }
-        // When the user is within 5 rows of the bottom, load more
+
+        // When we're within 5 items of the end, load more content
         let thresholdIndex = filteredNotifications.count - 5
-        if currentIndex == thresholdIndex {
-            let nextBatchSize = min(filteredNotifications.count + 50, totalNotifications.count)
-            // Only update if we can actually load more
-            if nextBatchSize > filteredNotifications.count {
-                withAnimation {
-                    filteredNotifications = Array(totalNotifications.prefix(nextBatchSize))
-                }
-                updateGrouping()
+
+        if currentIndex >= thresholdIndex && hasMoreContent && !isLoadingMorePages {
+            Task {
+                await loadPage(isInitialLoad: false)
             }
         }
     }
