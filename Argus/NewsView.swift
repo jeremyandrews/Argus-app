@@ -860,10 +860,13 @@ struct NewsView: View {
             isUpdating = true
             defer { isUpdating = false }
 
-            // Use original method approach for now
             var descriptor = FetchDescriptor<NotificationData>(
                 predicate: buildPredicate()
             )
+            descriptor.sortBy = [
+                SortDescriptor(\.pub_date, order: .reverse),
+                SortDescriptor(\.date, order: .reverse),
+            ]
             descriptor.fetchLimit = 30
 
             do {
