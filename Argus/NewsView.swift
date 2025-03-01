@@ -193,16 +193,22 @@ struct NewsView: View {
                     if lastSelectedTopic != newTopic {
                         needsScrollReset = true
                         lastSelectedTopic = newTopic
+
+                        // Force an immediate refresh with the new topic
+                        updateFilteredNotifications()
                     }
                 }
                 .onChange(of: showArchivedContent) { _, _ in
                     needsTopicReset = true
+                    updateFilteredNotifications()
                 }
                 .onChange(of: showUnreadOnly) { _, _ in
                     needsTopicReset = true
+                    updateFilteredNotifications()
                 }
                 .onChange(of: showBookmarkedOnly) { _, _ in
                     needsTopicReset = true
+                    updateFilteredNotifications()
                 }
                 .onChange(of: visibleTopics) { _, _ in
                     if needsTopicReset {
@@ -315,8 +321,8 @@ struct NewsView: View {
                         withAnimation {
                             selectedTopic = topic
                         }
-                        // Then trigger the filter update
-                        updateFilteredNotifications()
+                        // Don't call updateFilteredNotifications() here as it will be
+                        // triggered by the onChange handler
                     } label: {
                         Text(topic)
                             .padding(.horizontal, 12)
@@ -839,7 +845,7 @@ struct NewsView: View {
 
     @MainActor
     private func updateFilteredNotifications(isBackgroundUpdate: Bool = false) {
-        let updateInterval: TimeInterval = 2.0 // Minimum seconds between updates
+        let updateInterval: TimeInterval = 2.0
         let now = Date()
 
         if isBackgroundUpdate {
@@ -854,21 +860,98 @@ struct NewsView: View {
             isUpdating = true
             defer { isUpdating = false }
 
+            // Use original method approach for now
             var descriptor = FetchDescriptor<NotificationData>(
                 predicate: buildPredicate()
             )
             descriptor.fetchLimit = 30
 
-            let fetchedNotifications = try? modelContext.fetch(descriptor)
-
-            await processNotifications(fetchedNotifications ?? [])
-
-            lastUpdateTime = now
+            do {
+                let fetchedNotifications = try modelContext.fetch(descriptor)
+                await processNotifications(fetchedNotifications)
+                lastUpdateTime = now
+            } catch {
+                print("Error fetching notifications: \(error)")
+            }
         }
+    }
+
+    private func mergeAndProcessNotifications(_ newNotifications: [NotificationData]) async {
+        // Move to background for heavy processing
+        return await Task.detached {
+            // Capture needed values
+            let currentSortOrder = await self.sortOrder
+            let currentBatchSize = await self.batchSize
+
+            // Force a full replacement when the content is completely different or
+            // when the topic filter has changed
+            let isFullReplacement = true // Treat all updates as full replacements for now
+
+            // Create a sorting function that properly uses effectiveDate
+            let sortNotifications: ([NotificationData]) -> [NotificationData] = { notifications in
+                notifications.sorted { n1, n2 in
+                    switch currentSortOrder {
+                    case "oldest":
+                        return n1.effectiveDate < n2.effectiveDate
+                    case "bookmarked":
+                        if n1.isBookmarked != n2.isBookmarked {
+                            return n1.isBookmarked
+                        }
+                        return n1.effectiveDate > n2.effectiveDate
+                    default: // "newest"
+                        return n1.effectiveDate > n2.effectiveDate
+                    }
+                }
+            }
+
+            // Sort all the notifications properly
+            let sortedTotal = sortNotifications(newNotifications)
+
+            // Debug the sorting
+            await MainActor.run {
+                print("-- Sorting Diagnostics --")
+                print("Sort order: \(currentSortOrder)")
+                if let firstFew = sortedTotal.prefix(3).map({ "\($0.effectiveDate): \($0.title.prefix(20))..." }).joined(separator: "\n- ").nilIfEmpty {
+                    print("First few sorted items:\n- \(firstFew)")
+                }
+
+                // Extra diagnostics - check pub_date vs date
+                for notification in sortedTotal.prefix(3) {
+                    print("ID: \(notification.id)")
+                    print("  pub_date: \(String(describing: notification.pub_date))")
+                    print("  date: \(notification.date)")
+                    print("  effectiveDate: \(notification.effectiveDate)")
+                    print("  title: \(notification.title.prefix(30))")
+                }
+            }
+
+            // Create the batched array for display, respecting the current batch size
+            let batchedNotifications = Array(sortedTotal.prefix(currentBatchSize))
+
+            // Update UI on main thread with optimized arrays
+            await MainActor.run {
+                let hasChanges = true // Always update when filtering
+
+                // Always update if the topic has changed
+                if hasChanges || isFullReplacement {
+                    // Update the full collection
+                    self.totalNotifications = sortedTotal
+
+                    // Apply animation for the update
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        // For a full replacement or when filter changes, use the batch size
+                        self.filteredNotifications = batchedNotifications
+                    }
+
+                    self.updateGrouping()
+                }
+            }
+        }.value
     }
 
     @MainActor
     private func buildPredicate() -> Predicate<NotificationData>? {
+        // Always create a fresh predicate based on current filter settings
         let topicPredicate = selectedTopic == "All" ? nil :
             #Predicate<NotificationData> { $0.topic == selectedTopic }
         let archivedPredicate = showArchivedContent ? nil :
@@ -889,6 +972,7 @@ struct NewsView: View {
                 combinedPredicate = predicate
             }
         }
+
         return combinedPredicate
     }
 
@@ -903,6 +987,7 @@ struct NewsView: View {
         }
     }
 
+    @MainActor
     private func processNotifications(_ notifications: [NotificationData]) async {
         // Move to background for heavy processing
         return await Task.detached {
@@ -910,19 +995,51 @@ struct NewsView: View {
             let currentSortOrder = await self.sortOrder
             let currentBatchSize = await self.batchSize
 
-            // Sort based on captured sortOrder
+            // Add debug logging to see what's happening
+            print("Sort order: \(currentSortOrder)")
+
+            // Make sure we consistently use effectiveDate, not a mix of date types
             let sortedNotifications = notifications.sorted { n1, n2 in
+                // Debug: Print sample of what we're comparing
+                if notifications.count > 0 && n1.id == notifications[0].id {
+                    print("Comparing dates for sorting:")
+                    print("  n1 pub_date: \(String(describing: n1.pub_date))")
+                    print("  n1 date: \(n1.date)")
+                    print("  n1 effectiveDate: \(n1.pub_date ?? n1.date)")
+                    print("  n2 pub_date: \(String(describing: n2.pub_date))")
+                    print("  n2 date: \(n2.date)")
+                    print("  n2 effectiveDate: \(n2.pub_date ?? n2.date)")
+                }
+
+                // Use direct date comparison with explicit property access
+                // to avoid any extension issues
                 switch currentSortOrder {
                 case "oldest":
-                    return n1.date < n2.date
+                    // For oldest first, earlier dates come first
+                    let date1 = n1.pub_date ?? n1.date
+                    let date2 = n2.pub_date ?? n2.date
+                    return date1 < date2
                 case "bookmarked":
                     if n1.isBookmarked != n2.isBookmarked {
                         return n1.isBookmarked
                     }
-                    return n1.date > n2.date
+                    // For bookmarked, sort by newest within bookmarked status
+                    let date1 = n1.pub_date ?? n1.date
+                    let date2 = n2.pub_date ?? n2.date
+                    return date1 > date2
                 default: // "newest"
-                    return n1.date > n2.date
+                    // For newest first, later dates come first
+                    let date1 = n1.pub_date ?? n1.date
+                    let date2 = n2.pub_date ?? n2.date
+                    return date1 > date2
                 }
+            }
+
+            // Print first few sorted items to verify
+            print("After sorting (\(currentSortOrder)):")
+            for (i, notification) in sortedNotifications.prefix(3).enumerated() {
+                let date = notification.pub_date ?? notification.date
+                print("  \(i). \(date) - \(notification.title.prefix(20))...")
             }
 
             // Create the batched array
@@ -931,7 +1048,11 @@ struct NewsView: View {
             // Update UI on main thread with copied arrays
             await MainActor.run {
                 self.totalNotifications = sortedNotifications
-                self.filteredNotifications = batchedNotifications
+
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.filteredNotifications = batchedNotifications
+                }
+
                 self.updateGrouping()
             }
         }.value
@@ -944,9 +1065,9 @@ struct NewsView: View {
         // When the user is within 5 rows of the bottom, load more
         let thresholdIndex = filteredNotifications.count - 5
         if currentIndex == thresholdIndex {
-            let nextBatchSize = filteredNotifications.count + 50
-            // Ensure we don't go out of bounds
-            if nextBatchSize <= totalNotifications.count {
+            let nextBatchSize = min(filteredNotifications.count + 50, totalNotifications.count)
+            // Only update if we can actually load more
+            if nextBatchSize > filteredNotifications.count {
                 withAnimation {
                     filteredNotifications = Array(totalNotifications.prefix(nextBatchSize))
                 }
@@ -956,20 +1077,27 @@ struct NewsView: View {
     }
 
     private func updateGrouping() {
-        Task.detached(priority: .userInitiated) { [sortOrder, groupingStyle] in // Capture values
-            // First get the sorted array
+        Task.detached(priority: .userInitiated) { [sortOrder, groupingStyle] in
+            // First get the sorted array - using the same sorting logic as in processNotifications
             let sorted = await MainActor.run {
                 self.filteredNotifications.sorted { n1, n2 in
+                    // Use direct date comparison with explicit property access
                     switch sortOrder {
                     case "oldest":
-                        return n1.date < n2.date
+                        let date1 = n1.pub_date ?? n1.date
+                        let date2 = n2.pub_date ?? n2.date
+                        return date1 < date2
                     case "bookmarked":
                         if n1.isBookmarked != n2.isBookmarked {
                             return n1.isBookmarked
                         }
-                        return n1.date > n2.date
+                        let date1 = n1.pub_date ?? n1.date
+                        let date2 = n2.pub_date ?? n2.date
+                        return date1 > date2
                     default: // "newest"
-                        return n1.date > n2.date
+                        let date1 = n1.pub_date ?? n1.date
+                        let date2 = n2.pub_date ?? n2.date
+                        return date1 > date2
                     }
                 }
             }
@@ -978,13 +1106,30 @@ struct NewsView: View {
 
             switch groupingStyle {
             case "date":
+                // Group by day
                 let groupedByDay = Dictionary(grouping: sorted) {
-                    $0.pub_date?.dayOnly ?? $0.date.dayOnly
+                    let date = $0.pub_date ?? $0.date
+                    return date.dayOnly
                 }
-                let sortedDayKeys = groupedByDay.keys.sorted(by: >)
+
+                // Sort the days based on current sort order
+                let sortedDayKeys: [Date]
+                if sortOrder == "oldest" {
+                    // For oldest first, sort days in ascending order
+                    sortedDayKeys = groupedByDay.keys.sorted(by: <)
+                } else {
+                    // For newest first or bookmarked, sort days in descending order
+                    sortedDayKeys = groupedByDay.keys.sorted(by: >)
+                }
+
+                // Create the grouped data structure
                 newGroupingData = sortedDayKeys.map { dateKey in
                     let displayKey = dateKey.formatted(.dateTime.month(.abbreviated).day().year())
-                    return (key: displayKey, displayKey: displayKey, notifications: groupedByDay[dateKey] ?? [])
+
+                    // Keep the order of notifications within each group consistent with overall sort
+                    let sortedGroupNotifications = groupedByDay[dateKey] ?? []
+
+                    return (key: displayKey, displayKey: displayKey, notifications: sortedGroupNotifications)
                 }
 
             case "topic":
@@ -995,6 +1140,18 @@ struct NewsView: View {
 
             default:
                 newGroupingData = [("", "", sorted)]
+            }
+
+            // Debug the grouping
+            await MainActor.run {
+                print("Grouped by \(groupingStyle), sort: \(sortOrder)")
+                for (i, group) in newGroupingData.prefix(3).enumerated() {
+                    print("Group \(i): \(group.key)")
+                    for (j, notification) in group.notifications.prefix(2).enumerated() {
+                        let date = notification.pub_date ?? notification.date
+                        print("  \(j). \(date) - \(notification.title.prefix(20))...")
+                    }
+                }
             }
 
             // Update UI on main thread with final result
@@ -1213,5 +1370,17 @@ struct RoundedCorner: Shape {
             cornerRadii: CGSize(width: radius, height: radius)
         )
         return Path(path.cgPath)
+    }
+}
+
+extension NotificationData {
+    var effectiveDate: Date {
+        return pub_date ?? date
+    }
+}
+
+extension String {
+    var nilIfEmpty: String? {
+        return isEmpty ? nil : self
     }
 }
