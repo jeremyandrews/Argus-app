@@ -1173,13 +1173,55 @@ struct NewsView: View {
     }
 
     private func startBackgroundRefresh() {
+        // Cancel any existing task first
+        backgroundRefreshTask?.cancel()
+
         backgroundRefreshTask = Task {
             while !Task.isCancelled {
-                Task { @MainActor in
-                    updateFilteredNotifications(isBackgroundUpdate: true)
+                // Use a much longer interval - 5 minutes instead of 30 seconds
+                try? await Task.sleep(nanoseconds: 5 * 60 * 1_000_000_000) // 5 minutes
+
+                if Task.isCancelled { break }
+
+                // First check if we need to update in the background
+                let needsUpdate = await checkForNewContent()
+
+                // Only trigger UI update if we actually have new content
+                if needsUpdate {
+                    await MainActor.run {
+                        updateFilteredNotifications(isBackgroundUpdate: true)
+                    }
                 }
-                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000) // 30 seconds
             }
+        }
+    }
+
+    private func checkForNewContent() async -> Bool {
+        // This could check for new notifications since the last known one
+        // without triggering a full UI refresh
+        do {
+            // Get the timestamp of our newest notification
+            let newestTimestamp = filteredNotifications.first?.pub_date ?? .distantPast
+
+            // Create a predicate to find only newer items
+            let newerPredicate = #Predicate<NotificationData> {
+                ($0.pub_date ?? $0.date) > newestTimestamp
+            }
+
+            // Create the fetch descriptor with our predicate
+            var descriptor = FetchDescriptor<NotificationData>(
+                predicate: newerPredicate
+            )
+
+            // We just need to know if there are any, not fetch them all
+            descriptor.fetchLimit = 1
+
+            // Check if there are any new notifications
+            let newNotifications = try modelContext.fetch(descriptor)
+            return !newNotifications.isEmpty
+        } catch {
+            print("Error checking for new content: \(error)")
+            return false
         }
     }
 
