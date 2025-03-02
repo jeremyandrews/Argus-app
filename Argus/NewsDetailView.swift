@@ -587,6 +587,16 @@ struct NewsDetailView: View {
             content += "Source Quality: \(qualityLabel)\n\n"
         }
 
+        // Add more details if available in the notification
+        if let domain = notification.domain {
+            content += "Domain: \(domain)\n\n"
+        }
+
+        // If we have no content at all, add a placeholder
+        if content.isEmpty {
+            content = "No source analysis data available."
+        }
+
         return content
     }
 
@@ -600,7 +610,8 @@ struct NewsDetailView: View {
             notification.critical_analysis != nil &&
             notification.logical_fallacies != nil &&
             notification.relation_to_topic != nil &&
-            notification.additional_insights != nil
+            notification.additional_insights != nil &&
+            notification.source_analysis != nil
         {
             return
         }
@@ -622,6 +633,12 @@ struct NewsDetailView: View {
 
         if notification.source_type == nil {
             notification.source_type = content["source_type"] as? String
+        }
+
+        // Store the full source_analysis field
+        if notification.source_analysis == nil {
+            let sourceAnalysis = (content["source_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            notification.source_analysis = convertMarkdown(sourceAnalysis)
         }
 
         if notification.quality == nil {
@@ -857,14 +874,20 @@ struct NewsDetailView: View {
             let fallaciesContent = notification.logical_fallacies ?? (json["logical_fallacies"] as? String ?? "")
             sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
 
-            // Source Analysis section
-            var sourceContent: String
-            if notification.source_type != nil || notification.sources_quality != nil {
-                sourceContent = buildSourceAnalysis(notification)
-            } else {
-                sourceContent = json["source_analysis"] as? String ?? ""
-            }
-            sections.append(ContentSection(header: "Source Analysis", content: sourceContent))
+            // Source Analysis section - UPDATED TO USE THE source_analysis FIELD DIRECTLY
+            // Get source_analysis from JSON, ensuring it's not empty
+            let sourceAnalysis = (json["source_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? notification.source_analysis // Fall back to stored source_analysis
+                ?? "" // Default to empty string if neither is available
+
+            // Create a custom object to pass both the sourceAnalysis text and metadata
+            let sourceAnalysisData: [String: Any] = [
+                "text": sourceAnalysis,
+                "sourceType": notification.source_type ?? (json["source_type"] as? String ?? ""),
+                "sourcesQuality": notification.sources_quality ?? (json["sources_quality"] as? Int ?? 0),
+            ]
+
+            sections.append(ContentSection(header: "Source Analysis", content: sourceAnalysisData))
 
             // Additional Insights section (optional)
             if let insights = notification.additional_insights, !insights.isEmpty {
@@ -942,35 +965,86 @@ struct NewsDetailView: View {
     private func sectionContent(for section: ContentSection) -> some View {
         AnyView(
             Group {
-                if section.header == "Source Analysis", let sourceContent = section.content as? String {
-                    // Source Analysis section content
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text("Article Domain:")
-                                if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
-                                   !domain.isEmpty
-                                {
-                                    Text(domain)
-                                        .foregroundColor(.blue)
-                                        .onTapGesture {
-                                            if let url = URL(string: "https://\(domain)") {
-                                                UIApplication.shared.open(url)
-                                            }
-                                        }
-                                }
-                                Text("") // blank line for spacing
-                            }
-                            Spacer()
-                        }
+                if section.header == "Source Analysis" {
+                    // Source Analysis section with updated UI
+                    if let sourceData = section.content as? [String: Any] {
+                        let sourceText = sourceData["text"] as? String ?? ""
+                        let sourceType = sourceData["sourceType"] as? String ?? ""
+                        let sourcesQuality = sourceData["sourcesQuality"] as? Int ?? 0
 
-                        let processedContent = processSourceAnalysisContent(sourceContent)
-                        let attributedContent = SwiftyMarkdown(string: processedContent).attributedString()
-                        Text(AttributedString(attributedContent))
+                        VStack(alignment: .leading, spacing: 12) {
+                            // Domain info at the top
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text("Article Domain:")
+                                    if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
+                                       !domain.isEmpty
+                                    {
+                                        Text(domain)
+                                            .foregroundColor(.blue)
+                                            .onTapGesture {
+                                                if let url = URL(string: "https://\(domain)") {
+                                                    UIApplication.shared.open(url)
+                                                }
+                                            }
+                                    }
+                                }
+                                Spacer()
+                            }
+
+                            // The actual source analysis content
+                            if !sourceText.isEmpty {
+                                let attributedContent = SwiftyMarkdown(string: sourceText).attributedString()
+                                Text(AttributedString(attributedContent))
+                                    .textSelection(.enabled)
+                            } else {
+                                Text("No detailed source analysis available.")
+                                    .italic()
+                                    .foregroundColor(.secondary)
+                            }
+
+                            // Source type and quality as icons at the bottom
+                            HStack(spacing: 16) {
+                                if !sourceType.isEmpty {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: sourceTypeIcon(for: sourceType))
+                                            .foregroundColor(.blue)
+                                        Text(sourceType.capitalized)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+
+                                if sourcesQuality > 0 {
+                                    HStack(spacing: 4) {
+                                        ForEach(0 ..< min(sourcesQuality, 4), id: \.self) { _ in
+                                            Image(systemName: "star.fill")
+                                                .foregroundColor(.blue)
+                                                .font(.caption)
+                                        }
+                                        ForEach(0 ..< (4 - min(sourcesQuality, 4)), id: \.self) { _ in
+                                            Image(systemName: "star")
+                                                .foregroundColor(.gray)
+                                                .font(.caption)
+                                        }
+
+                                        Text(qualityLabel(for: sourcesQuality))
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
+                        .font(.body)
+                        .padding(.top, 8)
+                        .textSelection(.enabled)
+                    } else {
+                        Text("Source analysis information unavailable")
+                            .italic()
+                            .foregroundColor(.secondary)
+                            .padding()
                     }
-                    .font(.body)
-                    .padding(.top, 8)
-                    .textSelection(.enabled)
                 } else if section.header == "Vector WIP" {
                     VStack(alignment: .leading, spacing: 10) {
                         if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
@@ -1073,6 +1147,33 @@ struct NewsDetailView: View {
                 // Mark the Vector WIP section as loaded
                 self.expandedSections["Vector WIP"] = true
             }
+        }
+    }
+
+    private func sourceTypeIcon(for sourceType: String) -> String {
+        switch sourceType.lowercased() {
+        case "press", "news":
+            return "newspaper"
+        case "blog":
+            return "text.bubble"
+        case "academic":
+            return "book"
+        case "government":
+            return "building.columns"
+        case "social media":
+            return "person.2"
+        default:
+            return "doc.text"
+        }
+    }
+
+    private func qualityLabel(for quality: Int) -> String {
+        switch quality {
+        case 1: return "Poor"
+        case 2: return "Fair"
+        case 3: return "Good"
+        case 4: return "Strong"
+        default: return ""
         }
     }
 
