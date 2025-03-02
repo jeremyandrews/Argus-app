@@ -91,6 +91,9 @@ struct NewsView: View {
     @State private var isLoadingMorePages: Bool = false
     @State private var pageSize: Int = 30
     @State private var hasMoreContent: Bool = true
+    @State private var isActivelyScrolling: Bool = false
+    @State private var pendingUpdateNeeded: Bool = false
+    @State private var scrollIdleTimer: Task<Void, Never>? = nil
 
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "none"
@@ -249,6 +252,14 @@ struct NewsView: View {
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleArchived"))) { _ in
                     updateFilteredNotifications()
                 }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 10)
+                        .onChanged { _ in
+                            if !isActivelyScrolling {
+                                handleScrollBegin()
+                            }
+                        }
+                )
                 .confirmationDialog(
                     deleteConfirmationMessage,
                     isPresented: $showDeleteConfirmation,
@@ -615,6 +626,29 @@ struct NewsView: View {
         }
     }
 
+    private func handleScrollBegin() {
+        isActivelyScrolling = true
+
+        // Cancel any existing timer
+        scrollIdleTimer?.cancel()
+
+        // Create a new timer for when scrolling stops
+        scrollIdleTimer = Task {
+            // Wait for scroll to be idle (1 second)
+            try? await Task.sleep(nanoseconds: 1 * 1_000_000_000)
+
+            await MainActor.run {
+                isActivelyScrolling = false
+
+                // If there's a pending update, run it now
+                if pendingUpdateNeeded {
+                    pendingUpdateNeeded = false
+                    updateFilteredNotifications()
+                }
+            }
+        }
+    }
+
     private func openArticleWithSection(_ notification: NotificationData, _: [String: Any], section: String? = nil) {
         guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
             return
@@ -919,9 +953,11 @@ struct NewsView: View {
 
     @MainActor
     private func updateFilteredNotifications(isBackgroundUpdate: Bool = false) {
-        let updateInterval: TimeInterval = 2.0
+        // Set a longer update interval for background refreshes (10 seconds)
+        let updateInterval: TimeInterval = 10.0
         let now = Date()
 
+        // For background updates, enforce a minimum time between updates
         if isBackgroundUpdate {
             guard now.timeIntervalSince(lastUpdateTime) > updateInterval,
                   !isUpdating
@@ -930,9 +966,18 @@ struct NewsView: View {
             }
         }
 
+        // Skip updates if we're actively scrolling
+        if isActivelyScrolling {
+            pendingUpdateNeeded = true
+            return
+        }
+
         Task {
             isUpdating = true
-            defer { isUpdating = false }
+            defer {
+                isUpdating = false
+                lastUpdateTime = Date()
+            }
 
             // Reset pagination state when filters change
             self.lastLoadedDate = nil
@@ -942,7 +987,6 @@ struct NewsView: View {
 
             // Load the first page
             await loadPage(isInitialLoad: true)
-            lastUpdateTime = now
         }
     }
 
