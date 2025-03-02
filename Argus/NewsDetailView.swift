@@ -1744,79 +1744,96 @@ struct ShareSelectionView: View {
 
         for section in getSections(from: content ?? [:]) {
             if selectedSections.contains(section.header) {
-                if section.header == "Article URL" {
-                    if let url = section.content as? String {
-                        shareText += "\(url)\n\n"
-                    }
-                } else if section.header == "Title" || section.header == "Brief Summary" {
-                    if let shareableContent = section.content as? String {
-                        shareText += "\(shareableContent)\n\n"
-                    }
-                } else if section.header == "Argus Engine Stats" {
+                var sectionContent: String? = nil
+
+                switch section.header {
+                case "Title":
+                    sectionContent = notification.title // Title comes from notification, not JSON
+                case "Brief Summary":
+                    sectionContent = notification.body // Tiny Summary is actually stored as `body`
+                case "Article URL":
+                    sectionContent = content?["url"] as? String
+                case "Source Analysis":
+                    sectionContent = notification.source_analysis // Use stored `source_analysis`
+                case "Argus Engine Stats":
                     if let details = section.argusDetails {
-                        shareText += "ARGUS ENGINE STATS\n\n"
-                        shareText += """
-                        Generated with \(details.model) in \(String(format: "%.2f", details.elapsedTime)) seconds.
-                        Metrics:
+                        sectionContent = """
+                        **Model:** \(details.model)
+                        **Elapsed Time:** \(String(format: "%.2f", details.elapsedTime)) seconds
+                        **Metrics:**
                         \(formattedStats(details.stats))
+                        **Received:** \(details.date.formatted(.dateTime.month().day().year().hour().minute().second()))
                         """
-
-                        if let sysInfo = details.systemInfo {
-                            shareText += "System Information:\n"
-                            if let buildInfo = sysInfo["build_info"] as? [String: Any] {
-                                shareText += "\nBuild Details:\n"
-                                if let version = buildInfo["version"] as? String {
-                                    shareText += "Version: \(version)\n"
-                                }
-                                if let rustVersion = buildInfo["rust_version"] as? String {
-                                    shareText += "Rust: \(rustVersion)\n"
-                                }
-                                if let targetOs = buildInfo["target_os"] as? String {
-                                    shareText += "OS: \(targetOs)\n"
-                                }
-                                if let targetArch = buildInfo["target_arch"] as? String {
-                                    shareText += "Arch: \(targetArch)\n"
-                                }
-                            }
-
-                            if let runtimeMetrics = sysInfo["runtime_metrics"] as? [String: Any] {
-                                shareText += "\nRuntime Metrics:\n"
-                                if let cpuUsage = runtimeMetrics["cpu_usage_percent"] as? Double {
-                                    shareText += "CPU: \(String(format: "%.2f%%", cpuUsage))\n"
-                                }
-                                if let memoryTotal = runtimeMetrics["memory_total_kb"] as? Int {
-                                    shareText += "Total Memory: \(formatMemory(memoryTotal))\n"
-                                }
-                                if let memoryUsage = runtimeMetrics["memory_usage_kb"] as? Int {
-                                    shareText += "Used Memory: \(formatMemory(memoryUsage))\n"
-                                }
-                                if let threadCount = runtimeMetrics["thread_count"] as? Int {
-                                    shareText += "Threads: \(threadCount)\n"
-                                }
-                                if let uptime = runtimeMetrics["uptime_seconds"] as? Int {
-                                    shareText += "Uptime: \(formatUptime(uptime))\n"
-                                }
-                            }
-                            shareText += "\n"
+                        if let systemInfo = details.systemInfo {
+                            sectionContent! += formatSystemInfo(systemInfo)
                         }
-
-                        shareText += "Received from Argus on \(details.date.formatted(.dateTime.month(.wide).day().year().hour().minute().second()))\n\n"
                     }
-                } else if section.header != "Description" {
-                    shareText += "\(section.header.uppercased())\n\n"
-                    if let shareableContent = section.content as? String {
-                        shareText += "\(shareableContent)\n\n"
+                default:
+                    sectionContent = section.content as? String
+                }
+
+                if let contentToShare = sectionContent, !contentToShare.isEmpty {
+                    if section.header == "Title" || section.header == "Brief Summary" || section.header == "Article URL" {
+                        // Share these fields as raw content, without headers
+                        shareText += "\(contentToShare)\n\n"
+                    } else {
+                        // Keep headers for everything else
+                        shareText += "**\(section.header):**\n\(contentToShare)\n\n"
                     }
                 }
             }
         }
 
+        // If no sections were selected, avoid sharing empty content
+        if shareText.isEmpty {
+            shareText = "No content selected for sharing."
+        }
+
+        // Apply markdown formatting if enabled
         if formatText {
             let formattedText = SwiftyMarkdown(string: shareText).attributedString()
             shareItems = [formattedText]
         } else {
             shareItems = [shareText]
         }
+    }
+
+    private func formattedStats(_ stats: String) -> String {
+        let parts = stats.split(separator: ":").map { String($0) }
+        guard parts.count == 6 else {
+            return "Invalid stats format"
+        }
+
+        let descriptions = [
+            "• Articles reviewed: \(parts[0])",
+            "• Matched: \(parts[1])",
+            "• Queued to review: \(parts[2])",
+            "• Life safety queue: \(parts[3])",
+            "• Matched topics queue: \(parts[4])",
+            "• Clients: \(parts[5])",
+        ]
+
+        return descriptions.joined(separator: "\n")
+    }
+
+    private func formatSystemInfo(_ systemInfo: [String: Any]) -> String {
+        var formattedInfo = "\n**System Info:**\n"
+        if let buildInfo = systemInfo["build_info"] as? [String: Any] {
+            if let version = buildInfo["version"] as? String {
+                formattedInfo += "• Version: \(version)\n"
+            }
+            if let rustVersion = buildInfo["rust_version"] as? String {
+                formattedInfo += "• Rust: \(rustVersion)\n"
+            }
+            if let targetOs = buildInfo["target_os"] as? String {
+                formattedInfo += "• OS: \(targetOs)\n"
+            }
+            if let targetArch = buildInfo["target_arch"] as? String {
+                formattedInfo += "• Arch: \(targetArch)\n"
+            }
+        }
+
+        return formattedInfo
     }
 
     private var sectionHeaders: [String] {
@@ -1863,34 +1880,6 @@ struct ShareSelectionView: View {
         let minutes = (seconds % 3600) / 60
         let secs = seconds % 60
         return String(format: "%02d:%02d:%02d", hours, minutes, secs)
-    }
-
-    private func formattedStats(_ stats: String) -> String {
-        let parts = stats.split(separator: ":").map { String($0) }
-        guard parts.count == 6 else {
-            return "Invalid stats format"
-        }
-
-        let numberFormatter = NumberFormatter()
-        numberFormatter.numberStyle = .decimal
-
-        func formattedNumber(_ value: String) -> String {
-            if let number = Int(value), let formatted = numberFormatter.string(from: NSNumber(value: number)) {
-                return formatted
-            }
-            return value
-        }
-
-        let descriptions = [
-            "• Articles reviewed: \(formattedNumber(parts[0]))",
-            "• Matched: \(formattedNumber(parts[1]))",
-            "• Queued to review: \(formattedNumber(parts[2]))",
-            "• Life safety queue: \(formattedNumber(parts[3]))",
-            "• Matched topics queue: \(formattedNumber(parts[4]))",
-            "• Clients: \(formattedNumber(parts[5]))",
-        ]
-
-        return descriptions.joined(separator: "\n")
     }
 }
 
