@@ -195,6 +195,9 @@ struct NewsView: View {
                         await SyncManager.shared.sendRecentArticlesToServer()
                     }
                 }
+                .onChange(of: allNotifications.map(\.isViewed)) {
+                    updateFilteredNotifications()
+                }
                 .onChange(of: selectedTopic) { _, newTopic in
                     // If we changed topics, reset scroll if desired
                     if lastSelectedTopic != newTopic {
