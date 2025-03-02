@@ -75,6 +75,7 @@ class SyncManager {
         sourcesQuality: Int?,
         argumentQuality: Int?,
         sourceType: String?,
+        sourceAnalysis: String?,
         quality: Int?,
         summary: String?,
         criticalAnalysis: String?,
@@ -118,6 +119,7 @@ class SyncManager {
         let summary = (json["summary"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let criticalAnalysis = (json["critical_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let logicalFallacies = (json["logical_fallacies"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let sourceAnalysis = (json["source_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let relationToTopic = (json["relation_to_topic"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let additionalInsights = (json["additional_insights"] as? String).flatMap { $0.isEmpty ? nil : $0 }
 
@@ -157,7 +159,7 @@ class SyncManager {
 
         return (
             title, body, jsonURL, topic, articleTitle, affected, domain, pubDate,
-            sourcesQuality, argumentQuality, sourceType, quality,
+            sourcesQuality, argumentQuality, sourceType, sourceAnalysis, quality,
             summary, criticalAnalysis, logicalFallacies, relationToTopic, additionalInsights,
             engineStats, similarArticlesJSON
         )
@@ -285,6 +287,7 @@ class SyncManager {
                 sourcesQuality: Int?,
                 argumentQuality: Int?,
                 sourceType: String?,
+                sourceAnalysis: String?,
                 quality: Int?,
                 summary: String?,
                 criticalAnalysis: String?,
@@ -340,6 +343,7 @@ class SyncManager {
         sourcesQuality: Int?,
         argumentQuality: Int?,
         sourceType: String?,
+        sourceAnalysis: String?,
         quality: Int?,
         summary: String?,
         criticalAnalysis: String?,
@@ -386,6 +390,10 @@ class SyncManager {
 
                             if let sourceType = article.sourceType {
                                 notification.source_type = sourceType
+                            }
+
+                            if let sourceAnalysis = article.sourceAnalysis {
+                                notification.source_analysis = sourceAnalysis
                             }
 
                             if let quality = article.quality {
@@ -441,6 +449,7 @@ class SyncManager {
                             sources_quality: article.sourcesQuality,
                             argument_quality: article.argumentQuality,
                             source_type: article.sourceType,
+                            source_analysis: article.sourceAnalysis,
                             quality: article.quality,
                             summary: article.summary,
                             critical_analysis: article.criticalAnalysis,

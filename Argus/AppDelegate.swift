@@ -633,6 +633,7 @@ class NotificationData {
     @Attribute var summary: String?
     @Attribute var critical_analysis: String?
     @Attribute var logical_fallacies: String?
+    @Attribute var source_analysis: String?
     @Attribute var relation_to_topic: String?
     @Attribute var additional_insights: String?
 
@@ -657,6 +658,7 @@ class NotificationData {
         sources_quality: Int? = nil,
         argument_quality: Int? = nil,
         source_type: String? = nil,
+        source_analysis: String? = nil,
         quality: Int? = nil,
         summary: String? = nil,
         critical_analysis: String? = nil,
@@ -682,6 +684,7 @@ class NotificationData {
         self.sources_quality = sources_quality
         self.argument_quality = argument_quality
         self.source_type = source_type
+        self.source_analysis = source_analysis
         self.quality = quality
         self.summary = summary
         self.critical_analysis = critical_analysis
