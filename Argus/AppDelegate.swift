@@ -623,6 +623,23 @@ class NotificationData {
     @Attribute var domain: String?
     @Attribute var pub_date: Date?
 
+    // New fields for analytics and content
+    @Attribute var sources_quality: Int?
+    @Attribute var argument_quality: Int?
+    @Attribute var source_type: String?
+    @Attribute var quality: Int?
+
+    // New fields for content converted from markdown
+    @Attribute var summary: String?
+    @Attribute var critical_analysis: String?
+    @Attribute var logical_fallacies: String?
+    @Attribute var relation_to_topic: String?
+    @Attribute var additional_insights: String?
+
+    // Engine statistics and similar articles stored as JSON strings
+    @Attribute var engine_stats: String?
+    @Attribute var similar_articles: String?
+
     init(
         id: UUID = UUID(),
         date: Date,
@@ -633,9 +650,21 @@ class NotificationData {
         article_title: String,
         affected: String,
         domain: String? = nil,
+        pub_date: Date? = nil,
         isViewed: Bool = false,
         isBookmarked: Bool = false,
-        pub_date: Date? = nil
+        isArchived: Bool = false,
+        sources_quality: Int? = nil,
+        argument_quality: Int? = nil,
+        source_type: String? = nil,
+        quality: Int? = nil,
+        summary: String? = nil,
+        critical_analysis: String? = nil,
+        logical_fallacies: String? = nil,
+        relation_to_topic: String? = nil,
+        additional_insights: String? = nil,
+        engine_stats: String? = nil,
+        similar_articles: String? = nil
     ) {
         self.id = id
         self.date = date
@@ -646,9 +675,28 @@ class NotificationData {
         self.article_title = article_title
         self.affected = affected
         self.domain = domain
+        self.pub_date = pub_date
         self.isViewed = isViewed
         self.isBookmarked = isBookmarked
-        self.pub_date = pub_date
+        self.isArchived = isArchived
+        self.sources_quality = sources_quality
+        self.argument_quality = argument_quality
+        self.source_type = source_type
+        self.quality = quality
+        self.summary = summary
+        self.critical_analysis = critical_analysis
+        self.logical_fallacies = logical_fallacies
+        self.relation_to_topic = relation_to_topic
+        self.additional_insights = additional_insights
+        self.engine_stats = engine_stats
+        self.similar_articles = similar_articles
+    }
+}
+
+// Extension to provide computed property for effective date
+extension NotificationData {
+    var effectiveDate: Date {
+        return pub_date ?? date
     }
 }
 

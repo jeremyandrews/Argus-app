@@ -12,6 +12,8 @@ struct ArgusApp: App {
             NotificationData.self,
             SeenArticle.self,
         ])
+
+        // Set up the model configuration with schema versioning
         let modelConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
@@ -20,6 +22,16 @@ struct ArgusApp: App {
 
         do {
             let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
+
+            // Create database indexes after container is set up
+            Task {
+                do {
+                    let _ = try ensureDatabaseIndexes()
+                    print("Database indexes created successfully")
+                } catch {
+                    print("Failed to create database indexes: \(error)")
+                }
+            }
 
             return container
         } catch {
@@ -112,6 +124,12 @@ struct ArgusApp: App {
             // Additional indexes for detail view operations
             ("idx_notification_domain", "ZDOMAIN"),
             ("idx_notification_title", "ZTITLE"),
+
+            // New indexes for the added fields
+            ("idx_notification_sources_quality", "ZSOURCES_QUALITY"),
+            ("idx_notification_argument_quality", "ZARGUMENT_QUALITY"),
+            ("idx_notification_source_type", "ZSOURCE_TYPE"),
+            ("idx_notification_quality", "ZQUALITY"),
         ]
 
         // Define indexes for SeenArticle
@@ -129,7 +147,12 @@ struct ArgusApp: App {
             """
 
             if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
-                print("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
+                let error = String(cString: sqlite3_errmsg(db))
+                // Only print an error if it's not about the column not existing
+                // This handles the case where we're trying to index a new column that doesn't exist yet
+                if !error.contains("no such column") {
+                    print("Warning: Failed to create index \(indexName): \(error)")
+                }
                 continue
             }
         }

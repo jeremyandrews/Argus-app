@@ -8,104 +8,115 @@ struct QualityBadges: View {
     var onBadgeTap: ((String) -> Void)?
 
     var body: some View {
-        HStack(spacing: 4) {
+        // Use a fixed order: source type, sources quality, argument quality
+        HStack(spacing: 8) {
+            // 1. Source Type (e.g., "Press", "Blog")
+            if let sourceType = sourceType {
+                QualityBadge(
+                    label: sourceType,
+                    color: getSourceTypeColor(sourceType),
+                    iconName: "newspaper.fill"
+                )
+                .onTapGesture {
+                    if let onBadgeTap = onBadgeTap {
+                        onBadgeTap("Source Analysis")
+                    } else {
+                        scrollToSection = "Source Analysis"
+                    }
+                }
+            }
+
+            // 2. Sources Quality (e.g., "Proof: Strong")
             if let sourcesQuality = sourcesQuality {
-                let (text, color) = qualityText(sourcesQuality)
-                Text("Proof: \(text)")
-                    .font(.caption2)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(color.opacity(0.15))
-                    .foregroundColor(color)
-                    .cornerRadius(4)
-                    .onTapGesture {
-                        if let onBadgeTap = onBadgeTap {
-                            onBadgeTap("Critical Analysis")
-                        } else {
-                            scrollToSection = "Critical Analysis"
-                        }
+                QualityBadge(
+                    label: "Proof: \(getQualityLabel(sourcesQuality))",
+                    color: getQualityColor(sourcesQuality),
+                    iconName: "checkmark.seal.fill"
+                )
+                .onTapGesture {
+                    if let onBadgeTap = onBadgeTap {
+                        onBadgeTap("Source Analysis")
+                    } else {
+                        scrollToSection = "Source Analysis"
                     }
+                }
             }
 
+            // 3. Argument Quality (e.g., "Logic: Fair")
             if let argumentQuality = argumentQuality {
-                let (text, color) = qualityText(argumentQuality)
-                Text("Logic: \(text)")
-                    .font(.caption2)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(color.opacity(0.2))
-                    .foregroundColor(color)
-                    .cornerRadius(4)
-                    .onTapGesture {
-                        if let onBadgeTap = onBadgeTap {
-                            onBadgeTap("Logical Fallacies")
-                        } else {
-                            scrollToSection = "Logical Fallacies"
-                        }
+                QualityBadge(
+                    label: "Logic: \(getQualityLabel(argumentQuality))",
+                    color: getQualityColor(argumentQuality),
+                    iconName: "brain.fill"
+                )
+                .onTapGesture {
+                    if let onBadgeTap = onBadgeTap {
+                        onBadgeTap("Logical Fallacies")
+                    } else {
+                        scrollToSection = "Logical Fallacies"
                     }
-            }
-
-            if let sourceType = sourceType, sourceType != "none" {
-                let (text, color) = sourceTypeText(sourceType)
-                Text(text)
-                    .font(.caption2)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(color.opacity(0.2))
-                    .foregroundColor(color)
-                    .cornerRadius(4)
-                    .onTapGesture {
-                        if let onBadgeTap = onBadgeTap {
-                            onBadgeTap("Source Analysis")
-                        } else {
-                            scrollToSection = "Source Analysis"
-                        }
-                    }
+                }
             }
         }
-        .padding(.horizontal, 4)
+        .frame(height: 28) // Fixed height to ensure badges don't expand vertically
     }
 
-    private func sourceTypeText(_ type: String?) -> (String, Color) {
-        guard let type = type else { return ("", .clear) }
-        switch type {
-        case "official":
-            return ("Official", .blue)
-        case "academic", "press", "corporate", "nonprofit":
-            return (
-                type.capitalized,
-                Color(uiColor: .systemGray)
-            )
-        case "questionable":
-            return ("Unreliable", Color(uiColor: .systemGray))
+    private func getSourceTypeColor(_ sourceType: String) -> Color {
+        switch sourceType.lowercased() {
+        case "press", "news":
+            return .blue
+        case "blog":
+            return .orange
+        case "academic", "research":
+            return .purple
+        case "gov", "government":
+            return .green
+        case "opinion":
+            return .red
         default:
-            return ("", .clear)
+            return .gray
         }
     }
 
-    private func qualityText(_ quality: Int?) -> (String, Color) {
-        guard let quality = quality else { return ("", .clear) }
+    private func getQualityLabel(_ quality: Int) -> String {
         switch quality {
-        case 1:
-            return ("Weak", Color(red: 0.8, green: 0.2, blue: 0.2))
-        case 2:
-            return ("Fair", Color(red: 0.8, green: 0.6, blue: 0.0))
-        case 3:
-            return ("Strong", Color(red: 0.2, green: 0.6, blue: 0.2))
-        default:
-            return ("", .clear)
+        case 1: return "Poor"
+        case 2: return "Fair"
+        case 3: return "Good"
+        case 4: return "Strong"
+        default: return "Unknown"
         }
     }
 
-    private func expandSourcesSection(quality _: Int) {
-        scrollToSection = "Critical Analysis"
+    private func getQualityColor(_ quality: Int) -> Color {
+        switch quality {
+        case 1: return .red
+        case 2: return .orange
+        case 3: return .green
+        case 4: return .blue
+        default: return .gray
+        }
     }
+}
 
-    private func expandLogicSection(quality _: Int) {
-        scrollToSection = "Logical Fallacies"
-    }
+struct QualityBadge: View {
+    let label: String
+    let color: Color
+    let iconName: String
 
-    private func expandSourceTypeSection(type _: String) {
-        scrollToSection = "Source Analysis"
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: iconName)
+                .font(.system(size: 10))
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1) // Prevent text wrapping
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.2))
+        .foregroundColor(color)
+        .cornerRadius(8)
+        .fixedSize(horizontal: true, vertical: false) // Critical fix: make the badge width accommodate content
     }
 }

@@ -436,6 +436,7 @@ struct NewsView: View {
         let modelContext: ModelContext
         let filteredNotifications: [NotificationData]
         let totalNotifications: [NotificationData]
+        @State private var cachedContent: [String: Any]? = nil
 
         var body: some View {
             VStack(alignment: .leading, spacing: 16) {
@@ -444,29 +445,101 @@ struct NewsView: View {
                     .foregroundColor(.blue)
                     .lineLimit(1)
 
-                LazyLoadingQualityBadges(
-                    jsonURL: notification.json_url,
-                    onBadgeTap: { section in
-                        guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
-                            return
+                // Try local data first, fallback to cached content
+                if notification.sources_quality != nil ||
+                    notification.argument_quality != nil ||
+                    notification.source_type != nil
+                {
+                    // Use local data
+                    QualityBadges(
+                        sourcesQuality: notification.sources_quality,
+                        argumentQuality: notification.argument_quality,
+                        sourceType: notification.source_type,
+                        scrollToSection: .constant(nil),
+                        onBadgeTap: { section in
+                            navigateToDetailView(section: section)
                         }
-                        let detailView = NewsDetailView(
-                            notifications: filteredNotifications,
-                            allNotifications: totalNotifications,
-                            currentIndex: index,
-                            initiallyExpandedSection: section
-                        )
-                        .environment(\.modelContext, modelContext)
-                        let hostingController = UIHostingController(rootView: detailView)
-                        hostingController.modalPresentationStyle = .fullScreen
-                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                           let window = windowScene.windows.first,
-                           let rootViewController = window.rootViewController
-                        {
-                            rootViewController.present(hostingController, animated: true)
+                    )
+                } else if let content = cachedContent ?? ContentCache.shared.getContent(for: notification.json_url) {
+                    // Use cached content
+                    QualityBadges(
+                        sourcesQuality: content["sources_quality"] as? Int,
+                        argumentQuality: content["argument_quality"] as? Int,
+                        sourceType: content["source_type"] as? String,
+                        scrollToSection: .constant(nil),
+                        onBadgeTap: { section in
+                            navigateToDetailView(section: section)
                         }
+                    )
+                    .onAppear {
+                        // Update notification with cached data
+                        updateFromCache(content)
                     }
-                )
+                } else {
+                    // No data available yet - load it
+                    Color.clear.frame(height: 20)
+                        .onAppear {
+                            ContentCache.shared.loadContent(for: notification.json_url)
+                        }
+                }
+            }
+            .onAppear {
+                if cachedContent == nil && notification.sources_quality == nil {
+                    cachedContent = ContentCache.shared.getContent(for: notification.json_url)
+                    if cachedContent == nil {
+                        ContentCache.shared.loadContent(for: notification.json_url)
+                    }
+                }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .init("ContentLoaded-\(notification.json_url)"))
+            ) { _ in
+                if let content = ContentCache.shared.getContent(for: notification.json_url) {
+                    self.cachedContent = content
+                    updateFromCache(content)
+                }
+            }
+        }
+
+        private func navigateToDetailView(section: String) {
+            guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
+                return
+            }
+            let detailView = NewsDetailView(
+                notifications: filteredNotifications,
+                allNotifications: totalNotifications,
+                currentIndex: index,
+                initiallyExpandedSection: section
+            )
+            .environment(\.modelContext, modelContext)
+            let hostingController = UIHostingController(rootView: detailView)
+            hostingController.modalPresentationStyle = .fullScreen
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = windowScene.windows.first,
+               let rootViewController = window.rootViewController
+            {
+                rootViewController.present(hostingController, animated: true)
+            }
+        }
+
+        private func updateFromCache(_ content: [String: Any]) {
+            Task { @MainActor in
+                if notification.sources_quality == nil {
+                    notification.sources_quality = content["sources_quality"] as? Int
+                }
+                if notification.argument_quality == nil {
+                    notification.argument_quality = content["argument_quality"] as? Int
+                }
+                if notification.source_type == nil {
+                    notification.source_type = content["source_type"] as? String
+                }
+
+                if notification.sources_quality != nil ||
+                    notification.argument_quality != nil ||
+                    notification.source_type != nil
+                {
+                    try? modelContext.save()
+                }
             }
         }
     }
@@ -487,9 +560,6 @@ struct NewsView: View {
             Spacer()
 
             BookmarkButton(notification: notification)
-        }
-        .onAppear {
-            ContentCache.shared.loadContent(for: notification.json_url)
         }
         .padding()
         .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.15))
@@ -1265,18 +1335,6 @@ struct NewsView: View {
                 newGroupingData = [("", "", sorted)]
             }
 
-            // Debug the grouping
-            await MainActor.run {
-                print("Grouped by \(groupingStyle), sort: \(sortOrder)")
-                for (i, group) in newGroupingData.prefix(3).enumerated() {
-                    print("Group \(i): \(group.key)")
-                    for (j, notification) in group.notifications.prefix(2).enumerated() {
-                        let date = notification.pub_date ?? notification.date
-                        print("  \(j). \(date) - \(notification.title.prefix(20))...")
-                    }
-                }
-            }
-
             // Update UI on main thread with final result
             await MainActor.run {
                 if !self.areGroupingArraysEqual(self.sortedAndGroupedNotifications,
@@ -1380,39 +1438,97 @@ struct NewsView: View {
 }
 
 struct LazyLoadingQualityBadges: View {
-    let jsonURL: String
+    let notification: NotificationData
     @State private var content: [String: Any]? = nil
     var onBadgeTap: ((String) -> Void)?
+    @State private var scrollToSection: String? = nil
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         Group {
-            if let content = content ?? ContentCache.shared.getContent(for: jsonURL) {
+            // First try to use the locally stored data
+            if notification.sources_quality != nil ||
+                notification.argument_quality != nil ||
+                notification.source_type != nil
+            {
+                QualityBadges(
+                    sourcesQuality: notification.sources_quality,
+                    argumentQuality: notification.argument_quality,
+                    sourceType: notification.source_type,
+                    scrollToSection: $scrollToSection,
+                    onBadgeTap: onBadgeTap
+                )
+            } else if let content = content ?? ContentCache.shared.getContent(for: notification.json_url) {
+                // Fall back to the cached content if local data isn't available
                 QualityBadges(
                     sourcesQuality: content["sources_quality"] as? Int,
                     argumentQuality: content["argument_quality"] as? Int,
                     sourceType: content["source_type"] as? String,
-                    scrollToSection: .constant(nil),
+                    scrollToSection: $scrollToSection,
                     onBadgeTap: onBadgeTap
                 )
+                .onAppear {
+                    // Update local data when we get it from cache
+                    updateNotificationFromCache(notification, content)
+                }
             } else {
+                // If neither local nor cached data is available, load it
                 Color.clear.frame(height: 20)
                     .onAppear {
-                        if ContentCache.shared.getContent(for: jsonURL) == nil {
-                            ContentCache.shared.loadContent(for: jsonURL)
-                        }
+                        ContentCache.shared.loadContent(for: notification.json_url)
                     }
             }
         }
         .onAppear {
-            // Try to load content immediately if available
-            if content == nil {
-                content = ContentCache.shared.getContent(for: jsonURL)
+            // Try to load content if needed
+            if notification.sources_quality == nil &&
+                notification.argument_quality == nil &&
+                notification.source_type == nil
+            {
+                if content == nil {
+                    content = ContentCache.shared.getContent(for: notification.json_url)
+                }
+                if content == nil {
+                    ContentCache.shared.loadContent(for: notification.json_url)
+                }
             }
         }
         .onReceive(
-            NotificationCenter.default.publisher(for: .init("ContentLoaded-\(jsonURL)"))
+            NotificationCenter.default.publisher(for: .init("ContentLoaded-\(notification.json_url)"))
         ) { _ in
-            self.content = ContentCache.shared.getContent(for: jsonURL)
+            if let newContent = ContentCache.shared.getContent(for: notification.json_url) {
+                self.content = newContent
+                // Update notification with fetched data
+                updateNotificationFromCache(notification, newContent)
+            }
+        }
+    }
+
+    // Helper to update notification with cached data
+    private func updateNotificationFromCache(_ notification: NotificationData, _ content: [String: Any]) {
+        Task { @MainActor in
+            // Only update if not already set
+            if notification.sources_quality == nil {
+                notification.sources_quality = content["sources_quality"] as? Int
+            }
+            if notification.argument_quality == nil {
+                notification.argument_quality = content["argument_quality"] as? Int
+            }
+            if notification.source_type == nil {
+                notification.source_type = content["source_type"] as? String
+            }
+
+            // Save context if we made changes
+            if notification.sources_quality != nil ||
+                notification.argument_quality != nil ||
+                notification.source_type != nil
+            {
+                do {
+                    try modelContext.save()
+                } catch {
+                    print("Failed to save updated notification: \(error)")
+                }
+            }
         }
     }
 }
@@ -1493,12 +1609,6 @@ struct RoundedCorner: Shape {
             cornerRadii: CGSize(width: radius, height: radius)
         )
         return Path(path.cgPath)
-    }
-}
-
-extension NotificationData {
-    var effectiveDate: Date {
-        return pub_date ?? date
     }
 }
 

@@ -520,6 +520,182 @@ struct NewsDetailView: View {
 
     // MARK: - Helper Methods
 
+    private func getEngineStatsData(from jsonString: String?) -> ArgusDetailsData? {
+        guard let jsonString = jsonString,
+              let jsonData = jsonString.data(using: .utf8),
+              let statsDict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+        else {
+            return nil
+        }
+
+        if let model = statsDict["model"] as? String,
+           let elapsedTime = statsDict["elapsed_time"] as? Double,
+           let stats = statsDict["stats"] as? String
+        {
+            return ArgusDetailsData(
+                model: model,
+                elapsedTime: elapsedTime,
+                date: currentNotification?.date ?? Date(),
+                stats: stats,
+                systemInfo: statsDict["system_info"] as? [String: Any]
+            )
+        }
+        return nil
+    }
+
+    private func getSimilarArticles(from jsonString: String?) -> [[String: Any]]? {
+        guard let jsonString = jsonString,
+              let jsonData = jsonString.data(using: .utf8),
+              let similarArticles = try? JSONSerialization.jsonObject(with: jsonData) as? [[String: Any]]
+        else {
+            return nil
+        }
+        return similarArticles
+    }
+
+    private func getArticleUrl(_ notification: NotificationData) -> String? {
+        // If we have the URL cached in additionalContent, use that
+        if let content = additionalContent, let url = content["url"] as? String {
+            return url
+        }
+
+        // Otherwise try to construct a URL from the domain
+        if let domain = notification.domain {
+            return "https://\(domain)"
+        }
+
+        return nil
+    }
+
+    // Helper to build source analysis content
+    private func buildSourceAnalysis(_ notification: NotificationData) -> String {
+        var content = ""
+
+        if let sourceType = notification.source_type {
+            content += "Source Type: \(sourceType)\n\n"
+        }
+
+        if let sourcesQuality = notification.sources_quality {
+            let qualityLabel: String
+            switch sourcesQuality {
+            case 1: qualityLabel = "Poor"
+            case 2: qualityLabel = "Fair"
+            case 3: qualityLabel = "Good"
+            case 4: qualityLabel = "Strong"
+            default: qualityLabel = "Unknown"
+            }
+            content += "Source Quality: \(qualityLabel)\n\n"
+        }
+
+        return content
+    }
+
+    @MainActor
+    private func updateLocalDatabaseWithFetchedContent(_ notification: NotificationData, _ content: [String: Any]) {
+        // Don't update if we already have all the content
+        if notification.sources_quality != nil &&
+            notification.argument_quality != nil &&
+            notification.source_type != nil &&
+            notification.summary != nil &&
+            notification.critical_analysis != nil &&
+            notification.logical_fallacies != nil &&
+            notification.relation_to_topic != nil &&
+            notification.additional_insights != nil
+        {
+            return
+        }
+
+        // Helper function to convert markdown
+        func convertMarkdown(_ text: String?) -> String? {
+            guard let text = text, !text.isEmpty else { return nil }
+            return SwiftyMarkdown(string: text).attributedString().string
+        }
+
+        // Update fields that weren't stored locally
+        if notification.sources_quality == nil {
+            notification.sources_quality = content["sources_quality"] as? Int
+        }
+
+        if notification.argument_quality == nil {
+            notification.argument_quality = content["argument_quality"] as? Int
+        }
+
+        if notification.source_type == nil {
+            notification.source_type = content["source_type"] as? String
+        }
+
+        if notification.quality == nil {
+            notification.quality = content["quality"] as? Int
+        }
+
+        if notification.summary == nil {
+            notification.summary = convertMarkdown(content["summary"] as? String)
+        }
+
+        if notification.critical_analysis == nil {
+            notification.critical_analysis = convertMarkdown(content["critical_analysis"] as? String)
+        }
+
+        if notification.logical_fallacies == nil {
+            notification.logical_fallacies = convertMarkdown(content["logical_fallacies"] as? String)
+        }
+
+        if notification.relation_to_topic == nil {
+            notification.relation_to_topic = convertMarkdown(content["relation_to_topic"] as? String)
+        }
+
+        if notification.additional_insights == nil {
+            notification.additional_insights = convertMarkdown(content["additional_insights"] as? String)
+        }
+
+        // Store engine stats
+        if notification.engine_stats == nil {
+            var engineStatsDict: [String: Any] = [:]
+
+            if let model = content["model"] as? String {
+                engineStatsDict["model"] = model
+            }
+
+            if let elapsedTime = content["elapsed_time"] as? Double {
+                engineStatsDict["elapsed_time"] = elapsedTime
+            }
+
+            if let stats = content["stats"] as? String {
+                engineStatsDict["stats"] = stats
+            }
+
+            if let systemInfo = content["system_info"] as? [String: Any] {
+                engineStatsDict["system_info"] = systemInfo
+            }
+
+            if !engineStatsDict.isEmpty {
+                if let jsonData = try? JSONSerialization.data(withJSONObject: engineStatsDict),
+                   let jsonString = String(data: jsonData, encoding: .utf8)
+                {
+                    notification.engine_stats = jsonString
+                }
+            }
+        }
+
+        // Store similar articles
+        if notification.similar_articles == nil {
+            if let similarArticles = content["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty {
+                if let jsonData = try? JSONSerialization.data(withJSONObject: similarArticles),
+                   let jsonString = String(data: jsonData, encoding: .utf8)
+                {
+                    notification.similar_articles = jsonString
+                }
+            }
+        }
+
+        // Save the changes
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to save updated notification data: \(error)")
+        }
+    }
+
     private func markAsViewed() {
         guard let notification = currentNotification else { return }
         if !notification.isViewed {
@@ -530,9 +706,60 @@ struct NewsDetailView: View {
         }
     }
 
-    private func loadAdditionalContent() {
+    func loadAdditionalContent() {
         guard let notification = currentNotification else { return }
 
+        // Check if we have enough local data to display without fetching
+        let hasLocalData = notification.summary != nil &&
+            notification.critical_analysis != nil &&
+            notification.logical_fallacies != nil &&
+            notification.relation_to_topic != nil
+
+        // If we can build information from the local data, do that first
+        if hasLocalData {
+            // Create a content dictionary from local data
+            var localContent: [String: Any] = [:]
+
+            if let sourceType = notification.source_type {
+                localContent["source_type"] = sourceType
+            }
+
+            if let sourcesQuality = notification.sources_quality {
+                localContent["sources_quality"] = sourcesQuality
+            }
+
+            if let argumentQuality = notification.argument_quality {
+                localContent["argument_quality"] = argumentQuality
+            }
+
+            if let url = getArticleUrl(notification) {
+                localContent["url"] = url
+            }
+
+            if let summary = notification.summary {
+                localContent["summary"] = summary
+            }
+
+            if let criticalAnalysis = notification.critical_analysis {
+                localContent["critical_analysis"] = criticalAnalysis
+            }
+
+            if let logicalFallacies = notification.logical_fallacies {
+                localContent["logical_fallacies"] = logicalFallacies
+            }
+
+            if let relationToTopic = notification.relation_to_topic {
+                localContent["relation_to_topic"] = relationToTopic
+            }
+
+            if let additionalInsights = notification.additional_insights {
+                localContent["additional_insights"] = additionalInsights
+            }
+
+            additionalContent = localContent
+        }
+
+        // For bookmarked articles, try to load from local storage even if we have data
         if notification.isBookmarked {
             let localFileURL = AppDelegate().getLocalFileURL(for: notification)
             if FileManager.default.fileExists(atPath: localFileURL.path) {
@@ -540,6 +767,11 @@ struct NewsDetailView: View {
                     let data = try Data(contentsOf: localFileURL)
                     if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
                         additionalContent = json
+
+                        // Store the full content in the notification if we don't have it
+                        if !hasLocalData {
+                            updateLocalDatabaseWithFetchedContent(notification, json)
+                        }
                         return
                     }
                 } catch {
@@ -548,25 +780,31 @@ struct NewsDetailView: View {
             }
         }
 
-        let jsonURL = notification.json_url
-        guard let url = URL(string: jsonURL) else {
-            print("Error: Invalid JSON URL \(jsonURL)")
-            return
-        }
-
-        isLoadingAdditionalContent = true
-        Task {
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    additionalContent = json
-                } else {
-                    additionalContent = ["Error": "No valid content found."]
-                }
-            } catch {
-                additionalContent = ["Error": "Failed to load content: \(error.localizedDescription)"]
+        // If we don't have full content, fall back to network request
+        if !hasLocalData {
+            let jsonURL = notification.json_url
+            guard let url = URL(string: jsonURL) else {
+                print("Error: Invalid JSON URL \(jsonURL)")
+                return
             }
-            isLoadingAdditionalContent = false
+
+            isLoadingAdditionalContent = true
+            Task {
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        additionalContent = json
+
+                        // Now that we have the full content, update our local database
+                        updateLocalDatabaseWithFetchedContent(notification, json)
+                    } else {
+                        additionalContent = ["Error": "No valid content found."]
+                    }
+                } catch {
+                    additionalContent = ["Error": "Failed to load content: \(error.localizedDescription)"]
+                }
+                isLoadingAdditionalContent = false
+            }
         }
     }
 
@@ -599,33 +837,84 @@ struct NewsDetailView: View {
     }
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
-        var sections = [
-            ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
-            ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
-            ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
-            ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
-            ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
-        ]
+        var sections = [ContentSection]()
 
-        if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-            sections.append(ContentSection(header: "Context & Perspective", content: insights))
-        }
+        // Use local data if available, otherwise use the JSON
+        if let notification = currentNotification {
+            // Summary section
+            let summaryContent = notification.summary ?? (json["summary"] as? String ?? "")
+            sections.append(ContentSection(header: "Summary", content: summaryContent))
 
-        sections.append(ContentSection(
-            header: "Argus Engine Stats",
-            content: (
-                json["model"] as? String ?? "Unknown",
-                (json["elapsed_time"] as? Double) ?? 0.0,
-                currentNotification?.date ?? Date(),
-                json["stats"] as? String ?? "N/A",
-                json["system_info"] as? [String: Any]
-            )
-        ))
+            // Relevance section
+            let relevanceContent = notification.relation_to_topic ?? (json["relation_to_topic"] as? String ?? "")
+            sections.append(ContentSection(header: "Relevance", content: relevanceContent))
 
-        sections.append(ContentSection(header: "Preview", content: json["url"] as? String ?? ""))
+            // Critical Analysis section
+            let analysisContent = notification.critical_analysis ?? (json["critical_analysis"] as? String ?? "")
+            sections.append(ContentSection(header: "Critical Analysis", content: analysisContent))
 
-        if let similarArray = json["similar_articles"] as? [[String: Any]], !similarArray.isEmpty {
-            sections.append(ContentSection(header: "Vector WIP", content: similarArray))
+            // Logical Fallacies section
+            let fallaciesContent = notification.logical_fallacies ?? (json["logical_fallacies"] as? String ?? "")
+            sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
+
+            // Source Analysis section
+            var sourceContent: String
+            if notification.source_type != nil || notification.sources_quality != nil {
+                sourceContent = buildSourceAnalysis(notification)
+            } else {
+                sourceContent = json["source_analysis"] as? String ?? ""
+            }
+            sections.append(ContentSection(header: "Source Analysis", content: sourceContent))
+
+            // Additional Insights section (optional)
+            if let insights = notification.additional_insights, !insights.isEmpty {
+                sections.append(ContentSection(header: "Context & Perspective", content: insights))
+            } else if let insights = json["additional_insights"] as? String, !insights.isEmpty {
+                sections.append(ContentSection(header: "Context & Perspective", content: insights))
+            }
+
+            // Argus Engine Stats section
+            if let engineStatsJson = notification.engine_stats,
+               let engineStats = getEngineStatsData(from: engineStatsJson)
+            {
+                sections.append(ContentSection(
+                    header: "Argus Engine Stats",
+                    content: (
+                        engineStats.model,
+                        engineStats.elapsedTime,
+                        engineStats.date,
+                        engineStats.stats,
+                        engineStats.systemInfo
+                    )
+                ))
+            } else if let model = json["model"] as? String,
+                      let elapsedTime = json["elapsed_time"] as? Double,
+                      let stats = json["stats"] as? String
+            {
+                sections.append(ContentSection(
+                    header: "Argus Engine Stats",
+                    content: (
+                        model,
+                        elapsedTime,
+                        notification.date,
+                        stats,
+                        json["system_info"] as? [String: Any]
+                    )
+                ))
+            }
+
+            // Preview section
+            sections.append(ContentSection(header: "Preview", content: getArticleUrl(notification) ?? (json["url"] as? String ?? "")))
+
+            // Similar Articles section (Vector WIP)
+            if let similarArticlesJson = notification.similar_articles,
+               let similarArticles = getSimilarArticles(from: similarArticlesJson),
+               !similarArticles.isEmpty
+            {
+                sections.append(ContentSection(header: "Vector WIP", content: similarArticles))
+            } else if let similarArticles = json["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty {
+                sections.append(ContentSection(header: "Vector WIP", content: similarArticles))
+            }
         }
 
         return sections
