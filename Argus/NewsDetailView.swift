@@ -229,6 +229,95 @@ struct NewsDetailView: View {
         }
     }
 
+    private func getSections(from json: [String: Any]) -> [ContentSection] {
+        var sections = [ContentSection]()
+
+        // Use local data if available, otherwise use the JSON
+        if let notification = currentNotification {
+            // Summary section
+            let summaryContent = notification.summary ?? (json["summary"] as? String ?? "")
+            sections.append(ContentSection(header: "Summary", content: summaryContent))
+
+            // Relevance section
+            let relevanceContent = notification.relation_to_topic ?? (json["relation_to_topic"] as? String ?? "")
+            sections.append(ContentSection(header: "Relevance", content: relevanceContent))
+
+            // Critical Analysis section
+            let analysisContent = notification.critical_analysis ?? (json["critical_analysis"] as? String ?? "")
+            sections.append(ContentSection(header: "Critical Analysis", content: analysisContent))
+
+            // Logical Fallacies section
+            let fallaciesContent = notification.logical_fallacies ?? (json["logical_fallacies"] as? String ?? "")
+            sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
+
+            // Source Analysis section - UPDATED TO USE THE source_analysis FIELD DIRECTLY
+            // Get source_analysis from JSON, ensuring it's not empty
+            let sourceAnalysis = (json["source_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? notification.source_analysis // Fall back to stored source_analysis
+                ?? "" // Default to empty string if neither is available
+
+            // Create a custom object to pass the sourceAnalysis text and source type only
+            let sourceAnalysisData: [String: Any] = [
+                "text": sourceAnalysis,
+                "sourceType": notification.source_type ?? (json["source_type"] as? String ?? ""),
+            ]
+
+            sections.append(ContentSection(header: "Source Analysis", content: sourceAnalysisData))
+
+            // Additional Insights section (optional)
+            if let insights = notification.additional_insights, !insights.isEmpty {
+                sections.append(ContentSection(header: "Context & Perspective", content: insights))
+            } else if let insights = json["additional_insights"] as? String, !insights.isEmpty {
+                sections.append(ContentSection(header: "Context & Perspective", content: insights))
+            }
+
+            // Argus Engine Stats section
+            if let engineStatsJson = notification.engine_stats,
+               let engineStats = getEngineStatsData(from: engineStatsJson)
+            {
+                sections.append(ContentSection(
+                    header: "Argus Engine Stats",
+                    content: (
+                        engineStats.model,
+                        engineStats.elapsedTime,
+                        engineStats.date,
+                        engineStats.stats,
+                        engineStats.systemInfo
+                    )
+                ))
+            } else if let model = json["model"] as? String,
+                      let elapsedTime = json["elapsed_time"] as? Double,
+                      let stats = json["stats"] as? String
+            {
+                sections.append(ContentSection(
+                    header: "Argus Engine Stats",
+                    content: (
+                        model,
+                        elapsedTime,
+                        notification.date,
+                        stats,
+                        json["system_info"] as? [String: Any]
+                    )
+                ))
+            }
+
+            // Preview section
+            sections.append(ContentSection(header: "Preview", content: getArticleUrl(notification) ?? (json["url"] as? String ?? "")))
+
+            // Similar Articles section (Vector WIP)
+            if let similarArticlesJson = notification.similar_articles,
+               let similarArticles = getSimilarArticles(from: similarArticlesJson),
+               !similarArticles.isEmpty
+            {
+                sections.append(ContentSection(header: "Vector WIP", content: similarArticles))
+            } else if let similarArticles = json["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty {
+                sections.append(ContentSection(header: "Vector WIP", content: similarArticles))
+            }
+        }
+
+        return sections
+    }
+
     // MARK: - Navigation and Safety Methods
 
     // SAFETY: Added validation and safe navigation
@@ -853,96 +942,6 @@ struct NewsDetailView: View {
         }
     }
 
-    private func getSections(from json: [String: Any]) -> [ContentSection] {
-        var sections = [ContentSection]()
-
-        // Use local data if available, otherwise use the JSON
-        if let notification = currentNotification {
-            // Summary section
-            let summaryContent = notification.summary ?? (json["summary"] as? String ?? "")
-            sections.append(ContentSection(header: "Summary", content: summaryContent))
-
-            // Relevance section
-            let relevanceContent = notification.relation_to_topic ?? (json["relation_to_topic"] as? String ?? "")
-            sections.append(ContentSection(header: "Relevance", content: relevanceContent))
-
-            // Critical Analysis section
-            let analysisContent = notification.critical_analysis ?? (json["critical_analysis"] as? String ?? "")
-            sections.append(ContentSection(header: "Critical Analysis", content: analysisContent))
-
-            // Logical Fallacies section
-            let fallaciesContent = notification.logical_fallacies ?? (json["logical_fallacies"] as? String ?? "")
-            sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
-
-            // Source Analysis section - UPDATED TO USE THE source_analysis FIELD DIRECTLY
-            // Get source_analysis from JSON, ensuring it's not empty
-            let sourceAnalysis = (json["source_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                ?? notification.source_analysis // Fall back to stored source_analysis
-                ?? "" // Default to empty string if neither is available
-
-            // Create a custom object to pass both the sourceAnalysis text and metadata
-            let sourceAnalysisData: [String: Any] = [
-                "text": sourceAnalysis,
-                "sourceType": notification.source_type ?? (json["source_type"] as? String ?? ""),
-                "sourcesQuality": notification.sources_quality ?? (json["sources_quality"] as? Int ?? 0),
-            ]
-
-            sections.append(ContentSection(header: "Source Analysis", content: sourceAnalysisData))
-
-            // Additional Insights section (optional)
-            if let insights = notification.additional_insights, !insights.isEmpty {
-                sections.append(ContentSection(header: "Context & Perspective", content: insights))
-            } else if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-                sections.append(ContentSection(header: "Context & Perspective", content: insights))
-            }
-
-            // Argus Engine Stats section
-            if let engineStatsJson = notification.engine_stats,
-               let engineStats = getEngineStatsData(from: engineStatsJson)
-            {
-                sections.append(ContentSection(
-                    header: "Argus Engine Stats",
-                    content: (
-                        engineStats.model,
-                        engineStats.elapsedTime,
-                        engineStats.date,
-                        engineStats.stats,
-                        engineStats.systemInfo
-                    )
-                ))
-            } else if let model = json["model"] as? String,
-                      let elapsedTime = json["elapsed_time"] as? Double,
-                      let stats = json["stats"] as? String
-            {
-                sections.append(ContentSection(
-                    header: "Argus Engine Stats",
-                    content: (
-                        model,
-                        elapsedTime,
-                        notification.date,
-                        stats,
-                        json["system_info"] as? [String: Any]
-                    )
-                ))
-            }
-
-            // Preview section
-            sections.append(ContentSection(header: "Preview", content: getArticleUrl(notification) ?? (json["url"] as? String ?? "")))
-
-            // Similar Articles section (Vector WIP)
-            if let similarArticlesJson = notification.similar_articles,
-               let similarArticles = getSimilarArticles(from: similarArticlesJson),
-               !similarArticles.isEmpty
-            {
-                sections.append(ContentSection(header: "Vector WIP", content: similarArticles))
-            } else if let similarArticles = json["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty {
-                sections.append(ContentSection(header: "Vector WIP", content: similarArticles))
-            }
-        }
-
-        return sections
-    }
-
     struct ContentSection {
         let header: String
         let content: Any
@@ -970,7 +969,6 @@ struct NewsDetailView: View {
                     if let sourceData = section.content as? [String: Any] {
                         let sourceText = sourceData["text"] as? String ?? ""
                         let sourceType = sourceData["sourceType"] as? String ?? ""
-                        let sourcesQuality = sourceData["sourcesQuality"] as? Int ?? 0
 
                         VStack(alignment: .leading, spacing: 12) {
                             // Domain info at the top
@@ -1003,38 +1001,17 @@ struct NewsDetailView: View {
                                     .foregroundColor(.secondary)
                             }
 
-                            // Source type and quality as icons at the bottom
-                            HStack(spacing: 16) {
-                                if !sourceType.isEmpty {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: sourceTypeIcon(for: sourceType))
-                                            .foregroundColor(.blue)
-                                        Text(sourceType.capitalized)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
+                            // Only source type at the bottom
+                            if !sourceType.isEmpty {
+                                HStack(spacing: 4) {
+                                    Image(systemName: sourceTypeIcon(for: sourceType))
+                                        .foregroundColor(.blue)
+                                    Text(sourceType.capitalized)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
                                 }
-
-                                if sourcesQuality > 0 {
-                                    HStack(spacing: 4) {
-                                        ForEach(0 ..< min(sourcesQuality, 4), id: \.self) { _ in
-                                            Image(systemName: "star.fill")
-                                                .foregroundColor(.blue)
-                                                .font(.caption)
-                                        }
-                                        ForEach(0 ..< (4 - min(sourcesQuality, 4)), id: \.self) { _ in
-                                            Image(systemName: "star")
-                                                .foregroundColor(.gray)
-                                                .font(.caption)
-                                        }
-
-                                        Text(qualityLabel(for: sourcesQuality))
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
+                                .padding(.top, 8)
                             }
-                            .padding(.top, 8)
                         }
                         .font(.body)
                         .padding(.top, 8)
@@ -1173,8 +1150,126 @@ struct NewsDetailView: View {
         case 2: return "Fair"
         case 3: return "Good"
         case 4: return "Strong"
-        default: return ""
+        default: return "Unknown"
         }
+    }
+
+    private func updateArticleHeaderStyle() -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Existing topic pill + "Archived" pill code
+            HStack(spacing: 8) {
+                if let notification = currentNotification {
+                    if let topic = notification.topic, !topic.isEmpty {
+                        TopicPill(topic: topic)
+                    }
+
+                    if notification.isArchived {
+                        ArchivedPill()
+                    }
+                }
+            }
+
+            // Title code remains the same
+            if let notification = currentNotification {
+                let processedTitle = SwiftyMarkdown(string: notification.title).attributedString()
+
+                if let content = additionalContent,
+                   let articleURLString = content["url"] as? String,
+                   let articleURL = URL(string: articleURLString)
+                {
+                    Link(destination: articleURL) {
+                        Text(AttributedString(processedTitle))
+                            .font(.headline)
+                            .fontWeight(notification.isViewed ? .regular : .bold)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
+                            .foregroundColor(.blue)
+                    }
+                } else {
+                    Text(AttributedString(processedTitle))
+                        .font(.headline)
+                        .fontWeight(notification.isViewed ? .regular : .bold)
+                        .foregroundColor(.primary)
+                }
+            } else if let notification = currentNotification {
+                Text(notification.title)
+                    .font(.headline)
+                    .fontWeight(notification.isViewed ? .regular : .bold)
+                    .foregroundColor(.primary)
+            }
+
+            // Publication Date
+            if let notification = currentNotification,
+               let pubDate = notification.pub_date
+            {
+                Text("Published: \(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+
+            // Quality indicator (newly added)
+            if let notification = currentNotification,
+               let quality = notification.quality ?? notification.argument_quality,
+               quality > 0
+            {
+                HStack(spacing: 2) {
+                    ForEach(0 ..< min(quality, 4), id: \.self) { _ in
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.blue)
+                            .font(.caption)
+                    }
+                    ForEach(0 ..< (4 - min(quality, 4)), id: \.self) { _ in
+                        Image(systemName: "star")
+                            .foregroundColor(.gray)
+                            .font(.caption)
+                    }
+
+                    Text("Article Quality: \(qualityLabel(for: quality))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 4)
+                }
+            }
+
+            // Rest of the body code remains the same
+            if let notification = currentNotification {
+                let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
+                Text(AttributedString(attributedBody))
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+
+                // Affected (optional)
+                if !notification.affected.isEmpty {
+                    Text(notification.affected)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+
+                // Domain
+                if let domain = notification.domain, !domain.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(domain)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.blue)
+                            .lineLimit(1)
+
+                        if let content = additionalContent {
+                            QualityBadges(
+                                sourcesQuality: content["sources_quality"] as? Int,
+                                argumentQuality: content["argument_quality"] as? Int,
+                                sourceType: content["source_type"] as? String,
+                                scrollToSection: $scrollToSection
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .background(currentNotification?.isViewed ?? true ? Color.clear : Color.blue.opacity(0.15))
     }
 
     private func processSourceAnalysisContent(_ content: String) -> String {
