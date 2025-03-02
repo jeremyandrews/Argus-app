@@ -10,6 +10,8 @@ struct NewsDetailView: View {
     @State private var currentIndex: Int
     @State private var deletedIDs: Set<UUID> = []
     @State private var batchSize: Int = 50
+    @State private var scrollViewProxy: ScrollViewProxy? = nil
+    @State private var scrollToTopTrigger = UUID()
 
     private var isCurrentIndexValid: Bool {
         currentIndex >= 0 && currentIndex < notifications.count
@@ -64,8 +66,26 @@ struct NewsDetailView: View {
                     VStack(spacing: 0) {
                         topBar
                         ScrollView {
-                            articleHeaderStyle
-                            additionalSectionsView
+                            ScrollViewReader { proxy in
+                                VStack {
+                                    // Add an invisible view at the top to scroll to
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id("top")
+
+                                    articleHeaderStyle
+                                    additionalSectionsView
+                                }
+                                .onChange(of: scrollToTopTrigger) { _, _ in
+                                    // Scroll to top when the trigger changes
+                                    withAnimation {
+                                        proxy.scrollTo("top", anchor: .top)
+                                    }
+                                }
+                                .onAppear {
+                                    self.scrollViewProxy = proxy
+                                }
+                            }
                         }
                         bottomToolbar
                     }
@@ -378,6 +398,8 @@ struct NewsDetailView: View {
                 currentIndex = nextIndex
                 markAsViewed()
                 loadAdditionalContent()
+                // Trigger scroll to top
+                scrollToTopTrigger = UUID()
                 return
             }
             nextIndex += 1
@@ -404,6 +426,8 @@ struct NewsDetailView: View {
                 currentIndex = prevIndex
                 markAsViewed()
                 loadAdditionalContent()
+                // Trigger scroll to top
+                scrollToTopTrigger = UUID()
                 return
             }
             prevIndex -= 1
