@@ -1461,28 +1461,26 @@ struct NewsView: View {
     }
 
     private func updateGrouping() {
-        Task.detached(priority: .userInitiated) { [sortOrder, groupingStyle] in
-            // First get the sorted array - using the same sorting logic as in processNotifications
-            let sorted = await MainActor.run {
-                self.filteredNotifications.sorted { n1, n2 in
-                    // Use direct date comparison with explicit property access
-                    switch sortOrder {
-                    case "oldest":
-                        let date1 = n1.pub_date ?? n1.date
-                        let date2 = n2.pub_date ?? n2.date
-                        return date1 < date2
-                    case "bookmarked":
-                        if n1.isBookmarked != n2.isBookmarked {
-                            return n1.isBookmarked
-                        }
-                        let date1 = n1.pub_date ?? n1.date
-                        let date2 = n2.pub_date ?? n2.date
-                        return date1 > date2
-                    default: // "newest"
-                        let date1 = n1.pub_date ?? n1.date
-                        let date2 = n2.pub_date ?? n2.date
-                        return date1 > date2
+        // Use Task and MainActor rather than Task.detached to balance performance
+        Task(priority: .userInitiated) {
+            // Performing the sort and group operation in a non-blocking way to the main thread
+            let sorted = filteredNotifications.sorted { n1, n2 in
+                switch sortOrder {
+                case "oldest":
+                    let date1 = n1.pub_date ?? n1.date
+                    let date2 = n2.pub_date ?? n2.date
+                    return date1 < date2
+                case "bookmarked":
+                    if n1.isBookmarked != n2.isBookmarked {
+                        return n1.isBookmarked
                     }
+                    let date1 = n1.pub_date ?? n1.date
+                    let date2 = n2.pub_date ?? n2.date
+                    return date1 > date2
+                default: // "newest"
+                    let date1 = n1.pub_date ?? n1.date
+                    let date2 = n2.pub_date ?? n2.date
+                    return date1 > date2
                 }
             }
 
@@ -1490,49 +1488,34 @@ struct NewsView: View {
 
             switch groupingStyle {
             case "date":
-                // Group by day
                 let groupedByDay = Dictionary(grouping: sorted) {
-                    let date = $0.pub_date ?? $0.date
-                    return date.dayOnly
+                    Calendar.current.startOfDay(for: $0.pub_date ?? $0.date)
                 }
-
-                // Sort the days based on current sort order
-                let sortedDayKeys: [Date]
-                if sortOrder == "oldest" {
-                    // For oldest first, sort days in ascending order
-                    sortedDayKeys = groupedByDay.keys.sorted(by: <)
-                } else {
-                    // For newest first or bookmarked, sort days in descending order
-                    sortedDayKeys = groupedByDay.keys.sorted(by: >)
+                let sortedDayKeys = groupedByDay.keys.sorted { $0 < $1 }
+                newGroupingData = sortedDayKeys.map { day in
+                    let displayKey = day.formatted(date: .abbreviated, time: .omitted)
+                    let notifications = groupedByDay[day] ?? []
+                    return (key: displayKey, displayKey: displayKey, notifications: notifications)
                 }
-
-                // Create the grouped data structure
-                newGroupingData = sortedDayKeys.map { dateKey in
-                    let displayKey = dateKey.formatted(.dateTime.month(.abbreviated).day().year())
-
-                    // Keep the order of notifications within each group consistent with overall sort
-                    let sortedGroupNotifications = groupedByDay[dateKey] ?? []
-
-                    return (key: displayKey, displayKey: displayKey, notifications: sortedGroupNotifications)
-                }
-
             case "topic":
                 let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
-                newGroupingData = groupedByTopic
-                    .map { (key: $0.key, displayKey: $0.key, notifications: $0.value) }
-                    .sorted { $0.key < $1.key }
-
+                newGroupingData = groupedByTopic.map {
+                    (key: $0.key, displayKey: $0.key, notifications: $0.value)
+                }.sorted { $0.key < $1.key }
             default:
                 newGroupingData = [("", "", sorted)]
             }
 
-            // Update UI on main thread with final result
+            // Exit early if there's no difference to prevent unnecessary animation
+            if areGroupingArraysEqual(self.sortedAndGroupedNotifications,
+                                      newGroupingData.map { ($0.displayKey, $0.notifications) })
+            {
+                return
+            }
+
+            // Update on the main actor/UI
             await MainActor.run {
-                if !self.areGroupingArraysEqual(self.sortedAndGroupedNotifications,
-                                                newGroupingData.map { ($0.displayKey, $0.notifications) })
-                {
-                    self.sortedAndGroupedNotifications = newGroupingData.map { ($0.displayKey, $0.notifications) }
-                }
+                self.sortedAndGroupedNotifications = newGroupingData.map { ($0.displayKey, $0.notifications) }
             }
         }
     }
