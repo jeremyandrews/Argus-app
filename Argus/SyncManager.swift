@@ -34,31 +34,17 @@ class SyncManager {
     private init() {}
 
     func sendRecentArticlesToServer() async {
-        // Run the fetch on the main actor, but nothing else
-        func fetchRecentArticles() async throws -> [SeenArticle] {
-            return await MainActor.run {
-                let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
-                let context = ArgusApp.sharedModelContainer.mainContext
-                return (try? context.fetch(FetchDescriptor<SeenArticle>(
-                    predicate: #Predicate { $0.date >= oneDayAgo }
-                ))) ?? []
-            }
-        }
+        async let recentArticles = fetchRecentArticles()
 
         do {
-            // Fetch recent articles (still requires MainActor for SwiftData)
-            let recentArticles = try await fetchRecentArticles()
-            let jsonUrls = recentArticles.map { $0.json_url }
+            let jsonUrls = try await recentArticles.map { $0.json_url }
 
             try await withTimeout(seconds: 10) {
-                // Process network request off the main thread
                 let url = URL(string: "https://api.arguspulse.com/articles/sync")!
                 let payload = ["seen_articles": jsonUrls]
                 let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
 
-                // Parse JSON off the main thread
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
-
                 if let unseenUrls = serverResponse["unseen_articles"] {
                     await self.fetchAndSaveUnseenArticles(from: unseenUrls)
                 }
@@ -67,6 +53,16 @@ class SyncManager {
             print("Sync operation timed out after 10 seconds")
         } catch {
             print("Failed to sync articles: \(error)")
+        }
+    }
+
+    private func fetchRecentArticles() async throws -> [SeenArticle] {
+        await MainActor.run {
+            let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
+            let context = ArgusApp.sharedModelContainer.mainContext
+            return (try? context.fetch(FetchDescriptor<SeenArticle>(
+                predicate: #Predicate { $0.date >= oneDayAgo }
+            ))) ?? []
         }
     }
 

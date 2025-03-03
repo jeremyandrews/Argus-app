@@ -31,7 +31,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Set up background refresh
         setupBackgroundRefresh()
 
-        // Request notification permissions
+        // Request notification permissions separately from other app startup routines
+        requestNotificationPermissions()
+
+        // Defer non-crucial tasks to minimize startup freeze
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.executeDeferredStartupTasks()
+        }
+
+        return true
+    }
+
+    private func requestNotificationPermissions() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if granted {
                 DispatchQueue.main.async {
@@ -42,22 +53,39 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 print("Error requesting notification authorization: \(error)")
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            NotificationUtils.updateAppBadgeCount()
+    }
+
+    private func executeDeferredStartupTasks() {
+        // Ensure database indexes a bit delayed
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.5) {
+            self.verifyDatabaseIndexes()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            do {
-                let success = try ArgusApp.ensureDatabaseIndexes()
-                if success {
-                    print("Database indexes verified successfully")
-                }
-            } catch {
-                print("Database index creation failed: \(error)")
+        // Auto-sync with the server with networking prioritization
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1.0) {
+            self.performAutoSync()
+        }
+
+        // Cleanup old articles in the background
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.0) {
+            Task { @MainActor in
+                self.cleanupOldArticles()
             }
         }
+    }
 
-        // Auto-sync with the server when the application launches, but only if network conditions allow
+    private func verifyDatabaseIndexes() {
+        do {
+            let success = try ArgusApp.ensureDatabaseIndexes()
+            if success {
+                print("Database indexes verified successfully")
+            }
+        } catch {
+            print("Database index creation failed: \(error)")
+        }
+    }
+
+    private func performAutoSync() {
         Task {
             if shouldAllowSync() {
                 await SyncManager.shared.sendRecentArticlesToServer()
@@ -65,16 +93,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 print("Skipping initial sync - waiting for WiFi or user permission for cellular data")
             }
         }
-
-        // Call cleanup in the background, but use Task to perform the SwiftData
-        // work on the main actor.
-        DispatchQueue.global(qos: .background).async {
-            Task { @MainActor in
-                self.cleanupOldArticles()
-            }
-        }
-
-        return true
     }
 
     func application(_: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
