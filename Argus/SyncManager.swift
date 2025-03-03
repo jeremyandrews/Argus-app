@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import SwiftyMarkdown
+import UIKit
 
 extension Task where Success == Never, Failure == Never {
     static func timeout(seconds: Double) async throws {
@@ -169,6 +170,130 @@ class SyncManager {
             summary, criticalAnalysis, logicalFallacies, relationToTopic, additionalInsights,
             engineStats, similarArticlesJSON
         )
+    }
+
+    private func convertMarkdownFieldsToRichText(for notification: NotificationData) {
+        // Create function to convert markdown to NSAttributedString with Dynamic Type support
+        func markdownToAccessibleAttributedString(_ markdown: String?, textStyle: String) -> NSAttributedString? {
+            guard let markdown = markdown, !markdown.isEmpty else { return nil }
+
+            let swiftyMarkdown = SwiftyMarkdown(string: markdown)
+
+            // Get the preferred font for the specified text style (supports Dynamic Type)
+            let bodyFont = UIFont.preferredFont(forTextStyle: UIFont.TextStyle(rawValue: textStyle))
+            swiftyMarkdown.body.fontName = bodyFont.fontName
+            swiftyMarkdown.body.fontSize = bodyFont.pointSize
+
+            // Style headings with appropriate Dynamic Type text styles
+            let h1Font = UIFont.preferredFont(forTextStyle: .title1)
+            swiftyMarkdown.h1.fontName = h1Font.fontName
+            swiftyMarkdown.h1.fontSize = h1Font.pointSize
+
+            let h2Font = UIFont.preferredFont(forTextStyle: .title2)
+            swiftyMarkdown.h2.fontName = h2Font.fontName
+            swiftyMarkdown.h2.fontSize = h2Font.pointSize
+
+            let h3Font = UIFont.preferredFont(forTextStyle: .title3)
+            swiftyMarkdown.h3.fontName = h3Font.fontName
+            swiftyMarkdown.h3.fontSize = h3Font.pointSize
+
+            // Other styling
+            swiftyMarkdown.link.color = .systemBlue
+
+            // Get bold and italic versions of the body font if possible
+            if let boldDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitBold) {
+                let boldFont = UIFont(descriptor: boldDescriptor, size: 0)
+                swiftyMarkdown.bold.fontName = boldFont.fontName
+            } else {
+                swiftyMarkdown.bold.fontName = ".SFUI-Bold"
+            }
+
+            if let italicDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitItalic) {
+                let italicFont = UIFont(descriptor: italicDescriptor, size: 0)
+                swiftyMarkdown.italic.fontName = italicFont.fontName
+            } else {
+                swiftyMarkdown.italic.fontName = ".SFUI-Italic"
+            }
+
+            // Get the initial attributed string from SwiftyMarkdown
+            let attributedString = swiftyMarkdown.attributedString()
+
+            // Create a mutable copy
+            let mutableAttributedString = NSMutableAttributedString(attributedString: attributedString)
+
+            // Add accessibility trait to indicate the text style
+            let textStyleKey = NSAttributedString.Key(rawValue: "NSAccessibilityTextStyleStringAttribute")
+            mutableAttributedString.addAttribute(
+                textStyleKey,
+                value: textStyle,
+                range: NSRange(location: 0, length: mutableAttributedString.length)
+            )
+
+            return mutableAttributedString
+        }
+
+        // Add this method to handle the other places that still call the old function name
+        func markdownToAttributedString(_ markdown: String?, isTitle: Bool = false) -> NSAttributedString? {
+            let textStyle = isTitle ? "UIFontTextStyleHeadline" : "UIFontTextStyleBody"
+            return markdownToAccessibleAttributedString(markdown, textStyle: textStyle)
+        }
+
+        // Convert title with headline style
+        if let attributedTitle = markdownToAccessibleAttributedString(notification.title, textStyle: "UIFontTextStyleHeadline") {
+            try? notification.setRichText(attributedTitle, for: .title)
+        }
+
+        // Convert body with body style
+        if let attributedBody = markdownToAccessibleAttributedString(notification.body, textStyle: "UIFontTextStyleBody") {
+            try? notification.setRichText(attributedBody, for: .body)
+        }
+
+        // Convert summary
+        if let attributedSummary = markdownToAccessibleAttributedString(notification.summary, textStyle: "UIFontTextStyleBody") {
+            try? notification.setRichText(attributedSummary, for: .summary)
+        }
+
+        // Convert critical analysis
+        if let attributedCriticalAnalysis = markdownToAccessibleAttributedString(notification.critical_analysis, textStyle: "UIFontTextStyleBody") {
+            try? notification.setRichText(attributedCriticalAnalysis, for: .criticalAnalysis)
+        }
+
+        // Convert logical fallacies
+        if let attributedLogicalFallacies = markdownToAccessibleAttributedString(notification.logical_fallacies, textStyle: "UIFontTextStyleBody") {
+            try? notification.setRichText(attributedLogicalFallacies, for: .logicalFallacies)
+        }
+
+        // Convert source analysis
+        if let attributedSourceAnalysis = markdownToAccessibleAttributedString(notification.source_analysis, textStyle: "UIFontTextStyleBody") {
+            try? notification.setRichText(attributedSourceAnalysis, for: .sourceAnalysis)
+        }
+
+        // Convert relation to topic
+        if let attributedRelationToTopic = markdownToAccessibleAttributedString(notification.relation_to_topic, textStyle: "UIFontTextStyleBody") {
+            try? notification.setRichText(attributedRelationToTopic, for: .relationToTopic)
+        }
+
+        // Convert additional insights
+        if let attributedAdditionalInsights = markdownToAccessibleAttributedString(notification.additional_insights, textStyle: "UIFontTextStyleBody") {
+            try? notification.setRichText(attributedAdditionalInsights, for: .additionalInsights)
+        }
+    }
+
+    static func convertMarkdownToRichTextIfNeeded(for notification: NotificationData) {
+        // Check if rich text versions already exist
+        let hasRichText = notification.title_blob != nil &&
+            notification.body_blob != nil &&
+            (notification.summary == nil || notification.summary_blob != nil) &&
+            (notification.critical_analysis == nil || notification.critical_analysis_blob != nil) &&
+            (notification.logical_fallacies == nil || notification.logical_fallacies_blob != nil) &&
+            (notification.source_analysis == nil || notification.source_analysis_blob != nil) &&
+            (notification.relation_to_topic == nil || notification.relation_to_topic_blob != nil) &&
+            (notification.additional_insights == nil || notification.additional_insights_blob != nil)
+
+        // Convert only if we don't have rich text versions yet
+        if !hasRichText {
+            shared.convertMarkdownFieldsToRichText(for: notification)
+        }
     }
 
     func addOrUpdateArticle(
@@ -445,6 +570,9 @@ class SyncManager {
                                 if let similarArticles = article.similarArticles {
                                     notification.similar_articles = similarArticles
                                 }
+
+                                // Convert markdown fields to rich text
+                                self.convertMarkdownFieldsToRichText(for: notification)
                             }
                         } else if !existingSeenURLs.contains(article.jsonURL) {
                             print("Creating new article: \(article.jsonURL)")
@@ -475,6 +603,9 @@ class SyncManager {
                                 engine_stats: article.engineStats,
                                 similar_articles: article.similarArticles
                             )
+
+                            // Convert markdown fields to rich text for the new notification
+                            self.convertMarkdownFieldsToRichText(for: notification)
 
                             let seenArticle = SeenArticle(
                                 id: notification.id,
@@ -509,7 +640,8 @@ class SyncManager {
             notification.critical_analysis != nil &&
             notification.logical_fallacies != nil
         {
-            // Already has full content, just return it
+            // Already has full content, ensure rich text conversions exist
+            convertMarkdownToRichTextIfNeeded(for: notification)
             return notification
         }
 

@@ -1,6 +1,7 @@
 import SwiftData
 import SwiftUI
 import SwiftyMarkdown
+import UIKit
 
 extension Date {
     var dayOnly: Date {
@@ -328,13 +329,68 @@ struct NewsView: View {
 
     // MARK: - Row building
 
+    struct AccessibleAttributedText: UIViewRepresentable {
+        let attributedString: NSAttributedString
+
+        func makeUIView(context _: Context) -> UITextView {
+            let textView = UITextView()
+            textView.attributedText = attributedString
+            textView.isEditable = false
+            textView.isScrollEnabled = false
+            textView.backgroundColor = .clear
+
+            // Remove default padding
+            textView.textContainerInset = UIEdgeInsets.zero
+            textView.textContainer.lineFragmentPadding = 0
+
+            // Enable Dynamic Type
+            textView.adjustsFontForContentSizeCategory = true
+
+            // Make sure it expands to fit content
+            textView.setContentCompressionResistancePriority(.required, for: .vertical)
+
+            // Disable scrolling indicators
+            textView.showsHorizontalScrollIndicator = false
+            textView.showsVerticalScrollIndicator = false
+
+            return textView
+        }
+
+        func updateUIView(_ uiView: UITextView, context _: Context) {
+            uiView.attributedText = attributedString
+
+            // Ensure it updates its layout
+            uiView.layoutIfNeeded()
+        }
+
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize {
+            // Set width constraint if available
+            if let width = proposal.width {
+                uiView.textContainer.size.width = width
+                uiView.layoutIfNeeded()
+            }
+
+            // Get the natural size after layout
+            let fittingSize = uiView.sizeThatFits(CGSize(
+                width: proposal.width ?? UIView.layoutFittingExpandedSize.width,
+                height: UIView.layoutFittingExpandedSize.height
+            ))
+
+            return fittingSize
+        }
+    }
+
     private struct NotificationContentView: View {
         let notification: NotificationData
         let modelContext: ModelContext
         let filteredNotifications: [NotificationData]
         let totalNotifications: [NotificationData]
+        @State private var titleAttributedString: NSAttributedString?
+        @State private var bodyAttributedString: NSAttributedString?
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         var body: some View {
+            // Remove GeometryReader which might be causing sizing issues
             VStack(alignment: .leading, spacing: 8) {
                 // Topic and Archive pills
                 HStack(spacing: 8) {
@@ -344,13 +400,21 @@ struct NewsView: View {
                     if notification.isArchived {
                         ArchivedPill()
                     }
+                    Spacer()
                 }
 
-                // Title
-                let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
-                Text(AttributedString(attributedTitle))
-                    .font(.headline)
-                    .fontWeight(notification.isViewed ? .regular : .bold)
+                // Title - with accessibility support
+                Group {
+                    if let attributedTitle = titleAttributedString {
+                        // Remove fixed height constraint
+                        AccessibleAttributedText(attributedString: attributedTitle)
+                    } else {
+                        Text(notification.title)
+                            .font(.headline)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                .fontWeight(notification.isViewed ? .regular : .bold)
 
                 // Publication Date
                 if let pubDate = notification.pub_date {
@@ -359,12 +423,19 @@ struct NewsView: View {
                         .foregroundColor(.secondary)
                 }
 
-                // Summary
-                let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
-                Text(AttributedString(attributedBody))
-                    .font(.system(size: 14, weight: .light))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.leading)
+                // Body - with accessibility support
+                Group {
+                    if let attributedBody = bodyAttributedString {
+                        // Remove fixed height constraint
+                        AccessibleAttributedText(attributedString: attributedBody)
+                    } else {
+                        Text(notification.body)
+                            .font(.body)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(3)
+                    }
+                }
+                .foregroundColor(.secondary)
 
                 // Affected
                 if !notification.affected.isEmpty {
@@ -383,6 +454,70 @@ struct NewsView: View {
                         filteredNotifications: filteredNotifications,
                         totalNotifications: totalNotifications
                     )
+                }
+            }
+            .onAppear {
+                loadRichTextContent()
+            }
+        }
+
+        private func loadRichTextContent() {
+            // First check if rich text versions exist
+            if let titleBlob = notification.title_blob,
+               let bodyBlob = notification.body_blob
+            {
+                // Use existing rich text BLOBs
+                do {
+                    if let attributedTitle = try NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self,
+                        from: titleBlob
+                    ) {
+                        titleAttributedString = attributedTitle
+                    }
+
+                    if let attributedBody = try NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self,
+                        from: bodyBlob
+                    ) {
+                        bodyAttributedString = attributedBody
+                    }
+                } catch {
+                    print("Error unarchiving rich text: \(error)")
+                }
+            } else {
+                // We need to convert and save the rich text versions
+                Task {
+                    await MainActor.run {
+                        // Convert markdown to rich text and save
+                        SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
+
+                        // Now try to load the rich text versions
+                        if let titleBlob = notification.title_blob {
+                            do {
+                                if let attributedTitle = try NSKeyedUnarchiver.unarchivedObject(
+                                    ofClass: NSAttributedString.self,
+                                    from: titleBlob
+                                ) {
+                                    self.titleAttributedString = attributedTitle
+                                }
+                            } catch {
+                                print("Error unarchiving title: \(error)")
+                            }
+                        }
+
+                        if let bodyBlob = notification.body_blob {
+                            do {
+                                if let attributedBody = try NSKeyedUnarchiver.unarchivedObject(
+                                    ofClass: NSAttributedString.self,
+                                    from: bodyBlob
+                                ) {
+                                    self.bodyAttributedString = attributedBody
+                                }
+                            } catch {
+                                print("Error unarchiving body: \(error)")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -455,6 +590,11 @@ struct NewsView: View {
                     // Use SyncManager to fetch and update the notification
                     _ = try await SyncManager.fetchFullContentIfNeeded(for: notification)
 
+                    // After fetching, make sure rich text versions are created
+                    await MainActor.run {
+                        SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
+                    }
+
                     // Update UI state
                     await MainActor.run {
                         isLoading = false
@@ -497,72 +637,91 @@ struct NewsView: View {
 
     private func NotificationRow(
         notification: NotificationData,
-        editMode: Binding<EditMode>?,
-        selectedNotificationIDs: Binding<Set<NotificationData.ID>>
+        editMode _: Binding<EditMode>?,
+        selectedNotificationIDs _: Binding<Set<NotificationData.ID>>
     ) -> some View {
-        HStack {
-            NotificationContentView(
-                notification: notification,
-                modelContext: modelContext,
-                filteredNotifications: filteredNotifications,
-                totalNotifications: totalNotifications
-            )
+        VStack(alignment: .leading, spacing: 10) {
+            // Top row: topic pill + archived pill
+            HStack(spacing: 8) {
+                if let topic = notification.topic, !topic.isEmpty {
+                    TopicPill(topic: topic)
+                }
+                if notification.isArchived {
+                    ArchivedPill()
+                }
+                Spacer()
+                BookmarkButton(notification: notification)
+            }
 
-            Spacer()
+            // Title
+            Text(notification.title)
+                .font(.headline)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            BookmarkButton(notification: notification)
+            // Publication Date
+            if let pubDate = notification.pub_date {
+                Text(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+
+            // Summary
+            Group {
+                if let bodyBlob = notification.body_blob,
+                   let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
+                {
+                    RichTextView(attributedString: attributedBody, lineLimit: 3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(notification.body.isEmpty ? "Loading content..." : notification.body)
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(3)
+                }
+            }
+            .onAppear {
+                Task {
+                    await MainActor.run {
+                        SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
+                    }
+                }
+            }
+
+            // Affected Field
+            if !notification.affected.isEmpty {
+                Text(notification.affected)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 3)
+            }
+
+            // Domain
+            if let domain = notification.domain, !domain.isEmpty {
+                Text(domain)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 3)
+            }
+
+            // LazyLoadingQualityBadges
+            HStack {
+                LazyLoadingQualityBadges(notification: notification)
+            }
+            .padding(.top, 5)
         }
         .padding()
         .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.15))
         .cornerRadius(10)
         .id(notification.id)
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            Button {
-                toggleArchive(notification)
-            } label: {
-                Label(
-                    notification.isArchived ? "Unarchive" : "Archive",
-                    systemImage: notification.isArchived ? "tray.and.arrow.up.fill" : "archivebox"
-                )
-            }
-            .tint(.orange)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: !notification.isBookmarked) {
-            if notification.isBookmarked {
-                Button {
-                    articleToDelete = notification
-                    showDeleteConfirmation = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-                .tint(.red)
-            } else {
-                Button(role: .destructive) {
-                    deleteNotification(notification)
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
-        }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            toggleReadStatus(notification)
-        }
-        .onTapGesture(count: 1) {
-            if editMode?.wrappedValue == .active {
-                withAnimation {
-                    if selectedNotificationIDs.wrappedValue.contains(notification.id) {
-                        selectedNotificationIDs.wrappedValue.remove(notification.id)
-                    } else {
-                        selectedNotificationIDs.wrappedValue.insert(notification.id)
-                    }
-                }
-            } else {
-                handleTapGesture(for: notification)
-            }
-        }
-        .onLongPressGesture {
-            handleLongPressGesture(for: notification)
+        .onTapGesture {
+            openArticle(notification)
         }
     }
 
@@ -612,10 +771,15 @@ struct NewsView: View {
             rootViewController.present(hostingController, animated: true)
         }
 
-        // Trigger content fetch in the background to ensure it's loaded when needed
+        // Trigger content fetch and rich text conversion in the background
         Task {
             do {
-                _ = try await SyncManager.fetchFullContentIfNeeded(for: notification)
+                let updatedNotification = try await SyncManager.fetchFullContentIfNeeded(for: notification)
+
+                // After fetching content, ensure rich text versions exist
+                await MainActor.run {
+                    SyncManager.convertMarkdownToRichTextIfNeeded(for: updatedNotification)
+                }
             } catch {
                 print("Error pre-loading full content: \(error)")
                 // The UI will handle showing loading states if needed
@@ -628,7 +792,6 @@ struct NewsView: View {
             return
         }
 
-        // Start the detail view loading
         let detailView = NewsDetailView(
             notifications: filteredNotifications,
             allNotifications: totalNotifications,
@@ -644,16 +807,6 @@ struct NewsView: View {
            let rootViewController = window.rootViewController
         {
             rootViewController.present(hostingController, animated: true)
-        }
-
-        // Trigger content fetch in the background to ensure it's loaded when needed
-        Task {
-            do {
-                _ = try await SyncManager.fetchFullContentIfNeeded(for: notification)
-            } catch {
-                print("Error pre-loading full content: \(error)")
-                // The UI will handle showing loading states if needed
-            }
         }
     }
 
@@ -1438,13 +1591,21 @@ struct NewsView: View {
             }
             .padding(.horizontal, 10)
 
-            // Title
-            let attributedTitle = SwiftyMarkdown(string: notification.title).attributedString()
-            Text(AttributedString(attributedTitle))
-                .font(.headline)
-                .lineLimit(2)
-                .foregroundColor(.primary)
-                .padding(.horizontal, 10)
+            // Title - use accessible attributed text if available
+            if let titleBlob = notification.title_blob,
+               let attributedTitle = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: titleBlob)
+            {
+                AccessibleAttributedText(attributedString: attributedTitle)
+                    .frame(height: 50) // Allow some space for the text to grow with Dynamic Type
+                    .lineLimit(2)
+                    .padding(.horizontal, 10)
+            } else {
+                Text(notification.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 10)
+            }
 
             // Domain (optional)
             if let domain = notification.domain, !domain.isEmpty {
@@ -1455,22 +1616,34 @@ struct NewsView: View {
                     .padding(.horizontal, 10)
             }
 
-            // Body
-            let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
-            Text(AttributedString(attributedBody))
-                .font(.system(size: 14, weight: .light))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.leading)
-                .padding(.horizontal, 10)
+            // Body - use accessible attributed text if available
+            if let bodyBlob = notification.body_blob,
+               let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
+            {
+                AccessibleAttributedText(attributedString: attributedBody)
+                    .frame(minHeight: 50) // Allow space for dynamic type
+                    .padding(.horizontal, 10)
+            } else {
+                Text(notification.body)
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 10)
+            }
 
             // Affected (optional)
             if !notification.affected.isEmpty {
                 Text(notification.affected)
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.caption)
+                    .fontWeight(.bold)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, 18)
             }
+        }
+        .onAppear {
+            // Convert markdown to rich text if needed when row appears
+            SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
         }
     }
 }
@@ -1533,6 +1706,11 @@ struct LazyLoadingQualityBadges: View {
             do {
                 // Use SyncManager to fetch and update the notification
                 _ = try await SyncManager.fetchFullContentIfNeeded(for: notification)
+
+                // After fetching full content, make sure rich text versions are created
+                await MainActor.run {
+                    SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
+                }
 
                 // Update UI state
                 await MainActor.run {
@@ -1632,5 +1810,50 @@ struct RoundedCorner: Shape {
 extension String {
     var nilIfEmpty: String? {
         return isEmpty ? nil : self
+    }
+}
+
+struct RichTextView: UIViewRepresentable {
+    let attributedString: NSAttributedString
+    var lineLimit: Int? = nil
+
+    func makeUIView(context _: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isScrollEnabled = false
+        textView.backgroundColor = .clear
+
+        // Remove default padding
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+
+        // Enable Dynamic Type
+        textView.adjustsFontForContentSizeCategory = true
+
+        // Ensure the text always starts at the same left margin
+        textView.textAlignment = .left
+
+        // Force `UITextView` to wrap by constraining its width
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        textView.setContentHuggingPriority(.required, for: .horizontal)
+        textView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        NSLayoutConstraint.activate([
+            textView.widthAnchor.constraint(lessThanOrEqualToConstant: UIScreen.main.bounds.width - 40), // Ensures wrapping
+        ])
+
+        return textView
+    }
+
+    func updateUIView(_ uiView: UITextView, context _: Context) {
+        let mutableString = NSMutableAttributedString(attributedString: attributedString)
+
+        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+        mutableString.addAttribute(.font, value: bodyFont, range: NSRange(location: 0, length: mutableString.length))
+
+        uiView.attributedText = mutableString
+        uiView.textAlignment = .left
+        uiView.invalidateIntrinsicContentSize()
+        uiView.layoutIfNeeded()
     }
 }

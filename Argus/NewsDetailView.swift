@@ -13,6 +13,13 @@ struct NewsDetailView: View {
     @State private var scrollViewProxy: ScrollViewProxy? = nil
     @State private var scrollToTopTrigger = UUID()
 
+    @State private var titleAttributedString: NSAttributedString?
+    @State private var bodyAttributedString: NSAttributedString?
+    @State private var summaryAttributedString: NSAttributedString?
+    @State private var criticalAnalysisAttributedString: NSAttributedString?
+    @State private var logicalFallaciesAttributedString: NSAttributedString?
+    @State private var sourceAnalysisAttributedString: NSAttributedString?
+
     private var isCurrentIndexValid: Bool {
         currentIndex >= 0 && currentIndex < notifications.count
     }
@@ -24,7 +31,6 @@ struct NewsDetailView: View {
 
     @State private var scrollToSection: String? = nil
     let initiallyExpandedSection: String?
-
     @State private var showDeleteConfirmation = false
     @State private var additionalContent: [String: Any]? = nil
     @State private var isLoadingAdditionalContent = false
@@ -39,11 +45,9 @@ struct NewsDetailView: View {
         "Argus Engine Stats": false,
         "Vector WIP": false,
     ]
-
     @State private var isSharePresented = false
     @State private var selectedSections: Set<String> = []
     @State private var articleContent: String? = nil
-
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
@@ -103,6 +107,7 @@ struct NewsDetailView: View {
                 setupDeletionHandling()
                 markAsViewed()
                 loadAdditionalContent()
+                loadRichTextContent()
                 if let section = initiallyExpandedSection {
                     expandedSections[section] = true
                 }
@@ -133,6 +138,22 @@ struct NewsDetailView: View {
                     }
             )
         }
+    }
+
+    // MARK: - Helper Function to Load Rich Text
+
+    private func loadRichTextContent() {
+        guard let currentNotification = currentNotification else { return }
+
+        // Load title and body
+        titleAttributedString = currentNotification.getRichText(for: .title)
+        bodyAttributedString = currentNotification.getRichText(for: .body)
+
+        // Load other fields based on their blobs
+        summaryAttributedString = currentNotification.getRichText(for: .summary)
+        criticalAnalysisAttributedString = currentNotification.getRichText(for: .criticalAnalysis)
+        logicalFallaciesAttributedString = currentNotification.getRichText(for: .logicalFallacies)
+        sourceAnalysisAttributedString = currentNotification.getRichText(for: .sourceAnalysis)
     }
 
     // MARK: - Top Bar

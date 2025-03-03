@@ -594,13 +594,23 @@ class NotificationData {
     @Attribute var source_type: String?
     @Attribute var quality: Int?
 
-    // New fields for content converted from markdown
+    // Text fields for source content
     @Attribute var summary: String?
     @Attribute var critical_analysis: String?
     @Attribute var logical_fallacies: String?
     @Attribute var source_analysis: String?
     @Attribute var relation_to_topic: String?
     @Attribute var additional_insights: String?
+
+    // BLOB fields for rich text versions
+    @Attribute var title_blob: Data?
+    @Attribute var body_blob: Data?
+    @Attribute var summary_blob: Data?
+    @Attribute var critical_analysis_blob: Data?
+    @Attribute var logical_fallacies_blob: Data?
+    @Attribute var source_analysis_blob: Data?
+    @Attribute var relation_to_topic_blob: Data?
+    @Attribute var additional_insights_blob: Data?
 
     // Engine statistics and similar articles stored as JSON strings
     @Attribute var engine_stats: String?
@@ -630,6 +640,14 @@ class NotificationData {
         logical_fallacies: String? = nil,
         relation_to_topic: String? = nil,
         additional_insights: String? = nil,
+        title_blob: Data? = nil,
+        body_blob: Data? = nil,
+        summary_blob: Data? = nil,
+        critical_analysis_blob: Data? = nil,
+        logical_fallacies_blob: Data? = nil,
+        source_analysis_blob: Data? = nil,
+        relation_to_topic_blob: Data? = nil,
+        additional_insights_blob: Data? = nil,
         engine_stats: String? = nil,
         similar_articles: String? = nil
     ) {
@@ -656,8 +674,140 @@ class NotificationData {
         self.logical_fallacies = logical_fallacies
         self.relation_to_topic = relation_to_topic
         self.additional_insights = additional_insights
+        self.title_blob = title_blob
+        self.body_blob = body_blob
+        self.summary_blob = summary_blob
+        self.critical_analysis_blob = critical_analysis_blob
+        self.logical_fallacies_blob = logical_fallacies_blob
+        self.source_analysis_blob = source_analysis_blob
+        self.relation_to_topic_blob = relation_to_topic_blob
+        self.additional_insights_blob = additional_insights_blob
         self.engine_stats = engine_stats
         self.similar_articles = similar_articles
+    }
+
+    // Convenience methods to convert between NSAttributedString and Data
+
+    func setRichText(_ attributedString: NSAttributedString, for field: RichTextField) throws {
+        let data = try NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false)
+
+        switch field {
+        case .title:
+            title_blob = data
+        case .body:
+            body_blob = data
+        case .summary:
+            summary_blob = data
+        case .criticalAnalysis:
+            critical_analysis_blob = data
+        case .logicalFallacies:
+            logical_fallacies_blob = data
+        case .sourceAnalysis:
+            source_analysis_blob = data
+        case .relationToTopic:
+            relation_to_topic_blob = data
+        case .additionalInsights:
+            additional_insights_blob = data
+        }
+    }
+
+    func getRichText(for field: RichTextField) -> NSAttributedString? {
+        guard let data = getBlobData(for: field) else { return nil }
+
+        do {
+            if let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self,
+                from: data
+            ) {
+                return attributedString
+            }
+            return nil
+        } catch {
+            print("Error unarchiving rich text for \(field): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func getBlobData(for field: RichTextField) -> Data? {
+        switch field {
+        case .title:
+            return title_blob
+        case .body:
+            return body_blob
+        case .summary:
+            return summary_blob
+        case .criticalAnalysis:
+            return critical_analysis_blob
+        case .logicalFallacies:
+            return logical_fallacies_blob
+        case .sourceAnalysis:
+            return source_analysis_blob
+        case .relationToTopic:
+            return relation_to_topic_blob
+        case .additionalInsights:
+            return additional_insights_blob
+        }
+    }
+}
+
+// Enum to identify which rich text field to work with
+enum RichTextField {
+    case title
+    case body
+    case summary
+    case criticalAnalysis
+    case logicalFallacies
+    case sourceAnalysis
+    case relationToTopic
+    case additionalInsights
+}
+
+// Extension to help with converting between String and NSAttributedString
+extension NotificationData {
+    // Convert plain text to rich text and store in corresponding blob field
+    func updateRichTextFromPlainText(for field: RichTextField) {
+        let plainText: String?
+
+        switch field {
+        case .title:
+            plainText = title
+        case .body:
+            plainText = body
+        case .summary:
+            plainText = summary
+        case .criticalAnalysis:
+            plainText = critical_analysis
+        case .logicalFallacies:
+            plainText = logical_fallacies
+        case .sourceAnalysis:
+            plainText = source_analysis
+        case .relationToTopic:
+            plainText = relation_to_topic
+        case .additionalInsights:
+            plainText = additional_insights
+        }
+
+        guard let text = plainText, !text.isEmpty else { return }
+
+        let attributedString = NSAttributedString(string: text)
+        try? setRichText(attributedString, for: field)
+    }
+
+    // Convert HTML to rich text and store in corresponding blob field
+    func updateRichTextFromHTML(html: String, for field: RichTextField) {
+        guard let data = html.data(using: .utf8) else { return }
+
+        do {
+            let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+                .documentType: NSAttributedString.DocumentType.html,
+                .characterEncoding: String.Encoding.utf8.rawValue,
+            ]
+
+            let attributedString = try NSAttributedString(data: data, options: options, documentAttributes: nil)
+            try setRichText(attributedString, for: field)
+        } catch {
+            print("Error converting HTML to rich text: \(error.localizedDescription)")
+        }
     }
 }
 
