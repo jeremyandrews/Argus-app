@@ -463,7 +463,7 @@ struct NewsView: View {
         }
 
         private func loadRichTextContent() {
-            // First check if rich text versions exist
+            // First check if rich text versions already exist
             if let titleBlob = notification.title_blob,
                let bodyBlob = notification.body_blob
             {
@@ -486,13 +486,18 @@ struct NewsView: View {
                     print("Error unarchiving rich text: \(error)")
                 }
             } else {
-                // We need to convert and save the rich text versions
+                // We need to convert and save the rich text versions - do this in background
                 Task {
-                    await MainActor.run {
-                        // Convert markdown to rich text and save
-                        SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
+                    // Use the static method that handles conversion asynchronously
+                    // This properly delegates to the shared instance and handles all thread coordination
+                    SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
 
-                        // Now try to load the rich text versions
+                    // Wait a brief moment for the conversion to complete
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+
+                    // Then retrieve the new rich text blobs on the main thread
+                    await MainActor.run {
+                        // Now that the blobs should be saved in the model, retrieve them
                         if let titleBlob = notification.title_blob {
                             do {
                                 if let attributedTitle = try NSKeyedUnarchiver.unarchivedObject(
@@ -502,7 +507,7 @@ struct NewsView: View {
                                     self.titleAttributedString = attributedTitle
                                 }
                             } catch {
-                                print("Error unarchiving title: \(error)")
+                                print("Error unarchiving title after conversion: \(error)")
                             }
                         }
 
@@ -515,7 +520,7 @@ struct NewsView: View {
                                     self.bodyAttributedString = attributedBody
                                 }
                             } catch {
-                                print("Error unarchiving body: \(error)")
+                                print("Error unarchiving body after conversion: \(error)")
                             }
                         }
                     }
@@ -687,6 +692,16 @@ struct NewsView: View {
                         .multilineTextAlignment(.leading)
                         .lineLimit(3)
                         .textSelection(.disabled)
+                        .onAppear {
+                            // Trigger background conversion only when this row appears
+                            // and only if the rich text blob doesn't already exist
+                            if notification.body_blob == nil {
+                                Task {
+                                    // This will trigger the optimized conversion in background
+                                    SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
+                                }
+                            }
+                        }
                 }
             }
 

@@ -35,7 +35,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         requestNotificationPermissions()
 
         // Defer non-crucial tasks to minimize startup freeze
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             self.executeDeferredStartupTasks()
         }
 

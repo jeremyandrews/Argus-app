@@ -288,7 +288,15 @@ class SyncManager {
 
         // Convert only if we don't have rich text versions yet
         if !hasRichText {
-            shared.convertMarkdownFieldsToRichText(for: notification)
+            Task {
+                // Offload the CPU-intensive conversion to a detached task
+                await Task.detached(priority: .utility) {
+                    await MainActor.run {
+                        // This function handles the actual conversion work
+                        SyncManager.shared.convertMarkdownFieldsToRichText(for: notification)
+                    }
+                }.value
+            }
         }
     }
 
