@@ -8,62 +8,6 @@ extension Date {
     }
 }
 
-@Observable
-final class ContentCache: @unchecked Sendable {
-    static let shared = ContentCache()
-    private let cache = NSCache<NSString, NSDictionary>()
-    private let queue = DispatchQueue(label: "com.argus.contentcache", attributes: .concurrent)
-    private var loadingTasks: [String: Task<Void, Never>] = [:]
-
-    private init() {
-        cache.countLimit = 200
-        cache.totalCostLimit = 50 * 1024 * 1024 // 50MB
-    }
-
-    func getContent(for url: String) -> [String: Any]? {
-        queue.sync {
-            cache.object(forKey: url as NSString) as? [String: Any]
-        }
-    }
-
-    func loadContent(for jsonURL: String) {
-        queue.async(flags: .barrier) { [weak self] in
-            guard self?.cache.object(forKey: jsonURL as NSString) == nil,
-                  self?.loadingTasks[jsonURL] == nil
-            else {
-                return
-            }
-
-            let task = Task { @MainActor in
-                defer {
-                    self?.queue.async(flags: .barrier) { [weak self] in
-                        self?.loadingTasks[jsonURL] = nil
-                    }
-                }
-
-                guard let url = URL(string: jsonURL) else { return }
-
-                do {
-                    let (data, _) = try await URLSession.shared.data(from: url)
-
-                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        self?.cache.setObject(json as NSDictionary, forKey: jsonURL as NSString)
-
-                        NotificationCenter.default.post(
-                            name: Notification.Name("ContentLoaded-\(jsonURL)"),
-                            object: nil
-                        )
-                    }
-                } catch {
-                    print("Failed to load content for \(jsonURL): \(error)")
-                }
-            }
-
-            self?.loadingTasks[jsonURL] = task
-        }
-    }
-}
-
 struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.editMode) private var editMode
@@ -450,7 +394,8 @@ struct NewsView: View {
         let modelContext: ModelContext
         let filteredNotifications: [NotificationData]
         let totalNotifications: [NotificationData]
-        @State private var cachedContent: [String: Any]? = nil
+        @State private var isLoading = false
+        @State private var loadError: Error? = nil
 
         var body: some View {
             VStack(alignment: .leading, spacing: 16) {
@@ -459,12 +404,11 @@ struct NewsView: View {
                     .foregroundColor(.blue)
                     .lineLimit(1)
 
-                // Try local data first, fallback to cached content
                 if notification.sources_quality != nil ||
                     notification.argument_quality != nil ||
                     notification.source_type != nil
                 {
-                    // Use local data
+                    // Use local data since it's already available
                     QualityBadges(
                         sourcesQuality: notification.sources_quality,
                         argumentQuality: notification.argument_quality,
@@ -474,43 +418,54 @@ struct NewsView: View {
                             navigateToDetailView(section: section)
                         }
                     )
-                } else if let content = cachedContent ?? ContentCache.shared.getContent(for: notification.json_url) {
-                    // Use cached content
-                    QualityBadges(
-                        sourcesQuality: content["sources_quality"] as? Int,
-                        argumentQuality: content["argument_quality"] as? Int,
-                        sourceType: content["source_type"] as? String,
-                        scrollToSection: .constant(nil),
-                        onBadgeTap: { section in
-                            navigateToDetailView(section: section)
-                        }
-                    )
-                    .onAppear {
-                        // Update notification with cached data
-                        updateFromCache(content)
-                    }
+                } else if isLoading {
+                    // Show loading indicator
+                    ProgressView()
+                        .frame(height: 20)
+                } else if loadError != nil {
+                    // Show error state
+                    Text("Failed to load content")
+                        .font(.caption)
+                        .foregroundColor(.red)
                 } else {
                     // No data available yet - load it
                     Color.clear.frame(height: 20)
                         .onAppear {
-                            ContentCache.shared.loadContent(for: notification.json_url)
+                            loadFullContent()
                         }
                 }
             }
             .onAppear {
-                if cachedContent == nil && notification.sources_quality == nil {
-                    cachedContent = ContentCache.shared.getContent(for: notification.json_url)
-                    if cachedContent == nil {
-                        ContentCache.shared.loadContent(for: notification.json_url)
-                    }
+                if notification.sources_quality == nil &&
+                    notification.argument_quality == nil &&
+                    notification.source_type == nil &&
+                    !isLoading
+                {
+                    loadFullContent()
                 }
             }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .init("ContentLoaded-\(notification.json_url)"))
-            ) { _ in
-                if let content = ContentCache.shared.getContent(for: notification.json_url) {
-                    self.cachedContent = content
-                    updateFromCache(content)
+        }
+
+        private func loadFullContent() {
+            guard !isLoading else { return }
+
+            isLoading = true
+            Task {
+                do {
+                    // Use SyncManager to fetch and update the notification
+                    _ = try await SyncManager.fetchFullContentIfNeeded(for: notification)
+
+                    // Update UI state
+                    await MainActor.run {
+                        isLoading = false
+                        loadError = nil
+                    }
+                } catch {
+                    await MainActor.run {
+                        isLoading = false
+                        loadError = error
+                        print("Failed to load content for \(notification.json_url): \(error)")
+                    }
                 }
             }
         }
@@ -519,6 +474,7 @@ struct NewsView: View {
             guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
                 return
             }
+
             let detailView = NewsDetailView(
                 notifications: filteredNotifications,
                 allNotifications: totalNotifications,
@@ -526,34 +482,15 @@ struct NewsView: View {
                 initiallyExpandedSection: section
             )
             .environment(\.modelContext, modelContext)
+
             let hostingController = UIHostingController(rootView: detailView)
             hostingController.modalPresentationStyle = .fullScreen
+
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let window = windowScene.windows.first,
                let rootViewController = window.rootViewController
             {
                 rootViewController.present(hostingController, animated: true)
-            }
-        }
-
-        private func updateFromCache(_ content: [String: Any]) {
-            Task { @MainActor in
-                if notification.sources_quality == nil {
-                    notification.sources_quality = content["sources_quality"] as? Int
-                }
-                if notification.argument_quality == nil {
-                    notification.argument_quality = content["argument_quality"] as? Int
-                }
-                if notification.source_type == nil {
-                    notification.source_type = content["source_type"] as? String
-                }
-
-                if notification.sources_quality != nil ||
-                    notification.argument_quality != nil ||
-                    notification.source_type != nil
-                {
-                    try? modelContext.save()
-                }
             }
         }
     }
@@ -652,7 +589,7 @@ struct NewsView: View {
         }
     }
 
-    private func openArticleWithSection(_ notification: NotificationData, _: [String: Any], section: String? = nil) {
+    private func openArticleWithSection(_ notification: NotificationData, section: String? = nil) {
         guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
             return
         }
@@ -674,6 +611,16 @@ struct NewsView: View {
         {
             rootViewController.present(hostingController, animated: true)
         }
+
+        // Trigger content fetch in the background to ensure it's loaded when needed
+        Task {
+            do {
+                _ = try await SyncManager.fetchFullContentIfNeeded(for: notification)
+            } catch {
+                print("Error pre-loading full content: \(error)")
+                // The UI will handle showing loading states if needed
+            }
+        }
     }
 
     private func openArticle(_ notification: NotificationData) {
@@ -681,6 +628,7 @@ struct NewsView: View {
             return
         }
 
+        // Start the detail view loading
         let detailView = NewsDetailView(
             notifications: filteredNotifications,
             allNotifications: totalNotifications,
@@ -696,6 +644,16 @@ struct NewsView: View {
            let rootViewController = window.rootViewController
         {
             rootViewController.present(hostingController, animated: true)
+        }
+
+        // Trigger content fetch in the background to ensure it's loaded when needed
+        Task {
+            do {
+                _ = try await SyncManager.fetchFullContentIfNeeded(for: notification)
+            } catch {
+                print("Error pre-loading full content: \(error)")
+                // The UI will handle showing loading states if needed
+            }
         }
     }
 
@@ -1519,10 +1477,11 @@ struct NewsView: View {
 
 struct LazyLoadingQualityBadges: View {
     let notification: NotificationData
-    @State private var content: [String: Any]? = nil
     var onBadgeTap: ((String) -> Void)?
     @State private var scrollToSection: String? = nil
     @Environment(\.modelContext) private var modelContext
+    @State private var isLoading = false
+    @State private var loadError: Error? = nil
 
     var body: some View {
         Group {
@@ -1538,75 +1497,53 @@ struct LazyLoadingQualityBadges: View {
                     scrollToSection: $scrollToSection,
                     onBadgeTap: onBadgeTap
                 )
-            } else if let content = content ?? ContentCache.shared.getContent(for: notification.json_url) {
-                // Fall back to the cached content if local data isn't available
-                QualityBadges(
-                    sourcesQuality: content["sources_quality"] as? Int,
-                    argumentQuality: content["argument_quality"] as? Int,
-                    sourceType: content["source_type"] as? String,
-                    scrollToSection: $scrollToSection,
-                    onBadgeTap: onBadgeTap
-                )
-                .onAppear {
-                    // Update local data when we get it from cache
-                    updateNotificationFromCache(notification, content)
-                }
+            } else if isLoading {
+                // Show loading indicator
+                ProgressView()
+                    .frame(height: 20)
+            } else if loadError != nil {
+                // Show error state
+                Text("Failed to load content")
+                    .font(.caption)
+                    .foregroundColor(.red)
             } else {
-                // If neither local nor cached data is available, load it
+                // No data available yet - load it
                 Color.clear.frame(height: 20)
                     .onAppear {
-                        ContentCache.shared.loadContent(for: notification.json_url)
+                        loadFullContent()
                     }
             }
         }
         .onAppear {
-            // Try to load content if needed
             if notification.sources_quality == nil &&
                 notification.argument_quality == nil &&
-                notification.source_type == nil
+                notification.source_type == nil &&
+                !isLoading
             {
-                if content == nil {
-                    content = ContentCache.shared.getContent(for: notification.json_url)
-                }
-                if content == nil {
-                    ContentCache.shared.loadContent(for: notification.json_url)
-                }
-            }
-        }
-        .onReceive(
-            NotificationCenter.default.publisher(for: .init("ContentLoaded-\(notification.json_url)"))
-        ) { _ in
-            if let newContent = ContentCache.shared.getContent(for: notification.json_url) {
-                self.content = newContent
-                // Update notification with fetched data
-                updateNotificationFromCache(notification, newContent)
+                loadFullContent()
             }
         }
     }
 
-    // Helper to update notification with cached data
-    private func updateNotificationFromCache(_ notification: NotificationData, _ content: [String: Any]) {
-        Task { @MainActor in
-            // Only update if not already set
-            if notification.sources_quality == nil {
-                notification.sources_quality = content["sources_quality"] as? Int
-            }
-            if notification.argument_quality == nil {
-                notification.argument_quality = content["argument_quality"] as? Int
-            }
-            if notification.source_type == nil {
-                notification.source_type = content["source_type"] as? String
-            }
+    private func loadFullContent() {
+        guard !isLoading else { return }
 
-            // Save context if we made changes
-            if notification.sources_quality != nil ||
-                notification.argument_quality != nil ||
-                notification.source_type != nil
-            {
-                do {
-                    try modelContext.save()
-                } catch {
-                    print("Failed to save updated notification: \(error)")
+        isLoading = true
+        Task {
+            do {
+                // Use SyncManager to fetch and update the notification
+                _ = try await SyncManager.fetchFullContentIfNeeded(for: notification)
+
+                // Update UI state
+                await MainActor.run {
+                    isLoading = false
+                    loadError = nil
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    loadError = error
+                    print("Failed to load content for \(notification.json_url): \(error)")
                 }
             }
         }
