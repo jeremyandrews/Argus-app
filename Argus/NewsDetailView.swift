@@ -584,11 +584,6 @@ struct NewsDetailView: View {
     private func toggleBookmark() {
         guard let notification = currentNotification else { return }
         notification.isBookmarked.toggle()
-        if notification.isBookmarked {
-            AppDelegate().saveJSONLocally(notification: notification)
-        } else {
-            AppDelegate().deleteLocalJSON(notification: notification)
-        }
         saveModel()
         NotificationUtils.updateAppBadgeCount()
     }
@@ -613,7 +608,6 @@ struct NewsDetailView: View {
 
     private func deleteNotification() {
         guard let notification = currentNotification else { return }
-        AppDelegate().deleteLocalJSON(notification: notification)
         modelContext.delete(notification)
         do {
             try modelContext.save()

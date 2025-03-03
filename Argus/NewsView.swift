@@ -866,9 +866,7 @@ struct NewsView: View {
         }
     }
 
-    private func deleteNotification(_ notification: NotificationData) {
-        AppDelegate().deleteLocalJSON(notification: notification)
-        modelContext.delete(notification)
+    private func deleteNotification(_: NotificationData) {
         do {
             try modelContext.save()
             NotificationUtils.updateAppBadgeCount()
@@ -883,8 +881,6 @@ struct NewsView: View {
         withAnimation {
             for id in selectedNotificationIDs {
                 if let notification = filteredNotifications.first(where: { $0.id == id }) {
-                    AppDelegate().deleteLocalJSON(notification: notification)
-                    modelContext.delete(notification)
                     AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
                 }
             }
@@ -909,11 +905,6 @@ struct NewsView: View {
 
     private func toggleBookmark(_ notification: NotificationData) {
         notification.isBookmarked.toggle()
-        if notification.isBookmarked {
-            AppDelegate().saveJSONLocally(notification: notification)
-        } else {
-            AppDelegate().deleteLocalJSON(notification: notification)
-        }
         saveChanges()
         updateFilteredNotifications()
     }

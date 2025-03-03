@@ -378,41 +378,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
-    func saveJSONLocally(notification: NotificationData) {
-        let jsonURL = notification.json_url // No need for optional binding
-
-        guard let url = URL(string: jsonURL) else {
-            print("Error: Invalid URL string \(jsonURL)")
-            return
-        }
-
-        Task {
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                let fileURL = getLocalFileURL(for: notification)
-                try data.write(to: fileURL)
-            } catch {
-                print("Failed to save JSON locally: \(error)")
-            }
-        }
-    }
-
-    func deleteLocalJSON(notification: NotificationData) {
-        let fileURL = getLocalFileURL(for: notification)
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            do {
-                try FileManager.default.removeItem(at: fileURL)
-            } catch {
-                print("Failed to delete local JSON: \(error)")
-            }
-        }
-    }
-
-    func getLocalFileURL(for notification: NotificationData) -> URL {
-        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return documentsDirectory.appendingPathComponent("\(notification.id).json")
-    }
-
     private func populateSeenArticlesFromNotificationData() {
         let context = ArgusApp.sharedModelContainer.mainContext
 
