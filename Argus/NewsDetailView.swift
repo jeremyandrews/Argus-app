@@ -836,104 +836,94 @@ struct NewsDetailView: View {
         }
     }
 
+    private func hasRequiredContent(_ notification: NotificationData) -> Bool {
+        return notification.summary != nil &&
+            notification.critical_analysis != nil &&
+            notification.logical_fallacies != nil
+    }
+
+    // Helper function to build content dictionary from notification
+    private func buildContentDictionary(from notification: NotificationData) -> [String: Any] {
+        var content: [String: Any] = [:]
+
+        // Add URL if available
+        if let domain = notification.domain {
+            content["url"] = "https://\(domain)"
+        }
+
+        // Transfer all relevant fields from the notification to the content dictionary
+        content["sources_quality"] = notification.sources_quality
+        content["argument_quality"] = notification.argument_quality
+        content["source_type"] = notification.source_type
+        content["summary"] = notification.summary
+        content["critical_analysis"] = notification.critical_analysis
+        content["logical_fallacies"] = notification.logical_fallacies
+        content["relation_to_topic"] = notification.relation_to_topic
+        content["additional_insights"] = notification.additional_insights
+        content["source_analysis"] = notification.source_analysis
+
+        // If we have engine stats, parse and add them
+        if let engineStatsJson = notification.engine_stats,
+           let engineStatsData = engineStatsJson.data(using: .utf8),
+           let engineStats = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
+        {
+            if let model = engineStats["model"] as? String {
+                content["model"] = model
+            }
+
+            if let elapsedTime = engineStats["elapsed_time"] as? Double {
+                content["elapsed_time"] = elapsedTime
+            }
+
+            if let stats = engineStats["stats"] as? String {
+                content["stats"] = stats
+            }
+
+            if let systemInfo = engineStats["system_info"] as? [String: Any] {
+                content["system_info"] = systemInfo
+            }
+        }
+
+        // If we have similar articles, parse and add them
+        if let similarArticlesJson = notification.similar_articles,
+           let similarArticlesData = similarArticlesJson.data(using: .utf8),
+           let similarArticles = try? JSONSerialization.jsonObject(with: similarArticlesData) as? [[String: Any]]
+        {
+            content["similar_articles"] = similarArticles
+        }
+
+        return content
+    }
+
     func loadAdditionalContent() {
         guard let notification = currentNotification else { return }
 
-        // Check if we have enough local data to display without fetching
-        let hasLocalData = notification.summary != nil &&
-            notification.critical_analysis != nil &&
-            notification.logical_fallacies != nil &&
-            notification.relation_to_topic != nil
-
-        // If we can build information from the local data, do that first
-        if hasLocalData {
-            // Create a content dictionary from local data
-            var localContent: [String: Any] = [:]
-
-            if let sourceType = notification.source_type {
-                localContent["source_type"] = sourceType
-            }
-
-            if let sourcesQuality = notification.sources_quality {
-                localContent["sources_quality"] = sourcesQuality
-            }
-
-            if let argumentQuality = notification.argument_quality {
-                localContent["argument_quality"] = argumentQuality
-            }
-
-            if let url = getArticleUrl(notification) {
-                localContent["url"] = url
-            }
-
-            if let summary = notification.summary {
-                localContent["summary"] = summary
-            }
-
-            if let criticalAnalysis = notification.critical_analysis {
-                localContent["critical_analysis"] = criticalAnalysis
-            }
-
-            if let logicalFallacies = notification.logical_fallacies {
-                localContent["logical_fallacies"] = logicalFallacies
-            }
-
-            if let relationToTopic = notification.relation_to_topic {
-                localContent["relation_to_topic"] = relationToTopic
-            }
-
-            if let additionalInsights = notification.additional_insights {
-                localContent["additional_insights"] = additionalInsights
-            }
-
-            additionalContent = localContent
+        // First, check if we already have the content in the notification object
+        if hasRequiredContent(notification) {
+            // If we have local data, build content dictionary immediately without showing loader
+            additionalContent = buildContentDictionary(from: notification)
+            return
         }
 
-        // For bookmarked articles, try to load from local storage even if we have data
-        if notification.isBookmarked {
-            let localFileURL = AppDelegate().getLocalFileURL(for: notification)
-            if FileManager.default.fileExists(atPath: localFileURL.path) {
-                do {
-                    let data = try Data(contentsOf: localFileURL)
-                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        additionalContent = json
+        isLoadingAdditionalContent = true
+        Task {
+            do {
+                // Use the new helper to fetch and update notification content if needed
+                let updatedNotification = try await SyncManager.fetchFullContentIfNeeded(for: notification)
 
-                        // Store the full content in the notification if we don't have it
-                        if !hasLocalData {
-                            updateLocalDatabaseWithFetchedContent(notification, json)
-                        }
-                        return
-                    }
-                } catch {
-                    print("Failed to load local JSON: \(error)")
+                // Build content dictionary from the updated notification
+                let content = buildContentDictionary(from: updatedNotification)
+
+                await MainActor.run {
+                    // Update the content and loading state on the main thread
+                    self.additionalContent = content
+                    self.isLoadingAdditionalContent = false
                 }
-            }
-        }
-
-        // If we don't have full content, fall back to network request
-        if !hasLocalData {
-            let jsonURL = notification.json_url
-            guard let url = URL(string: jsonURL) else {
-                print("Error: Invalid JSON URL \(jsonURL)")
-                return
-            }
-
-            isLoadingAdditionalContent = true
-            Task {
-                do {
-                    let (data, _) = try await URLSession.shared.data(from: url)
-                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        additionalContent = json
-
-                        // Now that we have the full content, update our local database
-                        updateLocalDatabaseWithFetchedContent(notification, json)
-                    } else {
-                        additionalContent = ["Error": "No valid content found."]
-                    }
-                } catch {
-                    additionalContent = ["Error": "Failed to load content: \(error.localizedDescription)"]
+            } catch {
+                await MainActor.run {
+                    self.additionalContent = ["Error": "Failed to load content: \(error.localizedDescription)"]
+                    self.isLoadingAdditionalContent = false
                 }
-                isLoadingAdditionalContent = false
             }
         }
     }

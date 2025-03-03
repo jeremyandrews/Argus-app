@@ -502,4 +502,67 @@ class SyncManager {
             }
         }.value
     }
+
+    static func fetchFullContentIfNeeded(for notification: NotificationData) async throws -> NotificationData {
+        // Check if the notification already has detailed content
+        if notification.summary != nil &&
+            notification.critical_analysis != nil &&
+            notification.logical_fallacies != nil
+        {
+            // Already has full content, just return it
+            return notification
+        }
+
+        // Need to fetch the full content
+        print("Fetching full content for article: \(notification.json_url)")
+
+        guard let url = URL(string: notification.json_url) else {
+            throw NSError(domain: "com.arguspulse", code: 400, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid JSON URL: \(notification.json_url)",
+            ])
+        }
+
+        // Fetch with timeout
+        do {
+            let (data, _) = try await withTimeout(seconds: 10) {
+                try await URLSession.shared.data(from: url)
+            }
+
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw NSError(domain: "com.arguspulse", code: 500, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to parse JSON from \(url)",
+                ])
+            }
+
+            // Process the retrieved JSON
+            var jsonWithURL = json
+            // Ensure the json_url is in the processed data
+            if jsonWithURL["json_url"] == nil {
+                jsonWithURL["json_url"] = notification.json_url
+            }
+
+            let processedArticle = shared.processArticleJSON(jsonWithURL)
+
+            // Update the database with the full content
+            try await shared.addOrUpdateArticlesWithExtendedData([processedArticle])
+
+            // Instead of fetching by ID, let's use the original notification object
+            // and rely on SwiftData's object tracking to reflect the updates
+            await MainActor.run {
+                // Give SwiftData a chance to update the object
+                try? ArgusApp.sharedModelContainer.mainContext.save()
+            }
+
+            // Return the same notification object which should now have updated fields
+            return notification
+        } catch is TimeoutError {
+            print("Network request timed out for \(url)")
+            throw NSError(domain: "com.arguspulse", code: 408, userInfo: [
+                NSLocalizedDescriptionKey: "Request timed out fetching article content",
+            ])
+        } catch {
+            print("Failed to fetch article content: \(error)")
+            throw error
+        }
+    }
 }
