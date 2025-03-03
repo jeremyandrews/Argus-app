@@ -637,8 +637,8 @@ struct NewsView: View {
 
     private func NotificationRow(
         notification: NotificationData,
-        editMode _: Binding<EditMode>?,
-        selectedNotificationIDs _: Binding<Set<NotificationData.ID>>
+        editMode: Binding<EditMode>?,
+        selectedNotificationIDs: Binding<Set<NotificationData.ID>>
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             // Top row: topic pill + archived pill
@@ -653,11 +653,16 @@ struct NewsView: View {
                 BookmarkButton(notification: notification)
             }
 
-            // Title
-            Text(notification.title)
-                .font(.headline)
-                .lineLimit(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Title - wrap in a ZStack to allow text selection while maintaining the double-tap gesture
+            ZStack {
+                // This is the selectable text
+                Text(notification.title)
+                    .font(.headline)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .allowsHitTesting(true) // Ensures text selection works
+            }
 
             // Publication Date
             if let pubDate = notification.pub_date {
@@ -666,26 +671,25 @@ struct NewsView: View {
                     .foregroundColor(.secondary)
             }
 
-            // Summary
-            Group {
-                if let bodyBlob = notification.body_blob,
-                   let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
-                {
-                    RichTextView(attributedString: attributedBody, lineLimit: 3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(notification.body.isEmpty ? "Loading content..." : notification.body)
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(3)
-                }
-            }
-            .onAppear {
-                Task {
-                    await MainActor.run {
-                        SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
+            // Summary - wrap in another ZStack for selectable text
+            ZStack {
+                Group {
+                    if let bodyBlob = notification.body_blob,
+                       let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
+                    {
+                        RichTextView(attributedString: attributedBody, lineLimit: 3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                            .allowsHitTesting(true)
+                    } else {
+                        Text(notification.body.isEmpty ? "Loading content..." : notification.body)
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(3)
+                            .textSelection(.enabled)
+                            .allowsHitTesting(true)
                     }
                 }
             }
@@ -697,6 +701,8 @@ struct NewsView: View {
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 3)
+                    .textSelection(.enabled)
+                    .allowsHitTesting(true)
             }
 
             // Domain
@@ -707,6 +713,8 @@ struct NewsView: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 3)
+                    .textSelection(.enabled)
+                    .allowsHitTesting(true)
             }
 
             // LazyLoadingQualityBadges
@@ -719,9 +727,23 @@ struct NewsView: View {
         .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.15))
         .cornerRadius(10)
         .id(notification.id)
-        .contentShape(Rectangle())
-        .onTapGesture {
+        .contentShape(Rectangle()) // Define the tappable area
+        .onTapGesture(count: 2) {
+            // Double-tap: Toggle read/unread
+            withAnimation {
+                toggleReadStatus(notification)
+            }
+        }
+        .onTapGesture(count: 1) {
+            // Single tap: Open the article
             openArticle(notification)
+        }
+        .onLongPressGesture {
+            // Enter edit mode
+            withAnimation {
+                editMode?.wrappedValue = .active
+                selectedNotificationIDs.wrappedValue.insert(notification.id)
+            }
         }
     }
 
