@@ -336,6 +336,7 @@ struct NewsView: View {
             let textView = UITextView()
             textView.attributedText = attributedString
             textView.isEditable = false
+            textView.isSelectable = false // Disable selection
             textView.isScrollEnabled = false
             textView.backgroundColor = .clear
 
@@ -640,7 +641,10 @@ struct NewsView: View {
         editMode: Binding<EditMode>?,
         selectedNotificationIDs: Binding<Set<NotificationData.ID>>
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // Create a local state to track the animation
+        let isUnread = !notification.isViewed
+
+        return VStack(alignment: .leading, spacing: 10) {
             // Top row: topic pill + archived pill
             HStack(spacing: 8) {
                 if let topic = notification.topic, !topic.isEmpty {
@@ -653,44 +657,36 @@ struct NewsView: View {
                 BookmarkButton(notification: notification)
             }
 
-            // Title - wrap in a ZStack to allow text selection while maintaining the double-tap gesture
-            ZStack {
-                // This is the selectable text
-                Text(notification.title)
-                    .font(.headline)
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .allowsHitTesting(true) // Ensures text selection works
-            }
+            // Title
+            Text(notification.title)
+                .font(.headline)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.disabled)
 
             // Publication Date
             if let pubDate = notification.pub_date {
                 Text(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
                     .font(.footnote)
                     .foregroundColor(.secondary)
+                    .textSelection(.disabled)
             }
 
-            // Summary - wrap in another ZStack for selectable text
-            ZStack {
-                Group {
-                    if let bodyBlob = notification.body_blob,
-                       let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
-                    {
-                        RichTextView(attributedString: attributedBody, lineLimit: 3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                            .allowsHitTesting(true)
-                    } else {
-                        Text(notification.body.isEmpty ? "Loading content..." : notification.body)
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(3)
-                            .textSelection(.enabled)
-                            .allowsHitTesting(true)
-                    }
+            // Summary
+            Group {
+                if let bodyBlob = notification.body_blob,
+                   let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
+                {
+                    NonSelectableRichTextView(attributedString: attributedBody, lineLimit: 3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(notification.body.isEmpty ? "Loading content..." : notification.body)
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(3)
+                        .textSelection(.disabled)
                 }
             }
 
@@ -701,8 +697,7 @@ struct NewsView: View {
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 3)
-                    .textSelection(.enabled)
-                    .allowsHitTesting(true)
+                    .textSelection(.disabled)
             }
 
             // Domain
@@ -713,8 +708,7 @@ struct NewsView: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 3)
-                    .textSelection(.enabled)
-                    .allowsHitTesting(true)
+                    .textSelection(.disabled)
             }
 
             // LazyLoadingQualityBadges
@@ -724,26 +718,74 @@ struct NewsView: View {
             .padding(.top, 5)
         }
         .padding()
-        .background(notification.isViewed ? Color.clear : Color.blue.opacity(0.15))
+        .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
         .cornerRadius(10)
         .id(notification.id)
-        .contentShape(Rectangle()) // Define the tappable area
-        .onTapGesture(count: 2) {
-            // Double-tap: Toggle read/unread
-            withAnimation {
-                toggleReadStatus(notification)
-            }
-        }
-        .onTapGesture(count: 1) {
-            // Single tap: Open the article
-            openArticle(notification)
-        }
         .onLongPressGesture {
-            // Enter edit mode
             withAnimation {
                 editMode?.wrappedValue = .active
                 selectedNotificationIDs.wrappedValue.insert(notification.id)
             }
+        }
+        .gesture(
+            TapGesture(count: 2)
+                .exclusively(before: TapGesture(count: 1))
+                .onEnded { result in
+                    switch result {
+                    case .first:
+                        // This is the double‐tap case
+                        toggleReadStatus(notification)
+                    case .second:
+                        // This is the single‐tap case
+                        openArticle(notification)
+                    }
+                }
+        )
+    }
+
+    struct NonSelectableRichTextView: UIViewRepresentable {
+        let attributedString: NSAttributedString
+        var lineLimit: Int? = nil
+
+        func makeUIView(context _: Context) -> UITextView {
+            let textView = UITextView()
+            textView.isEditable = false
+            textView.isScrollEnabled = false
+            textView.isSelectable = false // Disable selection
+            textView.backgroundColor = .clear
+
+            // Remove default padding
+            textView.textContainerInset = .zero
+            textView.textContainer.lineFragmentPadding = 0
+
+            // Enable Dynamic Type
+            textView.adjustsFontForContentSizeCategory = true
+
+            // Ensure the text always starts at the same left margin
+            textView.textAlignment = .left
+
+            // Force `UITextView` to wrap by constraining its width
+            textView.translatesAutoresizingMaskIntoConstraints = false
+            textView.setContentHuggingPriority(.required, for: .horizontal)
+            textView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+            NSLayoutConstraint.activate([
+                textView.widthAnchor.constraint(lessThanOrEqualToConstant: UIScreen.main.bounds.width - 40), // Ensures wrapping
+            ])
+
+            return textView
+        }
+
+        func updateUIView(_ uiView: UITextView, context _: Context) {
+            let mutableString = NSMutableAttributedString(attributedString: attributedString)
+
+            let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+            mutableString.addAttribute(.font, value: bodyFont, range: NSRange(location: 0, length: mutableString.length))
+
+            uiView.attributedText = mutableString
+            uiView.textAlignment = .left
+            uiView.invalidateIntrinsicContentSize()
+            uiView.layoutIfNeeded()
         }
     }
 
