@@ -779,7 +779,10 @@ class SyncManager {
                             print("Updating existing article: \(article.jsonURL)")
                             // Update existing notification
                             if let notification = existingNotifications?.first(where: { $0.json_url == article.jsonURL }) {
-                                // Update the fields we want to modify
+                                if !article.affected.isEmpty {
+                                    notification.affected = article.affected
+                                }
+
                                 if let sourcesQuality = article.sourcesQuality {
                                     notification.sources_quality = sourcesQuality
                                 }
