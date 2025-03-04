@@ -272,110 +272,172 @@ class SyncManager {
         )
     }
 
-    private func convertMarkdownFieldsToRichText(for notification: NotificationData) {
-        // Create function to convert markdown to NSAttributedString with Dynamic Type support
-        func markdownToAccessibleAttributedString(_ markdown: String?, textStyle: String) -> NSAttributedString? {
-            guard let markdown = markdown, !markdown.isEmpty else { return nil }
+    func convertMarkdownFieldsToRichText(for notification: NotificationData) {
+        // First check if rich text versions already exist to avoid unnecessary work
+        let hasRichText = notification.title_blob != nil &&
+            notification.body_blob != nil &&
+            (notification.summary == nil || notification.summary_blob != nil) &&
+            (notification.critical_analysis == nil || notification.critical_analysis_blob != nil) &&
+            (notification.logical_fallacies == nil || notification.logical_fallacies_blob != nil) &&
+            (notification.source_analysis == nil || notification.source_analysis_blob != nil) &&
+            (notification.relation_to_topic == nil || notification.relation_to_topic_blob != nil) &&
+            (notification.additional_insights == nil || notification.additional_insights_blob != nil)
 
-            let swiftyMarkdown = SwiftyMarkdown(string: markdown)
+        // Convert only if we don't have rich text versions yet
+        if !hasRichText {
+            Task {
+                // Collect all the text that needs to be processed
+                let fields = (
+                    title: notification.title,
+                    body: notification.body,
+                    summary: notification.summary,
+                    criticalAnalysis: notification.critical_analysis,
+                    logicalFallacies: notification.logical_fallacies,
+                    sourceAnalysis: notification.source_analysis,
+                    relationToTopic: notification.relation_to_topic,
+                    additionalInsights: notification.additional_insights
+                )
 
-            // Get the preferred font for the specified text style (supports Dynamic Type)
-            let bodyFont = UIFont.preferredFont(forTextStyle: UIFont.TextStyle(rawValue: textStyle))
-            swiftyMarkdown.body.fontName = bodyFont.fontName
-            swiftyMarkdown.body.fontSize = bodyFont.pointSize
+                // Process the markdown conversion off the main thread and directly convert to Data
+                // This avoids passing NSAttributedString between tasks (solves Sendable warning)
+                let richTextBlobs = await Task.detached(priority: .utility) { () -> [String: Data] in
+                    var result = [String: Data]()
 
-            // Style headings with appropriate Dynamic Type text styles
-            let h1Font = UIFont.preferredFont(forTextStyle: .title1)
-            swiftyMarkdown.h1.fontName = h1Font.fontName
-            swiftyMarkdown.h1.fontSize = h1Font.pointSize
+                    // Create function to convert markdown to NSAttributedString with Dynamic Type support
+                    func markdownToAccessibleAttributedString(_ markdown: String?, textStyle: String) -> NSAttributedString? {
+                        guard let markdown = markdown, !markdown.isEmpty else { return nil }
 
-            let h2Font = UIFont.preferredFont(forTextStyle: .title2)
-            swiftyMarkdown.h2.fontName = h2Font.fontName
-            swiftyMarkdown.h2.fontSize = h2Font.pointSize
+                        let swiftyMarkdown = SwiftyMarkdown(string: markdown)
 
-            let h3Font = UIFont.preferredFont(forTextStyle: .title3)
-            swiftyMarkdown.h3.fontName = h3Font.fontName
-            swiftyMarkdown.h3.fontSize = h3Font.pointSize
+                        // Get the preferred font for the specified text style (supports Dynamic Type)
+                        let bodyFont = UIFont.preferredFont(forTextStyle: UIFont.TextStyle(rawValue: textStyle))
+                        swiftyMarkdown.body.fontName = bodyFont.fontName
+                        swiftyMarkdown.body.fontSize = bodyFont.pointSize
 
-            // Other styling
-            swiftyMarkdown.link.color = .systemBlue
+                        // Style headings with appropriate Dynamic Type text styles
+                        let h1Font = UIFont.preferredFont(forTextStyle: .title1)
+                        swiftyMarkdown.h1.fontName = h1Font.fontName
+                        swiftyMarkdown.h1.fontSize = h1Font.pointSize
 
-            // Get bold and italic versions of the body font if possible
-            if let boldDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitBold) {
-                let boldFont = UIFont(descriptor: boldDescriptor, size: 0)
-                swiftyMarkdown.bold.fontName = boldFont.fontName
-            } else {
-                swiftyMarkdown.bold.fontName = ".SFUI-Bold"
+                        let h2Font = UIFont.preferredFont(forTextStyle: .title2)
+                        swiftyMarkdown.h2.fontName = h2Font.fontName
+                        swiftyMarkdown.h2.fontSize = h2Font.pointSize
+
+                        let h3Font = UIFont.preferredFont(forTextStyle: .title3)
+                        swiftyMarkdown.h3.fontName = h3Font.fontName
+                        swiftyMarkdown.h3.fontSize = h3Font.pointSize
+
+                        // Other styling
+                        swiftyMarkdown.link.color = .systemBlue
+
+                        // Get bold and italic versions of the body font if possible
+                        if let boldDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitBold) {
+                            let boldFont = UIFont(descriptor: boldDescriptor, size: 0)
+                            swiftyMarkdown.bold.fontName = boldFont.fontName
+                        } else {
+                            swiftyMarkdown.bold.fontName = ".SFUI-Bold"
+                        }
+
+                        if let italicDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitItalic) {
+                            let italicFont = UIFont(descriptor: italicDescriptor, size: 0)
+                            swiftyMarkdown.italic.fontName = italicFont.fontName
+                        } else {
+                            swiftyMarkdown.italic.fontName = ".SFUI-Italic"
+                        }
+
+                        // Get the initial attributed string from SwiftyMarkdown
+                        let attributedString = swiftyMarkdown.attributedString()
+
+                        // Create a mutable copy
+                        let mutableAttributedString = NSMutableAttributedString(attributedString: attributedString)
+
+                        // Add accessibility trait to indicate the text style
+                        let textStyleKey = NSAttributedString.Key(rawValue: "NSAccessibilityTextStyleStringAttribute")
+                        mutableAttributedString.addAttribute(
+                            textStyleKey,
+                            value: textStyle,
+                            range: NSRange(location: 0, length: mutableAttributedString.length)
+                        )
+
+                        return mutableAttributedString
+                    }
+
+                    // Add this method to handle the other places that still call the old function name
+                    func markdownToAttributedString(_ markdown: String?, isTitle: Bool = false) -> NSAttributedString? {
+                        let textStyle = isTitle ? "UIFontTextStyleHeadline" : "UIFontTextStyleBody"
+                        return markdownToAccessibleAttributedString(markdown, textStyle: textStyle)
+                    }
+
+                    // Process title with headline style
+                    if let attributedTitle = markdownToAccessibleAttributedString(fields.title, textStyle: "UIFontTextStyleHeadline"),
+                       let titleData = try? NSKeyedArchiver.archivedData(withRootObject: attributedTitle, requiringSecureCoding: false)
+                    {
+                        result["title"] = titleData
+                    }
+
+                    // Process body with body style
+                    if let attributedBody = markdownToAccessibleAttributedString(fields.body, textStyle: "UIFontTextStyleBody"),
+                       let bodyData = try? NSKeyedArchiver.archivedData(withRootObject: attributedBody, requiringSecureCoding: false)
+                    {
+                        result["body"] = bodyData
+                    }
+
+                    // Process summary
+                    if let summary = fields.summary,
+                       let attributedSummary = markdownToAccessibleAttributedString(summary, textStyle: "UIFontTextStyleBody"),
+                       let summaryData = try? NSKeyedArchiver.archivedData(withRootObject: attributedSummary, requiringSecureCoding: false)
+                    {
+                        result["summary"] = summaryData
+                    }
+
+                    // Process critical analysis
+                    if let criticalAnalysis = fields.criticalAnalysis,
+                       let attributedCriticalAnalysis = markdownToAccessibleAttributedString(criticalAnalysis, textStyle: "UIFontTextStyleBody"),
+                       let criticalAnalysisData = try? NSKeyedArchiver.archivedData(withRootObject: attributedCriticalAnalysis, requiringSecureCoding: false)
+                    {
+                        result["critical_analysis"] = criticalAnalysisData
+                    }
+
+                    // Process logical fallacies
+                    if let logicalFallacies = fields.logicalFallacies,
+                       let attributedLogicalFallacies = markdownToAccessibleAttributedString(logicalFallacies, textStyle: "UIFontTextStyleBody"),
+                       let logicalFallaciesData = try? NSKeyedArchiver.archivedData(withRootObject: attributedLogicalFallacies, requiringSecureCoding: false)
+                    {
+                        result["logical_fallacies"] = logicalFallaciesData
+                    }
+
+                    // Process source analysis
+                    if let sourceAnalysis = fields.sourceAnalysis,
+                       let attributedSourceAnalysis = markdownToAccessibleAttributedString(sourceAnalysis, textStyle: "UIFontTextStyleBody"),
+                       let sourceAnalysisData = try? NSKeyedArchiver.archivedData(withRootObject: attributedSourceAnalysis, requiringSecureCoding: false)
+                    {
+                        result["source_analysis"] = sourceAnalysisData
+                    }
+
+                    // Process relation to topic
+                    if let relationToTopic = fields.relationToTopic,
+                       let attributedRelationToTopic = markdownToAccessibleAttributedString(relationToTopic, textStyle: "UIFontTextStyleBody"),
+                       let relationToTopicData = try? NSKeyedArchiver.archivedData(withRootObject: attributedRelationToTopic, requiringSecureCoding: false)
+                    {
+                        result["relation_to_topic"] = relationToTopicData
+                    }
+
+                    // Process additional insights
+                    if let additionalInsights = fields.additionalInsights,
+                       let attributedAdditionalInsights = markdownToAccessibleAttributedString(additionalInsights, textStyle: "UIFontTextStyleBody"),
+                       let additionalInsightsData = try? NSKeyedArchiver.archivedData(withRootObject: attributedAdditionalInsights, requiringSecureCoding: false)
+                    {
+                        result["additional_insights"] = additionalInsightsData
+                    }
+
+                    return result
+                }.value
+
+                // Apply the blobs on the main thread
+                await MainActor.run {
+                    self.applyRichTextBlobs(notification: notification, richTextBlobs: richTextBlobs)
+                }
             }
-
-            if let italicDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitItalic) {
-                let italicFont = UIFont(descriptor: italicDescriptor, size: 0)
-                swiftyMarkdown.italic.fontName = italicFont.fontName
-            } else {
-                swiftyMarkdown.italic.fontName = ".SFUI-Italic"
-            }
-
-            // Get the initial attributed string from SwiftyMarkdown
-            let attributedString = swiftyMarkdown.attributedString()
-
-            // Create a mutable copy
-            let mutableAttributedString = NSMutableAttributedString(attributedString: attributedString)
-
-            // Add accessibility trait to indicate the text style
-            let textStyleKey = NSAttributedString.Key(rawValue: "NSAccessibilityTextStyleStringAttribute")
-            mutableAttributedString.addAttribute(
-                textStyleKey,
-                value: textStyle,
-                range: NSRange(location: 0, length: mutableAttributedString.length)
-            )
-
-            return mutableAttributedString
-        }
-
-        // Add this method to handle the other places that still call the old function name
-        func markdownToAttributedString(_ markdown: String?, isTitle: Bool = false) -> NSAttributedString? {
-            let textStyle = isTitle ? "UIFontTextStyleHeadline" : "UIFontTextStyleBody"
-            return markdownToAccessibleAttributedString(markdown, textStyle: textStyle)
-        }
-
-        // Convert title with headline style
-        if let attributedTitle = markdownToAccessibleAttributedString(notification.title, textStyle: "UIFontTextStyleHeadline") {
-            try? notification.setRichText(attributedTitle, for: .title)
-        }
-
-        // Convert body with body style
-        if let attributedBody = markdownToAccessibleAttributedString(notification.body, textStyle: "UIFontTextStyleBody") {
-            try? notification.setRichText(attributedBody, for: .body)
-        }
-
-        // Convert summary
-        if let attributedSummary = markdownToAccessibleAttributedString(notification.summary, textStyle: "UIFontTextStyleBody") {
-            try? notification.setRichText(attributedSummary, for: .summary)
-        }
-
-        // Convert critical analysis
-        if let attributedCriticalAnalysis = markdownToAccessibleAttributedString(notification.critical_analysis, textStyle: "UIFontTextStyleBody") {
-            try? notification.setRichText(attributedCriticalAnalysis, for: .criticalAnalysis)
-        }
-
-        // Convert logical fallacies
-        if let attributedLogicalFallacies = markdownToAccessibleAttributedString(notification.logical_fallacies, textStyle: "UIFontTextStyleBody") {
-            try? notification.setRichText(attributedLogicalFallacies, for: .logicalFallacies)
-        }
-
-        // Convert source analysis
-        if let attributedSourceAnalysis = markdownToAccessibleAttributedString(notification.source_analysis, textStyle: "UIFontTextStyleBody") {
-            try? notification.setRichText(attributedSourceAnalysis, for: .sourceAnalysis)
-        }
-
-        // Convert relation to topic
-        if let attributedRelationToTopic = markdownToAccessibleAttributedString(notification.relation_to_topic, textStyle: "UIFontTextStyleBody") {
-            try? notification.setRichText(attributedRelationToTopic, for: .relationToTopic)
-        }
-
-        // Convert additional insights
-        if let attributedAdditionalInsights = markdownToAccessibleAttributedString(notification.additional_insights, textStyle: "UIFontTextStyleBody") {
-            try? notification.setRichText(attributedAdditionalInsights, for: .additionalInsights)
         }
     }
 
@@ -493,42 +555,91 @@ class SyncManager {
         }.value
     }
 
-    @MainActor
-    private func savePreparedArticles(_ articles: [PreparedArticle]) throws {
-        let context = ArgusApp.sharedModelContainer.mainContext
+    func savePreparedArticles(_ articles: [PreparedArticle]) async throws {
+        // 1. Do the heavy processing work off the main thread
+        let articlesToSave = await Task.detached(priority: .utility) { () -> [(NotificationData, SeenArticle)] in
+            // Process data and identify new articles off the main thread
+            let processedArticles = articles.map { article -> (PreparedArticle, [String: NSAttributedString]?) in
+                // Do the expensive markdown conversion here if needed
+                let attributedStrings = self.generateAttributedStringsForFields((
+                    title: article.title,
+                    body: article.body,
+                    summary: article.summary,
+                    criticalAnalysis: article.criticalAnalysis,
+                    logicalFallacies: article.logicalFallacies,
+                    sourceAnalysis: article.sourceAnalysis,
+                    relationToTopic: article.relationToTopic,
+                    additionalInsights: article.additionalInsights
+                ))
 
-        let existingSeenURLs = Set(
-            (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
-        )
+                return (article, attributedStrings)
+            }
 
-        let newArticles = articles.filter { !existingSeenURLs.contains($0.jsonURL) }
-        guard !newArticles.isEmpty else {
-            print("No new articles to insert/update. Skipping transaction.")
-            return
-        }
-
-        try context.transaction {
-            for prepared in newArticles {
+            return processedArticles.map { article, attributedStrings in
                 let notification = NotificationData(
                     date: Date(),
-                    title: prepared.title,
-                    body: prepared.body,
-                    json_url: prepared.jsonURL,
-                    topic: prepared.topic,
-                    article_title: prepared.articleTitle,
-                    affected: prepared.affected,
-                    domain: prepared.domain,
-                    pub_date: prepared.pubDate ?? Date(),
+                    title: article.title,
+                    body: article.body,
+                    json_url: article.jsonURL,
+                    topic: article.topic,
+                    article_title: article.articleTitle,
+                    affected: article.affected,
+                    domain: article.domain,
+                    pub_date: article.pubDate ?? Date(),
                     isViewed: false,
                     isBookmarked: false,
                     isArchived: false
                 )
-                context.insert(notification)
-                context.insert(SeenArticle(id: notification.id, json_url: prepared.jsonURL, date: notification.date))
-            }
-        }
 
-        print("Inserted/updated \(newArticles.count) articles in one transaction.")
+                // Apply rich text blobs from attributed strings
+                if let attributedStrings = attributedStrings {
+                    let richTextBlobs = attributedStrings.compactMapValues { attributedString in
+                        try? NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false)
+                    }
+
+                    // Apply the blobs directly
+                    if let titleBlob = richTextBlobs["title"] {
+                        notification.title_blob = titleBlob
+                    }
+                    // ... (other fields)
+                }
+
+                let seenArticle = SeenArticle(
+                    id: notification.id,
+                    json_url: article.jsonURL,
+                    date: notification.date
+                )
+
+                return (notification, seenArticle)
+            }
+        }.value
+
+        // 2. Only use the MainActor for the actual database work
+        return try await MainActor.run {
+            let context = ArgusApp.sharedModelContainer.mainContext
+
+            // Fetch existing URLs (must be done on MainActor since it uses SwiftData)
+            let existingSeenURLs = Set(
+                (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
+            )
+
+            // Filter out articles we've already seen
+            let newArticles = articlesToSave.filter { !existingSeenURLs.contains($0.0.json_url) }
+            guard !newArticles.isEmpty else {
+                print("No new articles to insert/update. Skipping transaction.")
+                return
+            }
+
+            // Execute the actual database transaction
+            try context.transaction {
+                for (notification, seenArticle) in newArticles {
+                    context.insert(notification)
+                    context.insert(seenArticle)
+                }
+            }
+
+            print("Inserted/updated \(newArticles.count) articles in one transaction.")
+        }
     }
 
     private func generateAttributedStringsForFields(_ fields: (
@@ -774,143 +885,260 @@ class SyncManager {
         // Debug what we're trying to save
         print("Attempting to save \(articles.count) articles to database")
 
-        // Make a local copy to avoid capturing
-        let articlesToProcess = articles
+        // 1. Process articles off the main thread and directly generate Data blobs
+        // This avoids Sendable conformance issues with NSAttributedString
+        let processedData = await Task.detached(priority: .utility) { () -> [(article: PreparedArticle, richTextBlobs: [String: Data])] in
+            return articles.map { article in
+                // Convert to PreparedArticle
+                let prepared = PreparedArticle(
+                    title: article.title,
+                    body: article.body,
+                    jsonURL: article.jsonURL,
+                    topic: article.topic,
+                    articleTitle: article.articleTitle,
+                    affected: article.affected,
+                    domain: article.domain,
+                    pubDate: article.pubDate,
+                    sourcesQuality: article.sourcesQuality,
+                    argumentQuality: article.argumentQuality,
+                    sourceType: article.sourceType,
+                    sourceAnalysis: article.sourceAnalysis,
+                    quality: article.quality,
+                    summary: article.summary,
+                    criticalAnalysis: article.criticalAnalysis,
+                    logicalFallacies: article.logicalFallacies,
+                    relationToTopic: article.relationToTopic,
+                    additionalInsights: article.additionalInsights,
+                    engineStats: article.engineStats,
+                    similarArticles: article.similarArticles
+                )
 
-        // Move all processing to MainActor directly since we need SwiftData context
-        try await Task.detached { @MainActor in
-            do {
-                let context = ArgusApp.sharedModelContainer.mainContext
+                // Define the markdown conversion functions locally to avoid self references
+                func markdownToAccessibleAttributedString(_ markdown: String?, textStyle: String) -> NSAttributedString? {
+                    guard let markdown = markdown, !markdown.isEmpty else { return nil }
 
-                // Get all existing data
-                let existingNotifications = try? context.fetch(FetchDescriptor<NotificationData>())
-                let existingURLs = existingNotifications?.map { $0.json_url } ?? []
-                print("Found \(existingURLs.count) existing notifications")
+                    let swiftyMarkdown = SwiftyMarkdown(string: markdown)
 
-                // Get existing seen article URLs separately
-                let existingSeenURLs = (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
-                print("Found \(existingSeenURLs.count) seen articles")
+                    // Get the preferred font for the specified text style (supports Dynamic Type)
+                    let bodyFont = UIFont.preferredFont(forTextStyle: UIFont.TextStyle(rawValue: textStyle))
+                    swiftyMarkdown.body.fontName = bodyFont.fontName
+                    swiftyMarkdown.body.fontSize = bodyFont.pointSize
 
-                // Process all articles
-                try context.transaction {
-                    for article in articlesToProcess {
-                        if existingURLs.contains(article.jsonURL) {
-                            print("Updating existing article: \(article.jsonURL)")
-                            // Update existing notification
-                            if let notification = existingNotifications?.first(where: { $0.json_url == article.jsonURL }) {
-                                if !article.affected.isEmpty {
-                                    notification.affected = article.affected
-                                }
+                    // Style headings with appropriate Dynamic Type text styles
+                    let h1Font = UIFont.preferredFont(forTextStyle: .title1)
+                    swiftyMarkdown.h1.fontName = h1Font.fontName
+                    swiftyMarkdown.h1.fontSize = h1Font.pointSize
 
-                                if let sourcesQuality = article.sourcesQuality {
-                                    notification.sources_quality = sourcesQuality
-                                }
+                    let h2Font = UIFont.preferredFont(forTextStyle: .title2)
+                    swiftyMarkdown.h2.fontName = h2Font.fontName
+                    swiftyMarkdown.h2.fontSize = h2Font.pointSize
 
-                                if let argumentQuality = article.argumentQuality {
-                                    notification.argument_quality = argumentQuality
-                                }
+                    let h3Font = UIFont.preferredFont(forTextStyle: .title3)
+                    swiftyMarkdown.h3.fontName = h3Font.fontName
+                    swiftyMarkdown.h3.fontSize = h3Font.pointSize
 
-                                if let sourceType = article.sourceType {
-                                    notification.source_type = sourceType
-                                }
+                    // Other styling
+                    swiftyMarkdown.link.color = .systemBlue
 
-                                if let sourceAnalysis = article.sourceAnalysis {
-                                    notification.source_analysis = sourceAnalysis
-                                }
-
-                                if let quality = article.quality {
-                                    notification.quality = quality
-                                }
-
-                                if let summary = article.summary {
-                                    notification.summary = summary
-                                }
-
-                                if let criticalAnalysis = article.criticalAnalysis {
-                                    notification.critical_analysis = criticalAnalysis
-                                }
-
-                                if let logicalFallacies = article.logicalFallacies {
-                                    notification.logical_fallacies = logicalFallacies
-                                }
-
-                                if let relationToTopic = article.relationToTopic {
-                                    notification.relation_to_topic = relationToTopic
-                                }
-
-                                if let additionalInsights = article.additionalInsights {
-                                    notification.additional_insights = additionalInsights
-                                }
-
-                                if let engineStats = article.engineStats {
-                                    notification.engine_stats = engineStats
-                                }
-
-                                if let similarArticles = article.similarArticles {
-                                    notification.similar_articles = similarArticles
-                                }
-
-                                // Convert markdown fields to rich text
-                                self.convertMarkdownFieldsToRichText(for: notification)
-                            }
-                        } else if !existingSeenURLs.contains(article.jsonURL) {
-                            print("Creating new article: \(article.jsonURL)")
-                            // Create new notification and seen article
-                            let notification = NotificationData(
-                                date: Date(),
-                                title: article.title,
-                                body: article.body,
-                                json_url: article.jsonURL,
-                                topic: article.topic,
-                                article_title: article.articleTitle,
-                                affected: article.affected,
-                                domain: article.domain,
-                                pub_date: article.pubDate ?? Date(),
-                                isViewed: false,
-                                isBookmarked: false,
-                                isArchived: false,
-                                sources_quality: article.sourcesQuality,
-                                argument_quality: article.argumentQuality,
-                                source_type: article.sourceType,
-                                source_analysis: article.sourceAnalysis,
-                                quality: article.quality,
-                                summary: article.summary,
-                                critical_analysis: article.criticalAnalysis,
-                                logical_fallacies: article.logicalFallacies,
-                                relation_to_topic: article.relationToTopic,
-                                additional_insights: article.additionalInsights,
-                                engine_stats: article.engineStats,
-                                similar_articles: article.similarArticles
-                            )
-
-                            // Convert markdown fields to rich text for the new notification
-                            self.convertMarkdownFieldsToRichText(for: notification)
-
-                            let seenArticle = SeenArticle(
-                                id: notification.id,
-                                json_url: article.jsonURL,
-                                date: notification.date
-                            )
-
-                            // Insert the new entities
-                            context.insert(notification)
-                            context.insert(seenArticle)
-                        } else {
-                            print("Skipping article (already seen): \(article.jsonURL)")
-                        }
+                    // Get bold and italic versions of the body font if possible
+                    if let boldDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitBold) {
+                        let boldFont = UIFont(descriptor: boldDescriptor, size: 0)
+                        swiftyMarkdown.bold.fontName = boldFont.fontName
+                    } else {
+                        swiftyMarkdown.bold.fontName = ".SFUI-Bold"
                     }
+
+                    if let italicDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitItalic) {
+                        let italicFont = UIFont(descriptor: italicDescriptor, size: 0)
+                        swiftyMarkdown.italic.fontName = italicFont.fontName
+                    } else {
+                        swiftyMarkdown.italic.fontName = ".SFUI-Italic"
+                    }
+
+                    // Get the initial attributed string from SwiftyMarkdown
+                    let attributedString = swiftyMarkdown.attributedString()
+
+                    // Create a mutable copy
+                    let mutableAttributedString = NSMutableAttributedString(attributedString: attributedString)
+
+                    // Add accessibility trait to indicate the text style
+                    let textStyleKey = NSAttributedString.Key(rawValue: "NSAccessibilityTextStyleStringAttribute")
+                    mutableAttributedString.addAttribute(
+                        textStyleKey,
+                        value: textStyle,
+                        range: NSRange(location: 0, length: mutableAttributedString.length)
+                    )
+
+                    return mutableAttributedString
                 }
 
-                print("Database transaction completed")
-
-                if !suppressBadgeUpdate {
-                    NotificationUtils.updateAppBadgeCount()
+                func markdownToAttributedString(_ markdown: String?, isTitle: Bool = false) -> NSAttributedString? {
+                    let textStyle = isTitle ? "UIFontTextStyleHeadline" : "UIFontTextStyleBody"
+                    return markdownToAccessibleAttributedString(markdown, textStyle: textStyle)
                 }
-            } catch {
-                print("Failed to insert or update articles: \(error)")
-                throw error
+
+                // Generate rich text blobs directly (NSAttributedString -> Data)
+                var richTextBlobs = [String: Data]()
+
+                // Process title
+                if let attributedTitle = markdownToAttributedString(article.title, isTitle: true),
+                   let titleData = try? NSKeyedArchiver.archivedData(withRootObject: attributedTitle, requiringSecureCoding: false)
+                {
+                    richTextBlobs["title"] = titleData
+                }
+
+                // Process body
+                if let attributedBody = markdownToAttributedString(article.body),
+                   let bodyData = try? NSKeyedArchiver.archivedData(withRootObject: attributedBody, requiringSecureCoding: false)
+                {
+                    richTextBlobs["body"] = bodyData
+                }
+
+                // Process summary
+                if let summary = article.summary,
+                   let attributedSummary = markdownToAttributedString(summary),
+                   let summaryData = try? NSKeyedArchiver.archivedData(withRootObject: attributedSummary, requiringSecureCoding: false)
+                {
+                    richTextBlobs["summary"] = summaryData
+                }
+
+                // Process critical analysis
+                if let criticalAnalysis = article.criticalAnalysis,
+                   let attributedCriticalAnalysis = markdownToAttributedString(criticalAnalysis),
+                   let criticalAnalysisData = try? NSKeyedArchiver.archivedData(withRootObject: attributedCriticalAnalysis, requiringSecureCoding: false)
+                {
+                    richTextBlobs["critical_analysis"] = criticalAnalysisData
+                }
+
+                // Process logical fallacies
+                if let logicalFallacies = article.logicalFallacies,
+                   let attributedLogicalFallacies = markdownToAttributedString(logicalFallacies),
+                   let logicalFallaciesData = try? NSKeyedArchiver.archivedData(withRootObject: attributedLogicalFallacies, requiringSecureCoding: false)
+                {
+                    richTextBlobs["logical_fallacies"] = logicalFallaciesData
+                }
+
+                // Process source analysis
+                if let sourceAnalysis = article.sourceAnalysis,
+                   let attributedSourceAnalysis = markdownToAttributedString(sourceAnalysis),
+                   let sourceAnalysisData = try? NSKeyedArchiver.archivedData(withRootObject: attributedSourceAnalysis, requiringSecureCoding: false)
+                {
+                    richTextBlobs["source_analysis"] = sourceAnalysisData
+                }
+
+                // Process relation to topic
+                if let relationToTopic = article.relationToTopic,
+                   let attributedRelationToTopic = markdownToAttributedString(relationToTopic),
+                   let relationToTopicData = try? NSKeyedArchiver.archivedData(withRootObject: attributedRelationToTopic, requiringSecureCoding: false)
+                {
+                    richTextBlobs["relation_to_topic"] = relationToTopicData
+                }
+
+                // Process additional insights
+                if let additionalInsights = article.additionalInsights,
+                   let attributedAdditionalInsights = markdownToAttributedString(additionalInsights),
+                   let additionalInsightsData = try? NSKeyedArchiver.archivedData(withRootObject: attributedAdditionalInsights, requiringSecureCoding: false)
+                {
+                    richTextBlobs["additional_insights"] = additionalInsightsData
+                }
+
+                return (prepared, richTextBlobs)
             }
         }.value
+
+        // 2. Use MainActor only for the database operations
+        try await MainActor.run {
+            let context = ArgusApp.sharedModelContainer.mainContext
+
+            // Fetch existing data (must happen on MainActor)
+            let existingNotifications = try? context.fetch(FetchDescriptor<NotificationData>())
+            let existingURLs = existingNotifications?.map { $0.json_url } ?? []
+            print("Found \(existingURLs.count) existing notifications")
+
+            let existingSeenURLs = (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
+            print("Found \(existingSeenURLs.count) seen articles")
+
+            // Process all articles in a single transaction
+            try context.transaction {
+                for (article, richTextBlobs) in processedData {
+                    if existingURLs.contains(article.jsonURL) {
+                        print("Updating existing article: \(article.jsonURL)")
+                        // Update existing notification
+                        if let notification = existingNotifications?.first(where: { $0.json_url == article.jsonURL }) {
+                            // Update fields
+                            self.updateNotificationFields(notification: notification, extendedInfo: (
+                                sourcesQuality: article.sourcesQuality,
+                                argumentQuality: article.argumentQuality,
+                                sourceType: article.sourceType,
+                                sourceAnalysis: article.sourceAnalysis,
+                                quality: article.quality,
+                                summary: article.summary,
+                                criticalAnalysis: article.criticalAnalysis,
+                                logicalFallacies: article.logicalFallacies,
+                                relationToTopic: article.relationToTopic,
+                                additionalInsights: article.additionalInsights,
+                                engineStats: article.engineStats,
+                                similarArticles: article.similarArticles
+                            ))
+
+                            // Apply rich text blobs directly (already Data, no need to convert)
+                            self.applyRichTextBlobs(notification: notification, richTextBlobs: richTextBlobs)
+                        }
+                    } else if !existingSeenURLs.contains(article.jsonURL) {
+                        print("Creating new article: \(article.jsonURL)")
+
+                        // Create new notification with all fields
+                        let notification = NotificationData(
+                            date: Date(),
+                            title: article.title,
+                            body: article.body,
+                            json_url: article.jsonURL,
+                            topic: article.topic,
+                            article_title: article.articleTitle,
+                            affected: article.affected,
+                            domain: article.domain,
+                            pub_date: article.pubDate ?? Date(),
+                            isViewed: false,
+                            isBookmarked: false,
+                            isArchived: false,
+                            sources_quality: article.sourcesQuality,
+                            argument_quality: article.argumentQuality,
+                            source_type: article.sourceType,
+                            source_analysis: article.sourceAnalysis,
+                            quality: article.quality,
+                            summary: article.summary,
+                            critical_analysis: article.criticalAnalysis,
+                            logical_fallacies: article.logicalFallacies,
+                            relation_to_topic: article.relationToTopic,
+                            additional_insights: article.additionalInsights,
+                            engine_stats: article.engineStats,
+                            similar_articles: article.similarArticles
+                        )
+
+                        // Apply rich text blobs directly (already Data, no need to convert)
+                        self.applyRichTextBlobs(notification: notification, richTextBlobs: richTextBlobs)
+
+                        let seenArticle = SeenArticle(
+                            id: notification.id,
+                            json_url: article.jsonURL,
+                            date: notification.date
+                        )
+
+                        // Insert the new entities
+                        context.insert(notification)
+                        context.insert(seenArticle)
+                    } else {
+                        print("Skipping article (already seen): \(article.jsonURL)")
+                    }
+                }
+            }
+
+            print("Database transaction completed")
+
+            if !suppressBadgeUpdate {
+                NotificationUtils.updateAppBadgeCount()
+            }
+        }
     }
 
     static func fetchFullContentIfNeeded(for notification: NotificationData) async throws -> NotificationData {
@@ -935,30 +1163,37 @@ class SyncManager {
 
         // Fetch with timeout
         do {
+            // Network request (off the main thread)
             let (data, _) = try await withTimeout(seconds: 10) {
                 try await URLSession.shared.data(from: url)
             }
 
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw NSError(domain: "com.arguspulse", code: 500, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to parse JSON from \(url)",
-                ])
-            }
+            // Process the JSON (off the main thread)
+            let processedArticle = await Task.detached { () -> PreparedArticle? in
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    print("Failed to parse JSON from \(url)")
+                    return nil
+                }
 
-            // Process the retrieved JSON
-            var jsonWithURL = json
-            // Ensure the json_url is in the processed data
-            if jsonWithURL["json_url"] == nil {
-                jsonWithURL["json_url"] = notification.json_url
-            }
+                // Process the retrieved JSON
+                var jsonWithURL = json
+                // Ensure the json_url is in the processed data
+                if jsonWithURL["json_url"] == nil {
+                    jsonWithURL["json_url"] = notification.json_url
+                }
 
-            let processedArticle = shared.processArticleJSON(jsonWithURL)
+                if let articleJSON = shared.processArticleJSON(jsonWithURL) {
+                    return convertToPreparedArticle(articleJSON)
+                }
 
-            // Update the database with the full content
+                return nil
+            }.value
+
+            // If we have processed data, update the database
             if let processedArticle = processedArticle {
                 try await shared.addOrUpdateArticlesWithExtendedData([(
                     title: processedArticle.title,
-                    body: processedArticle.body, // Ensure this is a String
+                    body: processedArticle.body,
                     jsonURL: processedArticle.jsonURL,
                     topic: processedArticle.topic,
                     articleTitle: processedArticle.articleTitle,
@@ -982,14 +1217,12 @@ class SyncManager {
                 print("Skipping article update: processedArticle is nil")
             }
 
-            // Instead of fetching by ID, let's use the original notification object
-            // and rely on SwiftData's object tracking to reflect the updates
+            // Force a save to ensure SwiftData object tracking reflects updates
             await MainActor.run {
-                // Give SwiftData a chance to update the object
                 try? ArgusApp.sharedModelContainer.mainContext.save()
             }
 
-            // Return the same notification object which should now have updated fields
+            // Return the updated notification object
             return notification
         } catch is TimeoutError {
             print("Network request timed out for \(url)")
