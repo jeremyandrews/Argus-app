@@ -116,7 +116,7 @@ class SyncManager {
 
         let now = Date()
         guard now.timeIntervalSince(lastSyncTime) > minimumSyncInterval else {
-            print("Sync called too soon; skipping.")
+            // Sync called too soon; skipping.
             return
         }
 
