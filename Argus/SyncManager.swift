@@ -222,34 +222,53 @@ class SyncManager {
     }
 
     func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
-        guard let title = json["tiny_title"] as? String,
-              let body = json["tiny_summary"] as? String,
-              let jsonURL = json["json_url"] as? String
+        // Required fields - function returns nil if any of these are missing
+        guard let title = json["tiny_title"] as? String, // Maps from "tiny_title" to local "title" variable
+              let body = json["tiny_summary"] as? String, // Maps from "tiny_summary" to local "body" variable
+              let jsonURL = json["json_url"] as? String // Maps from "json_url" to camelCase "jsonURL" variable
         else {
             return nil
         }
 
         return ArticleJSON(
-            title: title,
-            body: body,
-            jsonURL: jsonURL,
-            topic: json["topic"] as? String,
-            articleTitle: json["title"] as? String ?? "",
-            affected: json["affected"] as? String ?? "",
-            domain: json["url"] as? String,
+            // Required fields from above guard statement
+            title: title, // Maps from local "title" to ArticleJSON.title (originally from "tiny_title")
+            body: body, // Maps from local "body" to ArticleJSON.body (originally from "tiny_summary")
+            jsonURL: jsonURL, // Maps from local "jsonURL" to ArticleJSON.jsonURL (originally from "json_url")
+
+            // Optional fields with no default value (will be nil if missing)
+            topic: json["topic"] as? String, // Direct mapping, same name
+
+            // FIELD MISMATCH: "title" in JSON becomes "articleTitle" in our model
+            // Note that this is different from the "title" property which comes from "tiny_title"
+            articleTitle: json["title"] as? String ?? "", // Default empty string if missing
+
+            affected: json["affected"] as? String ?? "", // Default empty string if missing
+
+            // FIELD MISMATCH: "url" in JSON becomes "domain" in our model
+            domain: json["url"] as? String, // Will be nil if missing
+
+            // FIELD MISMATCH: "pub_date" in JSON becomes "pubDate" in our model (camelCase conversion)
+            // Also includes date parsing from ISO8601 string
             pubDate: (json["pub_date"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) },
-            sourcesQuality: json["sources_quality"] as? Int,
-            argumentQuality: json["argument_quality"] as? Int,
-            sourceType: json["source_type"] as? String,
-            sourceAnalysis: json["source_analysis"] as? String,
-            quality: json["quality"] as? Int,
-            summary: json["summary"] as? String,
-            criticalAnalysis: json["critical_analysis"] as? String,
-            logicalFallacies: json["logical_fallacies"] as? String,
-            relationToTopic: json["relation_to_topic"] as? String,
-            additionalInsights: json["additional_insights"] as? String,
-            engineStats: json["engine_stats"] as? String,
-            similarArticles: json["similar_articles"] as? String
+
+            // Fields with snake_case in JSON mapped to camelCase in model
+            sourcesQuality: json["sources_quality"] as? Int, // "sources_quality" → "sourcesQuality"
+            argumentQuality: json["argument_quality"] as? Int, // "argument_quality" → "argumentQuality"
+            sourceType: json["source_type"] as? String, // "source_type" → "sourceType"
+            sourceAnalysis: json["source_analysis"] as? String, // "source_analysis" → "sourceAnalysis"
+
+            // Simple direct mappings of optional fields
+            quality: json["quality"] as? Int, // Direct mapping, same name
+            summary: json["summary"] as? String, // Direct mapping, same name
+
+            // Remaining snake_case to camelCase conversions
+            criticalAnalysis: json["critical_analysis"] as? String, // "critical_analysis" → "criticalAnalysis"
+            logicalFallacies: json["logical_fallacies"] as? String, // "logical_fallacies" → "logicalFallacies"
+            relationToTopic: json["relation_to_topic"] as? String, // "relation_to_topic" → "relationToTopic"
+            additionalInsights: json["additional_insights"] as? String, // "additional_insights" → "additionalInsights"
+            engineStats: json["engine_stats"] as? String, // "engine_stats" → "engineStats"
+            similarArticles: json["similar_articles"] as? String // "similar_articles" → "similarArticles"
         )
     }
 
