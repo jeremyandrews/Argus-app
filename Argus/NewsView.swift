@@ -150,7 +150,7 @@ struct NewsView: View {
                         lastSelectedTopic = newTopic
 
                         // Force an immediate refresh with the new topic
-                        updateFilteredNotifications()
+                        updateFilteredNotifications(force: true)
                     }
                 }
                 .onChange(of: showArchivedContent) { _, _ in
@@ -283,9 +283,9 @@ struct NewsView: View {
                         // Update the selected topic immediately
                         withAnimation {
                             selectedTopic = topic
+                            // Force an immediate update when user taps a topic
+                            updateFilteredNotifications(force: true)
                         }
-                        // Don't call updateFilteredNotifications() here as it will be
-                        // triggered by the onChange handler
                     } label: {
                         Text(topic)
                             .padding(.horizontal, 12)
@@ -1136,7 +1136,7 @@ struct NewsView: View {
     }
 
     @MainActor
-    private func updateFilteredNotifications(isBackgroundUpdate: Bool = false) {
+    private func updateFilteredNotifications(isBackgroundUpdate: Bool = false, force: Bool = false) {
         // Set a longer update interval for background refreshes (10 seconds)
         let updateInterval: TimeInterval = 10.0
         let now = Date()
@@ -1150,8 +1150,8 @@ struct NewsView: View {
             }
         }
 
-        // Skip updates if we're actively scrolling
-        if isActivelyScrolling {
+        // Skip updates if we're actively scrolling, unless force=true (user explicitly tapped)
+        if !force && isActivelyScrolling {
             pendingUpdateNeeded = true
             return
         }

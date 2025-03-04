@@ -222,8 +222,8 @@ class SyncManager {
     }
 
     func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
-        guard let title = json["title"] as? String,
-              let body = json["body"] as? String,
+        guard let title = json["tiny_title"] as? String,
+              let body = json["tiny_summary"] as? String,
               let jsonURL = json["json_url"] as? String
         else {
             return nil
@@ -234,9 +234,9 @@ class SyncManager {
             body: body,
             jsonURL: jsonURL,
             topic: json["topic"] as? String,
-            articleTitle: json["article_title"] as? String ?? "",
+            articleTitle: json["title"] as? String ?? "",
             affected: json["affected"] as? String ?? "",
-            domain: json["domain"] as? String,
+            domain: json["url"] as? String,
             pubDate: (json["pub_date"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) },
             sourcesQuality: json["sources_quality"] as? Int,
             argumentQuality: json["argument_quality"] as? Int,
