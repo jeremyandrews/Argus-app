@@ -104,11 +104,29 @@ class SyncManager {
     static let shared = SyncManager()
     private init() {}
 
+    private var syncInProgress = false
+    private var lastSyncTime: Date = .distantPast
+    private let minimumSyncInterval: TimeInterval = 60
+
     func sendRecentArticlesToServer() async {
-        async let recentArticles = fetchRecentArticles()
+        guard !syncInProgress else {
+            print("Sync is already in progress. Skipping this call.")
+            return
+        }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastSyncTime) > minimumSyncInterval else {
+            print("Sync called too soon; skipping.")
+            return
+        }
+
+        syncInProgress = true
+        defer { syncInProgress = false }
+        lastSyncTime = now
 
         do {
-            let jsonUrls = try await recentArticles.map { $0.json_url }
+            let recentArticles = await fetchRecentArticles()
+            let jsonUrls = recentArticles.map { $0.json_url }
 
             try await withTimeout(seconds: 10) {
                 let url = URL(string: "https://api.arguspulse.com/articles/sync")!
@@ -116,24 +134,90 @@ class SyncManager {
                 let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
 
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
-                if let unseenUrls = serverResponse["unseen_articles"] {
+                if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
                     await self.fetchAndSaveUnseenArticles(from: unseenUrls)
+                } else {
+                    print("Server says there are no unseen articles.")
                 }
             }
         } catch is TimeoutError {
-            print("Sync operation timed out after 10 seconds")
+            print("Sync operation timed out after 10 seconds.")
         } catch {
             print("Failed to sync articles: \(error)")
         }
     }
 
-    private func fetchRecentArticles() async throws -> [SeenArticle] {
+    private func fetchRecentArticles() async -> [SeenArticle] {
         await MainActor.run {
             let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
             let context = ArgusApp.sharedModelContainer.mainContext
+
             return (try? context.fetch(FetchDescriptor<SeenArticle>(
                 predicate: #Predicate { $0.date >= oneDayAgo }
             ))) ?? []
+        }
+    }
+
+    func fetchAndSaveUnseenArticles(from urls: [String]) async {
+        let fetchedArticles = await withTaskGroup(of: (String, Data?).self) { group -> [(String, Data?)] in
+            for urlString in urls {
+                group.addTask {
+                    guard let url = URL(string: urlString) else {
+                        return (urlString, nil)
+                    }
+                    do {
+                        let (data, _) = try await withTimeout(seconds: 10) {
+                            try await URLSession.shared.data(from: url)
+                        }
+                        return (urlString, data)
+                    } catch {
+                        print("Network request failed for \(urlString): \(error)")
+                        return (urlString, nil)
+                    }
+                }
+            }
+
+            var results: [(String, Data?)] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+
+        let processed = fetchedArticles.compactMap { urlString, data -> ArticleJSON? in
+            guard let data,
+                  let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                print("Failed to parse JSON for \(urlString)")
+                return nil
+            }
+            var enrichedJson = rawJson
+            if enrichedJson["json_url"] == nil {
+                enrichedJson["json_url"] = urlString
+            }
+            return processArticleJSON(enrichedJson)
+        }
+
+        let preparedArticles = await withTaskGroup(of: PreparedArticle?.self) { group -> [PreparedArticle] in
+            for article in processed {
+                group.addTask {
+                    convertToPreparedArticle(article)
+                }
+            }
+
+            var results: [PreparedArticle] = []
+            for await result in group {
+                if let r = result {
+                    results.append(r)
+                }
+            }
+            return results
+        }
+
+        do {
+            try await savePreparedArticles(preparedArticles)
+        } catch {
+            print("Failed to save articles: \(error)")
         }
     }
 
@@ -390,133 +474,38 @@ class SyncManager {
         }.value
     }
 
-    func fetchAndSaveUnseenArticles(from urls: [String]) async {
-        let fetchedArticles = await withTaskGroup(of: (String, Data?).self) { group -> [(String, Data?)] in
-            for urlString in urls {
-                group.addTask {
-                    guard let url = URL(string: urlString) else {
-                        return (urlString, nil)
-                    }
-                    do {
-                        let (data, _) = try await withTimeout(seconds: 10) {
-                            try await URLSession.shared.data(from: url)
-                        }
-                        return (urlString, data)
-                    } catch {
-                        print("Network request failed for \(urlString): \(error)")
-                        return (urlString, nil)
-                    }
-                }
-            }
-
-            var results: [(String, Data?)] = []
-            for await result in group {
-                results.append(result)
-            }
-            return results
-        }
-
-        let processed = fetchedArticles.compactMap { urlString, data -> ArticleJSON? in
-            guard let data, let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                print("Failed to parse JSON for \(urlString)")
-                return nil
-            }
-            var enrichedJson = rawJson
-            if enrichedJson["json_url"] == nil {
-                enrichedJson["json_url"] = urlString
-            }
-            return processArticleJSON(enrichedJson)
-        }
-
-        let preparedArticles = await withTaskGroup(of: PreparedArticle?.self) { group -> [PreparedArticle] in
-            for article in processed {
-                group.addTask {
-                    convertToPreparedArticle(article)
-                }
-            }
-
-            var results: [PreparedArticle] = []
-            for await result in group {
-                if let r = result {
-                    results.append(r)
-                }
-            }
-            return results
-        }
-
-        do {
-            try await savePreparedArticles(preparedArticles)
-        } catch {
-            print("Failed to save articles: \(error)")
-        }
-    }
-
     @MainActor
     private func savePreparedArticles(_ articles: [PreparedArticle]) throws {
         let context = ArgusApp.sharedModelContainer.mainContext
 
-        // Fetch existing notifications and seen articles once, before the transaction
-        let existingNotifications = (try? context.fetch(FetchDescriptor<NotificationData>())) ?? []
         let existingSeenURLs = Set(
             (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
         )
 
-        // Filter out articles that have already been seen to avoid unnecessary DB writes
         let newArticles = articles.filter { !existingSeenURLs.contains($0.jsonURL) }
-
-        if newArticles.isEmpty {
+        guard !newArticles.isEmpty else {
             print("No new articles to insert/update. Skipping transaction.")
             return
         }
 
         try context.transaction {
             for prepared in newArticles {
-                if let existing = existingNotifications.first(where: { $0.json_url == prepared.jsonURL }) {
-                    // Update existing notification
-                    if let q = prepared.sourcesQuality { existing.sources_quality = q }
-                    if let a = prepared.argumentQuality { existing.argument_quality = a }
-                    if let t = prepared.sourceType { existing.source_type = t }
-                    if let sa = prepared.sourceAnalysis { existing.source_analysis = sa }
-                    if let q = prepared.quality { existing.quality = q }
-                    if let s = prepared.summary { existing.summary = s }
-                    if let ca = prepared.criticalAnalysis { existing.critical_analysis = ca }
-                    if let lf = prepared.logicalFallacies { existing.logical_fallacies = lf }
-                    if let rt = prepared.relationToTopic { existing.relation_to_topic = rt }
-                    if let ai = prepared.additionalInsights { existing.additional_insights = ai }
-                    if let es = prepared.engineStats { existing.engine_stats = es }
-                    if let sim = prepared.similarArticles { existing.similar_articles = sim }
-
-                } else {
-                    // Insert new notification
-                    let notification = NotificationData(
-                        date: Date(),
-                        title: prepared.title,
-                        body: prepared.body,
-                        json_url: prepared.jsonURL,
-                        topic: prepared.topic,
-                        article_title: prepared.articleTitle,
-                        affected: prepared.affected,
-                        domain: prepared.domain,
-                        pub_date: prepared.pubDate ?? Date(),
-                        isViewed: false,
-                        isBookmarked: false,
-                        isArchived: false,
-                        sources_quality: prepared.sourcesQuality,
-                        argument_quality: prepared.argumentQuality,
-                        source_type: prepared.sourceType,
-                        source_analysis: prepared.sourceAnalysis,
-                        quality: prepared.quality,
-                        summary: prepared.summary,
-                        critical_analysis: prepared.criticalAnalysis,
-                        logical_fallacies: prepared.logicalFallacies,
-                        relation_to_topic: prepared.relationToTopic,
-                        additional_insights: prepared.additionalInsights,
-                        engine_stats: prepared.engineStats,
-                        similar_articles: prepared.similarArticles
-                    )
-                    context.insert(notification)
-                    context.insert(SeenArticle(id: notification.id, json_url: prepared.jsonURL, date: notification.date))
-                }
+                let notification = NotificationData(
+                    date: Date(),
+                    title: prepared.title,
+                    body: prepared.body,
+                    json_url: prepared.jsonURL,
+                    topic: prepared.topic,
+                    article_title: prepared.articleTitle,
+                    affected: prepared.affected,
+                    domain: prepared.domain,
+                    pub_date: prepared.pubDate ?? Date(),
+                    isViewed: false,
+                    isBookmarked: false,
+                    isArchived: false
+                )
+                context.insert(notification)
+                context.insert(SeenArticle(id: notification.id, json_url: prepared.jsonURL, date: notification.date))
             }
         }
 
