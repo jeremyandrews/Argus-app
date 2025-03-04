@@ -29,6 +29,77 @@ func withTimeout<T>(seconds: Double, operation: @escaping () async throws -> T) 
     }
 }
 
+struct ArticleJSON {
+    let title: String
+    let body: String
+    let jsonURL: String
+    let topic: String?
+    let articleTitle: String
+    let affected: String
+    let domain: String?
+    let pubDate: Date?
+    let sourcesQuality: Int?
+    let argumentQuality: Int?
+    let sourceType: String?
+    let sourceAnalysis: String?
+    let quality: Int?
+    let summary: String?
+    let criticalAnalysis: String?
+    let logicalFallacies: String?
+    let relationToTopic: String?
+    let additionalInsights: String?
+    let engineStats: String?
+    let similarArticles: String?
+}
+
+struct PreparedArticle {
+    let title: String
+    let body: String
+    let jsonURL: String
+    let topic: String?
+    let articleTitle: String
+    let affected: String
+    let domain: String?
+    let pubDate: Date?
+    let sourcesQuality: Int?
+    let argumentQuality: Int?
+    let sourceType: String?
+    let sourceAnalysis: String?
+    let quality: Int?
+    let summary: String?
+    let criticalAnalysis: String?
+    let logicalFallacies: String?
+    let relationToTopic: String?
+    let additionalInsights: String?
+    let engineStats: String?
+    let similarArticles: String?
+}
+
+func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
+    return PreparedArticle(
+        title: input.title,
+        body: input.body,
+        jsonURL: input.jsonURL,
+        topic: input.topic,
+        articleTitle: input.articleTitle,
+        affected: input.affected,
+        domain: input.domain,
+        pubDate: input.pubDate,
+        sourcesQuality: input.sourcesQuality,
+        argumentQuality: input.argumentQuality,
+        sourceType: input.sourceType,
+        sourceAnalysis: input.sourceAnalysis,
+        quality: input.quality,
+        summary: input.summary,
+        criticalAnalysis: input.criticalAnalysis,
+        logicalFallacies: input.logicalFallacies,
+        relationToTopic: input.relationToTopic,
+        additionalInsights: input.additionalInsights,
+        engineStats: input.engineStats,
+        similarArticles: input.similarArticles
+    )
+}
+
 class SyncManager {
     static let shared = SyncManager()
     private init() {}
@@ -66,105 +137,35 @@ class SyncManager {
         }
     }
 
-    private func processArticleJSON(_ json: [String: Any]) -> (
-        title: String,
-        body: String,
-        jsonURL: String,
-        topic: String?,
-        articleTitle: String,
-        affected: String,
-        domain: String?,
-        pubDate: Date?,
-        sourcesQuality: Int?,
-        argumentQuality: Int?,
-        sourceType: String?,
-        sourceAnalysis: String?,
-        quality: Int?,
-        summary: String?,
-        criticalAnalysis: String?,
-        logicalFallacies: String?,
-        relationToTopic: String?,
-        additionalInsights: String?,
-        engineStats: String?,
-        similarArticles: String?
-    ) {
-        // Use markdown directly without conversion to plain text
-        let title = (json["tiny_title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Untitled"
-        let body = (json["tiny_summary"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "No content available"
-        let topic = json["topic"] as? String
-        let articleTitle = (json["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "No article title"
-        let affected = json["affected"] as? String ?? ""
-        let domain = URL(string: json["url"] as? String ?? "")?.host
-        let pubDate = (json["pub_date"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
-
-        // Critical: Use the actual json_url from the JSON if available
-        // If not available, it might be in the URL path of the request
-        let jsonURL: String
-        if let explicitJsonURL = json["json_url"] as? String, !explicitJsonURL.isEmpty {
-            jsonURL = explicitJsonURL
-        } else if let url = json["url"] as? String, url.contains("json") {
-            jsonURL = url
-        } else {
-            // This is a critical value - we need to ensure we have something valid
-            print("WARNING: No json_url found in content! Using fallback.")
-            jsonURL = "https://api.arguspulse.com/articles/\(UUID().uuidString).json"
+    func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
+        guard let title = json["title"] as? String,
+              let body = json["body"] as? String,
+              let jsonURL = json["json_url"] as? String
+        else {
+            return nil
         }
 
-        print("Processing article with JSON URL: \(jsonURL)")
-
-        // Extract the new fields
-        let sourcesQuality = json["sources_quality"] as? Int
-        let argumentQuality = json["argument_quality"] as? Int
-        let sourceType = json["source_type"] as? String
-        let quality = json["quality"] as? Int
-
-        // Keep markdown content intact
-        let summary = (json["summary"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let criticalAnalysis = (json["critical_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let logicalFallacies = (json["logical_fallacies"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let sourceAnalysis = (json["source_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let relationToTopic = (json["relation_to_topic"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let additionalInsights = (json["additional_insights"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-
-        // Process engine stats
-        var engineStats: String?
-        if let model = json["model"] as? String,
-           let elapsedTime = json["elapsed_time"] as? Double,
-           let stats = json["stats"] as? String
-        {
-            var statsDict: [String: Any] = [
-                "model": model,
-                "elapsed_time": elapsedTime,
-                "stats": stats,
-            ]
-
-            // Add system info if available
-            if let systemInfo = json["system_info"] as? [String: Any] {
-                statsDict["system_info"] = systemInfo
-            }
-
-            if let jsonData = try? JSONSerialization.data(withJSONObject: statsDict),
-               let jsonString = String(data: jsonData, encoding: .utf8)
-            {
-                engineStats = jsonString
-            }
-        }
-
-        // Store similar articles as JSON string
-        var similarArticlesJSON: String?
-        if let similarArticles = json["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty {
-            if let jsonData = try? JSONSerialization.data(withJSONObject: similarArticles),
-               let jsonString = String(data: jsonData, encoding: .utf8)
-            {
-                similarArticlesJSON = jsonString
-            }
-        }
-
-        return (
-            title, body, jsonURL, topic, articleTitle, affected, domain, pubDate,
-            sourcesQuality, argumentQuality, sourceType, sourceAnalysis, quality,
-            summary, criticalAnalysis, logicalFallacies, relationToTopic, additionalInsights,
-            engineStats, similarArticlesJSON
+        return ArticleJSON(
+            title: title,
+            body: body,
+            jsonURL: jsonURL,
+            topic: json["topic"] as? String,
+            articleTitle: json["article_title"] as? String ?? "",
+            affected: json["affected"] as? String ?? "",
+            domain: json["domain"] as? String,
+            pubDate: (json["pub_date"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) },
+            sourcesQuality: json["sources_quality"] as? Int,
+            argumentQuality: json["argument_quality"] as? Int,
+            sourceType: json["source_type"] as? String,
+            sourceAnalysis: json["source_analysis"] as? String,
+            quality: json["quality"] as? Int,
+            summary: json["summary"] as? String,
+            criticalAnalysis: json["critical_analysis"] as? String,
+            logicalFallacies: json["logical_fallacies"] as? String,
+            relationToTopic: json["relation_to_topic"] as? String,
+            additionalInsights: json["additional_insights"] as? String,
+            engineStats: json["engine_stats"] as? String,
+            similarArticles: json["similar_articles"] as? String
         )
     }
 
@@ -390,249 +391,136 @@ class SyncManager {
     }
 
     func fetchAndSaveUnseenArticles(from urls: [String]) async {
-        // Copy the URLs to avoid capturing
-        let urlsToProcess = urls
-
-        // Process everything in detached task
-        Task.detached {
-            // Fetch all article JSON in parallel with timeout protection
-            struct ArticleData: Sendable {
-                let basicInfo: (
-                    title: String,
-                    body: String,
-                    jsonURL: String,
-                    topic: String?,
-                    articleTitle: String,
-                    affected: String,
-                    domain: String?,
-                    pubDate: Date?
-                )
-                let extendedInfo: (
-                    sourcesQuality: Int?,
-                    argumentQuality: Int?,
-                    sourceType: String?,
-                    sourceAnalysis: String?,
-                    quality: Int?,
-                    summary: String?,
-                    criticalAnalysis: String?,
-                    logicalFallacies: String?,
-                    relationToTopic: String?,
-                    additionalInsights: String?,
-                    engineStats: String?,
-                    similarArticles: String?
-                )
-                let richTextBlobs: [String: Data]
-            }
-
-            // Step 1: Fetch all JSON data in parallel
-            let fetchedJsons = await withTaskGroup(of: (String, [String: Any]?).self) { group in
-                for urlString in urlsToProcess {
-                    group.addTask {
-                        guard let url = URL(string: urlString) else {
-                            return (urlString, nil)
+        let fetchedArticles = await withTaskGroup(of: (String, Data?).self) { group -> [(String, Data?)] in
+            for urlString in urls {
+                group.addTask {
+                    guard let url = URL(string: urlString) else {
+                        return (urlString, nil)
+                    }
+                    do {
+                        let (data, _) = try await withTimeout(seconds: 10) {
+                            try await URLSession.shared.data(from: url)
                         }
-
-                        do {
-                            let (data, _) = try await withTimeout(seconds: 10) {
-                                try await URLSession.shared.data(from: url)
-                            }
-
-                            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                                // Add URL to JSON if needed
-                                var jsonWithURL = json
-                                if jsonWithURL["json_url"] == nil {
-                                    jsonWithURL["json_url"] = urlString
-                                }
-                                return (urlString, jsonWithURL)
-                            }
-                        } catch {
-                            print("Network request failed for \(urlString): \(error)")
-                        }
-
+                        return (urlString, data)
+                    } catch {
+                        print("Network request failed for \(urlString): \(error)")
                         return (urlString, nil)
                     }
                 }
-
-                var results: [(String, [String: Any]?)] = []
-                for await result in group {
-                    results.append(result)
-                }
-                return results.filter { $0.1 != nil }
             }
 
-            // Step 2: Process each JSON into article data in parallel and collect results
-            let processedArticles = await withTaskGroup(of: ArticleData?.self) { group -> [ArticleData] in
-                for (_, json) in fetchedJsons {
-                    guard let json = json else { continue }
+            var results: [(String, Data?)] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
 
-                    group.addTask {
-                        // Process the article's basic data
-                        let processedArticle = self.processArticleJSON(json)
+        let processed = fetchedArticles.compactMap { urlString, data -> ArticleJSON? in
+            guard let data, let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                print("Failed to parse JSON for \(urlString)")
+                return nil
+            }
+            var enrichedJson = rawJson
+            if enrichedJson["json_url"] == nil {
+                enrichedJson["json_url"] = urlString
+            }
+            return processArticleJSON(enrichedJson)
+        }
 
-                        // IMPORTANT: We need to generate the attributed strings on the main thread due to UIFont
-                        // First, prepare the data we'll need
-                        let fieldData = (
-                            title: processedArticle.title,
-                            body: processedArticle.body,
-                            summary: processedArticle.summary,
-                            criticalAnalysis: processedArticle.criticalAnalysis,
-                            logicalFallacies: processedArticle.logicalFallacies,
-                            sourceAnalysis: processedArticle.sourceAnalysis,
-                            relationToTopic: processedArticle.relationToTopic,
-                            additionalInsights: processedArticle.additionalInsights
-                        )
-
-                        // On main thread, convert markdown to attributed strings and serialize to Data
-                        let richTextBlobs = await MainActor.run {
-                            // Generate attributed strings on main thread
-                            let attributedStrings = self.generateAttributedStringsForFields(fieldData)
-
-                            // Serialize them into Data blobs (still on main thread to avoid Sendable issues)
-                            var blobs = [String: Data]()
-                            for (key, attributedString) in attributedStrings {
-                                if let data = try? NSKeyedArchiver.archivedData(
-                                    withRootObject: attributedString,
-                                    requiringSecureCoding: false
-                                ) {
-                                    blobs[key] = data
-                                }
-                            }
-                            return blobs
-                        }
-
-                        // Return the complete article data
-                        return ArticleData(
-                            basicInfo: (
-                                title: processedArticle.title,
-                                body: processedArticle.body,
-                                jsonURL: processedArticle.jsonURL,
-                                topic: processedArticle.topic,
-                                articleTitle: processedArticle.articleTitle,
-                                affected: processedArticle.affected,
-                                domain: processedArticle.domain,
-                                pubDate: processedArticle.pubDate
-                            ),
-                            extendedInfo: (
-                                sourcesQuality: processedArticle.sourcesQuality,
-                                argumentQuality: processedArticle.argumentQuality,
-                                sourceType: processedArticle.sourceType,
-                                sourceAnalysis: processedArticle.sourceAnalysis,
-                                quality: processedArticle.quality,
-                                summary: processedArticle.summary,
-                                criticalAnalysis: processedArticle.criticalAnalysis,
-                                logicalFallacies: processedArticle.logicalFallacies,
-                                relationToTopic: processedArticle.relationToTopic,
-                                additionalInsights: processedArticle.additionalInsights,
-                                engineStats: processedArticle.engineStats,
-                                similarArticles: processedArticle.similarArticles
-                            ),
-                            richTextBlobs: richTextBlobs
-                        )
-                    }
+        let preparedArticles = await withTaskGroup(of: PreparedArticle?.self) { group -> [PreparedArticle] in
+            for article in processed {
+                group.addTask {
+                    convertToPreparedArticle(article)
                 }
-
-                // Collect all processed articles
-                var articles = [ArticleData]()
-                for await articleData in group {
-                    if let articleData = articleData {
-                        articles.append(articleData)
-                    }
-                }
-                return articles
             }
 
-            // Step 3: Insert everything into the database in a single transaction on the main thread
-            if !processedArticles.isEmpty {
-                do {
-                    try await MainActor.run {
-                        let context = ArgusApp.sharedModelContainer.mainContext
+            var results: [PreparedArticle] = []
+            for await result in group {
+                if let r = result {
+                    results.append(r)
+                }
+            }
+            return results
+        }
 
-                        // Get all existing data
-                        let existingNotifications = try? context.fetch(FetchDescriptor<NotificationData>())
-                        let existingURLs = existingNotifications?.map { $0.json_url } ?? []
+        do {
+            try await savePreparedArticles(preparedArticles)
+        } catch {
+            print("Failed to save articles: \(error)")
+        }
+    }
 
-                        // Get existing seen article URLs separately
-                        let existingSeenURLs = (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
+    @MainActor
+    private func savePreparedArticles(_ articles: [PreparedArticle]) throws {
+        let context = ArgusApp.sharedModelContainer.mainContext
 
-                        // Single transaction for all database operations
-                        try context.transaction {
-                            for article in processedArticles {
-                                let jsonURL = article.basicInfo.jsonURL
+        // Fetch existing notifications and seen articles once, before the transaction
+        let existingNotifications = (try? context.fetch(FetchDescriptor<NotificationData>())) ?? []
+        let existingSeenURLs = Set(
+            (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
+        )
 
-                                if existingURLs.contains(jsonURL) {
-                                    // Update existing notification
-                                    if let notification = existingNotifications?.first(where: { $0.json_url == jsonURL }) {
-                                        // Update extended fields
-                                        self.updateNotificationFields(
-                                            notification: notification,
-                                            extendedInfo: article.extendedInfo
-                                        )
+        // Filter out articles that have already been seen to avoid unnecessary DB writes
+        let newArticles = articles.filter { !existingSeenURLs.contains($0.jsonURL) }
 
-                                        // Apply pre-computed rich text blobs
-                                        self.applyRichTextBlobs(
-                                            notification: notification,
-                                            richTextBlobs: article.richTextBlobs
-                                        )
-                                    }
-                                } else if !existingSeenURLs.contains(jsonURL) {
-                                    // Create new notification and seen article
-                                    let notification = NotificationData(
-                                        date: Date(),
-                                        title: article.basicInfo.title,
-                                        body: article.basicInfo.body,
-                                        json_url: jsonURL,
-                                        topic: article.basicInfo.topic,
-                                        article_title: article.basicInfo.articleTitle,
-                                        affected: article.basicInfo.affected,
-                                        domain: article.basicInfo.domain,
-                                        pub_date: article.basicInfo.pubDate ?? Date(),
-                                        isViewed: false,
-                                        isBookmarked: false,
-                                        isArchived: false,
-                                        sources_quality: article.extendedInfo.sourcesQuality,
-                                        argument_quality: article.extendedInfo.argumentQuality,
-                                        source_type: article.extendedInfo.sourceType,
-                                        source_analysis: article.extendedInfo.sourceAnalysis,
-                                        quality: article.extendedInfo.quality,
-                                        summary: article.extendedInfo.summary,
-                                        critical_analysis: article.extendedInfo.criticalAnalysis,
-                                        logical_fallacies: article.extendedInfo.logicalFallacies,
-                                        relation_to_topic: article.extendedInfo.relationToTopic,
-                                        additional_insights: article.extendedInfo.additionalInsights,
-                                        engine_stats: article.extendedInfo.engineStats,
-                                        similar_articles: article.extendedInfo.similarArticles
-                                    )
+        if newArticles.isEmpty {
+            print("No new articles to insert/update. Skipping transaction.")
+            return
+        }
 
-                                    // Apply pre-computed rich text blobs
-                                    self.applyRichTextBlobs(
-                                        notification: notification,
-                                        richTextBlobs: article.richTextBlobs
-                                    )
+        try context.transaction {
+            for prepared in newArticles {
+                if let existing = existingNotifications.first(where: { $0.json_url == prepared.jsonURL }) {
+                    // Update existing notification
+                    if let q = prepared.sourcesQuality { existing.sources_quality = q }
+                    if let a = prepared.argumentQuality { existing.argument_quality = a }
+                    if let t = prepared.sourceType { existing.source_type = t }
+                    if let sa = prepared.sourceAnalysis { existing.source_analysis = sa }
+                    if let q = prepared.quality { existing.quality = q }
+                    if let s = prepared.summary { existing.summary = s }
+                    if let ca = prepared.criticalAnalysis { existing.critical_analysis = ca }
+                    if let lf = prepared.logicalFallacies { existing.logical_fallacies = lf }
+                    if let rt = prepared.relationToTopic { existing.relation_to_topic = rt }
+                    if let ai = prepared.additionalInsights { existing.additional_insights = ai }
+                    if let es = prepared.engineStats { existing.engine_stats = es }
+                    if let sim = prepared.similarArticles { existing.similar_articles = sim }
 
-                                    // Create seen article
-                                    let seenArticle = SeenArticle(
-                                        id: notification.id,
-                                        json_url: jsonURL,
-                                        date: notification.date
-                                    )
-
-                                    // Insert the new entities
-                                    context.insert(notification)
-                                    context.insert(seenArticle)
-                                }
-                            }
-                        }
-
-                        // Update badge after all processing is complete
-                        NotificationUtils.updateAppBadgeCount()
-                    }
-
-                    print("Successfully saved \(processedArticles.count) articles to database")
-                } catch {
-                    print("Failed to save articles: \(error)")
+                } else {
+                    // Insert new notification
+                    let notification = NotificationData(
+                        date: Date(),
+                        title: prepared.title,
+                        body: prepared.body,
+                        json_url: prepared.jsonURL,
+                        topic: prepared.topic,
+                        article_title: prepared.articleTitle,
+                        affected: prepared.affected,
+                        domain: prepared.domain,
+                        pub_date: prepared.pubDate ?? Date(),
+                        isViewed: false,
+                        isBookmarked: false,
+                        isArchived: false,
+                        sources_quality: prepared.sourcesQuality,
+                        argument_quality: prepared.argumentQuality,
+                        source_type: prepared.sourceType,
+                        source_analysis: prepared.sourceAnalysis,
+                        quality: prepared.quality,
+                        summary: prepared.summary,
+                        critical_analysis: prepared.criticalAnalysis,
+                        logical_fallacies: prepared.logicalFallacies,
+                        relation_to_topic: prepared.relationToTopic,
+                        additional_insights: prepared.additionalInsights,
+                        engine_stats: prepared.engineStats,
+                        similar_articles: prepared.similarArticles
+                    )
+                    context.insert(notification)
+                    context.insert(SeenArticle(id: notification.id, json_url: prepared.jsonURL, date: notification.date))
                 }
             }
         }
+
+        print("Inserted/updated \(newArticles.count) articles in one transaction.")
     }
 
     private func generateAttributedStringsForFields(_ fields: (
@@ -1056,7 +944,32 @@ class SyncManager {
             let processedArticle = shared.processArticleJSON(jsonWithURL)
 
             // Update the database with the full content
-            try await shared.addOrUpdateArticlesWithExtendedData([processedArticle])
+            if let processedArticle = processedArticle {
+                try await shared.addOrUpdateArticlesWithExtendedData([(
+                    title: processedArticle.title,
+                    body: processedArticle.body, // Ensure this is a String
+                    jsonURL: processedArticle.jsonURL,
+                    topic: processedArticle.topic,
+                    articleTitle: processedArticle.articleTitle,
+                    affected: processedArticle.affected,
+                    domain: processedArticle.domain,
+                    pubDate: processedArticle.pubDate,
+                    sourcesQuality: processedArticle.sourcesQuality,
+                    argumentQuality: processedArticle.argumentQuality,
+                    sourceType: processedArticle.sourceType,
+                    sourceAnalysis: processedArticle.sourceAnalysis,
+                    quality: processedArticle.quality,
+                    summary: processedArticle.summary,
+                    criticalAnalysis: processedArticle.criticalAnalysis,
+                    logicalFallacies: processedArticle.logicalFallacies,
+                    relationToTopic: processedArticle.relationToTopic,
+                    additionalInsights: processedArticle.additionalInsights,
+                    engineStats: processedArticle.engineStats,
+                    similarArticles: processedArticle.similarArticles
+                )])
+            } else {
+                print("Skipping article update: processedArticle is nil")
+            }
 
             // Instead of fetching by ID, let's use the original notification object
             // and rely on SwiftData's object tracking to reflect the updates
