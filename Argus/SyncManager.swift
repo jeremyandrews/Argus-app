@@ -395,85 +395,461 @@ class SyncManager {
 
         // Process everything in detached task
         Task.detached {
-            // Temporary storage for processed articles
-            var processedArticles: [(
-                title: String,
-                body: String,
-                jsonURL: String,
-                topic: String?,
-                articleTitle: String,
-                affected: String,
-                domain: String?,
-                pubDate: Date?,
-                sourcesQuality: Int?,
-                argumentQuality: Int?,
-                sourceType: String?,
-                sourceAnalysis: String?,
-                quality: Int?,
-                summary: String?,
-                criticalAnalysis: String?,
-                logicalFallacies: String?,
-                relationToTopic: String?,
-                additionalInsights: String?,
-                engineStats: String?,
-                similarArticles: String?
-            )] = []
+            // Fetch all article JSON in parallel with timeout protection
+            struct ArticleData: Sendable {
+                let basicInfo: (
+                    title: String,
+                    body: String,
+                    jsonURL: String,
+                    topic: String?,
+                    articleTitle: String,
+                    affected: String,
+                    domain: String?,
+                    pubDate: Date?
+                )
+                let extendedInfo: (
+                    sourcesQuality: Int?,
+                    argumentQuality: Int?,
+                    sourceType: String?,
+                    sourceAnalysis: String?,
+                    quality: Int?,
+                    summary: String?,
+                    criticalAnalysis: String?,
+                    logicalFallacies: String?,
+                    relationToTopic: String?,
+                    additionalInsights: String?,
+                    engineStats: String?,
+                    similarArticles: String?
+                )
+                let richTextBlobs: [String: Data]
+            }
 
-            await withTaskGroup(of: (String, Data?).self) { group in
+            // Step 1: Fetch all JSON data in parallel
+            let fetchedJsons = await withTaskGroup(of: (String, [String: Any]?).self) { group in
                 for urlString in urlsToProcess {
                     group.addTask {
                         guard let url = URL(string: urlString) else {
-                            return (urlString, nil as Data?)
+                            return (urlString, nil)
                         }
-                        // Timeout only the network call, not the processing
+
                         do {
                             let (data, _) = try await withTimeout(seconds: 10) {
                                 try await URLSession.shared.data(from: url)
                             }
-                            return (urlString, data)
+
+                            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                                // Add URL to JSON if needed
+                                var jsonWithURL = json
+                                if jsonWithURL["json_url"] == nil {
+                                    jsonWithURL["json_url"] = urlString
+                                }
+                                return (urlString, jsonWithURL)
+                            }
                         } catch {
-                            print("Network request timed out or failed for \(urlString): \(error)")
-                            return (urlString, nil)
+                            print("Network request failed for \(urlString): \(error)")
                         }
+
+                        return (urlString, nil)
                     }
                 }
 
-                for await (urlString, data) in group {
-                    guard let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                        print("Failed to parse JSON for URL: \(urlString)")
-                        continue
-                    }
-
-                    print("Successfully fetched and parsed JSON for: \(urlString)")
-
-                    // Create a new JSON with the URL included
-                    var jsonWithURL = json
-                    // Add the URL to the JSON if it doesn't have one
-                    if jsonWithURL["json_url"] == nil {
-                        jsonWithURL["json_url"] = urlString
-                    }
-
-                    // Process all fields from the JSON
-                    let processedArticle = self.processArticleJSON(jsonWithURL)
-                    processedArticles.append(processedArticle)
+                var results: [(String, [String: Any]?)] = []
+                for await result in group {
+                    results.append(result)
                 }
+                return results.filter { $0.1 != nil }
             }
 
-            // Debug logging to see what's happening
-            print("Processed \(processedArticles.count) articles from server")
+            // Step 2: Process each JSON into article data in parallel and collect results
+            let processedArticles = await withTaskGroup(of: ArticleData?.self) { group -> [ArticleData] in
+                for (_, json) in fetchedJsons {
+                    guard let json = json else { continue }
 
+                    group.addTask {
+                        // Process the article's basic data
+                        let processedArticle = self.processArticleJSON(json)
+
+                        // IMPORTANT: We need to generate the attributed strings on the main thread due to UIFont
+                        // First, prepare the data we'll need
+                        let fieldData = (
+                            title: processedArticle.title,
+                            body: processedArticle.body,
+                            summary: processedArticle.summary,
+                            criticalAnalysis: processedArticle.criticalAnalysis,
+                            logicalFallacies: processedArticle.logicalFallacies,
+                            sourceAnalysis: processedArticle.sourceAnalysis,
+                            relationToTopic: processedArticle.relationToTopic,
+                            additionalInsights: processedArticle.additionalInsights
+                        )
+
+                        // On main thread, convert markdown to attributed strings and serialize to Data
+                        let richTextBlobs = await MainActor.run {
+                            // Generate attributed strings on main thread
+                            let attributedStrings = self.generateAttributedStringsForFields(fieldData)
+
+                            // Serialize them into Data blobs (still on main thread to avoid Sendable issues)
+                            var blobs = [String: Data]()
+                            for (key, attributedString) in attributedStrings {
+                                if let data = try? NSKeyedArchiver.archivedData(
+                                    withRootObject: attributedString,
+                                    requiringSecureCoding: false
+                                ) {
+                                    blobs[key] = data
+                                }
+                            }
+                            return blobs
+                        }
+
+                        // Return the complete article data
+                        return ArticleData(
+                            basicInfo: (
+                                title: processedArticle.title,
+                                body: processedArticle.body,
+                                jsonURL: processedArticle.jsonURL,
+                                topic: processedArticle.topic,
+                                articleTitle: processedArticle.articleTitle,
+                                affected: processedArticle.affected,
+                                domain: processedArticle.domain,
+                                pubDate: processedArticle.pubDate
+                            ),
+                            extendedInfo: (
+                                sourcesQuality: processedArticle.sourcesQuality,
+                                argumentQuality: processedArticle.argumentQuality,
+                                sourceType: processedArticle.sourceType,
+                                sourceAnalysis: processedArticle.sourceAnalysis,
+                                quality: processedArticle.quality,
+                                summary: processedArticle.summary,
+                                criticalAnalysis: processedArticle.criticalAnalysis,
+                                logicalFallacies: processedArticle.logicalFallacies,
+                                relationToTopic: processedArticle.relationToTopic,
+                                additionalInsights: processedArticle.additionalInsights,
+                                engineStats: processedArticle.engineStats,
+                                similarArticles: processedArticle.similarArticles
+                            ),
+                            richTextBlobs: richTextBlobs
+                        )
+                    }
+                }
+
+                // Collect all processed articles
+                var articles = [ArticleData]()
+                for await articleData in group {
+                    if let articleData = articleData {
+                        articles.append(articleData)
+                    }
+                }
+                return articles
+            }
+
+            // Step 3: Insert everything into the database in a single transaction on the main thread
             if !processedArticles.isEmpty {
-                // Make a local copy to pass to the next function
-                let articlesToSave = processedArticles
-
-                // Add to database - this function handles its own actor transitions
                 do {
-                    try await self.addOrUpdateArticlesWithExtendedData(articlesToSave)
-                    print("Successfully saved articles to database")
+                    try await MainActor.run {
+                        let context = ArgusApp.sharedModelContainer.mainContext
+
+                        // Get all existing data
+                        let existingNotifications = try? context.fetch(FetchDescriptor<NotificationData>())
+                        let existingURLs = existingNotifications?.map { $0.json_url } ?? []
+
+                        // Get existing seen article URLs separately
+                        let existingSeenURLs = (try? context.fetch(FetchDescriptor<SeenArticle>()))?.map { $0.json_url } ?? []
+
+                        // Single transaction for all database operations
+                        try context.transaction {
+                            for article in processedArticles {
+                                let jsonURL = article.basicInfo.jsonURL
+
+                                if existingURLs.contains(jsonURL) {
+                                    // Update existing notification
+                                    if let notification = existingNotifications?.first(where: { $0.json_url == jsonURL }) {
+                                        // Update extended fields
+                                        self.updateNotificationFields(
+                                            notification: notification,
+                                            extendedInfo: article.extendedInfo
+                                        )
+
+                                        // Apply pre-computed rich text blobs
+                                        self.applyRichTextBlobs(
+                                            notification: notification,
+                                            richTextBlobs: article.richTextBlobs
+                                        )
+                                    }
+                                } else if !existingSeenURLs.contains(jsonURL) {
+                                    // Create new notification and seen article
+                                    let notification = NotificationData(
+                                        date: Date(),
+                                        title: article.basicInfo.title,
+                                        body: article.basicInfo.body,
+                                        json_url: jsonURL,
+                                        topic: article.basicInfo.topic,
+                                        article_title: article.basicInfo.articleTitle,
+                                        affected: article.basicInfo.affected,
+                                        domain: article.basicInfo.domain,
+                                        pub_date: article.basicInfo.pubDate ?? Date(),
+                                        isViewed: false,
+                                        isBookmarked: false,
+                                        isArchived: false,
+                                        sources_quality: article.extendedInfo.sourcesQuality,
+                                        argument_quality: article.extendedInfo.argumentQuality,
+                                        source_type: article.extendedInfo.sourceType,
+                                        source_analysis: article.extendedInfo.sourceAnalysis,
+                                        quality: article.extendedInfo.quality,
+                                        summary: article.extendedInfo.summary,
+                                        critical_analysis: article.extendedInfo.criticalAnalysis,
+                                        logical_fallacies: article.extendedInfo.logicalFallacies,
+                                        relation_to_topic: article.extendedInfo.relationToTopic,
+                                        additional_insights: article.extendedInfo.additionalInsights,
+                                        engine_stats: article.extendedInfo.engineStats,
+                                        similar_articles: article.extendedInfo.similarArticles
+                                    )
+
+                                    // Apply pre-computed rich text blobs
+                                    self.applyRichTextBlobs(
+                                        notification: notification,
+                                        richTextBlobs: article.richTextBlobs
+                                    )
+
+                                    // Create seen article
+                                    let seenArticle = SeenArticle(
+                                        id: notification.id,
+                                        json_url: jsonURL,
+                                        date: notification.date
+                                    )
+
+                                    // Insert the new entities
+                                    context.insert(notification)
+                                    context.insert(seenArticle)
+                                }
+                            }
+                        }
+
+                        // Update badge after all processing is complete
+                        NotificationUtils.updateAppBadgeCount()
+                    }
+
+                    print("Successfully saved \(processedArticles.count) articles to database")
                 } catch {
                     print("Failed to save articles: \(error)")
                 }
             }
+        }
+    }
+
+    private func generateAttributedStringsForFields(_ fields: (
+        title: String,
+        body: String,
+        summary: String?,
+        criticalAnalysis: String?,
+        logicalFallacies: String?,
+        sourceAnalysis: String?,
+        relationToTopic: String?,
+        additionalInsights: String?
+    )) -> [String: NSAttributedString] {
+        var attributedStrings: [String: NSAttributedString] = [:]
+
+        // Create function to convert markdown to NSAttributedString with Dynamic Type support
+        func markdownToAccessibleAttributedString(_ markdown: String?, textStyle: String) -> NSAttributedString? {
+            guard let markdown = markdown, !markdown.isEmpty else { return nil }
+
+            let swiftyMarkdown = SwiftyMarkdown(string: markdown)
+
+            // Get the preferred font for the specified text style (supports Dynamic Type)
+            let bodyFont = UIFont.preferredFont(forTextStyle: UIFont.TextStyle(rawValue: textStyle))
+            swiftyMarkdown.body.fontName = bodyFont.fontName
+            swiftyMarkdown.body.fontSize = bodyFont.pointSize
+
+            // Style headings with appropriate Dynamic Type text styles
+            let h1Font = UIFont.preferredFont(forTextStyle: .title1)
+            swiftyMarkdown.h1.fontName = h1Font.fontName
+            swiftyMarkdown.h1.fontSize = h1Font.pointSize
+
+            let h2Font = UIFont.preferredFont(forTextStyle: .title2)
+            swiftyMarkdown.h2.fontName = h2Font.fontName
+            swiftyMarkdown.h2.fontSize = h2Font.pointSize
+
+            let h3Font = UIFont.preferredFont(forTextStyle: .title3)
+            swiftyMarkdown.h3.fontName = h3Font.fontName
+            swiftyMarkdown.h3.fontSize = h3Font.pointSize
+
+            // Other styling
+            swiftyMarkdown.link.color = .systemBlue
+
+            // Get bold and italic versions of the body font if possible
+            if let boldDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitBold) {
+                let boldFont = UIFont(descriptor: boldDescriptor, size: 0)
+                swiftyMarkdown.bold.fontName = boldFont.fontName
+            } else {
+                swiftyMarkdown.bold.fontName = ".SFUI-Bold"
+            }
+
+            if let italicDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitItalic) {
+                let italicFont = UIFont(descriptor: italicDescriptor, size: 0)
+                swiftyMarkdown.italic.fontName = italicFont.fontName
+            } else {
+                swiftyMarkdown.italic.fontName = ".SFUI-Italic"
+            }
+
+            // Get the initial attributed string from SwiftyMarkdown
+            let attributedString = swiftyMarkdown.attributedString()
+
+            // Create a mutable copy
+            let mutableAttributedString = NSMutableAttributedString(attributedString: attributedString)
+
+            // Add accessibility trait to indicate the text style
+            let textStyleKey = NSAttributedString.Key(rawValue: "NSAccessibilityTextStyleStringAttribute")
+            mutableAttributedString.addAttribute(
+                textStyleKey,
+                value: textStyle,
+                range: NSRange(location: 0, length: mutableAttributedString.length)
+            )
+
+            return mutableAttributedString
+        }
+
+        // Generate all attributed strings at once
+        if let attributedTitle = markdownToAccessibleAttributedString(fields.title, textStyle: "UIFontTextStyleHeadline") {
+            attributedStrings["title"] = attributedTitle
+        }
+
+        if let attributedBody = markdownToAccessibleAttributedString(fields.body, textStyle: "UIFontTextStyleBody") {
+            attributedStrings["body"] = attributedBody
+        }
+
+        if let summary = fields.summary,
+           let attributedSummary = markdownToAccessibleAttributedString(summary, textStyle: "UIFontTextStyleBody")
+        {
+            attributedStrings["summary"] = attributedSummary
+        }
+
+        if let criticalAnalysis = fields.criticalAnalysis,
+           let attributedCriticalAnalysis = markdownToAccessibleAttributedString(criticalAnalysis, textStyle: "UIFontTextStyleBody")
+        {
+            attributedStrings["critical_analysis"] = attributedCriticalAnalysis
+        }
+
+        if let logicalFallacies = fields.logicalFallacies,
+           let attributedLogicalFallacies = markdownToAccessibleAttributedString(logicalFallacies, textStyle: "UIFontTextStyleBody")
+        {
+            attributedStrings["logical_fallacies"] = attributedLogicalFallacies
+        }
+
+        if let sourceAnalysis = fields.sourceAnalysis,
+           let attributedSourceAnalysis = markdownToAccessibleAttributedString(sourceAnalysis, textStyle: "UIFontTextStyleBody")
+        {
+            attributedStrings["source_analysis"] = attributedSourceAnalysis
+        }
+
+        if let relationToTopic = fields.relationToTopic,
+           let attributedRelationToTopic = markdownToAccessibleAttributedString(relationToTopic, textStyle: "UIFontTextStyleBody")
+        {
+            attributedStrings["relation_to_topic"] = attributedRelationToTopic
+        }
+
+        if let additionalInsights = fields.additionalInsights,
+           let attributedAdditionalInsights = markdownToAccessibleAttributedString(additionalInsights, textStyle: "UIFontTextStyleBody")
+        {
+            attributedStrings["additional_insights"] = attributedAdditionalInsights
+        }
+
+        return attributedStrings
+    }
+
+    private func applyRichTextBlobs(notification: NotificationData, richTextBlobs: [String: Data]) {
+        // Apply each blob to the corresponding field
+        if let titleBlob = richTextBlobs["title"] {
+            notification.title_blob = titleBlob
+        }
+
+        if let bodyBlob = richTextBlobs["body"] {
+            notification.body_blob = bodyBlob
+        }
+
+        if let summaryBlob = richTextBlobs["summary"] {
+            notification.summary_blob = summaryBlob
+        }
+
+        if let criticalAnalysisBlob = richTextBlobs["critical_analysis"] {
+            notification.critical_analysis_blob = criticalAnalysisBlob
+        }
+
+        if let logicalFallaciesBlob = richTextBlobs["logical_fallacies"] {
+            notification.logical_fallacies_blob = logicalFallaciesBlob
+        }
+
+        if let sourceAnalysisBlob = richTextBlobs["source_analysis"] {
+            notification.source_analysis_blob = sourceAnalysisBlob
+        }
+
+        if let relationToTopicBlob = richTextBlobs["relation_to_topic"] {
+            notification.relation_to_topic_blob = relationToTopicBlob
+        }
+
+        if let additionalInsightsBlob = richTextBlobs["additional_insights"] {
+            notification.additional_insights_blob = additionalInsightsBlob
+        }
+    }
+
+    private func updateNotificationFields(notification: NotificationData, extendedInfo: (
+        sourcesQuality: Int?,
+        argumentQuality: Int?,
+        sourceType: String?,
+        sourceAnalysis: String?,
+        quality: Int?,
+        summary: String?,
+        criticalAnalysis: String?,
+        logicalFallacies: String?,
+        relationToTopic: String?,
+        additionalInsights: String?,
+        engineStats: String?,
+        similarArticles: String?
+    )) {
+        // Update all fields that are present
+        if let sourcesQuality = extendedInfo.sourcesQuality {
+            notification.sources_quality = sourcesQuality
+        }
+
+        if let argumentQuality = extendedInfo.argumentQuality {
+            notification.argument_quality = argumentQuality
+        }
+
+        if let sourceType = extendedInfo.sourceType {
+            notification.source_type = sourceType
+        }
+
+        if let sourceAnalysis = extendedInfo.sourceAnalysis {
+            notification.source_analysis = sourceAnalysis
+        }
+
+        if let quality = extendedInfo.quality {
+            notification.quality = quality
+        }
+
+        if let summary = extendedInfo.summary {
+            notification.summary = summary
+        }
+
+        if let criticalAnalysis = extendedInfo.criticalAnalysis {
+            notification.critical_analysis = criticalAnalysis
+        }
+
+        if let logicalFallacies = extendedInfo.logicalFallacies {
+            notification.logical_fallacies = logicalFallacies
+        }
+
+        if let relationToTopic = extendedInfo.relationToTopic {
+            notification.relation_to_topic = relationToTopic
+        }
+
+        if let additionalInsights = extendedInfo.additionalInsights {
+            notification.additional_insights = additionalInsights
+        }
+
+        if let engineStats = extendedInfo.engineStats {
+            notification.engine_stats = engineStats
+        }
+
+        if let similarArticles = extendedInfo.similarArticles {
+            notification.similar_articles = similarArticles
         }
     }
 
