@@ -128,7 +128,7 @@ class SyncManager {
                 let backgroundContext = ModelContext(container)
                 let queueManager = backgroundContext.queueManager()
 
-                // Get items to process (increase batch size for better efficiency)
+                // Get items to process (larger batch for better efficiency)
                 let itemsToProcess = try await queueManager.getItemsToProcess(limit: 10)
 
                 if itemsToProcess.isEmpty {
@@ -142,20 +142,18 @@ class SyncManager {
                 // Track successfully processed items
                 var processedItems = [ArticleQueueItem]()
 
-                // Process each item in the batch
+                // Process each item in the batch - ALL IN BACKGROUND CONTEXT
                 for item in itemsToProcess {
                     if Task.isCancelled {
                         break
                     }
 
                     do {
-                        // Process the item - download from jsonURL
-                        // Note: We're not saving after each item anymore
+                        // Process the item in the BACKGROUND context
                         try await processQueueItem(item, context: backgroundContext)
                         processedItems.append(item)
                     } catch {
                         print("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
-                        // Skip this item and continue with the batch
                     }
                 }
 
@@ -169,6 +167,12 @@ class SyncManager {
                     }
 
                     print("Successfully processed and saved batch of \(processedItems.count) items")
+
+                    // OPTIONAL: Notify the main context that new data is available
+                    // Only do this if you need the UI to update immediately
+                    await MainActor.run {
+                        NotificationUtils.updateAppBadgeCount()
+                    }
                 }
 
                 // Short pause between batches
@@ -182,7 +186,7 @@ class SyncManager {
     }
 
     // Process a single queue item - downloads and saves the article data
-    private func processQueueItem(_ item: ArticleQueueItem, context _: ModelContext) async throws {
+    private func processQueueItem(_ item: ArticleQueueItem, context: ModelContext) async throws {
         guard let url = URL(string: item.jsonURL) else {
             throw NSError(domain: "com.arguspulse", code: 400, userInfo: [
                 NSLocalizedDescriptionKey: "Invalid JSON URL: \(item.jsonURL)",
@@ -216,7 +220,6 @@ class SyncManager {
         // Generate rich text blobs - detached in background
         let richTextBlobs = await Task.detached(priority: .utility) { () -> [String: Data] in
             // Rich text conversion code remains the same...
-            // (keeping the same code from your original implementation)
             var result = [String: Data]()
 
             // Create function to convert markdown to NSAttributedString with Dynamic Type support
@@ -302,11 +305,11 @@ class SyncManager {
         // If the item didn't already have a notification ID, update it
         if item.notificationID == nil {
             item.notificationID = notificationID
-            // Note: We don't save context here anymore, it will be saved in batch
+            // Don't save context here, will be saved in batch
         }
 
-        // Prepare all the data in the background before touching the MainActor
-        let notificationData = (
+        // Create the notification object in the background context
+        let notification = NotificationData(
             id: notificationID,
             date: date,
             title: articleJSON.title,
@@ -316,52 +319,29 @@ class SyncManager {
             article_title: articleJSON.articleTitle,
             affected: articleJSON.affected,
             domain: articleJSON.domain,
-            pub_date: articleJSON.pubDate ?? date,
-            titleBlob: richTextBlobs["title"],
-            bodyBlob: richTextBlobs["body"]
+            pub_date: articleJSON.pubDate ?? date
         )
 
-        // Create a new notification and SeenArticle on the main thread
-        await MainActor.run {
-            let mainContext = ArgusApp.sharedModelContainer.mainContext
-
-            // Create the notification object
-            let notification = NotificationData(
-                id: notificationData.id,
-                date: notificationData.date,
-                title: notificationData.title,
-                body: notificationData.body,
-                json_url: notificationData.json_url,
-                topic: notificationData.topic,
-                article_title: notificationData.article_title,
-                affected: notificationData.affected,
-                domain: notificationData.domain,
-                pub_date: notificationData.pub_date
-            )
-
-            // Apply rich text blobs
-            if let titleBlob = notificationData.titleBlob {
-                notification.title_blob = titleBlob
-            }
-
-            if let bodyBlob = notificationData.bodyBlob {
-                notification.body_blob = bodyBlob
-            }
-
-            // Insert the notification into the main context
-            mainContext.insert(notification)
-
-            // Create and insert the SeenArticle record
-            let seenArticle = SeenArticle(
-                id: notificationData.id,
-                json_url: notificationData.json_url,
-                date: notificationData.date
-            )
-            mainContext.insert(seenArticle)
-
-            // Note: We don't save the main context here
-            // It will be saved after all items in the batch are processed
+        // Apply rich text blobs
+        if let titleBlob = richTextBlobs["title"] {
+            notification.title_blob = titleBlob
         }
+
+        if let bodyBlob = richTextBlobs["body"] {
+            notification.body_blob = bodyBlob
+        }
+
+        // Insert the notification into the BACKGROUND context
+        context.insert(notification)
+
+        // Create and insert the SeenArticle record in the BACKGROUND context
+        let seenArticle = SeenArticle(
+            id: notificationID,
+            json_url: articleJSON.jsonURL,
+            date: date
+        )
+        context.insert(seenArticle)
+        // No context save here - it will be saved in batch
     }
 
     func sendRecentArticlesToServer() async {
