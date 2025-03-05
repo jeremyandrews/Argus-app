@@ -246,6 +246,16 @@ class SyncManager {
             }
         }
 
+        // Create similar articles JSON string if available in the raw JSON
+        var similarArticlesJSON: String?
+        if let similarArticles = enrichedJson["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: similarArticles),
+               let jsonString = String(data: jsonData, encoding: .utf8)
+            {
+                similarArticlesJSON = jsonString
+            }
+        }
+
         // Generate rich text blobs - detached in background
         let richTextBlobs = await Task.detached(priority: .utility) { () -> [String: Data] in
             // Rich text conversion code remains the same...
@@ -363,7 +373,7 @@ class SyncManager {
             relation_to_topic: articleJSON.relationToTopic,
             additional_insights: articleJSON.additionalInsights,
             engine_stats: engineStatsJSON, // Use the JSON string we created
-            similar_articles: articleJSON.similarArticles
+            similar_articles: similarArticlesJSON // Use the JSON string for similar articles
         )
 
         // Apply rich text blobs
