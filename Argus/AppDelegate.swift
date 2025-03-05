@@ -66,6 +66,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             self.performAutoSync()
         }
 
+        // Start queue processing for article downloads
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1.5) {
+            // Start processing the article queue in the background
+            SyncManager.shared.startQueueProcessing()
+        }
+
         // Cleanup old articles in the background
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.0) {
             Task { @MainActor in

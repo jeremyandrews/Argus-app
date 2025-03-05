@@ -108,6 +108,262 @@ class SyncManager {
     private var lastSyncTime: Date = .distantPast
     private let minimumSyncInterval: TimeInterval = 60
 
+    // Start a background task to process queue items
+    func startQueueProcessing() {
+        Task.detached(priority: .background) {
+            await self.processQueueItems()
+        }
+    }
+
+    // Main processing loop that runs continuously in the background
+    private func processQueueItems() async {
+        print("Starting background queue processing")
+
+        while true {
+            do {
+                // Create a background context for queue operations
+                let container = await MainActor.run {
+                    ArgusApp.sharedModelContainer
+                }
+                let backgroundContext = ModelContext(container)
+                let queueManager = backgroundContext.queueManager()
+
+                // Get items to process (increase batch size for better efficiency)
+                let itemsToProcess = try await queueManager.getItemsToProcess(limit: 10)
+
+                if itemsToProcess.isEmpty {
+                    // If no items to process, wait before checking again
+                    try await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                    continue
+                }
+
+                print("Processing batch of \(itemsToProcess.count) queue items")
+
+                // Track successfully processed items
+                var processedItems = [ArticleQueueItem]()
+
+                // Process each item in the batch
+                for item in itemsToProcess {
+                    if Task.isCancelled {
+                        break
+                    }
+
+                    do {
+                        // Process the item - download from jsonURL
+                        // Note: We're not saving after each item anymore
+                        try await processQueueItem(item, context: backgroundContext)
+                        processedItems.append(item)
+                    } catch {
+                        print("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
+                        // Skip this item and continue with the batch
+                    }
+                }
+
+                // Only save once after the entire batch is processed
+                if !processedItems.isEmpty {
+                    try backgroundContext.save()
+
+                    // After saving, remove the processed items from the queue
+                    for item in processedItems {
+                        try queueManager.removeItem(item)
+                    }
+
+                    print("Successfully processed and saved batch of \(processedItems.count) items")
+                }
+
+                // Short pause between batches
+                try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+
+            } catch {
+                print("Queue processing error: \(error.localizedDescription)")
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds pause on error
+            }
+        }
+    }
+
+    // Process a single queue item - downloads and saves the article data
+    private func processQueueItem(_ item: ArticleQueueItem, context _: ModelContext) async throws {
+        guard let url = URL(string: item.jsonURL) else {
+            throw NSError(domain: "com.arguspulse", code: 400, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid JSON URL: \(item.jsonURL)",
+            ])
+        }
+
+        // Fetch with timeout - doing network operations in the background
+        let (data, _) = try await withTimeout(seconds: 10) {
+            try await URLSession.shared.data(from: url)
+        }
+
+        guard let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "com.arguspulse", code: 400, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid JSON data in response",
+            ])
+        }
+
+        // Ensure the json_url is in the processed data - still in background
+        var enrichedJson = rawJson
+        if enrichedJson["json_url"] == nil {
+            enrichedJson["json_url"] = item.jsonURL
+        }
+
+        // Process article data - still in background
+        guard let articleJSON = processArticleJSON(enrichedJson) else {
+            throw NSError(domain: "com.arguspulse", code: 400, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to process article JSON",
+            ])
+        }
+
+        // Generate rich text blobs - detached in background
+        let richTextBlobs = await Task.detached(priority: .utility) { () -> [String: Data] in
+            // Rich text conversion code remains the same...
+            // (keeping the same code from your original implementation)
+            var result = [String: Data]()
+
+            // Create function to convert markdown to NSAttributedString with Dynamic Type support
+            func markdownToAccessibleAttributedString(_ markdown: String?, textStyle: String) -> NSAttributedString? {
+                guard let markdown = markdown, !markdown.isEmpty else { return nil }
+
+                let swiftyMarkdown = SwiftyMarkdown(string: markdown)
+
+                // Get the preferred font for the specified text style (supports Dynamic Type)
+                let bodyFont = UIFont.preferredFont(forTextStyle: UIFont.TextStyle(rawValue: textStyle))
+                swiftyMarkdown.body.fontName = bodyFont.fontName
+                swiftyMarkdown.body.fontSize = bodyFont.pointSize
+
+                // Style headings with appropriate Dynamic Type text styles
+                let h1Font = UIFont.preferredFont(forTextStyle: .title1)
+                swiftyMarkdown.h1.fontName = h1Font.fontName
+                swiftyMarkdown.h1.fontSize = h1Font.pointSize
+
+                let h2Font = UIFont.preferredFont(forTextStyle: .title2)
+                swiftyMarkdown.h2.fontName = h2Font.fontName
+                swiftyMarkdown.h2.fontSize = h2Font.pointSize
+
+                let h3Font = UIFont.preferredFont(forTextStyle: .title3)
+                swiftyMarkdown.h3.fontName = h3Font.fontName
+                swiftyMarkdown.h3.fontSize = h3Font.pointSize
+
+                // Other styling
+                swiftyMarkdown.link.color = .systemBlue
+
+                // Get bold and italic versions of the body font if possible
+                if let boldDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitBold) {
+                    let boldFont = UIFont(descriptor: boldDescriptor, size: 0)
+                    swiftyMarkdown.bold.fontName = boldFont.fontName
+                } else {
+                    swiftyMarkdown.bold.fontName = ".SFUI-Bold"
+                }
+
+                if let italicDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitItalic) {
+                    let italicFont = UIFont(descriptor: italicDescriptor, size: 0)
+                    swiftyMarkdown.italic.fontName = italicFont.fontName
+                } else {
+                    swiftyMarkdown.italic.fontName = ".SFUI-Italic"
+                }
+
+                // Get the initial attributed string from SwiftyMarkdown
+                let attributedString = swiftyMarkdown.attributedString()
+
+                // Create a mutable copy
+                let mutableAttributedString = NSMutableAttributedString(attributedString: attributedString)
+
+                // Add accessibility trait to indicate the text style
+                let textStyleKey = NSAttributedString.Key(rawValue: "NSAccessibilityTextStyleStringAttribute")
+                mutableAttributedString.addAttribute(
+                    textStyleKey,
+                    value: textStyle,
+                    range: NSRange(location: 0, length: mutableAttributedString.length)
+                )
+
+                return mutableAttributedString
+            }
+
+            // Process title with headline style
+            if let attributedTitle = markdownToAccessibleAttributedString(articleJSON.title, textStyle: "UIFontTextStyleHeadline"),
+               let titleData = try? NSKeyedArchiver.archivedData(withRootObject: attributedTitle, requiringSecureCoding: false)
+            {
+                result["title"] = titleData
+            }
+
+            // Process body with body style
+            if let attributedBody = markdownToAccessibleAttributedString(articleJSON.body, textStyle: "UIFontTextStyleBody"),
+               let bodyData = try? NSKeyedArchiver.archivedData(withRootObject: attributedBody, requiringSecureCoding: false)
+            {
+                result["body"] = bodyData
+            }
+
+            return result
+        }.value
+
+        // Create all objects we need in the background
+        let date = Date()
+        let notificationID = item.notificationID ?? UUID()
+
+        // If the item didn't already have a notification ID, update it
+        if item.notificationID == nil {
+            item.notificationID = notificationID
+            // Note: We don't save context here anymore, it will be saved in batch
+        }
+
+        // Prepare all the data in the background before touching the MainActor
+        let notificationData = (
+            id: notificationID,
+            date: date,
+            title: articleJSON.title,
+            body: articleJSON.body,
+            json_url: articleJSON.jsonURL,
+            topic: articleJSON.topic,
+            article_title: articleJSON.articleTitle,
+            affected: articleJSON.affected,
+            domain: articleJSON.domain,
+            pub_date: articleJSON.pubDate ?? date,
+            titleBlob: richTextBlobs["title"],
+            bodyBlob: richTextBlobs["body"]
+        )
+
+        // Create a new notification and SeenArticle on the main thread
+        await MainActor.run {
+            let mainContext = ArgusApp.sharedModelContainer.mainContext
+
+            // Create the notification object
+            let notification = NotificationData(
+                id: notificationData.id,
+                date: notificationData.date,
+                title: notificationData.title,
+                body: notificationData.body,
+                json_url: notificationData.json_url,
+                topic: notificationData.topic,
+                article_title: notificationData.article_title,
+                affected: notificationData.affected,
+                domain: notificationData.domain,
+                pub_date: notificationData.pub_date
+            )
+
+            // Apply rich text blobs
+            if let titleBlob = notificationData.titleBlob {
+                notification.title_blob = titleBlob
+            }
+
+            if let bodyBlob = notificationData.bodyBlob {
+                notification.body_blob = bodyBlob
+            }
+
+            // Insert the notification into the main context
+            mainContext.insert(notification)
+
+            // Create and insert the SeenArticle record
+            let seenArticle = SeenArticle(
+                id: notificationData.id,
+                json_url: notificationData.json_url,
+                date: notificationData.date
+            )
+            mainContext.insert(seenArticle)
+
+            // Note: We don't save the main context here
+            // It will be saved after all items in the batch are processed
+        }
+    }
+
     func sendRecentArticlesToServer() async {
         guard !syncInProgress else {
             print("Sync is already in progress. Skipping this call.")
@@ -135,7 +391,8 @@ class SyncManager {
 
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
                 if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
-                    await self.fetchAndSaveUnseenArticles(from: unseenUrls)
+                    // Queue the unseen articles instead of fetching them immediately
+                    await self.queueArticlesForProcessing(urls: unseenUrls)
                 } else {
                     print("Server says there are no unseen articles.")
                 }
@@ -155,6 +412,33 @@ class SyncManager {
             return (try? context.fetch(FetchDescriptor<SeenArticle>(
                 predicate: #Predicate { $0.date >= oneDayAgo }
             ))) ?? []
+        }
+    }
+
+    func queueArticlesForProcessing(urls: [String]) async {
+        // Get the model container on the main actor
+        let container = await MainActor.run {
+            ArgusApp.sharedModelContainer
+        }
+
+        // Create a background context
+        let backgroundContext = ModelContext(container)
+        let queueManager = backgroundContext.queueManager()
+
+        // Process each URL in the background
+        for jsonURL in urls {
+            do {
+                // Try to add the article to the queue
+                // The addArticle method will check for duplicates and ignore them
+                let added = try await queueManager.addArticle(jsonURL: jsonURL)
+                if added {
+                    print("Queued article: \(jsonURL)")
+                } else {
+                    print("Skipped duplicate article: \(jsonURL)")
+                }
+            } catch {
+                print("Failed to queue article \(jsonURL): \(error)")
+            }
         }
     }
 
@@ -233,6 +517,11 @@ class SyncManager {
         let url = json["url"] as? String ?? ""
         let domain = extractDomain(from: url)
 
+        // Include quality badge information in the first pass
+        let sourcesQuality = json["sources_quality"] as? Int
+        let argumentQuality = json["argument_quality"] as? Int
+        let sourceType = json["source_type"] as? String
+
         return ArticleJSON(
             // Required fields from above guard statement
             title: title, // Maps from local "title" to ArticleJSON.title (originally from "tiny_title")
@@ -256,9 +545,9 @@ class SyncManager {
             pubDate: (json["pub_date"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) },
 
             // Fields with snake_case in JSON mapped to camelCase in model
-            sourcesQuality: json["sources_quality"] as? Int, // "sources_quality" → "sourcesQuality"
-            argumentQuality: json["argument_quality"] as? Int, // "argument_quality" → "argumentQuality"
-            sourceType: json["source_type"] as? String, // "source_type" → "sourceType"
+            sourcesQuality: sourcesQuality, // "sources_quality" → "sourcesQuality"
+            argumentQuality: argumentQuality, // "argument_quality" → "argumentQuality"
+            sourceType: sourceType, // "source_type" → "sourceType"
             sourceAnalysis: json["source_analysis"] as? String, // "source_analysis" → "sourceAnalysis"
 
             // Simple direct mappings of optional fields

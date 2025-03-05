@@ -11,6 +11,7 @@ struct ArgusApp: App {
         let schema = Schema([
             NotificationData.self,
             SeenArticle.self,
+            ArticleQueueItem.self,
         ])
 
         // Set up the model configuration with schema versioning
