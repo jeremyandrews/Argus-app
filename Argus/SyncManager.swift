@@ -319,7 +319,22 @@ class SyncManager {
             article_title: articleJSON.articleTitle,
             affected: articleJSON.affected,
             domain: articleJSON.domain,
-            pub_date: articleJSON.pubDate ?? date
+            pub_date: articleJSON.pubDate ?? date,
+            isViewed: false,
+            isBookmarked: false,
+            isArchived: false,
+            sources_quality: articleJSON.sourcesQuality,
+            argument_quality: articleJSON.argumentQuality,
+            source_type: articleJSON.sourceType,
+            source_analysis: articleJSON.sourceAnalysis,
+            quality: articleJSON.quality,
+            summary: articleJSON.summary,
+            critical_analysis: articleJSON.criticalAnalysis,
+            logical_fallacies: articleJSON.logicalFallacies,
+            relation_to_topic: articleJSON.relationToTopic,
+            additional_insights: articleJSON.additionalInsights,
+            engine_stats: articleJSON.engineStats,
+            similar_articles: articleJSON.similarArticles
         )
 
         // Apply rich text blobs
