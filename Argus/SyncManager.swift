@@ -217,6 +217,35 @@ class SyncManager {
             ])
         }
 
+        // Create engine stats JSON string if the required fields are present in the raw JSON
+        var engineStatsJSON: String?
+        var engineStatsDict: [String: Any] = [:]
+
+        if let model = enrichedJson["model"] as? String {
+            engineStatsDict["model"] = model
+        }
+
+        if let elapsedTime = enrichedJson["elapsed_time"] as? Double {
+            engineStatsDict["elapsed_time"] = elapsedTime
+        }
+
+        if let stats = enrichedJson["stats"] as? String {
+            engineStatsDict["stats"] = stats
+        }
+
+        if let systemInfo = enrichedJson["system_info"] as? [String: Any] {
+            engineStatsDict["system_info"] = systemInfo
+        }
+
+        // Only create the JSON if we have some data to include
+        if !engineStatsDict.isEmpty {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: engineStatsDict),
+               let jsonString = String(data: jsonData, encoding: .utf8)
+            {
+                engineStatsJSON = jsonString
+            }
+        }
+
         // Generate rich text blobs - detached in background
         let richTextBlobs = await Task.detached(priority: .utility) { () -> [String: Data] in
             // Rich text conversion code remains the same...
@@ -333,7 +362,7 @@ class SyncManager {
             logical_fallacies: articleJSON.logicalFallacies,
             relation_to_topic: articleJSON.relationToTopic,
             additional_insights: articleJSON.additionalInsights,
-            engine_stats: articleJSON.engineStats,
+            engine_stats: engineStatsJSON, // Use the JSON string we created
             similar_articles: articleJSON.similarArticles
         )
 
