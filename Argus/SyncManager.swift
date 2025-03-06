@@ -398,6 +398,83 @@ class SyncManager {
         // No context save here - it will be saved in batch
     }
 
+    func processQueueWithTimeout(seconds: Double) async -> Bool {
+        print("Starting time-constrained queue processing (max \(seconds) seconds)")
+
+        let startTime = Date()
+        var processedCount = 0
+        var hasMoreItems = true
+
+        do {
+            // Create a background context for queue operations
+            let container = await MainActor.run {
+                ArgusApp.sharedModelContainer
+            }
+            let backgroundContext = ModelContext(container)
+            let queueManager = backgroundContext.queueManager()
+
+            // Process items until we hit the time limit or run out of items
+            while hasMoreItems && Date().timeIntervalSince(startTime) < seconds {
+                // Get a small batch (3 items) to process
+                let itemsToProcess = try await queueManager.getItemsToProcess(limit: 3)
+
+                if itemsToProcess.isEmpty {
+                    hasMoreItems = false
+                    break
+                }
+
+                // Track successfully processed items
+                var processedItems = [ArticleQueueItem]()
+
+                // Process each item in the batch
+                for item in itemsToProcess {
+                    // Check if we've exceeded the time limit
+                    if Date().timeIntervalSince(startTime) >= seconds {
+                        break
+                    }
+
+                    do {
+                        // Process the item
+                        try await processQueueItem(item, context: backgroundContext)
+                        processedItems.append(item)
+                        processedCount += 1
+                    } catch {
+                        print("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
+                    }
+                }
+
+                // Save and clean up processed items
+                if !processedItems.isEmpty {
+                    try backgroundContext.save()
+
+                    // Remove processed items from the queue
+                    for item in processedItems {
+                        try queueManager.removeItem(item)
+                    }
+
+                    print("Successfully processed \(processedItems.count) items in time-constrained mode")
+
+                    // Notify the main context that new data is available
+                    await MainActor.run {
+                        NotificationUtils.updateAppBadgeCount()
+                    }
+                }
+
+                // Check if there might be more items
+                let remainingCount = try await queueManager.queueCount()
+                hasMoreItems = processedCount < remainingCount
+            }
+
+            let timeElapsed = Date().timeIntervalSince(startTime)
+            print("Time-constrained processing completed: \(processedCount) items in \(String(format: "%.2f", timeElapsed)) seconds")
+            return processedCount > 0
+
+        } catch {
+            print("Queue processing error during time-constrained execution: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     func sendRecentArticlesToServer() async {
         guard !syncInProgress else {
             print("Sync is already in progress. Skipping this call.")

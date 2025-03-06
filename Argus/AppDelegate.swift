@@ -250,6 +250,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
                         // Update badge count with the basic notification
                         NotificationUtils.updateAppBadgeCount()
+
+                        // Process queue items immediately while in background
+                        // Try to process at least the current item (and possibly more)
+                        // within our background execution window
+                        let processedSome = await SyncManager.shared.processQueueWithTimeout(seconds: 10)
+
+                        if processedSome {
+                            print("Successfully processed queued items during background notification")
+                        } else {
+                            print("No items processed during background notification window")
+                        }
                     } else {
                         print("Article already in queue: \(jsonURL)")
                     }
