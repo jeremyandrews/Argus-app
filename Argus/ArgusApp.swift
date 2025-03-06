@@ -77,12 +77,13 @@ struct ArgusApp: App {
         let tableCheckQuery = """
             SELECT name FROM sqlite_master
             WHERE type='table'
-            AND (name LIKE '%NOTIFICATIONDATA' OR name LIKE '%SEENARTICLE');
+            AND (name LIKE '%NOTIFICATIONDATA' OR name LIKE '%SEENARTICLE' OR name LIKE '%ARTICLEQUEUEITEM');
         """
 
         var statement: OpaquePointer?
         var notificationTableName: String?
         var seenArticleTableName: String?
+        var articleQueueTableName: String?
 
         if sqlite3_prepare_v2(db, tableCheckQuery, -1, &statement, nil) == SQLITE_OK {
             while sqlite3_step(statement) == SQLITE_ROW {
@@ -92,6 +93,8 @@ struct ArgusApp: App {
                         notificationTableName = tableName
                     } else if tableName.contains("SEENARTICLE") {
                         seenArticleTableName = tableName
+                    } else if tableName.contains("ARTICLEQUEUEITEM") {
+                        articleQueueTableName = tableName
                     }
                 }
             }
@@ -140,6 +143,12 @@ struct ArgusApp: App {
             ("idx_seenarticle_json_url", "ZJSON_URL"),
         ]
 
+        // Define indexes for ArticleQueueItem
+        let articleQueueIndexes = [
+            ("idx_articlequeue_createdat", "ZCREATEDAT"),
+            ("idx_articlequeue_jsonurl", "ZJSON_URL"),
+        ]
+
         // Create NotificationData indexes
         for (indexName, column) in notificationIndexes {
             let createIndexQuery = """
@@ -169,6 +178,25 @@ struct ArgusApp: App {
                 print("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
                 continue
             }
+        }
+
+        // Create ArticleQueueItem indexes if the table exists
+        if let actualQueueTableName = articleQueueTableName {
+            // Create ArticleQueueItem indexes using the same loop pattern as the other tables
+            for (indexName, column) in articleQueueIndexes {
+                let isUnique = indexName.contains("jsonurl") // Make the jsonURL index unique
+
+                let createIndexQuery = """
+                CREATE \(isUnique ? "UNIQUE " : "")INDEX IF NOT EXISTS \(indexName)
+                ON \(actualQueueTableName) (\(column));
+                """
+
+                if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
+                    print("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
+                }
+            }
+        } else {
+            print("ArticleQueueItem table not found - will skip creating indexes for it")
         }
 
         return true
