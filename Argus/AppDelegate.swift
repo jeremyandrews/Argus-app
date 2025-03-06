@@ -183,8 +183,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             let contentAvailable = aps["content-available"] as? Int,
             contentAvailable == 1,
             let data = userInfo["data"] as? [String: AnyObject],
-            let jsonURL = data["json_url"] as? String,
-            !jsonURL.isEmpty
+            let jsonURL = data["json_url"] as? String, !jsonURL.isEmpty
         else {
             finish(.noData)
             return
@@ -204,37 +203,66 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             pubDate = isoFormatter.date(from: pubDateString)
         }
 
-        // Set a manual timeout that's shorter than the system watchdog
-        let timeoutTask = Task {
-            try? await Task.sleep(nanoseconds: 10 * 1_000_000_000) // 10 seconds
-            finish(.failed)
-        }
-
-        // 3. Perform async processing
-        Task { @MainActor in
+        // 3. Instead of direct processing, add to queue with 15-second timeout
+        Task {
             do {
-                try await withTimeout(seconds: 10) {
-                    try await SyncManager.shared.addOrUpdateArticle(
-                        title: title,
-                        body: body,
+                // Create a unique ID for this notification
+                let notificationID = UUID()
+
+                // Add to queue with notification ID reference
+                let context = ArgusApp.sharedModelContainer.mainContext
+                let queueManager = context.queueManager()
+
+                try await withTimeout(seconds: 15) {
+                    let added = try await queueManager.addArticleWithNotification(
                         jsonURL: jsonURL,
-                        topic: topic,
-                        articleTitle: articleTitle,
-                        affected: affected,
-                        domain: domain,
-                        pubDate: pubDate
+                        notificationID: notificationID
                     )
-                    NotificationUtils.updateAppBadgeCount()
+
+                    if added {
+                        print("Added article to processing queue: \(jsonURL)")
+
+                        // Create a base notification record right away for immediate display
+                        // This will be enriched later by the queue processor
+                        let notification = NotificationData(
+                            id: notificationID,
+                            date: Date(),
+                            title: title,
+                            body: body,
+                            json_url: jsonURL,
+                            topic: topic,
+                            article_title: articleTitle,
+                            affected: affected,
+                            domain: domain,
+                            pub_date: pubDate
+                        )
+
+                        context.insert(notification)
+
+                        // Also create a SeenArticle record
+                        let seenArticle = SeenArticle(
+                            id: notificationID,
+                            json_url: jsonURL,
+                            date: Date()
+                        )
+                        context.insert(seenArticle)
+                        try context.save()
+
+                        // Update badge count with the basic notification
+                        NotificationUtils.updateAppBadgeCount()
+                    } else {
+                        print("Article already in queue: \(jsonURL)")
+                    }
                 }
 
-                // Cancel timeout task since we completed successfully
-                timeoutTask.cancel()
+                // Signal success to the system
                 finish(.newData)
+
             } catch is TimeoutError {
-                print("Background processing timed out after 10 seconds")
+                print("Timed out while trying to add article to queue")
                 finish(.failed)
             } catch {
-                print("Background task failed: \(error)")
+                print("Failed to add article to queue: \(error)")
                 finish(.failed)
             }
         }
