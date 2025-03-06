@@ -56,6 +56,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func executeDeferredStartupTasks() {
+        // Sanity check.
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.2) {
+            ArgusApp.logDatabaseTableSizes()
+        }
+
         // Ensure database indexes a bit delayed
         DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.5) {
             self.verifyDatabaseIndexes()

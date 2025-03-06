@@ -181,4 +181,63 @@ struct ArgusApp: App {
         case openError(String)
         case tableNotFound
     }
+
+    static func logDatabaseTableSizes() {
+        Task { @MainActor in
+            let context = sharedModelContainer.mainContext
+
+            do {
+                // Count NotificationData entries
+                let notificationCount = try context.fetchCount(FetchDescriptor<NotificationData>())
+                print("📊 Database Stats: NotificationData table size: \(notificationCount) records")
+
+                // Count SeenArticle entries
+                let seenArticleCount = try context.fetchCount(FetchDescriptor<SeenArticle>())
+                print("📊 Database Stats: SeenArticle table size: \(seenArticleCount) records")
+
+                // Count ArticleQueueItem entries
+                let queueItemCount = try context.fetchCount(FetchDescriptor<ArticleQueueItem>())
+                print("📊 Database Stats: ArticleQueueItem table size: \(queueItemCount) records")
+
+                // Calculate total records
+                let totalRecords = notificationCount + seenArticleCount + queueItemCount
+                print("📊 Database Stats: Total records across all tables: \(totalRecords)")
+
+                // Log additional stats about viewed/unviewed status
+                let unviewedCount = try context.fetchCount(
+                    FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
+                )
+                print("📊 Database Stats: Unviewed notifications: \(unviewedCount) records")
+
+                let bookmarkedCount = try context.fetchCount(
+                    FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isBookmarked })
+                )
+                print("📊 Database Stats: Bookmarked notifications: \(bookmarkedCount) records")
+
+                let archivedCount = try context.fetchCount(
+                    FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isArchived })
+                )
+                print("📊 Database Stats: Archived notifications: \(archivedCount) records")
+
+                // Calculate statistics for articles eligible for cleanup
+                let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
+                if daysSetting > 0 {
+                    let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date())!
+
+                    let eligibleForCleanupCount = try context.fetchCount(
+                        FetchDescriptor<NotificationData>(
+                            predicate: #Predicate { notification in
+                                notification.date < cutoffDate &&
+                                    !notification.isBookmarked &&
+                                    !notification.isArchived
+                            }
+                        )
+                    )
+                    print("📊 Database Stats: Notifications eligible for cleanup: \(eligibleForCleanupCount) records")
+                }
+            } catch {
+                print("Error fetching database table sizes: \(error)")
+            }
+        }
+    }
 }
