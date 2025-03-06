@@ -1298,11 +1298,9 @@ struct NewsView: View {
         // Sort the new page based on current sort order
         let sortedNotifications = sortNotifications(notifications)
 
-        // Update the UI
-        withAnimation(.easeInOut(duration: 0.3)) {
-            self.totalNotifications = sortedNotifications
-            self.filteredNotifications = sortedNotifications
-        }
+        // Update the UI WITHOUT animation
+        totalNotifications = sortedNotifications
+        filteredNotifications = sortedNotifications
 
         updateGrouping()
     }
@@ -1319,11 +1317,9 @@ struct NewsView: View {
         let combinedNotifications = totalNotifications + newNotifications
         let sortedCombined = sortNotifications(combinedNotifications)
 
-        // Update the UI
-        withAnimation(.easeInOut(duration: 0.3)) {
-            self.totalNotifications = sortedCombined
-            self.filteredNotifications = sortedCombined
-        }
+        // Update the UI WITHOUT animation
+        totalNotifications = sortedCombined
+        filteredNotifications = sortedCombined
 
         updateGrouping()
         print("Added \(newNotifications.count) more notifications, total: \(sortedCombined.count)")
@@ -1406,12 +1402,7 @@ struct NewsView: View {
                     // Update the full collection
                     self.totalNotifications = sortedTotal
 
-                    // Apply animation for the update
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        // For a full replacement or when filter changes, use the batch size
-                        self.filteredNotifications = batchedNotifications
-                    }
-
+                    self.filteredNotifications = batchedNotifications
                     self.updateGrouping()
                 }
             }
@@ -1560,9 +1551,7 @@ struct NewsView: View {
             await MainActor.run {
                 self.totalNotifications = sortedNotifications
 
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    self.filteredNotifications = batchedNotifications
-                }
+                self.filteredNotifications = batchedNotifications
 
                 self.updateGrouping()
             }
