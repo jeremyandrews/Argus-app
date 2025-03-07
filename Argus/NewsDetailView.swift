@@ -559,33 +559,44 @@ struct NewsDetailView: View {
                 }
             }
 
-            // Title
+            // Title - using the pre-loaded titleAttributedString
             if let notification = currentNotification {
-                let processedTitle = SwiftyMarkdown(string: notification.title).attributedString()
-
                 if let content = additionalContent,
                    let articleURLString = content["url"] as? String,
                    let articleURL = URL(string: articleURLString)
                 {
                     Link(destination: articleURL) {
-                        Text(AttributedString(processedTitle))
-                            .font(.headline)
-                            .fontWeight(notification.isViewed ? .regular : .bold)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .multilineTextAlignment(.leading)
-                            .foregroundColor(.blue)
+                        if let titleAttrString = titleAttributedString {
+                            Text(AttributedString(titleAttrString))
+                                .font(.headline)
+                                .fontWeight(notification.isViewed ? .regular : .bold)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .multilineTextAlignment(.leading)
+                                .foregroundColor(.blue)
+                        } else {
+                            // Fallback if the attributed string isn't available
+                            Text(notification.title)
+                                .font(.headline)
+                                .fontWeight(notification.isViewed ? .regular : .bold)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .multilineTextAlignment(.leading)
+                                .foregroundColor(.blue)
+                        }
                     }
                 } else {
-                    Text(AttributedString(processedTitle))
-                        .font(.headline)
-                        .fontWeight(notification.isViewed ? .regular : .bold)
-                        .foregroundColor(.primary)
+                    if let titleAttrString = titleAttributedString {
+                        Text(AttributedString(titleAttrString))
+                            .font(.headline)
+                            .fontWeight(notification.isViewed ? .regular : .bold)
+                            .foregroundColor(.primary)
+                    } else {
+                        // Fallback if the attributed string isn't available
+                        Text(notification.title)
+                            .font(.headline)
+                            .fontWeight(notification.isViewed ? .regular : .bold)
+                            .foregroundColor(.primary)
+                    }
                 }
-            } else if let notification = currentNotification {
-                Text(notification.title)
-                    .font(.headline)
-                    .fontWeight(notification.isViewed ? .regular : .bold)
-                    .foregroundColor(.primary)
             }
 
             // Publication Date
@@ -597,13 +608,20 @@ struct NewsDetailView: View {
                     .foregroundColor(.secondary)
             }
 
-            // Body
+            // Body - using the pre-loaded bodyAttributedString
             if let notification = currentNotification {
-                let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
-                Text(AttributedString(attributedBody))
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.leading)
+                if let bodyAttrString = bodyAttributedString {
+                    Text(AttributedString(bodyAttrString))
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                } else {
+                    // Fallback if the attributed string isn't available
+                    Text(notification.body)
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
 
                 // Affected (optional)
                 if !notification.affected.isEmpty {
@@ -1108,9 +1126,16 @@ struct NewsDetailView: View {
 
                             // The actual source analysis content
                             if !sourceText.isEmpty {
-                                let attributedContent = SwiftyMarkdown(string: sourceText).attributedString()
-                                Text(AttributedString(attributedContent))
-                                    .textSelection(.enabled)
+                                if let attributedContent = markdownToAccessibleAttributedString(
+                                    sourceText,
+                                    textStyle: "UIFontTextStyleBody"
+                                ) {
+                                    Text(AttributedString(attributedContent))
+                                        .textSelection(.enabled)
+                                } else {
+                                    Text(sourceText)
+                                        .textSelection(.enabled)
+                                }
                             } else {
                                 Text("No detailed source analysis available.")
                                     .italic()
@@ -1206,12 +1231,22 @@ struct NewsDetailView: View {
                         }
                     }
                 } else if let markdownContent = section.content as? String {
-                    // Default markdown content display
-                    let attributedMarkdown = SwiftyMarkdown(string: markdownContent).attributedString()
-                    Text(AttributedString(attributedMarkdown))
-                        .font(.body)
-                        .padding(.top, 8)
-                        .textSelection(.enabled)
+                    // Default markdown content display - using the utility instead of SwiftyMarkdown
+                    if let attributedMarkdown = markdownToAccessibleAttributedString(
+                        markdownContent,
+                        textStyle: "UIFontTextStyleBody"
+                    ) {
+                        Text(AttributedString(attributedMarkdown))
+                            .font(.body)
+                            .padding(.top, 8)
+                            .textSelection(.enabled)
+                    } else {
+                        // Fallback if markdown conversion fails
+                        Text(markdownContent)
+                            .font(.body)
+                            .padding(.top, 8)
+                            .textSelection(.enabled)
+                    }
                 } else {
                     EmptyView() // Ensures consistent return type
                 }
