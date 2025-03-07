@@ -185,7 +185,8 @@ class SyncManager {
             }
         }
 
-        let richTextBlobs = await makeAttributedString(from: articleJSON)
+        // Convert from Markdown to Rich Text
+        let richTextBlobs = await makeAttributedStrings(from: articleJSON)
 
         // Create all objects we need in the background
         let date = Date()
@@ -480,152 +481,8 @@ class SyncManager {
         // Convert only if we don't have rich text versions yet
         if !hasRichText {
             Task {
-                // Collect all the text that needs to be processed
-                let fields = (
-                    title: notification.title,
-                    body: notification.body,
-                    summary: notification.summary,
-                    criticalAnalysis: notification.critical_analysis,
-                    logicalFallacies: notification.logical_fallacies,
-                    sourceAnalysis: notification.source_analysis,
-                    relationToTopic: notification.relation_to_topic,
-                    additionalInsights: notification.additional_insights
-                )
-
-                // Process the markdown conversion off the main thread and directly convert to Data
-                // This avoids passing NSAttributedString between tasks (solves Sendable warning)
-                let richTextBlobs = await Task.detached(priority: .utility) { () -> [String: Data] in
-                    var result = [String: Data]()
-
-                    // Create function to convert markdown to NSAttributedString with Dynamic Type support
-                    func markdownToAccessibleAttributedString(_ markdown: String?, textStyle: String) -> NSAttributedString? {
-                        guard let markdown = markdown, !markdown.isEmpty else { return nil }
-
-                        let swiftyMarkdown = SwiftyMarkdown(string: markdown)
-
-                        // Get the preferred font for the specified text style (supports Dynamic Type)
-                        let bodyFont = UIFont.preferredFont(forTextStyle: UIFont.TextStyle(rawValue: textStyle))
-                        swiftyMarkdown.body.fontName = bodyFont.fontName
-                        swiftyMarkdown.body.fontSize = bodyFont.pointSize
-
-                        // Style headings with appropriate Dynamic Type text styles
-                        let h1Font = UIFont.preferredFont(forTextStyle: .title1)
-                        swiftyMarkdown.h1.fontName = h1Font.fontName
-                        swiftyMarkdown.h1.fontSize = h1Font.pointSize
-
-                        let h2Font = UIFont.preferredFont(forTextStyle: .title2)
-                        swiftyMarkdown.h2.fontName = h2Font.fontName
-                        swiftyMarkdown.h2.fontSize = h2Font.pointSize
-
-                        let h3Font = UIFont.preferredFont(forTextStyle: .title3)
-                        swiftyMarkdown.h3.fontName = h3Font.fontName
-                        swiftyMarkdown.h3.fontSize = h3Font.pointSize
-
-                        // Other styling
-                        swiftyMarkdown.link.color = .systemBlue
-
-                        // Get bold and italic versions of the body font if possible
-                        if let boldDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitBold) {
-                            let boldFont = UIFont(descriptor: boldDescriptor, size: 0)
-                            swiftyMarkdown.bold.fontName = boldFont.fontName
-                        } else {
-                            swiftyMarkdown.bold.fontName = ".SFUI-Bold"
-                        }
-
-                        if let italicDescriptor = bodyFont.fontDescriptor.withSymbolicTraits(.traitItalic) {
-                            let italicFont = UIFont(descriptor: italicDescriptor, size: 0)
-                            swiftyMarkdown.italic.fontName = italicFont.fontName
-                        } else {
-                            swiftyMarkdown.italic.fontName = ".SFUI-Italic"
-                        }
-
-                        // Get the initial attributed string from SwiftyMarkdown
-                        let attributedString = swiftyMarkdown.attributedString()
-
-                        // Create a mutable copy
-                        let mutableAttributedString = NSMutableAttributedString(attributedString: attributedString)
-
-                        // Add accessibility trait to indicate the text style
-                        let textStyleKey = NSAttributedString.Key(rawValue: "NSAccessibilityTextStyleStringAttribute")
-                        mutableAttributedString.addAttribute(
-                            textStyleKey,
-                            value: textStyle,
-                            range: NSRange(location: 0, length: mutableAttributedString.length)
-                        )
-
-                        return mutableAttributedString
-                    }
-
-                    // Add this method to handle the other places that still call the old function name
-                    func markdownToAttributedString(_ markdown: String?, isTitle: Bool = false) -> NSAttributedString? {
-                        let textStyle = isTitle ? "UIFontTextStyleHeadline" : "UIFontTextStyleBody"
-                        return markdownToAccessibleAttributedString(markdown, textStyle: textStyle)
-                    }
-
-                    // Process title with headline style
-                    if let attributedTitle = markdownToAccessibleAttributedString(fields.title, textStyle: "UIFontTextStyleHeadline"),
-                       let titleData = try? NSKeyedArchiver.archivedData(withRootObject: attributedTitle, requiringSecureCoding: false)
-                    {
-                        result["title"] = titleData
-                    }
-
-                    // Process body with body style
-                    if let attributedBody = markdownToAccessibleAttributedString(fields.body, textStyle: "UIFontTextStyleBody"),
-                       let bodyData = try? NSKeyedArchiver.archivedData(withRootObject: attributedBody, requiringSecureCoding: false)
-                    {
-                        result["body"] = bodyData
-                    }
-
-                    // Process summary
-                    if let summary = fields.summary,
-                       let attributedSummary = markdownToAccessibleAttributedString(summary, textStyle: "UIFontTextStyleBody"),
-                       let summaryData = try? NSKeyedArchiver.archivedData(withRootObject: attributedSummary, requiringSecureCoding: false)
-                    {
-                        result["summary"] = summaryData
-                    }
-
-                    // Process critical analysis
-                    if let criticalAnalysis = fields.criticalAnalysis,
-                       let attributedCriticalAnalysis = markdownToAccessibleAttributedString(criticalAnalysis, textStyle: "UIFontTextStyleBody"),
-                       let criticalAnalysisData = try? NSKeyedArchiver.archivedData(withRootObject: attributedCriticalAnalysis, requiringSecureCoding: false)
-                    {
-                        result["critical_analysis"] = criticalAnalysisData
-                    }
-
-                    // Process logical fallacies
-                    if let logicalFallacies = fields.logicalFallacies,
-                       let attributedLogicalFallacies = markdownToAccessibleAttributedString(logicalFallacies, textStyle: "UIFontTextStyleBody"),
-                       let logicalFallaciesData = try? NSKeyedArchiver.archivedData(withRootObject: attributedLogicalFallacies, requiringSecureCoding: false)
-                    {
-                        result["logical_fallacies"] = logicalFallaciesData
-                    }
-
-                    // Process source analysis
-                    if let sourceAnalysis = fields.sourceAnalysis,
-                       let attributedSourceAnalysis = markdownToAccessibleAttributedString(sourceAnalysis, textStyle: "UIFontTextStyleBody"),
-                       let sourceAnalysisData = try? NSKeyedArchiver.archivedData(withRootObject: attributedSourceAnalysis, requiringSecureCoding: false)
-                    {
-                        result["source_analysis"] = sourceAnalysisData
-                    }
-
-                    // Process relation to topic
-                    if let relationToTopic = fields.relationToTopic,
-                       let attributedRelationToTopic = markdownToAccessibleAttributedString(relationToTopic, textStyle: "UIFontTextStyleBody"),
-                       let relationToTopicData = try? NSKeyedArchiver.archivedData(withRootObject: attributedRelationToTopic, requiringSecureCoding: false)
-                    {
-                        result["relation_to_topic"] = relationToTopicData
-                    }
-
-                    // Process additional insights
-                    if let additionalInsights = fields.additionalInsights,
-                       let attributedAdditionalInsights = markdownToAccessibleAttributedString(additionalInsights, textStyle: "UIFontTextStyleBody"),
-                       let additionalInsightsData = try? NSKeyedArchiver.archivedData(withRootObject: attributedAdditionalInsights, requiringSecureCoding: false)
-                    {
-                        result["additional_insights"] = additionalInsightsData
-                    }
-
-                    return result
-                }.value
+                // Convert from Markdown to Rich Text (for a NotificationData)
+                let richTextBlobs = await makeAttributedStrings(from: notification)
 
                 // Apply the blobs on the main thread
                 await MainActor.run {
