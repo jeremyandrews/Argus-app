@@ -145,15 +145,102 @@ struct NewsDetailView: View {
     private func loadRichTextContent() {
         guard let currentNotification = currentNotification else { return }
 
-        // Load title and body
-        titleAttributedString = currentNotification.getRichText(for: .title)
-        bodyAttributedString = currentNotification.getRichText(for: .body)
+        // Track if we need to save the model context
+        var needsSave = false
 
-        // Load other fields based on their blobs
-        summaryAttributedString = currentNotification.getRichText(for: .summary)
-        criticalAnalysisAttributedString = currentNotification.getRichText(for: .criticalAnalysis)
-        logicalFallaciesAttributedString = currentNotification.getRichText(for: .logicalFallacies)
-        sourceAnalysisAttributedString = currentNotification.getRichText(for: .sourceAnalysis)
+        // Title
+        titleAttributedString = markdownFieldToAttributedString(
+            notification: currentNotification,
+            field: .title
+        )
+
+        // If we got an attributed string and it wasn't already cached, save it
+        if let attributedString = titleAttributedString,
+           currentNotification.title_blob == nil
+        {
+            if saveAttributedString(attributedString, to: currentNotification, for: .title) {
+                needsSave = true
+            }
+        }
+
+        // Body
+        bodyAttributedString = markdownFieldToAttributedString(
+            notification: currentNotification,
+            field: .body
+        )
+
+        if let attributedString = bodyAttributedString,
+           currentNotification.body_blob == nil
+        {
+            if saveAttributedString(attributedString, to: currentNotification, for: .body) {
+                needsSave = true
+            }
+        }
+
+        // Summary
+        summaryAttributedString = markdownFieldToAttributedString(
+            notification: currentNotification,
+            field: .summary
+        )
+
+        if let attributedString = summaryAttributedString,
+           currentNotification.summary_blob == nil
+        {
+            if saveAttributedString(attributedString, to: currentNotification, for: .summary) {
+                needsSave = true
+            }
+        }
+
+        // Critical Analysis
+        criticalAnalysisAttributedString = markdownFieldToAttributedString(
+            notification: currentNotification,
+            field: .criticalAnalysis
+        )
+
+        if let attributedString = criticalAnalysisAttributedString,
+           currentNotification.critical_analysis_blob == nil
+        {
+            if saveAttributedString(attributedString, to: currentNotification, for: .criticalAnalysis) {
+                needsSave = true
+            }
+        }
+
+        // Logical Fallacies
+        logicalFallaciesAttributedString = markdownFieldToAttributedString(
+            notification: currentNotification,
+            field: .logicalFallacies
+        )
+
+        if let attributedString = logicalFallaciesAttributedString,
+           currentNotification.logical_fallacies_blob == nil
+        {
+            if saveAttributedString(attributedString, to: currentNotification, for: .logicalFallacies) {
+                needsSave = true
+            }
+        }
+
+        // Source Analysis
+        sourceAnalysisAttributedString = markdownFieldToAttributedString(
+            notification: currentNotification,
+            field: .sourceAnalysis
+        )
+
+        if let attributedString = sourceAnalysisAttributedString,
+           currentNotification.source_analysis_blob == nil
+        {
+            if saveAttributedString(attributedString, to: currentNotification, for: .sourceAnalysis) {
+                needsSave = true
+            }
+        }
+
+        // Save the model context if needed
+        if needsSave {
+            do {
+                try modelContext.save()
+            } catch {
+                print("Failed to save model context: \(error)")
+            }
+        }
     }
 
     // MARK: - Top Bar

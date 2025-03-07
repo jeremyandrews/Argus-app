@@ -165,3 +165,135 @@ func makeAttributedStrings(from notification: NotificationData) async -> [String
         return results
     }.value
 }
+
+// Add this enum to MarkdownUtilities.swift
+enum RichTextField {
+    case title
+    case body
+    case summary
+    case criticalAnalysis
+    case logicalFallacies
+    case sourceAnalysis
+    case relationToTopic
+    case additionalInsights
+}
+
+/// Gets rich text data from a NotificationData object
+func getRichText(from notification: NotificationData, for field: RichTextField) -> NSAttributedString? {
+    guard let data = getBlobData(from: notification, for: field) else { return nil }
+
+    do {
+        if let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+            ofClass: NSAttributedString.self,
+            from: data
+        ) {
+            return attributedString
+        }
+        return nil
+    } catch {
+        print("Error unarchiving rich text for \(field): \(error.localizedDescription)")
+        return nil
+    }
+}
+
+/// Gets blob data from a NotificationData object
+func getBlobData(from notification: NotificationData, for field: RichTextField) -> Data? {
+    switch field {
+    case .title:
+        return notification.title_blob
+    case .body:
+        return notification.body_blob
+    case .summary:
+        return notification.summary_blob
+    case .criticalAnalysis:
+        return notification.critical_analysis_blob
+    case .logicalFallacies:
+        return notification.logical_fallacies_blob
+    case .sourceAnalysis:
+        return notification.source_analysis_blob
+    case .relationToTopic:
+        return notification.relation_to_topic_blob
+    case .additionalInsights:
+        return notification.additional_insights_blob
+    }
+}
+
+/// Converts a specific field from NotificationData into an NSAttributedString
+func markdownFieldToAttributedString(
+    notification: NotificationData,
+    field: RichTextField
+) -> NSAttributedString? {
+    // First check if we have a stored blob
+    if let storedAttributedString = getRichText(from: notification, for: field) {
+        return storedAttributedString
+    }
+
+    // Otherwise, convert the markdown text directly
+    let textStyle: String
+    let markdownText: String?
+
+    switch field {
+    case .title:
+        textStyle = "UIFontTextStyleHeadline"
+        markdownText = notification.title
+    case .body:
+        textStyle = "UIFontTextStyleBody"
+        markdownText = notification.body
+    case .summary:
+        textStyle = "UIFontTextStyleBody"
+        markdownText = notification.summary
+    case .criticalAnalysis:
+        textStyle = "UIFontTextStyleBody"
+        markdownText = notification.critical_analysis
+    case .logicalFallacies:
+        textStyle = "UIFontTextStyleBody"
+        markdownText = notification.logical_fallacies
+    case .sourceAnalysis:
+        textStyle = "UIFontTextStyleBody"
+        markdownText = notification.source_analysis
+    case .relationToTopic:
+        textStyle = "UIFontTextStyleBody"
+        markdownText = notification.relation_to_topic
+    case .additionalInsights:
+        textStyle = "UIFontTextStyleBody"
+        markdownText = notification.additional_insights
+    }
+
+    return markdownToAccessibleAttributedString(markdownText, textStyle: textStyle)
+}
+
+/// Saves an attributed string to the appropriate blob field in a NotificationData object
+func saveAttributedString(
+    _ attributedString: NSAttributedString,
+    to notification: NotificationData,
+    for field: RichTextField
+) -> Bool {
+    guard let data = try? NSKeyedArchiver.archivedData(
+        withRootObject: attributedString,
+        requiringSecureCoding: false
+    ) else {
+        return false
+    }
+
+    // Store the data in the appropriate blob field
+    switch field {
+    case .title:
+        notification.title_blob = data
+    case .body:
+        notification.body_blob = data
+    case .summary:
+        notification.summary_blob = data
+    case .criticalAnalysis:
+        notification.critical_analysis_blob = data
+    case .logicalFallacies:
+        notification.logical_fallacies_blob = data
+    case .sourceAnalysis:
+        notification.source_analysis_blob = data
+    case .relationToTopic:
+        notification.relation_to_topic_blob = data
+    case .additionalInsights:
+        notification.additional_insights_blob = data
+    }
+
+    return true
+}

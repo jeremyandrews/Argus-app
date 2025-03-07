@@ -779,23 +779,6 @@ class NotificationData {
         }
     }
 
-    func getRichText(for field: RichTextField) -> NSAttributedString? {
-        guard let data = getBlobData(for: field) else { return nil }
-
-        do {
-            if let attributedString = try NSKeyedUnarchiver.unarchivedObject(
-                ofClass: NSAttributedString.self,
-                from: data
-            ) {
-                return attributedString
-            }
-            return nil
-        } catch {
-            print("Error unarchiving rich text for \(field): \(error.localizedDescription)")
-            return nil
-        }
-    }
-
     private func getBlobData(for field: RichTextField) -> Data? {
         switch field {
         case .title:
@@ -816,18 +799,6 @@ class NotificationData {
             return additional_insights_blob
         }
     }
-}
-
-// Enum to identify which rich text field to work with
-enum RichTextField {
-    case title
-    case body
-    case summary
-    case criticalAnalysis
-    case logicalFallacies
-    case sourceAnalysis
-    case relationToTopic
-    case additionalInsights
 }
 
 // Extension to help with converting between String and NSAttributedString
