@@ -1,6 +1,5 @@
 import SwiftData
 import SwiftUI
-import SwiftyMarkdown
 import UIKit
 
 extension Date {
