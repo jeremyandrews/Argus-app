@@ -142,105 +142,41 @@ struct NewsDetailView: View {
 
     // MARK: - Helper Function to Load Rich Text
 
+    // MARK: - Helper Function to Load Rich Text
+
     private func loadRichTextContent() {
         guard let currentNotification = currentNotification else { return }
 
-        // Track if we need to save the model context
-        var needsSave = false
-
-        // Title
-        titleAttributedString = markdownFieldToAttributedString(
-            notification: currentNotification,
-            field: .title
+        // Use the consistent helper for all fields
+        titleAttributedString = getAttributedString(
+            for: .title,
+            from: currentNotification
         )
 
-        // If we got an attributed string and it wasn't already cached, save it
-        if let attributedString = titleAttributedString,
-           currentNotification.title_blob == nil
-        {
-            if saveAttributedString(attributedString, to: currentNotification, for: .title) {
-                needsSave = true
-            }
-        }
-
-        // Body
-        bodyAttributedString = markdownFieldToAttributedString(
-            notification: currentNotification,
-            field: .body
+        bodyAttributedString = getAttributedString(
+            for: .body,
+            from: currentNotification
         )
 
-        if let attributedString = bodyAttributedString,
-           currentNotification.body_blob == nil
-        {
-            if saveAttributedString(attributedString, to: currentNotification, for: .body) {
-                needsSave = true
-            }
-        }
-
-        // Summary
-        summaryAttributedString = markdownFieldToAttributedString(
-            notification: currentNotification,
-            field: .summary
+        summaryAttributedString = getAttributedString(
+            for: .summary,
+            from: currentNotification
         )
 
-        if let attributedString = summaryAttributedString,
-           currentNotification.summary_blob == nil
-        {
-            if saveAttributedString(attributedString, to: currentNotification, for: .summary) {
-                needsSave = true
-            }
-        }
-
-        // Critical Analysis
-        criticalAnalysisAttributedString = markdownFieldToAttributedString(
-            notification: currentNotification,
-            field: .criticalAnalysis
+        criticalAnalysisAttributedString = getAttributedString(
+            for: .criticalAnalysis,
+            from: currentNotification
         )
 
-        if let attributedString = criticalAnalysisAttributedString,
-           currentNotification.critical_analysis_blob == nil
-        {
-            if saveAttributedString(attributedString, to: currentNotification, for: .criticalAnalysis) {
-                needsSave = true
-            }
-        }
-
-        // Logical Fallacies
-        logicalFallaciesAttributedString = markdownFieldToAttributedString(
-            notification: currentNotification,
-            field: .logicalFallacies
+        logicalFallaciesAttributedString = getAttributedString(
+            for: .logicalFallacies,
+            from: currentNotification
         )
 
-        if let attributedString = logicalFallaciesAttributedString,
-           currentNotification.logical_fallacies_blob == nil
-        {
-            if saveAttributedString(attributedString, to: currentNotification, for: .logicalFallacies) {
-                needsSave = true
-            }
-        }
-
-        // Source Analysis
-        sourceAnalysisAttributedString = markdownFieldToAttributedString(
-            notification: currentNotification,
-            field: .sourceAnalysis
+        sourceAnalysisAttributedString = getAttributedString(
+            for: .sourceAnalysis,
+            from: currentNotification
         )
-
-        if let attributedString = sourceAnalysisAttributedString,
-           currentNotification.source_analysis_blob == nil
-        {
-            if saveAttributedString(attributedString, to: currentNotification, for: .sourceAnalysis) {
-                needsSave = true
-            }
-        }
-
-        // Save the model context if needed
-        if needsSave {
-            do {
-                try modelContext.save()
-            } catch {
-                print("Failed to save model context: \(error)")
-            }
-        }
     }
 
     // MARK: - Top Bar
@@ -261,7 +197,7 @@ struct NewsDetailView: View {
                     goToPrevious()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 22))
+                        .font(.system(size: 24))
                         .frame(width: 44, height: 44)
                 }
                 .disabled(!isCurrentIndexValid || currentIndex == 0)
@@ -270,7 +206,7 @@ struct NewsDetailView: View {
                     goToNext()
                 } label: {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 22))
+                        .font(.system(size: 24))
                         .frame(width: 44, height: 44)
                 }
                 .disabled(!isCurrentIndexValid || currentIndex == notifications.count - 1)
@@ -505,7 +441,11 @@ struct NewsDetailView: View {
             if !deletedIDs.contains(notifications[nextIndex].id) {
                 currentIndex = nextIndex
                 markAsViewed()
-                loadAdditionalContent()
+                // Key fix: Reset all content for the new article
+                additionalContent = nil // Clear old content first
+                loadAdditionalContent() // Load new content
+                loadRichTextContent() // Refresh rich text content
+
                 // Trigger scroll to top
                 scrollToTopTrigger = UUID()
                 return
@@ -533,7 +473,11 @@ struct NewsDetailView: View {
             if !deletedIDs.contains(notifications[prevIndex].id) {
                 currentIndex = prevIndex
                 markAsViewed()
-                loadAdditionalContent()
+                // Key fix: Reset all content for the new article
+                additionalContent = nil // Clear old content first
+                loadAdditionalContent() // Load new content
+                loadRichTextContent() // Refresh rich text content
+
                 // Trigger scroll to top
                 scrollToTopTrigger = UUID()
                 return
@@ -559,7 +503,7 @@ struct NewsDetailView: View {
                 }
             }
 
-            // Title - using the pre-loaded titleAttributedString
+            // Title - using AccessibleAttributedText for better rendering
             if let notification = currentNotification {
                 if let content = additionalContent,
                    let articleURLString = content["url"] as? String,
@@ -567,14 +511,12 @@ struct NewsDetailView: View {
                 {
                     Link(destination: articleURL) {
                         if let titleAttrString = titleAttributedString {
-                            Text(AttributedString(titleAttrString))
+                            AccessibleAttributedText(attributedString: titleAttrString)
                                 .font(.headline)
-                                .fontWeight(notification.isViewed ? .regular : .bold)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .multilineTextAlignment(.leading)
                                 .foregroundColor(.blue)
                         } else {
-                            // Fallback if the attributed string isn't available
                             Text(notification.title)
                                 .font(.headline)
                                 .fontWeight(notification.isViewed ? .regular : .bold)
@@ -583,14 +525,13 @@ struct NewsDetailView: View {
                                 .foregroundColor(.blue)
                         }
                     }
+                    .buttonStyle(PlainButtonStyle())
                 } else {
                     if let titleAttrString = titleAttributedString {
-                        Text(AttributedString(titleAttrString))
+                        AccessibleAttributedText(attributedString: titleAttrString)
                             .font(.headline)
-                            .fontWeight(notification.isViewed ? .regular : .bold)
-                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        // Fallback if the attributed string isn't available
                         Text(notification.title)
                             .font(.headline)
                             .fontWeight(notification.isViewed ? .regular : .bold)
@@ -608,15 +549,14 @@ struct NewsDetailView: View {
                     .foregroundColor(.secondary)
             }
 
-            // Body - using the pre-loaded bodyAttributedString
+            // Body - using Text directly with attributed string conversion
             if let notification = currentNotification {
                 if let bodyAttrString = bodyAttributedString {
+                    // Convert NSAttributedString to AttributedString for SwiftUI
                     Text(AttributedString(bodyAttrString))
-                        .font(.system(size: 14))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
                 } else {
-                    // Fallback if the attributed string isn't available
                     Text(notification.body)
                         .font(.system(size: 14))
                         .foregroundColor(.secondary)
@@ -1096,162 +1036,180 @@ struct NewsDetailView: View {
     }
 
     private func sectionContent(for section: ContentSection) -> some View {
-        AnyView(
-            Group {
-                if section.header == "Source Analysis" {
-                    // Source Analysis section with updated UI
-                    if let sourceData = section.content as? [String: Any] {
-                        let sourceText = sourceData["text"] as? String ?? ""
-                        let sourceType = sourceData["sourceType"] as? String ?? ""
+        Group {
+            if section.header == "Source Analysis" {
+                // Source Analysis section with updated UI
+                if let sourceData = section.content as? [String: Any] {
+                    let sourceText = sourceData["text"] as? String ?? ""
+                    let sourceType = sourceData["sourceType"] as? String ?? ""
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            // Domain info at the top
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Article Domain:")
-                                    if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
-                                       !domain.isEmpty
-                                    {
-                                        Text(domain)
-                                            .foregroundColor(.blue)
-                                            .onTapGesture {
-                                                if let url = URL(string: "https://\(domain)") {
-                                                    UIApplication.shared.open(url)
-                                                }
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Domain info at the top
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text("Article Domain:")
+                                if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
+                                   !domain.isEmpty
+                                {
+                                    Text(domain)
+                                        .foregroundColor(.blue)
+                                        .onTapGesture {
+                                            if let url = URL(string: "https://\(domain)") {
+                                                UIApplication.shared.open(url)
                                             }
-                                    }
+                                        }
                                 }
-                                Spacer()
                             }
+                            Spacer()
+                        }
 
-                            // The actual source analysis content
-                            if !sourceText.isEmpty {
-                                if let attributedContent = markdownToAccessibleAttributedString(
-                                    sourceText,
-                                    textStyle: "UIFontTextStyleBody"
+                        // The actual source analysis content
+                        if !sourceText.isEmpty {
+                            if let attributedString = sourceAnalysisAttributedString {
+                                Text(AttributedString(attributedString))
+                                    .textSelection(.enabled)
+                            } else {
+                                if let attributedString = getAttributedString(
+                                    for: .sourceAnalysis,
+                                    from: currentNotification!,
+                                    createIfMissing: true
                                 ) {
-                                    Text(AttributedString(attributedContent))
+                                    Text(AttributedString(attributedString))
                                         .textSelection(.enabled)
                                 } else {
                                     Text(sourceText)
+                                        .font(.body)
                                         .textSelection(.enabled)
                                 }
-                            } else {
-                                Text("No detailed source analysis available.")
-                                    .italic()
+                            }
+                        } else {
+                            Text("No detailed source analysis available.")
+                                .italic()
+                                .foregroundColor(.secondary)
+                        }
+
+                        // Only source type at the bottom
+                        if !sourceType.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: sourceTypeIcon(for: sourceType))
+                                    .foregroundColor(.blue)
+                                Text(sourceType.capitalized)
+                                    .font(.caption)
                                     .foregroundColor(.secondary)
                             }
-
-                            // Only source type at the bottom
-                            if !sourceType.isEmpty {
-                                HStack(spacing: 4) {
-                                    Image(systemName: sourceTypeIcon(for: sourceType))
-                                        .foregroundColor(.blue)
-                                    Text(sourceType.capitalized)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.top, 8)
-                            }
+                            .padding(.top, 8)
                         }
-                        .font(.body)
-                        .padding(.top, 8)
-                        .textSelection(.enabled)
-                    } else {
-                        Text("Source analysis information unavailable")
-                            .italic()
-                            .foregroundColor(.secondary)
-                            .padding()
                     }
-                } else if section.header == "Vector WIP" {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
-                            // Show all articles in a scrollable LazyVStack
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Similar Articles")
-                                    .font(.headline)
-                                    .padding(.bottom, 4)
+                    .font(.body)
+                    .padding(.top, 8)
+                    .textSelection(.enabled)
+                } else {
+                    Text("Source analysis information unavailable")
+                        .italic()
+                        .foregroundColor(.secondary)
+                        .padding()
+                }
+            } else if section.header == "Vector WIP" {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
+                        // Show all articles in a scrollable LazyVStack
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Similar Articles")
+                                .font(.headline)
+                                .padding(.bottom, 4)
 
-                                ScrollView {
-                                    LazyVStack(alignment: .leading, spacing: 12) {
-                                        ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
-                                            SimilarArticleRow(
-                                                articleDict: article,
-                                                notifications: $notifications,
-                                                currentIndex: $currentIndex,
-                                                isLastItem: index == similarArticles.count - 1
-                                            )
-                                            .onAppear {
-                                                // When the third item appears, load the Vector WIP content
-                                                if index == 2 {
-                                                    loadVectorWIPArticles()
-                                                }
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 12) {
+                                    ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
+                                        SimilarArticleRow(
+                                            articleDict: article,
+                                            notifications: $notifications,
+                                            currentIndex: $currentIndex,
+                                            isLastItem: index == similarArticles.count - 1
+                                        )
+                                        .onAppear {
+                                            // When the third item appears, load the Vector WIP content
+                                            if index == 2 {
+                                                loadVectorWIPArticles()
                                             }
                                         }
                                     }
                                 }
-                                .frame(maxHeight: 400)
                             }
-                        } else {
-                            // Initial loading state - show a placeholder or loading indicator
-                            VStack {
-                                ProgressView()
-                                    .padding()
-                                Text("Loading similar articles...")
-                                    .font(.caption)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .onAppear {
-                                // Trigger loading when this view appears
-                                loadVectorWIPArticles()
-                            }
+                            .frame(maxHeight: 400)
                         }
-
-                        Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
-                            .font(.subheadline)
-                            .padding(.top, 5)
-                    }
-                    .padding(.top, 8)
-                } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
-                    ArgusDetailsView(data: details)
-                } else if section.header == "Preview" {
-                    // Preview section content
-                    VStack {
-                        if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
-                            SafariView(url: articleURL)
-                                .frame(height: 450)
-                            Button("Open in Browser") {
-                                UIApplication.shared.open(articleURL)
-                            }
-                            .padding(.top)
-                        } else {
-                            Text("Invalid URL")
-                                .frame(height: 450)
-                        }
-                    }
-                } else if let markdownContent = section.content as? String {
-                    // Default markdown content display - using the utility instead of SwiftyMarkdown
-                    if let attributedMarkdown = markdownToAccessibleAttributedString(
-                        markdownContent,
-                        textStyle: "UIFontTextStyleBody"
-                    ) {
-                        Text(AttributedString(attributedMarkdown))
-                            .font(.body)
-                            .padding(.top, 8)
-                            .textSelection(.enabled)
                     } else {
-                        // Fallback if markdown conversion fails
-                        Text(markdownContent)
-                            .font(.body)
-                            .padding(.top, 8)
-                            .textSelection(.enabled)
+                        // Initial loading state - show a placeholder or loading indicator
+                        VStack {
+                            ProgressView()
+                                .padding()
+                            Text("Loading similar articles...")
+                                .font(.caption)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .onAppear {
+                            // Trigger loading when this view appears
+                            loadVectorWIPArticles()
+                        }
                     }
-                } else {
-                    EmptyView() // Ensures consistent return type
+
+                    Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
+                        .font(.subheadline)
+                        .padding(.top, 5)
                 }
+                .padding(.top, 8)
+            } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
+                ArgusDetailsView(data: details)
+            } else if section.header == "Preview" {
+                // Preview section content
+                VStack {
+                    if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
+                        SafariView(url: articleURL)
+                            .frame(height: 450)
+                        Button("Open in Browser") {
+                            UIApplication.shared.open(articleURL)
+                        }
+                        .padding(.top)
+                    } else {
+                        Text("Invalid URL")
+                            .frame(height: 450)
+                    }
+                }
+            } else if let markdownContent = section.content as? String {
+                // Default markdown content display using attributed string
+                if let attributedString = getAttributedString(
+                    for: getRichTextFieldForSection(section.header),
+                    from: currentNotification!,
+                    createIfMissing: true,
+                    customFontSize: 16
+                ) {
+                    Text(AttributedString(attributedString))
+                        .font(.body)
+                        .padding(.top, 8)
+                        .textSelection(.enabled)
+                } else {
+                    Text(markdownContent)
+                        .font(.body)
+                        .padding(.top, 8)
+                        .textSelection(.enabled)
+                }
+            } else {
+                EmptyView() // Ensures consistent return type
             }
-        )
+        }
+    }
+
+    private func getRichTextFieldForSection(_ header: String) -> RichTextField {
+        switch header {
+        case "Summary": return .summary
+        case "Critical Analysis": return .criticalAnalysis
+        case "Logical Fallacies": return .logicalFallacies
+        case "Source Analysis": return .sourceAnalysis
+        case "Relevance": return .relationToTopic
+        case "Context & Perspective": return .additionalInsights
+        default: return .body // Default fallback
+        }
     }
 
     private func loadVectorWIPArticles() {
@@ -1305,6 +1263,39 @@ struct NewsDetailView: View {
         }
     }
 
+    struct AccessibleAttributedText: UIViewRepresentable {
+        let attributedString: NSAttributedString
+
+        func makeUIView(context _: Context) -> UILabel {
+            let label = UILabel()
+            label.lineBreakMode = .byWordWrapping
+            label.numberOfLines = 0 // Allow unlimited lines
+            label.attributedText = attributedString
+            label.adjustsFontForContentSizeCategory = true
+            return label
+        }
+
+        func updateUIView(_ uiView: UILabel, context _: Context) {
+            uiView.attributedText = attributedString
+        }
+
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context _: Context) -> CGSize? {
+            // Calculate height based on the width constraint
+            if let width = proposal.width {
+                let constraintRect = CGSize(width: width, height: .greatestFiniteMagnitude)
+                let boundingBox = uiView.attributedText?.boundingRect(
+                    with: constraintRect,
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    context: nil
+                )
+                if let height = boundingBox?.height {
+                    return CGSize(width: width, height: ceil(height))
+                }
+            }
+            return nil
+        }
+    }
+
     private func updateArticleHeaderStyle() -> some View {
         VStack(alignment: .leading, spacing: 16) {
             // Existing topic pill + "Archived" pill code
@@ -1320,33 +1311,40 @@ struct NewsDetailView: View {
                 }
             }
 
-            // Title code remains the same
+            // Title using attributed string
             if let notification = currentNotification {
-                let processedTitle = SwiftyMarkdown(string: notification.title).attributedString()
-
                 if let content = additionalContent,
                    let articleURLString = content["url"] as? String,
                    let articleURL = URL(string: articleURLString)
                 {
                     Link(destination: articleURL) {
-                        Text(AttributedString(processedTitle))
-                            .font(.headline)
-                            .fontWeight(notification.isViewed ? .regular : .bold)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .multilineTextAlignment(.leading)
-                            .foregroundColor(.blue)
+                        if let titleString = titleAttributedString {
+                            Text(AttributedString(titleString))
+                                .fontWeight(notification.isViewed ? .regular : .bold)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .multilineTextAlignment(.leading)
+                                .foregroundColor(.blue)
+                        } else {
+                            Text(notification.title)
+                                .font(.headline)
+                                .fontWeight(notification.isViewed ? .regular : .bold)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .multilineTextAlignment(.leading)
+                                .foregroundColor(.blue)
+                        }
                     }
                 } else {
-                    Text(AttributedString(processedTitle))
-                        .font(.headline)
-                        .fontWeight(notification.isViewed ? .regular : .bold)
-                        .foregroundColor(.primary)
+                    if let titleString = titleAttributedString {
+                        Text(AttributedString(titleString))
+                            .fontWeight(notification.isViewed ? .regular : .bold)
+                            .foregroundColor(.primary)
+                    } else {
+                        Text(notification.title)
+                            .font(.headline)
+                            .fontWeight(notification.isViewed ? .regular : .bold)
+                            .foregroundColor(.primary)
+                    }
                 }
-            } else if let notification = currentNotification {
-                Text(notification.title)
-                    .font(.headline)
-                    .fontWeight(notification.isViewed ? .regular : .bold)
-                    .foregroundColor(.primary)
             }
 
             // Publication Date
@@ -1358,7 +1356,7 @@ struct NewsDetailView: View {
                     .foregroundColor(.secondary)
             }
 
-            // Quality indicator (newly added)
+            // Quality indicator
             if let notification = currentNotification,
                let quality = notification.quality ?? notification.argument_quality,
                quality > 0
@@ -1382,18 +1380,24 @@ struct NewsDetailView: View {
                 }
             }
 
-            // Rest of the body code remains the same
+            // Body using attributed string
             if let notification = currentNotification {
-                let attributedBody = SwiftyMarkdown(string: notification.body).attributedString()
-                Text(AttributedString(attributedBody))
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.leading)
+                if let bodyString = bodyAttributedString {
+                    Text(AttributedString(bodyString))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                } else {
+                    Text(notification.body)
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
 
                 // Affected (optional)
                 if !notification.affected.isEmpty {
                     Text(notification.affected)
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.caption)
+                        .fontWeight(.bold)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
                 }
@@ -1899,13 +1903,64 @@ struct ShareSelectionView: View {
 
                 switch section.header {
                 case "Title":
-                    sectionContent = notification.title // Title comes from notification, not JSON
+                    // Use our new helper for consistent handling
+                    sectionContent = getAttributedString(
+                        for: .title,
+                        from: notification
+                    )?.string ?? notification.title
+
                 case "Brief Summary":
-                    sectionContent = notification.body // Tiny Summary is actually stored as `body`
+                    // Use our new helper for consistent handling
+                    sectionContent = getAttributedString(
+                        for: .body,
+                        from: notification
+                    )?.string ?? notification.body
+
                 case "Article URL":
                     sectionContent = content?["url"] as? String
+
+                case "Summary":
+                    // Use our new helper for consistent handling
+                    sectionContent = getAttributedString(
+                        for: .summary,
+                        from: notification
+                    )?.string ?? notification.summary
+
+                case "Critical Analysis":
+                    // Use our new helper for consistent handling
+                    sectionContent = getAttributedString(
+                        for: .criticalAnalysis,
+                        from: notification
+                    )?.string ?? notification.critical_analysis
+
+                case "Logical Fallacies":
+                    // Use our new helper for consistent handling
+                    sectionContent = getAttributedString(
+                        for: .logicalFallacies,
+                        from: notification
+                    )?.string ?? notification.logical_fallacies
+
                 case "Source Analysis":
-                    sectionContent = notification.source_analysis // Use stored `source_analysis`
+                    // Use our new helper for consistent handling
+                    sectionContent = getAttributedString(
+                        for: .sourceAnalysis,
+                        from: notification
+                    )?.string ?? notification.source_analysis
+
+                case "Relevance":
+                    // Use our new helper for consistent handling
+                    sectionContent = getAttributedString(
+                        for: .relationToTopic,
+                        from: notification
+                    )?.string ?? notification.relation_to_topic
+
+                case "Context & Perspective":
+                    // Use our new helper for consistent handling
+                    sectionContent = getAttributedString(
+                        for: .additionalInsights,
+                        from: notification
+                    )?.string ?? notification.additional_insights
+
                 case "Argus Engine Stats":
                     if let details = section.argusDetails {
                         sectionContent = """
@@ -1919,7 +1974,9 @@ struct ShareSelectionView: View {
                             sectionContent! += formatSystemInfo(systemInfo)
                         }
                     }
+
                 default:
+                    // For any other sections, use the content as is
                     sectionContent = section.content as? String
                 }
 
@@ -1942,8 +1999,15 @@ struct ShareSelectionView: View {
 
         // Apply markdown formatting if enabled
         if formatText {
-            let formattedText = SwiftyMarkdown(string: shareText).attributedString()
-            shareItems = [formattedText]
+            // Use the new consistent helper to convert markdown to attributed string
+            if let attributedString = markdownToAttributedString(
+                shareText,
+                textStyle: "UIFontTextStyleBody"
+            ) {
+                shareItems = [attributedString]
+            } else {
+                shareItems = [shareText]
+            }
         } else {
             shareItems = [shareText]
         }
