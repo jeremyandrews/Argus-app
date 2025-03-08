@@ -1082,17 +1082,17 @@ struct NewsDetailView: View {
                         let sourceText = sourceData["text"] as? String ?? ""
                         let sourceType = sourceData["sourceType"] as? String ?? ""
 
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 10) { // Reduced spacing
                             // Domain info at the top
                             HStack {
-                                VStack(alignment: .leading) {
+                                VStack(alignment: .leading, spacing: 2) { // Added spacing control
                                     Text("Article Domain:")
-                                        .font(.title3)
+                                        .font(.subheadline) // Further reduced from .body to .subheadline
                                     if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
                                        !domain.isEmpty
                                     {
                                         Text(domain)
-                                            .font(.headline)
+                                            .font(.subheadline) // Further reduced
                                             .foregroundColor(.blue)
                                             .onTapGesture {
                                                 if let url = URL(string: "https://\(domain)") {
@@ -1107,23 +1107,27 @@ struct NewsDetailView: View {
                             // The actual source analysis content
                             if !sourceText.isEmpty {
                                 if let attributedString = sourceAnalysisAttributedString {
-                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 18)
+                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15) // Further reduced from 16
                                         .textSelection(.enabled)
+                                        .padding(.top, 4) // Added padding for better separation
                                 } else if let attributedString = getAttributedString(
                                     for: .sourceAnalysis,
                                     from: currentNotification!,
                                     createIfMissing: true
                                 ) {
-                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 18)
+                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15) // Further reduced
                                         .textSelection(.enabled)
+                                        .padding(.top, 4) // Added padding
                                 } else {
                                     Text(sourceText)
-                                        .font(.system(size: 18))
+                                        .font(.callout) // Changed from .body to .callout (smaller)
                                         .textSelection(.enabled)
+                                        .padding(.top, 4) // Added padding
+                                        .lineSpacing(2) // Added line spacing for readability
                                 }
                             } else {
                                 Text("No detailed source analysis available.")
-                                    .font(.system(size: 18))
+                                    .font(.callout) // Smaller font
                                     .italic()
                                     .foregroundColor(.secondary)
                             }
@@ -1132,36 +1136,37 @@ struct NewsDetailView: View {
                             if !sourceType.isEmpty {
                                 HStack(spacing: 4) {
                                     Image(systemName: sourceTypeIcon(for: sourceType))
-                                        .font(.headline)
+                                        .font(.footnote) // Further reduced
                                         .foregroundColor(.blue)
                                     Text(sourceType.capitalized)
-                                        .font(.headline)
+                                        .font(.footnote) // Further reduced
                                         .foregroundColor(.secondary)
                                 }
-                                .padding(.top, 8)
+                                .padding(.top, 6) // Adjusted padding
                             }
                         }
-                        .font(.system(size: 18))
-                        .padding(.top, 8)
+                        .padding(.top, 6) // Adjusted padding
                         .textSelection(.enabled)
                     } else {
                         Text("Source analysis information unavailable")
-                            .font(.system(size: 18))
+                            .font(.callout) // Smaller font
                             .italic()
                             .foregroundColor(.secondary)
                             .padding()
                     }
                 } else if section.header == "Vector WIP" {
-                    VStack(alignment: .leading, spacing: 10) {
+                    // Vector WIP section with adjusted font sizes
+                    VStack(alignment: .leading, spacing: 8) { // Reduced spacing
                         if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
                             // Show all articles in a scrollable LazyVStack
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 6) { // Reduced spacing
                                 Text("Similar Articles")
-                                    .font(.title3)
-                                    .padding(.bottom, 4)
+                                    .font(.subheadline) // Reduced font size
+                                    .fontWeight(.medium) // Added to compensate for smaller size
+                                    .padding(.bottom, 2) // Reduced padding
 
                                 ScrollView {
-                                    LazyVStack(alignment: .leading, spacing: 12) {
+                                    LazyVStack(alignment: .leading, spacing: 10) { // Reduced spacing
                                         ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
                                             SimilarArticleRow(
                                                 articleDict: article,
@@ -1170,7 +1175,6 @@ struct NewsDetailView: View {
                                                 isLastItem: index == similarArticles.count - 1
                                             )
                                             .onAppear {
-                                                // When the third item appears, load the Vector WIP content
                                                 if index == 2 {
                                                     loadVectorWIPArticles()
                                                 }
@@ -1181,60 +1185,61 @@ struct NewsDetailView: View {
                                 .frame(maxHeight: 400)
                             }
                         } else {
-                            // Initial loading state - show a placeholder or loading indicator
-                            VStack {
+                            // Initial loading state
+                            VStack(spacing: 6) { // Reduced spacing
                                 ProgressView()
                                     .padding()
                                 Text("Loading similar articles...")
-                                    .font(.headline)
+                                    .font(.callout) // Reduced font size
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
                             .onAppear {
-                                // Trigger loading when this view appears
                                 loadVectorWIPArticles()
                             }
                         }
 
                         Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
-                            .font(.headline)
-                            .padding(.top, 5)
+                            .font(.footnote) // Further reduced font size
+                            .padding(.top, 4) // Reduced padding
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 6) // Reduced padding
                 } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
                     ArgusDetailsView(data: details)
                 } else if section.header == "Preview" {
                     // Preview section content
-                    VStack {
+                    VStack(spacing: 8) { // Added spacing control
                         if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
                             SafariView(url: articleURL)
                                 .frame(height: 450)
                             Button("Open in Browser") {
                                 UIApplication.shared.open(articleURL)
                             }
-                            .font(.headline)
-                            .padding(.top)
+                            .font(.callout) // Reduced font size
+                            .padding(.top, 4) // Reduced padding
                         } else {
                             Text("Invalid URL")
-                                .font(.headline)
+                                .font(.callout) // Reduced font size
                                 .frame(height: 450)
                         }
                     }
                 } else if let markdownContent = section.content as? String {
-                    // Default markdown content display using attributed string
+                    // Default markdown content display with improved spacing and smaller fonts
                     if let attributedString = getAttributedString(
                         for: getRichTextFieldForSection(section.header),
                         from: currentNotification!,
                         createIfMissing: true,
-                        customFontSize: 18
+                        customFontSize: 15 // Further reduced from 16 to 15
                     ) {
-                        AccessibleAttributedText(attributedString: attributedString, fontSize: 18)
-                            .padding(.top, 8)
+                        AccessibleAttributedText(attributedString: attributedString, fontSize: 15) // Further reduced
+                            .padding(.top, 6) // Reduced padding
+                            .padding(.bottom, 2) // Added bottom padding
                             .textSelection(.enabled)
                     } else {
                         Text(markdownContent)
-                            .font(.system(size: 18)) // Use a larger font size
-                            .padding(.top, 8)
+                            .font(.callout) // Smaller font size
+                            .padding(.top, 6) // Reduced padding
+                            .lineSpacing(2) // Added line spacing for readability
                             .textSelection(.enabled)
                     }
                 } else {
