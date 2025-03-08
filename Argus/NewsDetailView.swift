@@ -1,7 +1,6 @@
 import SafariServices
 import SwiftData
 import SwiftUI
-import SwiftyMarkdown
 import WebKit
 
 struct NewsDetailView: View {
@@ -789,10 +788,14 @@ struct NewsDetailView: View {
             return
         }
 
-        // Helper function to convert markdown
+        // Use our consistent helper instead of direct SwiftyMarkdown usage
         func convertMarkdown(_ text: String?) -> String? {
             guard let text = text, !text.isEmpty else { return nil }
-            return SwiftyMarkdown(string: text).attributedString().string
+            // Create an attributed string using our helper and extract the plain string
+            if let attributedString = markdownToAttributedString(text, textStyle: "UIFontTextStyleBody") {
+                return attributedString.string
+            }
+            return text
         }
 
         // Update fields that weren't stored locally
@@ -812,6 +815,13 @@ struct NewsDetailView: View {
         if notification.source_analysis == nil {
             let sourceAnalysis = (content["source_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             notification.source_analysis = convertMarkdown(sourceAnalysis)
+
+            // Also save the rich text version if we have the text
+            if let sourceText = sourceAnalysis,
+               let attributedString = markdownToAttributedString(sourceText, textStyle: "UIFontTextStyleBody")
+            {
+                _ = saveAttributedString(attributedString, for: .sourceAnalysis, in: notification)
+            }
         }
 
         if notification.quality == nil {
@@ -819,23 +829,63 @@ struct NewsDetailView: View {
         }
 
         if notification.summary == nil {
-            notification.summary = convertMarkdown(content["summary"] as? String)
+            let summaryText = content["summary"] as? String
+            notification.summary = convertMarkdown(summaryText)
+
+            // Also save the rich text version if we have the text
+            if let text = summaryText,
+               let attributedString = markdownToAttributedString(text, textStyle: "UIFontTextStyleBody")
+            {
+                _ = saveAttributedString(attributedString, for: .summary, in: notification)
+            }
         }
 
         if notification.critical_analysis == nil {
-            notification.critical_analysis = convertMarkdown(content["critical_analysis"] as? String)
+            let criticalText = content["critical_analysis"] as? String
+            notification.critical_analysis = convertMarkdown(criticalText)
+
+            // Also save the rich text version if we have the text
+            if let text = criticalText,
+               let attributedString = markdownToAttributedString(text, textStyle: "UIFontTextStyleBody")
+            {
+                _ = saveAttributedString(attributedString, for: .criticalAnalysis, in: notification)
+            }
         }
 
         if notification.logical_fallacies == nil {
-            notification.logical_fallacies = convertMarkdown(content["logical_fallacies"] as? String)
+            let fallaciesText = content["logical_fallacies"] as? String
+            notification.logical_fallacies = convertMarkdown(fallaciesText)
+
+            // Also save the rich text version if we have the text
+            if let text = fallaciesText,
+               let attributedString = markdownToAttributedString(text, textStyle: "UIFontTextStyleBody")
+            {
+                _ = saveAttributedString(attributedString, for: .logicalFallacies, in: notification)
+            }
         }
 
         if notification.relation_to_topic == nil {
-            notification.relation_to_topic = convertMarkdown(content["relation_to_topic"] as? String)
+            let relationText = content["relation_to_topic"] as? String
+            notification.relation_to_topic = convertMarkdown(relationText)
+
+            // Also save the rich text version if we have the text
+            if let text = relationText,
+               let attributedString = markdownToAttributedString(text, textStyle: "UIFontTextStyleBody")
+            {
+                _ = saveAttributedString(attributedString, for: .relationToTopic, in: notification)
+            }
         }
 
         if notification.additional_insights == nil {
-            notification.additional_insights = convertMarkdown(content["additional_insights"] as? String)
+            let insightsText = content["additional_insights"] as? String
+            notification.additional_insights = convertMarkdown(insightsText)
+
+            // Also save the rich text version if we have the text
+            if let text = insightsText,
+               let attributedString = markdownToAttributedString(text, textStyle: "UIFontTextStyleBody")
+            {
+                _ = saveAttributedString(attributedString, for: .additionalInsights, in: notification)
+            }
         }
 
         // Store engine stats
@@ -1572,9 +1622,11 @@ struct SimilarArticleRow: View {
 
     // Helper function to apply Markdown formatting with a fallback
     private func markdownFormatted(_ text: String) -> String? {
-        let markdown = SwiftyMarkdown(string: text)
-        let attributed = markdown.attributedString()
-        return attributed.string.isEmpty ? nil : attributed.string
+        // Replace direct SwiftyMarkdown usage
+        if let attributedString = markdownToAttributedString(text, textStyle: "UIFontTextStyleBody") {
+            return attributedString.string
+        }
+        return text.isEmpty ? nil : text
     }
 
     // Helper function to convert quality score to a descriptive label
