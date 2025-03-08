@@ -485,7 +485,7 @@ struct NewsDetailView: View {
         }
     }
 
-    // MARK: - Main Article Header
+    // MARK: - Article Header
 
     private var articleHeaderStyle: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -502,7 +502,7 @@ struct NewsDetailView: View {
                 }
             }
 
-            // Title - using AccessibleAttributedText for better rendering
+            // Title with consistent styling
             if let notification = currentNotification {
                 if let content = additionalContent,
                    let articleURLString = content["url"] as? String,
@@ -511,15 +511,12 @@ struct NewsDetailView: View {
                     Link(destination: articleURL) {
                         if let titleAttrString = titleAttributedString {
                             AccessibleAttributedText(attributedString: titleAttrString)
-                                .font(.headline)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .multilineTextAlignment(.leading)
+                                .padding(.vertical, 4)
                                 .foregroundColor(.blue)
                         } else {
                             Text(notification.title)
-                                .font(.headline)
+                                .font(.title2)
                                 .fontWeight(notification.isViewed ? .regular : .bold)
-                                .frame(maxWidth: .infinity, alignment: .leading)
                                 .multilineTextAlignment(.leading)
                                 .foregroundColor(.blue)
                         }
@@ -528,53 +525,47 @@ struct NewsDetailView: View {
                 } else {
                     if let titleAttrString = titleAttributedString {
                         AccessibleAttributedText(attributedString: titleAttrString)
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
                     } else {
                         Text(notification.title)
-                            .font(.headline)
+                            .font(.title2)
                             .fontWeight(notification.isViewed ? .regular : .bold)
-                            .foregroundColor(.primary)
+                            .multilineTextAlignment(.leading)
                     }
                 }
-            }
 
-            // Publication Date
-            if let notification = currentNotification,
-               let pubDate = notification.pub_date
-            {
-                Text("Published: \(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-            }
-
-            // Body - using Text directly with attributed string conversion
-            if let notification = currentNotification {
-                if let bodyAttrString = bodyAttributedString {
-                    // Convert NSAttributedString to AttributedString for SwiftUI
-                    Text(AttributedString(bodyAttrString))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                // Publication Date
+                if let pubDate = notification.pub_date {
+                    Text("Published: \(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
+                }
+
+                // Body text with consistent styling
+                if let bodyAttrString = bodyAttributedString {
+                    AccessibleAttributedText(attributedString: bodyAttrString)
+                        .padding(.vertical, 4)
                 } else {
                     Text(notification.body)
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                        .font(.body)
                         .multilineTextAlignment(.leading)
+                        .foregroundColor(.secondary)
                 }
 
                 // Affected (optional)
                 if !notification.affected.isEmpty {
                     Text(notification.affected)
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.callout)
+                        .fontWeight(.bold)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
                 }
 
                 // Domain
                 if let domain = notification.domain, !domain.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
                         Text(domain)
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.headline)
                             .foregroundColor(.blue)
                             .lineLimit(1)
 
@@ -1098,10 +1089,12 @@ struct NewsDetailView: View {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text("Article Domain:")
+                                    .font(.headline)
                                 if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
                                    !domain.isEmpty
                                 {
                                     Text(domain)
+                                        .font(.subheadline)
                                         .foregroundColor(.blue)
                                         .onTapGesture {
                                             if let url = URL(string: "https://\(domain)") {
@@ -1116,21 +1109,21 @@ struct NewsDetailView: View {
                         // The actual source analysis content
                         if !sourceText.isEmpty {
                             if let attributedString = sourceAnalysisAttributedString {
-                                Text(AttributedString(attributedString))
+                                AccessibleAttributedText(attributedString: attributedString)
+                                    .padding(.vertical, 4)
+                                    .textSelection(.enabled)
+                            } else if let attributedString = getAttributedString(
+                                for: .sourceAnalysis,
+                                from: currentNotification!,
+                                createIfMissing: true
+                            ) {
+                                AccessibleAttributedText(attributedString: attributedString)
+                                    .padding(.vertical, 4)
                                     .textSelection(.enabled)
                             } else {
-                                if let attributedString = getAttributedString(
-                                    for: .sourceAnalysis,
-                                    from: currentNotification!,
-                                    createIfMissing: true
-                                ) {
-                                    Text(AttributedString(attributedString))
-                                        .textSelection(.enabled)
-                                } else {
-                                    Text(sourceText)
-                                        .font(.body)
-                                        .textSelection(.enabled)
-                                }
+                                Text(sourceText)
+                                    .font(.body)
+                                    .textSelection(.enabled)
                             }
                         } else {
                             Text("No detailed source analysis available.")
@@ -1144,7 +1137,7 @@ struct NewsDetailView: View {
                                 Image(systemName: sourceTypeIcon(for: sourceType))
                                     .foregroundColor(.blue)
                                 Text(sourceType.capitalized)
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
                             .padding(.top, 8)
@@ -1221,8 +1214,10 @@ struct NewsDetailView: View {
                             UIApplication.shared.open(articleURL)
                         }
                         .padding(.top)
+                        .font(.headline)
                     } else {
                         Text("Invalid URL")
+                            .font(.body)
                             .frame(height: 450)
                     }
                 }
@@ -1231,12 +1226,10 @@ struct NewsDetailView: View {
                 if let attributedString = getAttributedString(
                     for: getRichTextFieldForSection(section.header),
                     from: currentNotification!,
-                    createIfMissing: true,
-                    customFontSize: 16
+                    createIfMissing: true
                 ) {
-                    Text(AttributedString(attributedString))
-                        .font(.body)
-                        .padding(.top, 8)
+                    AccessibleAttributedText(attributedString: attributedString)
+                        .padding(.vertical, 4)
                         .textSelection(.enabled)
                 } else {
                     Text(markdownContent)
@@ -1315,34 +1308,83 @@ struct NewsDetailView: View {
 
     struct AccessibleAttributedText: UIViewRepresentable {
         let attributedString: NSAttributedString
+        var fontSize: CGFloat = 17 // Default to larger size similar to NewsView
 
-        func makeUIView(context _: Context) -> UILabel {
-            let label = UILabel()
-            label.lineBreakMode = .byWordWrapping
-            label.numberOfLines = 0 // Allow unlimited lines
-            label.attributedText = attributedString
-            label.adjustsFontForContentSizeCategory = true
-            return label
+        func makeUIView(context _: Context) -> UITextView {
+            let textView = UITextView()
+            textView.attributedText = attributedString
+            textView.isEditable = false
+            textView.isSelectable = true
+            textView.isScrollEnabled = false
+            textView.backgroundColor = .clear
+
+            // Remove default padding
+            textView.textContainerInset = .zero
+            textView.textContainer.lineFragmentPadding = 0
+
+            // Enable Dynamic Type
+            textView.adjustsFontForContentSizeCategory = true
+
+            // Apply larger font size while preserving other attributes
+            applyLargerFontSize(to: textView)
+
+            // Setup for proper wrapping
+            textView.translatesAutoresizingMaskIntoConstraints = false
+            textView.setContentCompressionResistancePriority(.required, for: .vertical)
+            textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+            return textView
         }
 
-        func updateUIView(_ uiView: UILabel, context _: Context) {
+        func updateUIView(_ uiView: UITextView, context _: Context) {
             uiView.attributedText = attributedString
+            applyLargerFontSize(to: uiView)
+
+            // Ensure proper width for wrapping
+            if let superview = uiView.superview {
+                uiView.textContainer.size.width = superview.bounds.width - 32 // Account for padding
+            }
+
+            uiView.layoutIfNeeded()
         }
 
-        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context _: Context) -> CGSize? {
-            // Calculate height based on the width constraint
-            if let width = proposal.width {
-                let constraintRect = CGSize(width: width, height: .greatestFiniteMagnitude)
-                let boundingBox = uiView.attributedText?.boundingRect(
-                    with: constraintRect,
-                    options: [.usesLineFragmentOrigin, .usesFontLeading],
-                    context: nil
-                )
-                if let height = boundingBox?.height {
-                    return CGSize(width: width, height: ceil(height))
+        private func applyLargerFontSize(to textView: UITextView) {
+            // Create a mutable copy to modify attributes
+            let mutableAttrString = NSMutableAttributedString(attributedString: textView.attributedText)
+
+            // Define default font sizes based on context
+            let titleSize: CGFloat = 22
+            let bodySize: CGFloat = 17
+
+            // Apply larger font size while preserving style attributes
+            mutableAttrString.enumerateAttributes(in: NSRange(location: 0, length: mutableAttrString.length)) { attributes, range, _ in
+                // Get existing font to preserve traits
+                if let existingFont = attributes[.font] as? UIFont {
+                    let newSize = existingFont.fontDescriptor.symbolicTraits.contains(.traitBold) ? titleSize : bodySize
+                    let newFont = UIFont(descriptor: existingFont.fontDescriptor, size: newSize)
+                    mutableAttrString.addAttribute(.font, value: newFont, range: range)
+                } else {
+                    // If no font exists, add a default one
+                    let defaultFont = UIFont.systemFont(ofSize: bodySize)
+                    mutableAttrString.addAttribute(.font, value: defaultFont, range: range)
                 }
             }
-            return nil
+
+            textView.attributedText = mutableAttrString
+        }
+
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize? {
+            if let width = proposal.width {
+                uiView.textContainer.size.width = width - 32 // Account for padding
+                uiView.layoutIfNeeded()
+            }
+
+            let fittingSize = uiView.sizeThatFits(CGSize(
+                width: proposal.width ?? UIView.layoutFittingExpandedSize.width,
+                height: UIView.layoutFittingExpandedSize.height
+            ))
+
+            return fittingSize
         }
     }
 
