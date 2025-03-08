@@ -788,7 +788,7 @@ struct NewsDetailView: View {
             return
         }
 
-        // Use our consistent helper instead of direct SwiftyMarkdown usage
+        // Use consistent helper
         func convertMarkdown(_ text: String?) -> String? {
             guard let text = text, !text.isEmpty else { return nil }
             // Create an attributed string using our helper and extract the plain string
@@ -1622,7 +1622,6 @@ struct SimilarArticleRow: View {
 
     // Helper function to apply Markdown formatting with a fallback
     private func markdownFormatted(_ text: String) -> String? {
-        // Replace direct SwiftyMarkdown usage
         if let attributedString = markdownToAttributedString(text, textStyle: "UIFontTextStyleBody") {
             return attributedString.string
         }

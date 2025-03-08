@@ -1,6 +1,5 @@
 import Foundation
 import SwiftData
-import SwiftyMarkdown
 import UIKit
 
 extension Task where Success == Never, Failure == Never {
