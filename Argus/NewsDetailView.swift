@@ -541,11 +541,11 @@ struct NewsDetailView: View {
                 // Body - using Text directly with attributed string conversion
                 if let bodyAttrString = bodyAttributedString {
                     // Convert NSAttributedString to AttributedString for SwiftUI
-                    AccessibleAttributedText(attributedString: bodyAttrString, fontSize: 17)
+                    AccessibleAttributedText(attributedString: bodyAttrString, fontSize: 18)
                         .foregroundColor(.secondary)
                 } else {
                     Text(notification.body)
-                        .font(.system(size: 17))
+                        .font(.system(size: 18))
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
                 }
@@ -1107,23 +1107,23 @@ struct NewsDetailView: View {
                             // The actual source analysis content
                             if !sourceText.isEmpty {
                                 if let attributedString = sourceAnalysisAttributedString {
-                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 17)
+                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 18)
                                         .textSelection(.enabled)
                                 } else if let attributedString = getAttributedString(
                                     for: .sourceAnalysis,
                                     from: currentNotification!,
                                     createIfMissing: true
                                 ) {
-                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 17)
+                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 18)
                                         .textSelection(.enabled)
                                 } else {
                                     Text(sourceText)
-                                        .font(.system(size: 17))
+                                        .font(.system(size: 18))
                                         .textSelection(.enabled)
                                 }
                             } else {
                                 Text("No detailed source analysis available.")
-                                    .font(.system(size: 17))
+                                    .font(.system(size: 18))
                                     .italic()
                                     .foregroundColor(.secondary)
                             }
@@ -1141,12 +1141,12 @@ struct NewsDetailView: View {
                                 .padding(.top, 8)
                             }
                         }
-                        .font(.system(size: 17))
+                        .font(.system(size: 18))
                         .padding(.top, 8)
                         .textSelection(.enabled)
                     } else {
                         Text("Source analysis information unavailable")
-                            .font(.system(size: 17))
+                            .font(.system(size: 18))
                             .italic()
                             .foregroundColor(.secondary)
                             .padding()
@@ -1226,14 +1226,14 @@ struct NewsDetailView: View {
                         for: getRichTextFieldForSection(section.header),
                         from: currentNotification!,
                         createIfMissing: true,
-                        customFontSize: 17 // Use a larger font size
+                        customFontSize: 18
                     ) {
-                        AccessibleAttributedText(attributedString: attributedString, fontSize: 17)
+                        AccessibleAttributedText(attributedString: attributedString, fontSize: 18)
                             .padding(.top, 8)
                             .textSelection(.enabled)
                     } else {
                         Text(markdownContent)
-                            .font(.system(size: 17)) // Use a larger font size
+                            .font(.system(size: 18)) // Use a larger font size
                             .padding(.top, 8)
                             .textSelection(.enabled)
                     }
@@ -1309,7 +1309,7 @@ struct NewsDetailView: View {
 
     struct AccessibleAttributedText: UIViewRepresentable {
         let attributedString: NSAttributedString
-        var fontSize: CGFloat = 17 // Default to larger size similar to NewsView
+        var fontSize: CGFloat = 18
 
         func makeUIView(context _: Context) -> UITextView {
             let textView = UITextView()
