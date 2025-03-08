@@ -438,13 +438,20 @@ struct NewsDetailView: View {
             if !deletedIDs.contains(notifications[nextIndex].id) {
                 currentIndex = nextIndex
                 markAsViewed()
-                // Key fix: Reset all content for the new article
-                additionalContent = nil // Clear old content first
-                loadAdditionalContent() // Load new content
-                loadRichTextContent() // Refresh rich text content
-
-                // Trigger scroll to top
-                scrollToTopTrigger = UUID()
+                
+                // Reset content for the new article
+                additionalContent = nil
+                
+                // Use a slight delay to ensure the content change is processed before scrolling
+                DispatchQueue.main.async {
+                    self.loadAdditionalContent()
+                    self.loadRichTextContent()
+                    
+                    // Trigger scroll to top with a small delay to ensure content is updated first
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self.scrollToTopTrigger = UUID()
+                    }
+                }
                 return
             }
             nextIndex += 1
@@ -470,13 +477,20 @@ struct NewsDetailView: View {
             if !deletedIDs.contains(notifications[prevIndex].id) {
                 currentIndex = prevIndex
                 markAsViewed()
-                // Key fix: Reset all content for the new article
-                additionalContent = nil // Clear old content first
-                loadAdditionalContent() // Load new content
-                loadRichTextContent() // Refresh rich text content
-
-                // Trigger scroll to top
-                scrollToTopTrigger = UUID()
+                
+                // Reset content for the new article
+                additionalContent = nil
+                
+                // Use a slight delay to ensure the content change is processed before scrolling
+                DispatchQueue.main.async {
+                    self.loadAdditionalContent()
+                    self.loadRichTextContent()
+                    
+                    // Trigger scroll to top with a small delay to ensure content is updated first
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self.scrollToTopTrigger = UUID()
+                    }
+                }
                 return
             }
             prevIndex -= 1
@@ -1082,17 +1096,17 @@ struct NewsDetailView: View {
                         let sourceText = sourceData["text"] as? String ?? ""
                         let sourceType = sourceData["sourceType"] as? String ?? ""
 
-                        VStack(alignment: .leading, spacing: 10) { // Reduced spacing
+                        VStack(alignment: .leading, spacing: 10) {
                             // Domain info at the top
                             HStack {
-                                VStack(alignment: .leading, spacing: 2) { // Added spacing control
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text("Article Domain:")
-                                        .font(.subheadline) // Further reduced from .body to .subheadline
+                                        .font(.subheadline)
                                     if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
                                        !domain.isEmpty
                                     {
                                         Text(domain)
-                                            .font(.subheadline) // Further reduced
+                                            .font(.subheadline)
                                             .foregroundColor(.blue)
                                             .onTapGesture {
                                                 if let url = URL(string: "https://\(domain)") {
@@ -1107,27 +1121,31 @@ struct NewsDetailView: View {
                             // The actual source analysis content
                             if !sourceText.isEmpty {
                                 if let attributedString = sourceAnalysisAttributedString {
-                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15) // Further reduced from 16
+                                    // Fix for cutoff text
+                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                                        .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
                                         .textSelection(.enabled)
-                                        .padding(.top, 4) // Added padding for better separation
+                                        .padding(.top, 4)
                                 } else if let attributedString = getAttributedString(
                                     for: .sourceAnalysis,
                                     from: currentNotification!,
                                     createIfMissing: true
                                 ) {
-                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15) // Further reduced
+                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                                        .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
                                         .textSelection(.enabled)
-                                        .padding(.top, 4) // Added padding
+                                        .padding(.top, 4)
                                 } else {
                                     Text(sourceText)
-                                        .font(.callout) // Changed from .body to .callout (smaller)
+                                        .font(.callout)
                                         .textSelection(.enabled)
-                                        .padding(.top, 4) // Added padding
-                                        .lineSpacing(2) // Added line spacing for readability
+                                        .padding(.top, 4)
+                                        .lineSpacing(2)
+                                        .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
                                 }
                             } else {
                                 Text("No detailed source analysis available.")
-                                    .font(.callout) // Smaller font
+                                    .font(.callout)
                                     .italic()
                                     .foregroundColor(.secondary)
                             }
@@ -1136,37 +1154,36 @@ struct NewsDetailView: View {
                             if !sourceType.isEmpty {
                                 HStack(spacing: 4) {
                                     Image(systemName: sourceTypeIcon(for: sourceType))
-                                        .font(.footnote) // Further reduced
+                                        .font(.footnote)
                                         .foregroundColor(.blue)
                                     Text(sourceType.capitalized)
-                                        .font(.footnote) // Further reduced
+                                        .font(.footnote)
                                         .foregroundColor(.secondary)
                                 }
-                                .padding(.top, 6) // Adjusted padding
+                                .padding(.top, 6)
                             }
                         }
-                        .padding(.top, 6) // Adjusted padding
+                        .padding(.top, 6)
                         .textSelection(.enabled)
                     } else {
                         Text("Source analysis information unavailable")
-                            .font(.callout) // Smaller font
+                            .font(.callout)
                             .italic()
                             .foregroundColor(.secondary)
                             .padding()
                     }
                 } else if section.header == "Vector WIP" {
-                    // Vector WIP section with adjusted font sizes
-                    VStack(alignment: .leading, spacing: 8) { // Reduced spacing
+                    // Vector WIP section (content preserved)
+                    VStack(alignment: .leading, spacing: 8) {
                         if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
-                            // Show all articles in a scrollable LazyVStack
-                            VStack(alignment: .leading, spacing: 6) { // Reduced spacing
+                            VStack(alignment: .leading, spacing: 6) {
                                 Text("Similar Articles")
-                                    .font(.subheadline) // Reduced font size
-                                    .fontWeight(.medium) // Added to compensate for smaller size
-                                    .padding(.bottom, 2) // Reduced padding
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .padding(.bottom, 2)
 
                                 ScrollView {
-                                    LazyVStack(alignment: .leading, spacing: 10) { // Reduced spacing
+                                    LazyVStack(alignment: .leading, spacing: 10) {
                                         ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
                                             SimilarArticleRow(
                                                 articleDict: article,
@@ -1185,12 +1202,11 @@ struct NewsDetailView: View {
                                 .frame(maxHeight: 400)
                             }
                         } else {
-                            // Initial loading state
-                            VStack(spacing: 6) { // Reduced spacing
+                            VStack(spacing: 6) {
                                 ProgressView()
                                     .padding()
                                 Text("Loading similar articles...")
-                                    .font(.callout) // Reduced font size
+                                    .font(.callout)
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
@@ -1200,50 +1216,52 @@ struct NewsDetailView: View {
                         }
 
                         Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
-                            .font(.footnote) // Further reduced font size
-                            .padding(.top, 4) // Reduced padding
+                            .font(.footnote)
+                            .padding(.top, 4)
                     }
-                    .padding(.top, 6) // Reduced padding
+                    .padding(.top, 6)
                 } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
                     ArgusDetailsView(data: details)
                 } else if section.header == "Preview" {
                     // Preview section content
-                    VStack(spacing: 8) { // Added spacing control
+                    VStack(spacing: 8) {
                         if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
                             SafariView(url: articleURL)
                                 .frame(height: 450)
                             Button("Open in Browser") {
                                 UIApplication.shared.open(articleURL)
                             }
-                            .font(.callout) // Reduced font size
-                            .padding(.top, 4) // Reduced padding
+                            .font(.callout)
+                            .padding(.top, 4)
                         } else {
                             Text("Invalid URL")
-                                .font(.callout) // Reduced font size
+                                .font(.callout)
                                 .frame(height: 450)
                         }
                     }
                 } else if let markdownContent = section.content as? String {
-                    // Default markdown content display with improved spacing and smaller fonts
+                    // Default markdown content display - FIX FOR CUTOFF TEXT
                     if let attributedString = getAttributedString(
                         for: getRichTextFieldForSection(section.header),
                         from: currentNotification!,
                         createIfMissing: true,
-                        customFontSize: 15 // Further reduced from 16 to 15
+                        customFontSize: 15
                     ) {
-                        AccessibleAttributedText(attributedString: attributedString, fontSize: 15) // Further reduced
-                            .padding(.top, 6) // Reduced padding
-                            .padding(.bottom, 2) // Added bottom padding
+                        AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                            .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
+                            .padding(.top, 6)
+                            .padding(.bottom, 2)
                             .textSelection(.enabled)
                     } else {
                         Text(markdownContent)
-                            .font(.callout) // Smaller font size
-                            .padding(.top, 6) // Reduced padding
-                            .lineSpacing(2) // Added line spacing for readability
+                            .font(.callout)
+                            .padding(.top, 6)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
                             .textSelection(.enabled)
                     }
                 } else {
-                    EmptyView() // Ensures consistent return type
+                    EmptyView()
                 }
             }
         )
@@ -1314,41 +1332,41 @@ struct NewsDetailView: View {
 
     struct AccessibleAttributedText: UIViewRepresentable {
         let attributedString: NSAttributedString
-        var fontSize: CGFloat = 18
-
-        func makeUIView(context _: Context) -> UITextView {
+        var fontSize: CGFloat = 15
+        
+        func makeUIView(context: Context) -> UITextView {
             let textView = UITextView()
             textView.attributedText = attributedString
             textView.isEditable = false
             textView.isSelectable = true
             textView.isScrollEnabled = false
             textView.backgroundColor = .clear
-
+            
             // Remove default padding
             textView.textContainerInset = .zero
             textView.textContainer.lineFragmentPadding = 0
-
+            
             // Enable Dynamic Type
             textView.adjustsFontForContentSizeCategory = true
-
-            // Setup for proper text wrapping
+            
+            // Critical for height calculation - set content hugging and compression resistance
             textView.setContentCompressionResistancePriority(.required, for: .vertical)
-            textView.setContentHuggingPriority(.required, for: .vertical)
-
+            textView.setContentHuggingPriority(.defaultLow, for: .vertical)
+            
             return textView
         }
-
-        func updateUIView(_ uiView: UITextView, context _: Context) {
-            // Keep existing attributed text
+        
+        func updateUIView(_ uiView: UITextView, context: Context) {
+            // Apply the attributed text with adjusted font sizing
             let mutableAttrString = NSMutableAttributedString(attributedString: attributedString)
-
-            // Apply larger font size while preserving style attributes
+            
+            // Apply adjusted font sizes while preserving style attributes
             mutableAttrString.enumerateAttributes(in: NSRange(location: 0, length: mutableAttrString.length)) { attributes, range, _ in
                 // Get existing font to preserve traits
                 if let existingFont = attributes[.font] as? UIFont {
                     // Determine if this is a heading or body text based on size or traits
                     let isHeading = existingFont.pointSize > 14 || existingFont.fontDescriptor.symbolicTraits.contains(.traitBold)
-                    let newSize = isHeading ? fontSize + 5 : fontSize // Headings slightly larger
+                    let newSize = isHeading ? fontSize + 2 : fontSize // Headings slightly larger
                     let newFont = UIFont(descriptor: existingFont.fontDescriptor, size: newSize)
                     mutableAttrString.addAttribute(.font, value: newFont, range: range)
                 } else {
@@ -1357,36 +1375,44 @@ struct NewsDetailView: View {
                     mutableAttrString.addAttribute(.font, value: defaultFont, range: range)
                 }
             }
-
+            
             uiView.attributedText = mutableAttrString
-
-            // Critical for proper wrapping: ensure width is constrained
+            
+            // Ensure width is constrained based on superview
             if let superview = uiView.superview {
                 let availableWidth = superview.bounds.width - 32 // Account for padding
                 uiView.textContainer.size.width = availableWidth
             } else {
-                // Fall back to screen width if no superview exists yet
                 let screenWidth = UIScreen.main.bounds.width - 32 // Account for padding
                 uiView.textContainer.size.width = screenWidth
             }
-
+            
+            // Force layout immediately to ensure proper sizing
+            uiView.setNeedsLayout()
             uiView.layoutIfNeeded()
+            
+            // Make sure the text view adjusts its height to fit the content
+            let newSize = uiView.sizeThatFits(
+                CGSize(width: uiView.bounds.width, height: CGFloat.greatestFiniteMagnitude)
+            )
+            
+            if uiView.bounds.height != newSize.height {
+                uiView.frame = CGRect(origin: uiView.frame.origin, size: newSize)
+            }
         }
-
-        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize? {
-            // Set width constraint based on proposal
+        
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+            // Calculate the size that fits all content
             if let width = proposal.width {
                 uiView.textContainer.size.width = width - 16 // Account for padding
                 uiView.layoutIfNeeded()
+                
+                return uiView.sizeThatFits(CGSize(
+                    width: width - 16,
+                    height: CGFloat.greatestFiniteMagnitude
+                ))
             }
-
-            // Get the natural size after layout
-            let fittingSize = uiView.sizeThatFits(CGSize(
-                width: proposal.width ?? UIScreen.main.bounds.width - 32,
-                height: UIView.layoutFittingExpandedSize.height
-            ))
-
-            return fittingSize
+            return nil
         }
     }
 
