@@ -170,7 +170,7 @@ struct NewsDetailView: View {
 
             HStack(spacing: 32) {
                 Button {
-                    goToPrevious()
+                    navigateToArticle(direction: .previous)
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 24))
@@ -179,7 +179,7 @@ struct NewsDetailView: View {
                 .disabled(!isCurrentIndexValid || currentIndex == 0)
 
                 Button {
-                    goToNext()
+                    navigateToArticle(direction: .next)
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 24))
@@ -401,15 +401,22 @@ struct NewsDetailView: View {
         dismiss()
     }
 
-    private func goToNext() {
+    enum NavigationDirection {
+        case next
+        case previous
+    }
+
+    private func navigateToArticle(direction: NavigationDirection) {
         guard isCurrentIndexValid else { return }
-        var nextIndex = currentIndex + 1
+
+        // Set initial index based on direction
+        var targetIndex = (direction == .next) ? currentIndex + 1 : currentIndex - 1
 
         // Set navigating state to true first
         isNavigating = true
         loadingStage = 1
 
-        // Clear all content immediately before showing the next article
+        // Clear all content immediately before showing the new article
         titleAttributedString = nil
         bodyAttributedString = nil
         summaryAttributedString = nil
@@ -421,92 +428,45 @@ struct NewsDetailView: View {
         // Scroll to top immediately
         scrollToTopTrigger = UUID()
 
-        // If we're near the end of our loaded notifications, load more
-        if nextIndex >= notifications.count - 5 {
+        // Handle pagination based on direction
+        if direction == .next && targetIndex >= notifications.count - 5 {
+            // If we're near the end of our loaded notifications, load more
             let nextBatchSize = notifications.count + 50
             if nextBatchSize <= allNotifications.count {
                 notifications = Array(allNotifications.prefix(nextBatchSize))
             }
-        }
-
-        while nextIndex < notifications.count {
-            if !deletedIDs.contains(notifications[nextIndex].id) {
-                // Update the index
-                currentIndex = nextIndex
-
-                // Reset expanded sections
-                var newExpandedSections: [String: Bool] = [:]
-                for (key, _) in expandedSections {
-                    newExpandedSections[key] = (key == "Summary")
-                }
-                expandedSections = newExpandedSections
-
-                // Load content in stages with visual feedback
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    // Stage 1: Mark as viewed and prepare for content
-                    self.markAsViewed()
-
-                    // Stage 2: Begin loading content - still show loading indicator
-                    self.loadingStage = 2
-
-                    // Use our consolidated loading function for minimal content
-                    self.loadContent(contentType: .minimal, synchronously: true) {
-                        // Now that essential content is loaded, stop showing loading indicator
-                        self.isNavigating = false
-                        self.loadingStage = 0
-
-                        // Load remaining content in background
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            self.loadContent(contentType: .full)
-                        }
-                    }
-                }
-
-                return
-            }
-            nextIndex += 1
-        }
-
-        // If we couldn't navigate, reset the navigation state
-        isNavigating = false
-        loadingStage = 0
-    }
-
-    private func goToPrevious() {
-        guard isCurrentIndexValid else { return }
-        var prevIndex = currentIndex - 1
-
-        // Set navigating state to true first
-        isNavigating = true
-        loadingStage = 1
-
-        // Clear all content immediately before showing the previous article
-        titleAttributedString = nil
-        bodyAttributedString = nil
-        summaryAttributedString = nil
-        criticalAnalysisAttributedString = nil
-        logicalFallaciesAttributedString = nil
-        sourceAnalysisAttributedString = nil
-        additionalContent = nil
-
-        // Scroll to top immediately
-        scrollToTopTrigger = UUID()
-
-        // If we're near the start and there are more notifications to load
-        if prevIndex <= 5 && notifications.count < allNotifications.count {
+        } else if direction == .previous && targetIndex <= 5 && notifications.count < allNotifications.count {
+            // If we're near the start and there are more notifications to load
             let additionalItems = 50
             let startIndex = max(0, notifications.count - additionalItems)
             let newItems = Array(allNotifications[startIndex ..< min(startIndex + additionalItems, allNotifications.count)])
             notifications = newItems + notifications
             // Adjust currentIndex to account for the newly prepended items
             currentIndex += newItems.count
-            prevIndex += newItems.count
+            targetIndex += newItems.count
         }
 
-        while prevIndex >= 0 {
-            if !deletedIDs.contains(notifications[prevIndex].id) {
+        // Find the next undeleted article
+        let validArticleFound = findValidArticle(from: targetIndex, direction: direction)
+
+        if !validArticleFound {
+            // If we couldn't navigate, reset the navigation state
+            isNavigating = false
+            loadingStage = 0
+        }
+    }
+
+    private func findValidArticle(from startIndex: Int, direction: NavigationDirection) -> Bool {
+        var index = startIndex
+        let increment = (direction == .next) ? 1 : -1
+
+        // Check if the starting index is within valid range
+        while (direction == .next && index < notifications.count) ||
+            (direction == .previous && index >= 0)
+        {
+            if !deletedIDs.contains(notifications[index].id) {
                 // Update the index
-                currentIndex = prevIndex
+                currentIndex = index
 
                 // Reset expanded sections
                 var newExpandedSections: [String: Bool] = [:]
@@ -536,14 +496,14 @@ struct NewsDetailView: View {
                     }
                 }
 
-                return
+                return true
             }
-            prevIndex -= 1
+
+            // Move to the next index based on direction
+            index += increment
         }
 
-        // If we couldn't navigate, reset the navigation state
-        isNavigating = false
-        loadingStage = 0
+        return false
     }
 
     private func hasMinimalCachedContent(_ notification: NotificationData) -> Bool {
@@ -1232,9 +1192,13 @@ struct NewsDetailView: View {
         }
     }
 
-    private func loadContentForSection(_ section: String) {
-        guard let notification = currentNotification else { return }
+    /**
+     Loads content for a specific section when it's expanded or scrolled to.
+     This is a helper that uses the main loadContent function with specific fields.
 
+     - Parameter section: The name of the section to load content for
+     */
+    private func loadContentForSection(_ section: String) {
         // Map section name to field type
         let field: RichTextField?
         switch section {
@@ -1262,9 +1226,7 @@ struct NewsDetailView: View {
         guard let fieldToLoad = field else { return }
 
         // Use our consolidated loading function
-        loadContent(contentType: .specific([fieldToLoad]), synchronously: false) {
-            // This is called when loading completes
-        }
+        loadContent(contentType: .specific([fieldToLoad]), synchronously: false)
     }
 
     func loadAdditionalContent() {
