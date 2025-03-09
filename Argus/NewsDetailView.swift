@@ -122,7 +122,7 @@ struct NewsDetailView: View {
                 setupDeletionHandling()
                 markAsViewed()
                 loadAdditionalContent()
-                loadRichTextContent()
+                loadContent(contentType: .summary)
                 if let section = initiallyExpandedSection {
                     expandedSections[section] = true
                 }
@@ -152,17 +152,6 @@ struct NewsDetailView: View {
                         }
                     }
             )
-        }
-    }
-
-    // MARK: - Helper Function to Load Rich Text
-
-    private func loadRichTextContent() {
-        loadMinimalContent()
-
-        // Add preloading of cached content with a slight delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.preloadCachedContent()
         }
     }
 
@@ -455,23 +444,20 @@ struct NewsDetailView: View {
                 // Load content in stages with visual feedback
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     // Stage 1: Mark as viewed and prepare for content
-                    markAsViewed()
+                    self.markAsViewed()
 
                     // Stage 2: Begin loading content - still show loading indicator
-                    loadingStage = 2
+                    self.loadingStage = 2
 
-                    // Start loading minimal content
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        // Load all essential content synchronously before showing
-                        self.loadMinimalContentSync()
-
+                    // Use our consolidated loading function for minimal content
+                    self.loadContent(contentType: .minimal, synchronously: true) {
                         // Now that essential content is loaded, stop showing loading indicator
                         self.isNavigating = false
                         self.loadingStage = 0
 
                         // Load remaining content in background
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            self.preloadCachedContent()
+                            self.loadContent(contentType: .full)
                         }
                     }
                 }
@@ -532,23 +518,20 @@ struct NewsDetailView: View {
                 // Load content in stages with visual feedback
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     // Stage 1: Mark as viewed and prepare for content
-                    markAsViewed()
+                    self.markAsViewed()
 
                     // Stage 2: Begin loading content - still show loading indicator
-                    loadingStage = 2
+                    self.loadingStage = 2
 
-                    // Start loading minimal content
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        // Load all essential content synchronously before showing
-                        self.loadMinimalContentSync()
-
+                    // Use our consolidated loading function for minimal content
+                    self.loadContent(contentType: .minimal, synchronously: true) {
                         // Now that essential content is loaded, stop showing loading indicator
                         self.isNavigating = false
                         self.loadingStage = 0
 
                         // Load remaining content in background
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            self.preloadCachedContent()
+                            self.loadContent(contentType: .full)
                         }
                     }
                 }
@@ -561,20 +544,6 @@ struct NewsDetailView: View {
         // If we couldn't navigate, reset the navigation state
         isNavigating = false
         loadingStage = 0
-    }
-
-    private func loadMinimalContentSync() {
-        guard let notification = currentNotification else { return }
-
-        // Load essential content synchronously to prevent flashing
-        titleAttributedString = getAttributedString(for: .title, from: notification)
-        bodyAttributedString = getAttributedString(for: .body, from: notification)
-
-        // Build the content dictionary for sections
-        additionalContent = buildContentDictionary(from: notification)
-
-        // Load summary since it's expanded by default
-        summaryAttributedString = getAttributedString(for: .summary, from: notification)
     }
 
     private func hasMinimalCachedContent(_ notification: NotificationData) -> Bool {
@@ -623,87 +592,6 @@ struct NewsDetailView: View {
         let fileURL = documentsDirectory.appendingPathComponent(filename)
 
         return fileManager.fileExists(atPath: fileURL.path)
-    }
-
-    private func loadSectionHeaders() {
-        guard let notification = currentNotification else { return }
-        // Build a minimalist content dictionary with just the keys needed
-        // to display section headers, not their actual content
-        var minimalContent: [String: Any] = [:]
-
-        // Add minimal required fields
-        if let domain = notification.domain {
-            minimalContent["url"] = "https://\(domain)"
-        }
-        minimalContent["sources_quality"] = notification.sources_quality
-        minimalContent["argument_quality"] = notification.argument_quality
-        minimalContent["source_type"] = notification.source_type
-
-        // Add empty placeholder values for sections - just so they show up in the list
-        let placeholderSections = [
-            "summary", "critical_analysis", "logical_fallacies",
-            "relation_to_topic", "additional_insights", "source_analysis",
-        ]
-
-        for section in placeholderSections {
-            // Check if the field exists by accessing the property directly
-            let hasContent: Bool
-            switch section {
-            case "summary":
-                hasContent = notification.summary != nil
-            case "critical_analysis":
-                hasContent = notification.critical_analysis != nil
-            case "logical_fallacies":
-                hasContent = notification.logical_fallacies != nil
-            case "relation_to_topic":
-                hasContent = notification.relation_to_topic != nil
-            case "additional_insights":
-                hasContent = notification.additional_insights != nil
-            case "source_analysis":
-                hasContent = notification.source_analysis != nil
-            default:
-                hasContent = false
-            }
-
-            minimalContent[section] = hasContent ? " " : "" // Empty space as placeholder
-        }
-
-        // Set the dictionary - this will make sections appear
-        additionalContent = minimalContent
-
-        // Only now, load body text since it's visible in the header
-        DispatchQueue.main.async {
-            self.bodyAttributedString = getAttributedString(for: .body, from: notification)
-
-            // Load summary content only if Summary section is expanded (it is by default)
-            if self.expandedSections["Summary"] == true {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    self.summaryAttributedString = getAttributedString(
-                        for: .summary,
-                        from: notification
-                    )
-                }
-            }
-        }
-    }
-
-    private func loadMinimalHeaderContent() {
-        guard let notification = currentNotification else { return }
-        // Only load title and domain info - absolute minimum needed
-        titleAttributedString = getAttributedString(for: .title, from: notification)
-    }
-
-    // New function that loads only the minimum required content for the view
-    private func loadMinimalContent() {
-        guard let notification = currentNotification else { return }
-
-        // Load only title and body - these are needed for the header
-        titleAttributedString = getAttributedString(for: .title, from: notification)
-        bodyAttributedString = getAttributedString(for: .body, from: notification)
-
-        // Build the additionalContent dictionary which powers the section list
-        // This doesn't load the actual rich text content yet
-        additionalContent = buildContentDictionary(from: notification)
     }
 
     // MARK: - Article Header
@@ -851,61 +739,6 @@ struct NewsDetailView: View {
                             }
                             scrollToSection = nil
                         }
-                    }
-                }
-            }
-        }
-    }
-
-    private func loadContentForSection(_ section: String) {
-        guard let notification = currentNotification else { return }
-
-        // Map section name to field type
-        let field: RichTextField?
-        switch section {
-        case "Summary":
-            field = .summary
-            if summaryAttributedString != nil { return } // Already loaded
-        case "Critical Analysis":
-            field = .criticalAnalysis
-            if criticalAnalysisAttributedString != nil { return } // Already loaded
-        case "Logical Fallacies":
-            field = .logicalFallacies
-            if logicalFallaciesAttributedString != nil { return } // Already loaded
-        case "Source Analysis":
-            field = .sourceAnalysis
-            if sourceAnalysisAttributedString != nil { return } // Already loaded
-        case "Relevance":
-            field = .relationToTopic
-        case "Context & Perspective":
-            field = .additionalInsights
-        default:
-            field = nil // Unknown section
-        }
-
-        // Only proceed if we have a field to load
-        guard let fieldToLoad = field else { return }
-
-        // Load the content in background
-        Task {
-            if let attributedString = getAttributedString(
-                for: fieldToLoad,
-                from: notification,
-                createIfMissing: true
-            ) {
-                // Update UI on main thread
-                await MainActor.run {
-                    switch fieldToLoad {
-                    case .summary:
-                        summaryAttributedString = attributedString
-                    case .criticalAnalysis:
-                        criticalAnalysisAttributedString = attributedString
-                    case .logicalFallacies:
-                        logicalFallaciesAttributedString = attributedString
-                    case .sourceAnalysis:
-                        sourceAnalysisAttributedString = attributedString
-                    default:
-                        break // Other fields aren't cached in properties yet
                     }
                 }
             }
@@ -1292,6 +1125,148 @@ struct NewsDetailView: View {
         return content
     }
 
+    enum ContentLoadType {
+        case minimal // Just title and body (minimum needed for header)
+        case header // Only content needed for article header rendering
+        case summary // Minimal + summary content (for default expanded section)
+        case sectionHeaders // Just section headers without content (for quick display)
+        case full // All content including rich text for all sections
+        case specific([RichTextField]) // Load only specific fields
+    }
+
+    // MARK: - Consolidated Content Loading Function
+
+    /**
+     Loads content for the current article with various levels of detail and timing options.
+
+     - Parameters:
+       - contentType: Determines which content to load (minimal, header, full, etc.)
+       - synchronously: If true, blocks until content is loaded; if false, loads asynchronously
+       - completion: Optional callback to execute when content loading completes
+     */
+    private func loadContent(
+        contentType: ContentLoadType = .minimal,
+        synchronously: Bool = false,
+        completion: (() -> Void)? = nil
+    ) {
+        guard let notification = currentNotification else { return }
+
+        // Function to execute the loading based on content type
+        let performLoading = {
+            // Always build the basic content dictionary which powers the section list
+            // regardless of the content type - this ensures sections appear even if content is loading
+            if self.additionalContent == nil {
+                self.additionalContent = self.buildContentDictionary(from: notification)
+            }
+
+            // Determine which fields to load based on content type
+            var fieldsToLoad: [RichTextField] = []
+
+            switch contentType {
+            case .minimal:
+                fieldsToLoad = [.title, .body]
+
+            case .header:
+                fieldsToLoad = [.title, .body]
+
+            case .summary:
+                fieldsToLoad = [.title, .body, .summary]
+
+            case .sectionHeaders:
+                // Just return since we already built the content dictionary
+                return
+
+            case .full:
+                fieldsToLoad = [
+                    .title, .body, .summary, .criticalAnalysis,
+                    .logicalFallacies, .sourceAnalysis, .relationToTopic, .additionalInsights,
+                ]
+
+            case let .specific(fields):
+                fieldsToLoad = fields
+            }
+
+            // Load the fields
+            for field in fieldsToLoad {
+                let attributedString = getAttributedString(
+                    for: field,
+                    from: notification,
+                    createIfMissing: true
+                )
+
+                // Store the attributed string in the appropriate property
+                switch field {
+                case .title:
+                    self.titleAttributedString = attributedString
+                case .body:
+                    self.bodyAttributedString = attributedString
+                case .summary:
+                    self.summaryAttributedString = attributedString
+                case .criticalAnalysis:
+                    self.criticalAnalysisAttributedString = attributedString
+                case .logicalFallacies:
+                    self.logicalFallaciesAttributedString = attributedString
+                case .sourceAnalysis:
+                    self.sourceAnalysisAttributedString = attributedString
+                case .relationToTopic, .additionalInsights:
+                    // These don't have dedicated properties but are loaded for on-demand use
+                    break
+                }
+            }
+        }
+
+        // Execute the loading based on synchronicity parameter
+        if synchronously {
+            performLoading()
+            completion?()
+        } else {
+            // Run asynchronously to prevent UI blocking
+            DispatchQueue.global(qos: .userInteractive).async {
+                performLoading()
+
+                // Call completion on main thread
+                DispatchQueue.main.async {
+                    completion?()
+                }
+            }
+        }
+    }
+
+    private func loadContentForSection(_ section: String) {
+        guard let notification = currentNotification else { return }
+
+        // Map section name to field type
+        let field: RichTextField?
+        switch section {
+        case "Summary":
+            field = .summary
+            if summaryAttributedString != nil { return } // Already loaded
+        case "Critical Analysis":
+            field = .criticalAnalysis
+            if criticalAnalysisAttributedString != nil { return } // Already loaded
+        case "Logical Fallacies":
+            field = .logicalFallacies
+            if logicalFallaciesAttributedString != nil { return } // Already loaded
+        case "Source Analysis":
+            field = .sourceAnalysis
+            if sourceAnalysisAttributedString != nil { return } // Already loaded
+        case "Relevance":
+            field = .relationToTopic
+        case "Context & Perspective":
+            field = .additionalInsights
+        default:
+            field = nil // Unknown section
+        }
+
+        // Only proceed if we have a field to load
+        guard let fieldToLoad = field else { return }
+
+        // Use our consolidated loading function
+        loadContent(contentType: .specific([fieldToLoad]), synchronously: false) {
+            // This is called when loading completes
+        }
+    }
+
     func loadAdditionalContent() {
         guard let notification = currentNotification else { return }
 
@@ -1660,44 +1635,6 @@ struct NewsDetailView: View {
                 }
             } else {
                 EmptyView()
-            }
-        }
-    }
-
-    private func preloadCachedContent() {
-        guard let notification = currentNotification else { return }
-
-        // Create a background task to load only essential content
-        Task {
-            // Get only the absolutely necessary fields
-            let essentialFields: [RichTextField] = [
-                .title,
-                .body,
-                .summary, // Only preload summary since it's expanded by default
-            ]
-
-            // Load just these fields
-            let attributedStrings = essentialFields.compactMap { field -> (RichTextField, NSAttributedString)? in
-                if let attributedString = getAttributedString(
-                    for: field,
-                    from: notification,
-                    createIfMissing: true
-                ) {
-                    return (field, attributedString)
-                }
-                return nil
-            }
-
-            // Update the cached strings on the main thread
-            await MainActor.run {
-                for (field, attributedString) in attributedStrings {
-                    switch field {
-                    case .title: titleAttributedString = attributedString
-                    case .body: bodyAttributedString = attributedString
-                    case .summary: summaryAttributedString = attributedString
-                    default: break
-                    }
-                }
             }
         }
     }
