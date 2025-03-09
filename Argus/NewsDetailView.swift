@@ -1353,7 +1353,7 @@ struct NewsDetailView: View {
                         if !sourceText.isEmpty {
                             if let attributedString = sourceAnalysisAttributedString {
                                 // Use existing cached attributed string if available
-                                AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                                AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .textSelection(.enabled)
                                     .padding(.top, 4)
@@ -1362,11 +1362,11 @@ struct NewsDetailView: View {
                                           for: .sourceAnalysis,
                                           from: notification,
                                           createIfMissing: true,
-                                          customFontSize: 15
+                                          customFontSize: 16
                                       )
                             {
                                 // Get the attributed string and cache it
-                                AccessibleAttributedText(attributedString: attrString, fontSize: 15)
+                                AccessibleAttributedText(attributedString: attrString, fontSize: 16)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .textSelection(.enabled)
                                     .padding(.top, 4)
@@ -1410,7 +1410,7 @@ struct NewsDetailView: View {
                 // Summary section with efficient caching
                 if let attributedString = summaryAttributedString {
                     // Use cached version if available
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
@@ -1420,11 +1420,11 @@ struct NewsDetailView: View {
                               for: .summary,
                               from: notification,
                               createIfMissing: true,
-                              customFontSize: 15
+                              customFontSize: 16
                           )
                 {
                     // Get the attributed string and cache it
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
@@ -1446,7 +1446,7 @@ struct NewsDetailView: View {
             } else if section.header == "Critical Analysis" {
                 // Critical Analysis section with efficient caching
                 if let attributedString = criticalAnalysisAttributedString {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
@@ -1456,10 +1456,10 @@ struct NewsDetailView: View {
                               for: .criticalAnalysis,
                               from: notification,
                               createIfMissing: true,
-                              customFontSize: 15
+                              customFontSize: 16
                           )
                 {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
@@ -1479,7 +1479,7 @@ struct NewsDetailView: View {
             } else if section.header == "Logical Fallacies" {
                 // Logical Fallacies section with efficient caching
                 if let attributedString = logicalFallaciesAttributedString {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
@@ -1489,10 +1489,10 @@ struct NewsDetailView: View {
                               for: .logicalFallacies,
                               from: notification,
                               createIfMissing: true,
-                              customFontSize: 15
+                              customFontSize: 16
                           )
                 {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
@@ -1579,10 +1579,10 @@ struct NewsDetailView: View {
                        for: getRichTextFieldForSection(section.header),
                        from: notification,
                        createIfMissing: true,
-                       customFontSize: 15
+                       customFontSize: 16
                    )
                 {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
@@ -1611,7 +1611,7 @@ struct NewsDetailView: View {
             VStack {
                 if let attributedString = self.attributedString {
                     // Content loaded - display it
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
@@ -1637,7 +1637,7 @@ struct NewsDetailView: View {
                     for: field,
                     from: notification,
                     createIfMissing: true,
-                    customFontSize: 15
+                    customFontSize: 16
                 )
             }
         }
@@ -1654,7 +1654,7 @@ struct NewsDetailView: View {
             VStack {
                 if let attributedString = loadedAttributedString {
                     // Show content once loaded
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 } else if isLoading {
@@ -1700,14 +1700,14 @@ struct NewsDetailView: View {
             Group {
                 if let existingString = attributedString {
                     // Use existing attributed string if available
-                    AccessibleAttributedText(attributedString: existingString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: existingString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
                         .textSelection(.enabled)
                 } else if let loadedString = loadedAttributedString {
                     // Use our locally loaded attributed string
-                    AccessibleAttributedText(attributedString: loadedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: loadedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
@@ -1726,7 +1726,7 @@ struct NewsDetailView: View {
                                 for: richTextField,
                                 from: notification,
                                 createIfMissing: true,
-                                customFontSize: 15
+                                customFontSize: 16
                             ) {
                                 loadedAttributedString = attrString
                                 onLoad?(attrString)
@@ -1750,13 +1750,13 @@ struct NewsDetailView: View {
             Group {
                 if let existingString = attributedString {
                     // Use existing attributed string if available
-                    AccessibleAttributedText(attributedString: existingString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: existingString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                         .padding(.top, 4)
                 } else if let loadedString = loadedAttributedString {
                     // Use our locally loaded attributed string
-                    AccessibleAttributedText(attributedString: loadedString, fontSize: 15)
+                    AccessibleAttributedText(attributedString: loadedString, fontSize: 16)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                         .padding(.top, 4)
@@ -1774,7 +1774,7 @@ struct NewsDetailView: View {
                                 for: .sourceAnalysis,
                                 from: notification,
                                 createIfMissing: true,
-                                customFontSize: 15
+                                customFontSize: 16
                             ) {
                                 loadedAttributedString = attrString
                                 onLoad?(attrString)
@@ -1850,7 +1850,7 @@ struct NewsDetailView: View {
 
     struct AccessibleAttributedText: UIViewRepresentable {
         let attributedString: NSAttributedString
-        var fontSize: CGFloat = 15
+        var fontSize: CGFloat = 16
 
         func makeUIView(context _: Context) -> UITextView {
             let textView = UITextView()
