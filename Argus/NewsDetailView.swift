@@ -142,38 +142,12 @@ struct NewsDetailView: View {
     // MARK: - Helper Function to Load Rich Text
 
     private func loadRichTextContent() {
-        guard let currentNotification = currentNotification else { return }
+        loadMinimalContent()
 
-        // Use the consistent helper for all fields
-        titleAttributedString = getAttributedString(
-            for: .title,
-            from: currentNotification
-        )
-
-        bodyAttributedString = getAttributedString(
-            for: .body,
-            from: currentNotification
-        )
-
-        summaryAttributedString = getAttributedString(
-            for: .summary,
-            from: currentNotification
-        )
-
-        criticalAnalysisAttributedString = getAttributedString(
-            for: .criticalAnalysis,
-            from: currentNotification
-        )
-
-        logicalFallaciesAttributedString = getAttributedString(
-            for: .logicalFallacies,
-            from: currentNotification
-        )
-
-        sourceAnalysisAttributedString = getAttributedString(
-            for: .sourceAnalysis,
-            from: currentNotification
-        )
+        // Add preloading of cached content with a slight delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.preloadCachedContent()
+        }
     }
 
     // MARK: - Top Bar
@@ -438,24 +412,119 @@ struct NewsDetailView: View {
             if !deletedIDs.contains(notifications[nextIndex].id) {
                 currentIndex = nextIndex
                 markAsViewed()
-                
+
                 // Reset content for the new article
                 additionalContent = nil
-                
-                // Use a slight delay to ensure the content change is processed before scrolling
-                DispatchQueue.main.async {
-                    self.loadAdditionalContent()
-                    self.loadRichTextContent()
-                    
-                    // Trigger scroll to top with a small delay to ensure content is updated first
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        self.scrollToTopTrigger = UUID()
-                    }
+
+                // Clear all attributed strings to avoid keeping old content
+                titleAttributedString = nil
+                bodyAttributedString = nil
+                summaryAttributedString = nil
+                criticalAnalysisAttributedString = nil
+                logicalFallaciesAttributedString = nil
+                sourceAnalysisAttributedString = nil
+
+                // Preserve "Summary" as expanded by default
+                var newExpandedSections: [String: Bool] = [:]
+                for (key, _) in expandedSections {
+                    newExpandedSections[key] = (key == "Summary")
                 }
+                expandedSections = newExpandedSections
+
+                // Scroll to top immediately
+                scrollToTopTrigger = UUID()
+
+                // Load essential content with minimal delay
+                DispatchQueue.main.async {
+                    // Check if we have cached blobs first - this should be very fast
+                    guard let notification = self.currentNotification else { return }
+
+                    // Load header content immediately (title, body)
+                    self.titleAttributedString = getAttributedString(for: .title, from: notification)
+                    self.bodyAttributedString = getAttributedString(for: .body, from: notification)
+
+                    // Build the section dictionary using the existing method
+                    self.additionalContent = self.buildContentDictionary(from: notification)
+
+                    // Preload summary since it's expanded by default
+                    self.summaryAttributedString = getAttributedString(for: .summary, from: notification)
+
+                    // Call preloadCachedContent to efficiently load other key content
+                    self.preloadCachedContent()
+                }
+
                 return
             }
             nextIndex += 1
         }
+    }
+
+    private func loadSectionHeaders() {
+        guard let notification = currentNotification else { return }
+        // Build a minimalist content dictionary with just the keys needed
+        // to display section headers, not their actual content
+        var minimalContent: [String: Any] = [:]
+
+        // Add minimal required fields
+        if let domain = notification.domain {
+            minimalContent["url"] = "https://\(domain)"
+        }
+        minimalContent["sources_quality"] = notification.sources_quality
+        minimalContent["argument_quality"] = notification.argument_quality
+        minimalContent["source_type"] = notification.source_type
+
+        // Add empty placeholder values for sections - just so they show up in the list
+        let placeholderSections = [
+            "summary", "critical_analysis", "logical_fallacies",
+            "relation_to_topic", "additional_insights", "source_analysis",
+        ]
+
+        for section in placeholderSections {
+            // Check if the field exists by accessing the property directly
+            let hasContent: Bool
+            switch section {
+            case "summary":
+                hasContent = notification.summary != nil
+            case "critical_analysis":
+                hasContent = notification.critical_analysis != nil
+            case "logical_fallacies":
+                hasContent = notification.logical_fallacies != nil
+            case "relation_to_topic":
+                hasContent = notification.relation_to_topic != nil
+            case "additional_insights":
+                hasContent = notification.additional_insights != nil
+            case "source_analysis":
+                hasContent = notification.source_analysis != nil
+            default:
+                hasContent = false
+            }
+
+            minimalContent[section] = hasContent ? " " : "" // Empty space as placeholder
+        }
+
+        // Set the dictionary - this will make sections appear
+        additionalContent = minimalContent
+
+        // Only now, load body text since it's visible in the header
+        DispatchQueue.main.async {
+            self.bodyAttributedString = getAttributedString(for: .body, from: notification)
+
+            // Load summary content only if Summary section is expanded (it is by default)
+            if self.expandedSections["Summary"] == true {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self.summaryAttributedString = getAttributedString(
+                        for: .summary,
+                        from: notification
+                    )
+                }
+            }
+        }
+    }
+
+    private func loadMinimalHeaderContent() {
+        guard let notification = currentNotification else { return }
+        // Only load title and domain info - absolute minimum needed
+        titleAttributedString = getAttributedString(for: .title, from: notification)
     }
 
     private func goToPrevious() {
@@ -477,24 +546,64 @@ struct NewsDetailView: View {
             if !deletedIDs.contains(notifications[prevIndex].id) {
                 currentIndex = prevIndex
                 markAsViewed()
-                
+
                 // Reset content for the new article
                 additionalContent = nil
-                
-                // Use a slight delay to ensure the content change is processed before scrolling
-                DispatchQueue.main.async {
-                    self.loadAdditionalContent()
-                    self.loadRichTextContent()
-                    
-                    // Trigger scroll to top with a small delay to ensure content is updated first
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        self.scrollToTopTrigger = UUID()
-                    }
+
+                // Clear all attributed strings to avoid keeping old content
+                titleAttributedString = nil
+                bodyAttributedString = nil
+                summaryAttributedString = nil
+                criticalAnalysisAttributedString = nil
+                logicalFallaciesAttributedString = nil
+                sourceAnalysisAttributedString = nil
+
+                // Preserve "Summary" as expanded by default
+                var newExpandedSections: [String: Bool] = [:]
+                for (key, _) in expandedSections {
+                    newExpandedSections[key] = (key == "Summary")
                 }
+                expandedSections = newExpandedSections
+
+                // Scroll to top immediately
+                scrollToTopTrigger = UUID()
+
+                // Load essential content with minimal delay
+                DispatchQueue.main.async {
+                    // Check if we have cached blobs first - this should be very fast
+                    guard let notification = self.currentNotification else { return }
+
+                    // Load header content immediately (title, body)
+                    self.titleAttributedString = getAttributedString(for: .title, from: notification)
+                    self.bodyAttributedString = getAttributedString(for: .body, from: notification)
+
+                    // Build the section dictionary using the existing method
+                    self.additionalContent = self.buildContentDictionary(from: notification)
+
+                    // Preload summary since it's expanded by default
+                    self.summaryAttributedString = getAttributedString(for: .summary, from: notification)
+
+                    // Call preloadCachedContent to efficiently load other key content
+                    self.preloadCachedContent()
+                }
+
                 return
             }
             prevIndex -= 1
         }
+    }
+
+    // New function that loads only the minimum required content for the view
+    private func loadMinimalContent() {
+        guard let notification = currentNotification else { return }
+
+        // Load only title and body - these are needed for the header
+        titleAttributedString = getAttributedString(for: .title, from: notification)
+        bodyAttributedString = getAttributedString(for: .body, from: notification)
+
+        // Build the additionalContent dictionary which powers the section list
+        // This doesn't load the actual rich text content yet
+        additionalContent = buildContentDictionary(from: notification)
     }
 
     // MARK: - Article Header
@@ -599,7 +708,7 @@ struct NewsDetailView: View {
 
     // MARK: - Additional Sections
 
-    private var additionalSectionsView: some View {
+    var additionalSectionsView: some View {
         VStack(alignment: .leading, spacing: 8) {
             if isLoadingAdditionalContent {
                 ProgressView("Loading additional content...")
@@ -613,7 +722,15 @@ struct NewsDetailView: View {
                             DisclosureGroup(
                                 isExpanded: Binding(
                                     get: { expandedSections[section.header] ?? false },
-                                    set: { expandedSections[section.header] = $0 }
+                                    set: {
+                                        let wasExpanded = expandedSections[section.header] ?? false
+                                        expandedSections[section.header] = $0
+
+                                        // If newly expanded, trigger content loading
+                                        if !wasExpanded, $0 {
+                                            loadContentForSection(section.header)
+                                        }
+                                    }
                                 )
                             ) {
                                 sectionContent(for: section)
@@ -628,11 +745,67 @@ struct NewsDetailView: View {
                     .onChange(of: scrollToSection) { _, newSection in
                         if let section = newSection {
                             expandedSections[section] = true
+                            loadContentForSection(section) // Load content when scrolled to
                             withAnimation {
                                 proxy.scrollTo(section, anchor: .top)
                             }
                             scrollToSection = nil
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadContentForSection(_ section: String) {
+        guard let notification = currentNotification else { return }
+
+        // Map section name to field type
+        let field: RichTextField?
+        switch section {
+        case "Summary":
+            field = .summary
+            if summaryAttributedString != nil { return } // Already loaded
+        case "Critical Analysis":
+            field = .criticalAnalysis
+            if criticalAnalysisAttributedString != nil { return } // Already loaded
+        case "Logical Fallacies":
+            field = .logicalFallacies
+            if logicalFallaciesAttributedString != nil { return } // Already loaded
+        case "Source Analysis":
+            field = .sourceAnalysis
+            if sourceAnalysisAttributedString != nil { return } // Already loaded
+        case "Relevance":
+            field = .relationToTopic
+        case "Context & Perspective":
+            field = .additionalInsights
+        default:
+            field = nil // Unknown section
+        }
+
+        // Only proceed if we have a field to load
+        guard let fieldToLoad = field else { return }
+
+        // Load the content in background
+        Task {
+            if let attributedString = getAttributedString(
+                for: fieldToLoad,
+                from: notification,
+                createIfMissing: true
+            ) {
+                // Update UI on main thread
+                await MainActor.run {
+                    switch fieldToLoad {
+                    case .summary:
+                        summaryAttributedString = attributedString
+                    case .criticalAnalysis:
+                        criticalAnalysisAttributedString = attributedString
+                    case .logicalFallacies:
+                        logicalFallaciesAttributedString = attributedString
+                    case .sourceAnalysis:
+                        sourceAnalysisAttributedString = attributedString
+                    default:
+                        break // Other fields aren't cached in properties yet
                     }
                 }
             }
@@ -963,40 +1136,52 @@ struct NewsDetailView: View {
             content["url"] = "https://\(domain)"
         }
 
-        // Transfer all relevant fields from the notification to the content dictionary
+        // Transfer metadata fields directly without processing
         content["sources_quality"] = notification.sources_quality
         content["argument_quality"] = notification.argument_quality
         content["source_type"] = notification.source_type
+
+        // Just check if these fields exist without converting to attributed strings
         content["summary"] = notification.summary
         content["critical_analysis"] = notification.critical_analysis
         content["logical_fallacies"] = notification.logical_fallacies
         content["relation_to_topic"] = notification.relation_to_topic
         content["additional_insights"] = notification.additional_insights
-        content["source_analysis"] = notification.source_analysis
 
-        // If we have engine stats, parse and add them
+        // For source analysis, just create a basic dictionary without processing the text
+        if let sourceAnalysis = notification.source_analysis {
+            content["source_analysis"] = [
+                "text": sourceAnalysis,
+                "sourceType": notification.source_type ?? "",
+            ]
+        } else {
+            content["source_analysis"] = [
+                "text": "",
+                "sourceType": notification.source_type ?? "",
+            ]
+        }
+
+        // Transfer engine stats and similar articles as is
         if let engineStatsJson = notification.engine_stats,
            let engineStatsData = engineStatsJson.data(using: .utf8),
            let engineStats = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
         {
+            // Transfer relevant engine stats fields
             if let model = engineStats["model"] as? String {
                 content["model"] = model
             }
-
             if let elapsedTime = engineStats["elapsed_time"] as? Double {
                 content["elapsed_time"] = elapsedTime
             }
-
             if let stats = engineStats["stats"] as? String {
                 content["stats"] = stats
             }
-
             if let systemInfo = engineStats["system_info"] as? [String: Any] {
                 content["system_info"] = systemInfo
             }
         }
 
-        // If we have similar articles, parse and add them
+        // Transfer similar articles as is
         if let similarArticlesJson = notification.similar_articles,
            let similarArticlesData = similarArticlesJson.data(using: .utf8),
            let similarArticles = try? JSONSerialization.jsonObject(with: similarArticlesData) as? [[String: Any]]
@@ -1010,31 +1195,41 @@ struct NewsDetailView: View {
     func loadAdditionalContent() {
         guard let notification = currentNotification else { return }
 
-        // First, check if we already have the content in the notification object
-        if hasRequiredContent(notification) {
-            // If we have local data, build content dictionary immediately without showing loader
+        // Check if we have basic data to display sections
+        if additionalContent == nil {
+            // Set initial content immediately so sections appear
             additionalContent = buildContentDictionary(from: notification)
-            return
         }
 
-        isLoadingAdditionalContent = true
-        Task {
-            do {
-                // Use the new helper to fetch and update notification content if needed
-                let updatedNotification = try await SyncManager.fetchFullContentIfNeeded(for: notification)
+        // If we need to fetch additional content from the network
+        if !hasRequiredContent(notification) {
+            isLoadingAdditionalContent = true
 
-                // Build content dictionary from the updated notification
-                let content = buildContentDictionary(from: updatedNotification)
+            Task {
+                do {
+                    // Use the helper to fetch and update notification content if needed
+                    let updatedNotification = try await SyncManager.fetchFullContentIfNeeded(for: notification)
 
-                await MainActor.run {
-                    // Update the content and loading state on the main thread
-                    self.additionalContent = content
-                    self.isLoadingAdditionalContent = false
-                }
-            } catch {
-                await MainActor.run {
-                    self.additionalContent = ["Error": "Failed to load content: \(error.localizedDescription)"]
-                    self.isLoadingAdditionalContent = false
+                    // Build updated content dictionary from the updated notification
+                    let content = buildContentDictionary(from: updatedNotification)
+
+                    await MainActor.run {
+                        // Update the content and loading state on the main thread
+                        self.additionalContent = content
+                        self.isLoadingAdditionalContent = false
+
+                        // Only load the summary attributed string if the summary section is expanded
+                        if self.expandedSections["Summary"] == true {
+                            self.summaryAttributedString = getAttributedString(
+                                for: .summary,
+                                from: updatedNotification
+                            )
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.isLoadingAdditionalContent = false
+                    }
                 }
             }
         }
@@ -1088,183 +1283,507 @@ struct NewsDetailView: View {
     }
 
     private func sectionContent(for section: ContentSection) -> some View {
-        AnyView(
-            Group {
-                if section.header == "Source Analysis" {
-                    // Source Analysis section with updated UI
+        Group {
+            if section.header == "Source Analysis" {
+                // Source Analysis section with efficient caching
+                VStack(alignment: .leading, spacing: 10) {
+                    // Domain info at the top
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Article Domain:")
+                                .font(.subheadline)
+                            if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
+                               !domain.isEmpty
+                            {
+                                Text(domain)
+                                    .font(.subheadline)
+                                    .foregroundColor(.blue)
+                                    .onTapGesture {
+                                        if let url = URL(string: "https://\(domain)") {
+                                            UIApplication.shared.open(url)
+                                        }
+                                    }
+                            }
+                        }
+                        Spacer()
+                    }
+
                     if let sourceData = section.content as? [String: Any] {
                         let sourceText = sourceData["text"] as? String ?? ""
                         let sourceType = sourceData["sourceType"] as? String ?? ""
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            // Domain info at the top
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Article Domain:")
-                                        .font(.subheadline)
-                                    if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
-                                       !domain.isEmpty
-                                    {
-                                        Text(domain)
-                                            .font(.subheadline)
-                                            .foregroundColor(.blue)
-                                            .onTapGesture {
-                                                if let url = URL(string: "https://\(domain)") {
-                                                    UIApplication.shared.open(url)
-                                                }
-                                            }
+                        // The actual source analysis content
+                        if !sourceText.isEmpty {
+                            if let attributedString = sourceAnalysisAttributedString {
+                                // Use existing cached attributed string if available
+                                AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                                    .padding(.top, 4)
+                            } else if let notification = currentNotification,
+                                      let attrString = getAttributedString(
+                                          for: .sourceAnalysis,
+                                          from: notification,
+                                          createIfMissing: true,
+                                          customFontSize: 15
+                                      )
+                            {
+                                // Get the attributed string and cache it
+                                AccessibleAttributedText(attributedString: attrString, fontSize: 15)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                                    .padding(.top, 4)
+                                    .onAppear {
+                                        // Cache for future use
+                                        sourceAnalysisAttributedString = attrString
                                     }
-                                }
-                                Spacer()
-                            }
-
-                            // The actual source analysis content
-                            if !sourceText.isEmpty {
-                                if let attributedString = sourceAnalysisAttributedString {
-                                    // Fix for cutoff text
-                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
-                                        .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
-                                        .textSelection(.enabled)
-                                        .padding(.top, 4)
-                                } else if let attributedString = getAttributedString(
-                                    for: .sourceAnalysis,
-                                    from: currentNotification!,
-                                    createIfMissing: true
-                                ) {
-                                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
-                                        .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
-                                        .textSelection(.enabled)
-                                        .padding(.top, 4)
-                                } else {
-                                    Text(sourceText)
-                                        .font(.callout)
-                                        .textSelection(.enabled)
-                                        .padding(.top, 4)
-                                        .lineSpacing(2)
-                                        .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
-                                }
                             } else {
-                                Text("No detailed source analysis available.")
+                                Text(sourceText)
                                     .font(.callout)
-                                    .italic()
+                                    .textSelection(.enabled)
+                                    .padding(.top, 4)
+                                    .lineSpacing(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        } else {
+                            Text("No detailed source analysis available.")
+                                .font(.callout)
+                                .italic()
+                                .foregroundColor(.secondary)
+                        }
+
+                        // Only source type at the bottom
+                        if !sourceType.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: sourceTypeIcon(for: sourceType))
+                                    .font(.footnote)
+                                    .foregroundColor(.blue)
+                                Text(sourceType.capitalized)
+                                    .font(.footnote)
                                     .foregroundColor(.secondary)
                             }
-
-                            // Only source type at the bottom
-                            if !sourceType.isEmpty {
-                                HStack(spacing: 4) {
-                                    Image(systemName: sourceTypeIcon(for: sourceType))
-                                        .font(.footnote)
-                                        .foregroundColor(.blue)
-                                    Text(sourceType.capitalized)
-                                        .font(.footnote)
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.top, 6)
-                            }
+                            .padding(.top, 6)
                         }
-                        .padding(.top, 6)
-                        .textSelection(.enabled)
-                    } else {
-                        Text("Source analysis information unavailable")
-                            .font(.callout)
-                            .italic()
-                            .foregroundColor(.secondary)
-                            .padding()
                     }
-                } else if section.header == "Vector WIP" {
-                    // Vector WIP section (content preserved)
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Similar Articles")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    .padding(.bottom, 2)
+                }
+                .padding(.top, 6)
+                .textSelection(.enabled)
 
-                                ScrollView {
-                                    LazyVStack(alignment: .leading, spacing: 10) {
-                                        ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
-                                            SimilarArticleRow(
-                                                articleDict: article,
-                                                notifications: $notifications,
-                                                currentIndex: $currentIndex,
-                                                isLastItem: index == similarArticles.count - 1
-                                            )
-                                            .onAppear {
-                                                if index == 2 {
-                                                    loadVectorWIPArticles()
-                                                }
-                                            }
-                                        }
+            } else if section.header == "Summary" {
+                // Summary section with efficient caching
+                if let attributedString = summaryAttributedString {
+                    // Use cached version if available
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                } else if let notification = currentNotification,
+                          let attributedString = getAttributedString(
+                              for: .summary,
+                              from: notification,
+                              createIfMissing: true,
+                              customFontSize: 15
+                          )
+                {
+                    // Get the attributed string and cache it
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                        .onAppear {
+                            // Cache for future use
+                            summaryAttributedString = attributedString
+                        }
+                } else {
+                    // Plain text fallback if no summary or loading failed
+                    Text(section.content as? String ?? "")
+                        .font(.callout)
+                        .padding(.top, 6)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+            } else if section.header == "Critical Analysis" {
+                // Critical Analysis section with efficient caching
+                if let attributedString = criticalAnalysisAttributedString {
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                } else if let notification = currentNotification,
+                          let attributedString = getAttributedString(
+                              for: .criticalAnalysis,
+                              from: notification,
+                              createIfMissing: true,
+                              customFontSize: 15
+                          )
+                {
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                        .onAppear {
+                            criticalAnalysisAttributedString = attributedString
+                        }
+                } else {
+                    Text(section.content as? String ?? "")
+                        .font(.callout)
+                        .padding(.top, 6)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+            } else if section.header == "Logical Fallacies" {
+                // Logical Fallacies section with efficient caching
+                if let attributedString = logicalFallaciesAttributedString {
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                } else if let notification = currentNotification,
+                          let attributedString = getAttributedString(
+                              for: .logicalFallacies,
+                              from: notification,
+                              createIfMissing: true,
+                              customFontSize: 15
+                          )
+                {
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                        .onAppear {
+                            logicalFallaciesAttributedString = attributedString
+                        }
+                } else {
+                    Text(section.content as? String ?? "")
+                        .font(.callout)
+                        .padding(.top, 6)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+            } else if section.header == "Vector WIP" {
+                // Vector WIP section (content preserved)
+                VStack(alignment: .leading, spacing: 8) {
+                    if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Similar Articles")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .padding(.bottom, 2)
+
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 10) {
+                                    ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
+                                        SimilarArticleRow(
+                                            articleDict: article,
+                                            notifications: $notifications,
+                                            currentIndex: $currentIndex,
+                                            isLastItem: index == similarArticles.count - 1
+                                        )
                                     }
                                 }
-                                .frame(maxHeight: 400)
                             }
-                        } else {
-                            VStack(spacing: 6) {
-                                ProgressView()
-                                    .padding()
-                                Text("Loading similar articles...")
-                                    .font(.callout)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .onAppear {
-                                loadVectorWIPArticles()
-                            }
+                            .frame(maxHeight: 400)
                         }
-
-                        Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
-                            .font(.footnote)
-                            .padding(.top, 4)
-                    }
-                    .padding(.top, 6)
-                } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
-                    ArgusDetailsView(data: details)
-                } else if section.header == "Preview" {
-                    // Preview section content
-                    VStack(spacing: 8) {
-                        if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
-                            SafariView(url: articleURL)
-                                .frame(height: 450)
-                            Button("Open in Browser") {
-                                UIApplication.shared.open(articleURL)
-                            }
-                            .font(.callout)
-                            .padding(.top, 4)
-                        } else {
-                            Text("Invalid URL")
-                                .font(.callout)
-                                .frame(height: 450)
-                        }
-                    }
-                } else if let markdownContent = section.content as? String {
-                    // Default markdown content display - FIX FOR CUTOFF TEXT
-                    if let attributedString = getAttributedString(
-                        for: getRichTextFieldForSection(section.header),
-                        from: currentNotification!,
-                        createIfMissing: true,
-                        customFontSize: 15
-                    ) {
-                        AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
-                            .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
-                            .padding(.top, 6)
-                            .padding(.bottom, 2)
-                            .textSelection(.enabled)
                     } else {
-                        Text(markdownContent)
-                            .font(.callout)
-                            .padding(.top, 6)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true) // Key fix: Allow vertical expansion
-                            .textSelection(.enabled)
+                        VStack(spacing: 6) {
+                            ProgressView()
+                                .padding()
+                            Text("Loading similar articles...")
+                                .font(.callout)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
                     }
+
+                    Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
+                        .font(.footnote)
+                        .padding(.top, 4)
+                }
+                .padding(.top, 6)
+
+            } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
+                // Argus Engine Stats
+                ArgusDetailsView(data: details)
+
+            } else if section.header == "Preview" {
+                // Preview section content
+                VStack(spacing: 8) {
+                    if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
+                        SafariView(url: articleURL)
+                            .frame(height: 450)
+                        Button("Open in Browser") {
+                            UIApplication.shared.open(articleURL)
+                        }
+                        .font(.callout)
+                        .padding(.top, 4)
+                    } else {
+                        Text("Invalid URL")
+                            .font(.callout)
+                            .frame(height: 450)
+                    }
+                }
+
+            } else if section.content is String {
+                // For other fields, use direct creation without caching
+                if let notification = currentNotification,
+                   let attributedString = getAttributedString(
+                       for: getRichTextFieldForSection(section.header),
+                       from: notification,
+                       createIfMissing: true,
+                       customFontSize: 15
+                   )
+                {
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
                 } else {
-                    EmptyView()
+                    Text(section.content as? String ?? "")
+                        .font(.callout)
+                        .padding(.top, 6)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            } else {
+                EmptyView()
+            }
+        }
+    }
+
+    private func preloadCachedContent() {
+        guard let notification = currentNotification else { return }
+
+        // Create a background task to load only essential content
+        Task {
+            // Get only the absolutely necessary fields
+            let essentialFields: [RichTextField] = [
+                .title,
+                .body,
+                .summary, // Only preload summary since it's expanded by default
+            ]
+
+            // Load just these fields
+            let attributedStrings = essentialFields.compactMap { field -> (RichTextField, NSAttributedString)? in
+                if let attributedString = getAttributedString(
+                    for: field,
+                    from: notification,
+                    createIfMissing: true
+                ) {
+                    return (field, attributedString)
+                }
+                return nil
+            }
+
+            // Update the cached strings on the main thread
+            await MainActor.run {
+                for (field, attributedString) in attributedStrings {
+                    switch field {
+                    case .title: titleAttributedString = attributedString
+                    case .body: bodyAttributedString = attributedString
+                    case .summary: summaryAttributedString = attributedString
+                    default: break
+                    }
                 }
             }
-        )
+        }
+    }
+
+    struct LazyLoadingRichTextSection: View {
+        let title: String
+        let notification: NotificationData?
+        let field: RichTextField
+        @State private var attributedString: NSAttributedString?
+
+        var body: some View {
+            VStack {
+                if let attributedString = self.attributedString {
+                    // Content loaded - display it
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                } else {
+                    // Content not loaded yet - show placeholder and trigger loading
+                    Text("Loading \(title.lowercased())...")
+                        .font(.callout)
+                        .italic()
+                        .foregroundColor(.secondary)
+                        .padding(.top, 6)
+                        .onAppear {
+                            loadContent()
+                        }
+                }
+            }
+        }
+
+        private func loadContent() {
+            guard let notification = notification else { return }
+            DispatchQueue.main.async {
+                self.attributedString = getAttributedString(
+                    for: field,
+                    from: notification,
+                    createIfMissing: true,
+                    customFontSize: 15
+                )
+            }
+        }
+    }
+
+    struct LazySourceAnalysisLoader: View {
+        let notification: NotificationData
+        let sourceData: [String: Any]
+        var onLoad: ((NSAttributedString) -> Void)? = nil
+        @State private var isLoading = true
+        @State private var loadedAttributedString: NSAttributedString?
+
+        var body: some View {
+            VStack {
+                if let attributedString = loadedAttributedString {
+                    // Show content once loaded
+                    AccessibleAttributedText(attributedString: attributedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } else if isLoading {
+                    // Show loading indicator
+                    ProgressView()
+                        .padding()
+                } else {
+                    // Fallback to plain text if loading failed
+                    Text(sourceData["text"] as? String ?? "")
+                        .font(.callout)
+                }
+            }
+            .onAppear {
+                DispatchQueue.main.async {
+                    // This will only be called when the view is actually visible
+                    if let attrString = getAttributedString(
+                        for: .sourceAnalysis,
+                        from: notification,
+                        createIfMissing: true
+                    ) {
+                        loadedAttributedString = attrString
+                        onLoad?(attrString)
+                    }
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    // Helper view for lazy loading section content
+    struct LazySectionContentView: View {
+        let header: String
+        let markdownContent: String
+        let attributedString: NSAttributedString?
+        let richTextField: RichTextField
+        let notification: NotificationData
+        var onLoad: ((NSAttributedString) -> Void)? = nil
+
+        // Use a state variable to track if we've loaded content
+        @State private var loadedAttributedString: NSAttributedString?
+
+        var body: some View {
+            Group {
+                if let existingString = attributedString {
+                    // Use existing attributed string if available
+                    AccessibleAttributedText(attributedString: existingString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                } else if let loadedString = loadedAttributedString {
+                    // Use our locally loaded attributed string
+                    AccessibleAttributedText(attributedString: loadedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                } else {
+                    // Show plain text while loading
+                    Text(markdownContent)
+                        .font(.callout)
+                        .padding(.top, 6)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .onAppear {
+                            // Load the attributed string when the view appears
+                            if let attrString = getAttributedString(
+                                for: richTextField,
+                                from: notification,
+                                createIfMissing: true,
+                                customFontSize: 15
+                            ) {
+                                loadedAttributedString = attrString
+                                onLoad?(attrString)
+                            }
+                        }
+                }
+            }
+        }
+    }
+
+    // Helper view specifically for Source Analysis content
+    struct LazySourceAnalysisView: View {
+        let sourceText: String
+        let attributedString: NSAttributedString?
+        let notification: NotificationData
+        var onLoad: ((NSAttributedString) -> Void)? = nil
+
+        @State private var loadedAttributedString: NSAttributedString?
+
+        var body: some View {
+            Group {
+                if let existingString = attributedString {
+                    // Use existing attributed string if available
+                    AccessibleAttributedText(attributedString: existingString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .padding(.top, 4)
+                } else if let loadedString = loadedAttributedString {
+                    // Use our locally loaded attributed string
+                    AccessibleAttributedText(attributedString: loadedString, fontSize: 15)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .padding(.top, 4)
+                } else {
+                    // Show plain text while loading
+                    Text(sourceText)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .padding(.top, 4)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onAppear {
+                            // Load the attributed string when the view appears
+                            if let attrString = getAttributedString(
+                                for: .sourceAnalysis,
+                                from: notification,
+                                createIfMissing: true,
+                                customFontSize: 15
+                            ) {
+                                loadedAttributedString = attrString
+                                onLoad?(attrString)
+                            }
+                        }
+                }
+            }
+        }
     }
 
     private func getRichTextFieldForSection(_ header: String) -> RichTextField {
@@ -1333,33 +1852,33 @@ struct NewsDetailView: View {
     struct AccessibleAttributedText: UIViewRepresentable {
         let attributedString: NSAttributedString
         var fontSize: CGFloat = 15
-        
-        func makeUIView(context: Context) -> UITextView {
+
+        func makeUIView(context _: Context) -> UITextView {
             let textView = UITextView()
             textView.attributedText = attributedString
             textView.isEditable = false
             textView.isSelectable = true
             textView.isScrollEnabled = false
             textView.backgroundColor = .clear
-            
+
             // Remove default padding
             textView.textContainerInset = .zero
             textView.textContainer.lineFragmentPadding = 0
-            
+
             // Enable Dynamic Type
             textView.adjustsFontForContentSizeCategory = true
-            
+
             // Critical for height calculation - set content hugging and compression resistance
             textView.setContentCompressionResistancePriority(.required, for: .vertical)
             textView.setContentHuggingPriority(.defaultLow, for: .vertical)
-            
+
             return textView
         }
-        
-        func updateUIView(_ uiView: UITextView, context: Context) {
+
+        func updateUIView(_ uiView: UITextView, context _: Context) {
             // Apply the attributed text with adjusted font sizing
             let mutableAttrString = NSMutableAttributedString(attributedString: attributedString)
-            
+
             // Apply adjusted font sizes while preserving style attributes
             mutableAttrString.enumerateAttributes(in: NSRange(location: 0, length: mutableAttrString.length)) { attributes, range, _ in
                 // Get existing font to preserve traits
@@ -1375,9 +1894,9 @@ struct NewsDetailView: View {
                     mutableAttrString.addAttribute(.font, value: defaultFont, range: range)
                 }
             }
-            
+
             uiView.attributedText = mutableAttrString
-            
+
             // Ensure width is constrained based on superview
             if let superview = uiView.superview {
                 let availableWidth = superview.bounds.width - 32 // Account for padding
@@ -1386,27 +1905,27 @@ struct NewsDetailView: View {
                 let screenWidth = UIScreen.main.bounds.width - 32 // Account for padding
                 uiView.textContainer.size.width = screenWidth
             }
-            
+
             // Force layout immediately to ensure proper sizing
             uiView.setNeedsLayout()
             uiView.layoutIfNeeded()
-            
+
             // Make sure the text view adjusts its height to fit the content
             let newSize = uiView.sizeThatFits(
                 CGSize(width: uiView.bounds.width, height: CGFloat.greatestFiniteMagnitude)
             )
-            
+
             if uiView.bounds.height != newSize.height {
                 uiView.frame = CGRect(origin: uiView.frame.origin, size: newSize)
             }
         }
-        
-        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize? {
             // Calculate the size that fits all content
             if let width = proposal.width {
                 uiView.textContainer.size.width = width - 16 // Account for padding
                 uiView.layoutIfNeeded()
-                
+
                 return uiView.sizeThatFits(CGSize(
                     width: width - 16,
                     height: CGFloat.greatestFiniteMagnitude
