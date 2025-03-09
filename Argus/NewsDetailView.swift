@@ -11,6 +11,8 @@ struct NewsDetailView: View {
     @State private var batchSize: Int = 50
     @State private var scrollViewProxy: ScrollViewProxy? = nil
     @State private var scrollToTopTrigger = UUID()
+    @State private var isNavigating = false
+    @State private var loadingStage = 0 // 0: not loading, 1: loading, 2: formatting
 
     @State private var titleAttributedString: NSAttributedString?
     @State private var bodyAttributedString: NSAttributedString?
@@ -76,8 +78,22 @@ struct NewsDetailView: View {
                                         .frame(height: 1)
                                         .id("top")
 
-                                    articleHeaderStyle
-                                    additionalSectionsView
+                                    if isNavigating {
+                                        // Show a loading indicator when navigating
+                                        VStack(spacing: 16) {
+                                            ProgressView()
+                                                .padding(.top, 40)
+
+                                            Text(loadingStage == 1 ? "Loading article..." : "Formatting content...")
+                                                .foregroundColor(.secondary)
+
+                                            Spacer()
+                                        }
+                                        .frame(minHeight: 300)
+                                    } else {
+                                        articleHeaderStyle
+                                        additionalSectionsView
+                                    }
                                 }
                                 .onChange(of: scrollToTopTrigger) { _, _ in
                                     // Scroll to top when the trigger changes
@@ -400,6 +416,22 @@ struct NewsDetailView: View {
         guard isCurrentIndexValid else { return }
         var nextIndex = currentIndex + 1
 
+        // Set navigating state to true first
+        isNavigating = true
+        loadingStage = 1
+
+        // Clear all content immediately before showing the next article
+        titleAttributedString = nil
+        bodyAttributedString = nil
+        summaryAttributedString = nil
+        criticalAnalysisAttributedString = nil
+        logicalFallaciesAttributedString = nil
+        sourceAnalysisAttributedString = nil
+        additionalContent = nil
+
+        // Scroll to top immediately
+        scrollToTopTrigger = UUID()
+
         // If we're near the end of our loaded notifications, load more
         if nextIndex >= notifications.count - 5 {
             let nextBatchSize = notifications.count + 50
@@ -410,53 +442,187 @@ struct NewsDetailView: View {
 
         while nextIndex < notifications.count {
             if !deletedIDs.contains(notifications[nextIndex].id) {
+                // Update the index
                 currentIndex = nextIndex
-                markAsViewed()
 
-                // Reset content for the new article
-                additionalContent = nil
-
-                // Clear all attributed strings to avoid keeping old content
-                titleAttributedString = nil
-                bodyAttributedString = nil
-                summaryAttributedString = nil
-                criticalAnalysisAttributedString = nil
-                logicalFallaciesAttributedString = nil
-                sourceAnalysisAttributedString = nil
-
-                // Preserve "Summary" as expanded by default
+                // Reset expanded sections
                 var newExpandedSections: [String: Bool] = [:]
                 for (key, _) in expandedSections {
                     newExpandedSections[key] = (key == "Summary")
                 }
                 expandedSections = newExpandedSections
 
-                // Scroll to top immediately
-                scrollToTopTrigger = UUID()
+                // Load content in stages with visual feedback
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    // Stage 1: Mark as viewed and prepare for content
+                    markAsViewed()
 
-                // Load essential content with minimal delay
-                DispatchQueue.main.async {
-                    // Check if we have cached blobs first - this should be very fast
-                    guard let notification = self.currentNotification else { return }
+                    // Stage 2: Begin loading content - still show loading indicator
+                    loadingStage = 2
 
-                    // Load header content immediately (title, body)
-                    self.titleAttributedString = getAttributedString(for: .title, from: notification)
-                    self.bodyAttributedString = getAttributedString(for: .body, from: notification)
+                    // Start loading minimal content
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        // Load all essential content synchronously before showing
+                        self.loadMinimalContentSync()
 
-                    // Build the section dictionary using the existing method
-                    self.additionalContent = self.buildContentDictionary(from: notification)
+                        // Now that essential content is loaded, stop showing loading indicator
+                        self.isNavigating = false
+                        self.loadingStage = 0
 
-                    // Preload summary since it's expanded by default
-                    self.summaryAttributedString = getAttributedString(for: .summary, from: notification)
-
-                    // Call preloadCachedContent to efficiently load other key content
-                    self.preloadCachedContent()
+                        // Load remaining content in background
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            self.preloadCachedContent()
+                        }
+                    }
                 }
 
                 return
             }
             nextIndex += 1
         }
+
+        // If we couldn't navigate, reset the navigation state
+        isNavigating = false
+        loadingStage = 0
+    }
+
+    private func goToPrevious() {
+        guard isCurrentIndexValid else { return }
+        var prevIndex = currentIndex - 1
+
+        // Set navigating state to true first
+        isNavigating = true
+        loadingStage = 1
+
+        // Clear all content immediately before showing the previous article
+        titleAttributedString = nil
+        bodyAttributedString = nil
+        summaryAttributedString = nil
+        criticalAnalysisAttributedString = nil
+        logicalFallaciesAttributedString = nil
+        sourceAnalysisAttributedString = nil
+        additionalContent = nil
+
+        // Scroll to top immediately
+        scrollToTopTrigger = UUID()
+
+        // If we're near the start and there are more notifications to load
+        if prevIndex <= 5 && notifications.count < allNotifications.count {
+            let additionalItems = 50
+            let startIndex = max(0, notifications.count - additionalItems)
+            let newItems = Array(allNotifications[startIndex ..< min(startIndex + additionalItems, allNotifications.count)])
+            notifications = newItems + notifications
+            // Adjust currentIndex to account for the newly prepended items
+            currentIndex += newItems.count
+            prevIndex += newItems.count
+        }
+
+        while prevIndex >= 0 {
+            if !deletedIDs.contains(notifications[prevIndex].id) {
+                // Update the index
+                currentIndex = prevIndex
+
+                // Reset expanded sections
+                var newExpandedSections: [String: Bool] = [:]
+                for (key, _) in expandedSections {
+                    newExpandedSections[key] = (key == "Summary")
+                }
+                expandedSections = newExpandedSections
+
+                // Load content in stages with visual feedback
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    // Stage 1: Mark as viewed and prepare for content
+                    markAsViewed()
+
+                    // Stage 2: Begin loading content - still show loading indicator
+                    loadingStage = 2
+
+                    // Start loading minimal content
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        // Load all essential content synchronously before showing
+                        self.loadMinimalContentSync()
+
+                        // Now that essential content is loaded, stop showing loading indicator
+                        self.isNavigating = false
+                        self.loadingStage = 0
+
+                        // Load remaining content in background
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            self.preloadCachedContent()
+                        }
+                    }
+                }
+
+                return
+            }
+            prevIndex -= 1
+        }
+
+        // If we couldn't navigate, reset the navigation state
+        isNavigating = false
+        loadingStage = 0
+    }
+
+    private func loadMinimalContentSync() {
+        guard let notification = currentNotification else { return }
+
+        // Load essential content synchronously to prevent flashing
+        titleAttributedString = getAttributedString(for: .title, from: notification)
+        bodyAttributedString = getAttributedString(for: .body, from: notification)
+
+        // Build the content dictionary for sections
+        additionalContent = buildContentDictionary(from: notification)
+
+        // Load summary since it's expanded by default
+        summaryAttributedString = getAttributedString(for: .summary, from: notification)
+    }
+
+    private func hasMinimalCachedContent(_ notification: NotificationData) -> Bool {
+        // Check for cached rich text content
+        let titleExists = checkAttributedStringExists(for: .title, in: notification)
+        let bodyExists = checkAttributedStringExists(for: .body, in: notification)
+        let summaryExists = checkAttributedStringExists(for: .summary, in: notification)
+
+        // Also check if we already have basic content fields filled
+        let hasBasicFields = notification.title.count > 0 &&
+            notification.body.count > 0 &&
+            notification.summary != nil
+
+        return (titleExists && bodyExists && summaryExists) || hasBasicFields
+    }
+
+    // Helper function to check if an attributed string exists without loading it
+    private func checkAttributedStringExists(for field: RichTextField, in notification: NotificationData) -> Bool {
+        let notificationId = notification.id.uuidString.lowercased()
+
+        // Convert RichTextField to a string identifier for the filename
+        let fieldIdentifier: String
+        switch field {
+        case .title:
+            fieldIdentifier = "title"
+        case .body:
+            fieldIdentifier = "body"
+        case .summary:
+            fieldIdentifier = "summary"
+        case .criticalAnalysis:
+            fieldIdentifier = "criticalAnalysis"
+        case .logicalFallacies:
+            fieldIdentifier = "logicalFallacies"
+        case .sourceAnalysis:
+            fieldIdentifier = "sourceAnalysis"
+        case .relationToTopic:
+            fieldIdentifier = "relationToTopic"
+        case .additionalInsights:
+            fieldIdentifier = "additionalInsights"
+        }
+
+        let filename = "\(notificationId)-\(fieldIdentifier).dat"
+
+        let fileManager = FileManager.default
+        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let fileURL = documentsDirectory.appendingPathComponent(filename)
+
+        return fileManager.fileExists(atPath: fileURL.path)
     }
 
     private func loadSectionHeaders() {
@@ -525,72 +691,6 @@ struct NewsDetailView: View {
         guard let notification = currentNotification else { return }
         // Only load title and domain info - absolute minimum needed
         titleAttributedString = getAttributedString(for: .title, from: notification)
-    }
-
-    private func goToPrevious() {
-        guard isCurrentIndexValid else { return }
-        var prevIndex = currentIndex - 1
-
-        // If we're near the start and there are more notifications to load
-        if prevIndex <= 5 && notifications.count < allNotifications.count {
-            let additionalItems = 50
-            let startIndex = max(0, notifications.count - additionalItems)
-            let newItems = Array(allNotifications[startIndex ..< min(startIndex + additionalItems, allNotifications.count)])
-            notifications = newItems + notifications
-            // Adjust currentIndex to account for the newly prepended items
-            currentIndex += newItems.count
-            prevIndex += newItems.count
-        }
-
-        while prevIndex >= 0 {
-            if !deletedIDs.contains(notifications[prevIndex].id) {
-                currentIndex = prevIndex
-                markAsViewed()
-
-                // Reset content for the new article
-                additionalContent = nil
-
-                // Clear all attributed strings to avoid keeping old content
-                titleAttributedString = nil
-                bodyAttributedString = nil
-                summaryAttributedString = nil
-                criticalAnalysisAttributedString = nil
-                logicalFallaciesAttributedString = nil
-                sourceAnalysisAttributedString = nil
-
-                // Preserve "Summary" as expanded by default
-                var newExpandedSections: [String: Bool] = [:]
-                for (key, _) in expandedSections {
-                    newExpandedSections[key] = (key == "Summary")
-                }
-                expandedSections = newExpandedSections
-
-                // Scroll to top immediately
-                scrollToTopTrigger = UUID()
-
-                // Load essential content with minimal delay
-                DispatchQueue.main.async {
-                    // Check if we have cached blobs first - this should be very fast
-                    guard let notification = self.currentNotification else { return }
-
-                    // Load header content immediately (title, body)
-                    self.titleAttributedString = getAttributedString(for: .title, from: notification)
-                    self.bodyAttributedString = getAttributedString(for: .body, from: notification)
-
-                    // Build the section dictionary using the existing method
-                    self.additionalContent = self.buildContentDictionary(from: notification)
-
-                    // Preload summary since it's expanded by default
-                    self.summaryAttributedString = getAttributedString(for: .summary, from: notification)
-
-                    // Call preloadCachedContent to efficiently load other key content
-                    self.preloadCachedContent()
-                }
-
-                return
-            }
-            prevIndex -= 1
-        }
     }
 
     // New function that loads only the minimum required content for the view
