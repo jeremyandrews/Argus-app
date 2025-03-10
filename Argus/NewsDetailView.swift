@@ -418,23 +418,22 @@ struct NewsDetailView: View {
         // Cancel any pending tasks from previous navigations
         tabChangeTask?.cancel()
 
-        // Set initial index based on direction
-        let targetIndex = (direction == .next) ? currentIndex + 1 : currentIndex - 1
-
         // Set transition state to preparing
         tabTransitionState = .preparing
         loadingStage = 1
+        isNavigating = true // Add this line to show loading state immediately
 
         // Start asynchronous work
         tabChangeTask = Task {
             // Find the next valid article first before showing loading UI
-            let validArticleFound = await findValidArticle(from: targetIndex, direction: direction)
+            let validArticleFound = await findValidArticle(from: direction == .next ? currentIndex + 1 : currentIndex - 1, direction: direction)
 
             if !validArticleFound {
                 // If we couldn't navigate, reset the state
                 await MainActor.run {
                     tabTransitionState = .idle
                     loadingStage = 0
+                    isNavigating = false // Make sure to reset this
                 }
                 return
             }
@@ -447,28 +446,46 @@ struct NewsDetailView: View {
                 // Scroll to top immediately
                 scrollToTopTrigger = UUID()
 
-                // Set full loading state
-                tabTransitionState = .transitioning
+                loadingStage = 2 // Show "formatting content" message
             }
 
             // Handle pagination in the background
-            await handlePagination(direction: direction, targetIndex: targetIndex)
+            await handlePagination(direction: direction, targetIndex: currentIndex)
 
             // Mark as viewed in the background
             await MainActor.run {
                 markAsViewed()
             }
 
-            // Load minimal content for responsiveness
-            await preloadMinimalContent()
+            // Preload minimum required content before showing article
+            await preloadArticleContent()
 
             // Update UI to show the article has loaded
             await MainActor.run {
+                isNavigating = false
                 tabTransitionState = .idle
                 loadingStage = 0
-                // Preload summary content after UI is responsive
-                loadContent(contentType: .summary)
             }
+        }
+    }
+
+    private func preloadArticleContent() async {
+        guard let notification = currentNotification else { return }
+
+        // First quickly build the basic content dictionary (fast operation)
+        let basicContent = buildContentDictionary(from: notification)
+
+        // Preload critical rich text content needed for initial display
+        let titleString = getAttributedString(for: .title, from: notification, createIfMissing: true)
+        let bodyString = getAttributedString(for: .body, from: notification, createIfMissing: true)
+        let summaryString = getAttributedString(for: .summary, from: notification, createIfMissing: true)
+
+        // Update UI on main thread with preloaded content
+        await MainActor.run {
+            additionalContent = basicContent
+            titleAttributedString = titleString
+            bodyAttributedString = bodyString
+            summaryAttributedString = summaryString
         }
     }
 
@@ -518,15 +535,17 @@ struct NewsDetailView: View {
         // Build minimal content dictionary first (quick operation)
         let basicContent = buildContentDictionary(from: notification)
 
-        // Get title and body attributed strings (can be expensive)
+        // Get rich text content for immediately visible parts
         let titleString = getAttributedString(for: .title, from: notification, createIfMissing: true)
         let bodyString = getAttributedString(for: .body, from: notification, createIfMissing: true)
+        let summaryString = getAttributedString(for: .summary, from: notification, createIfMissing: true)
 
-        // Update UI on main thread
+        // Update UI on main thread with all preloaded content
         await MainActor.run {
             additionalContent = basicContent
             titleAttributedString = titleString
             bodyAttributedString = bodyString
+            summaryAttributedString = summaryString // Also set summary since it's open by default
         }
     }
 
@@ -626,7 +645,7 @@ struct NewsDetailView: View {
                 Spacer()
             }
 
-            // Title - using AccessibleAttributedText for better rendering
+            // Title - using NonSelectableRichTextView for better performance during transitions
             if let notification = currentNotification {
                 if let content = additionalContent,
                    let articleURLString = content["url"] as? String,
@@ -647,7 +666,7 @@ struct NewsDetailView: View {
                     .buttonStyle(PlainButtonStyle())
                 } else {
                     if let titleAttrString = titleAttributedString {
-                        AccessibleAttributedText(attributedString: titleAttrString)
+                        NonSelectableRichTextView(attributedString: titleAttrString)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Text(notification.title)
@@ -697,15 +716,14 @@ struct NewsDetailView: View {
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                        if let content = additionalContent {
-                            QualityBadges(
-                                sourcesQuality: content["sources_quality"] as? Int,
-                                argumentQuality: content["argument_quality"] as? Int,
-                                sourceType: content["source_type"] as? String,
-                                scrollToSection: $scrollToSection
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        // No need to check for content here since we're directly using notification
+                        LazyLoadingQualityBadges(
+                            notification: notification,
+                            onBadgeTap: { section in
+                                scrollToSection = section
+                            }
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -748,7 +766,14 @@ struct NewsDetailView: View {
                                 ) {
                                     // Only render content if section is expanded
                                     if expandedSections[section.header] == true {
-                                        sectionContent(for: section)
+                                        // Use a placeholder if we haven't loaded the content yet
+                                        if section.header == "Summary" && summaryAttributedString == nil {
+                                            ProgressView("Loading summary...")
+                                                .padding(.vertical, 10)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        } else {
+                                            sectionContent(for: section)
+                                        }
                                     } else {
                                         // Placeholder to reduce layout calculation
                                         Color.clear.frame(height: 1)
@@ -1314,11 +1339,48 @@ struct NewsDetailView: View {
             field = nil // Unknown section
         }
 
-        // Only proceed if we have a field to load
-        guard let fieldToLoad = field else { return }
+        // Only proceed if we have a field to load and notification is available
+        guard let fieldToLoad = field, let notification = currentNotification else { return }
 
-        // Use our consolidated loading function
-        loadContent(contentType: .specific([fieldToLoad]), synchronously: false)
+        // Create a copy of the ID to avoid capturing the whole notification
+        let notificationId = notification.id
+
+        Task {
+            // Fetch notification on the task to avoid capturing it
+            let attributedString = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    // Re-fetch notification using ID to avoid Sendable issues
+                    if let currentNotification = self.currentNotification, currentNotification.id == notificationId {
+                        let result = getAttributedString(
+                            for: fieldToLoad,
+                            from: currentNotification,
+                            createIfMissing: true
+                        )
+                        continuation.resume(returning: result)
+                    } else {
+                        continuation.resume(returning: nil)
+                    }
+                }
+            }
+
+            if !Task.isCancelled, let attributedString = attributedString {
+                await MainActor.run {
+                    // Store the attributed string in the appropriate property
+                    switch fieldToLoad {
+                    case .summary:
+                        summaryAttributedString = attributedString
+                    case .criticalAnalysis:
+                        criticalAnalysisAttributedString = attributedString
+                    case .logicalFallacies:
+                        logicalFallaciesAttributedString = attributedString
+                    case .sourceAnalysis:
+                        sourceAnalysisAttributedString = attributedString
+                    default:
+                        break
+                    }
+                }
+            }
+        }
     }
 
     func loadAdditionalContent() {
