@@ -3,6 +3,12 @@ import SwiftData
 import SwiftUI
 import WebKit
 
+enum TabTransitionState {
+    case idle
+    case preparing
+    case transitioning
+}
+
 struct NewsDetailView: View {
     @State private var notifications: [NotificationData]
     @State private var allNotifications: [NotificationData]
@@ -20,6 +26,11 @@ struct NewsDetailView: View {
     @State private var criticalAnalysisAttributedString: NSAttributedString?
     @State private var logicalFallaciesAttributedString: NSAttributedString?
     @State private var sourceAnalysisAttributedString: NSAttributedString?
+
+    @State private var tabTransitionState: TabTransitionState = .idle
+    @State private var tabChangeTask: Task<Void, Never>? = nil
+    @State private var cachedContentBySection: [String: NSAttributedString] = [:]
+    @State private var visibleTabIndex: Int? = nil
 
     private var isCurrentIndexValid: Bool {
         currentIndex >= 0 && currentIndex < notifications.count
@@ -373,6 +384,19 @@ struct NewsDetailView: View {
         }
     }
 
+    private func tryNavigateToValidArticle() {
+        if let currentNotification {
+            let currentID = currentNotification.id
+            if let newIndex = notifications.firstIndex(where: {
+                $0.id != currentID && !deletedIDs.contains($0.id)
+            }) {
+                currentIndex = newIndex
+                return
+            }
+        }
+        dismiss()
+    }
+
     private func setupDeletionHandling() {
         NotificationCenter.default.addObserver(
             forName: .willDeleteArticle,
@@ -388,35 +412,67 @@ struct NewsDetailView: View {
         }
     }
 
-    private func tryNavigateToValidArticle() {
-        if let currentNotification {
-            let currentID = currentNotification.id
-            if let newIndex = notifications.firstIndex(where: {
-                $0.id != currentID && !deletedIDs.contains($0.id)
-            }) {
-                currentIndex = newIndex
-                return
-            }
-        }
-        dismiss()
-    }
-
-    enum NavigationDirection {
-        case next
-        case previous
-    }
-
     private func navigateToArticle(direction: NavigationDirection) {
         guard isCurrentIndexValid else { return }
+
+        // Cancel any pending tasks from previous navigations
+        tabChangeTask?.cancel()
 
         // Set initial index based on direction
         var targetIndex = (direction == .next) ? currentIndex + 1 : currentIndex - 1
 
-        // Set navigating state to true first
-        isNavigating = true
+        // Set transition state to preparing
+        tabTransitionState = .preparing
         loadingStage = 1
 
-        // Clear all content immediately before showing the new article
+        // Start asynchronous work
+        tabChangeTask = Task {
+            // Find the next valid article first before showing loading UI
+            let validArticleFound = await findValidArticle(from: targetIndex, direction: direction)
+
+            if !validArticleFound {
+                // If we couldn't navigate, reset the state
+                await MainActor.run {
+                    tabTransitionState = .idle
+                    loadingStage = 0
+                }
+                return
+            }
+
+            // We found a valid article, now switch to transitioning state
+            await MainActor.run {
+                // Clear all content immediately before showing the new article
+                clearCurrentContent()
+
+                // Scroll to top immediately
+                scrollToTopTrigger = UUID()
+
+                // Set full loading state
+                tabTransitionState = .transitioning
+            }
+
+            // Handle pagination in the background
+            await handlePagination(direction: direction, targetIndex: targetIndex)
+
+            // Mark as viewed in the background
+            await MainActor.run {
+                markAsViewed()
+            }
+
+            // Load minimal content for responsiveness
+            await preloadMinimalContent()
+
+            // Update UI to show the article has loaded
+            await MainActor.run {
+                tabTransitionState = .idle
+                loadingStage = 0
+                // Preload summary content after UI is responsive
+                loadContent(contentType: .summary)
+            }
+        }
+    }
+
+    private func clearCurrentContent() {
         titleAttributedString = nil
         bodyAttributedString = nil
         summaryAttributedString = nil
@@ -425,38 +481,61 @@ struct NewsDetailView: View {
         sourceAnalysisAttributedString = nil
         additionalContent = nil
 
-        // Scroll to top immediately
-        scrollToTopTrigger = UUID()
+        // Reset expanded sections
+        var newExpandedSections: [String: Bool] = [:]
+        for (key, _) in expandedSections {
+            newExpandedSections[key] = (key == "Summary")
+        }
+        expandedSections = newExpandedSections
+    }
 
-        // Handle pagination based on direction
+    private func handlePagination(direction: NavigationDirection, targetIndex: Int) async {
         if direction == .next && targetIndex >= notifications.count - 5 {
             // If we're near the end of our loaded notifications, load more
             let nextBatchSize = notifications.count + 50
             if nextBatchSize <= allNotifications.count {
-                notifications = Array(allNotifications.prefix(nextBatchSize))
+                await MainActor.run {
+                    notifications = Array(allNotifications.prefix(nextBatchSize))
+                }
             }
         } else if direction == .previous && targetIndex <= 5 && notifications.count < allNotifications.count {
             // If we're near the start and there are more notifications to load
             let additionalItems = 50
             let startIndex = max(0, notifications.count - additionalItems)
             let newItems = Array(allNotifications[startIndex ..< min(startIndex + additionalItems, allNotifications.count)])
-            notifications = newItems + notifications
-            // Adjust currentIndex to account for the newly prepended items
-            currentIndex += newItems.count
-            targetIndex += newItems.count
-        }
 
-        // Find the next undeleted article
-        let validArticleFound = findValidArticle(from: targetIndex, direction: direction)
-
-        if !validArticleFound {
-            // If we couldn't navigate, reset the navigation state
-            isNavigating = false
-            loadingStage = 0
+            await MainActor.run {
+                notifications = newItems + notifications
+                // Adjust currentIndex to account for the newly prepended items
+                currentIndex += newItems.count
+            }
         }
     }
 
-    private func findValidArticle(from startIndex: Int, direction: NavigationDirection) -> Bool {
+    private func preloadMinimalContent() async {
+        guard let notification = currentNotification else { return }
+
+        // Build minimal content dictionary first (quick operation)
+        let basicContent = buildContentDictionary(from: notification)
+
+        // Get title and body attributed strings (can be expensive)
+        let titleString = getAttributedString(for: .title, from: notification, createIfMissing: true)
+        let bodyString = getAttributedString(for: .body, from: notification, createIfMissing: true)
+
+        // Update UI on main thread
+        await MainActor.run {
+            additionalContent = basicContent
+            titleAttributedString = titleString
+            bodyAttributedString = bodyString
+        }
+    }
+
+    enum NavigationDirection {
+        case next
+        case previous
+    }
+
+    private func findValidArticle(from startIndex: Int, direction: NavigationDirection) async -> Bool {
         var index = startIndex
         let increment = (direction == .next) ? 1 : -1
 
@@ -464,33 +543,13 @@ struct NewsDetailView: View {
         while (direction == .next && index < notifications.count) ||
             (direction == .previous && index >= 0)
         {
-            if !deletedIDs.contains(notifications[index].id) {
-                // Update the index
-                currentIndex = index
-
-                // Reset expanded sections
-                var newExpandedSections: [String: Bool] = [:]
-                for (key, _) in expandedSections {
-                    newExpandedSections[key] = (key == "Summary")
+            // Check off main thread if possible
+            let isValidArticle = !deletedIDs.contains(notifications[index].id)
+            if isValidArticle {
+                // Update the index on main thread
+                await MainActor.run {
+                    currentIndex = index
                 }
-                expandedSections = newExpandedSections
-
-                // Load content in stages with visual feedback
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    // Stage 1: Mark as viewed and prepare for content
-                    self.markAsViewed()
-
-                    // Stage 2: Begin loading content - still show loading indicator
-                    self.loadingStage = 2
-
-                    // Use our consolidated loading function for minimal content
-                    self.loadContent(contentType: .minimal, synchronously: true) {
-                        // Now that essential content is loaded, stop showing loading indicator
-                        self.isNavigating = false
-                        self.loadingStage = 0
-                    }
-                }
-
                 return true
             }
 
@@ -668,34 +727,42 @@ struct NewsDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             } else if let content = additionalContent {
                 ScrollViewReader { proxy in
-                    ForEach(getSections(from: content), id: \.header) { section in
-                        VStack(alignment: .leading) {
-                            Divider()
+                    LazyVStack(alignment: .leading) { // Use LazyVStack for better performance
+                        ForEach(getSections(from: content), id: \.header) { section in
+                            VStack(alignment: .leading) {
+                                Divider()
 
-                            DisclosureGroup(
-                                isExpanded: Binding(
-                                    get: { expandedSections[section.header] ?? false },
-                                    set: {
-                                        let wasExpanded = expandedSections[section.header] ?? false
-                                        expandedSections[section.header] = $0
+                                DisclosureGroup(
+                                    isExpanded: Binding(
+                                        get: { expandedSections[section.header] ?? false },
+                                        set: {
+                                            let wasExpanded = expandedSections[section.header] ?? false
+                                            expandedSections[section.header] = $0
 
-                                        // If newly expanded, trigger content loading
-                                        if !wasExpanded, $0 {
-                                            loadContentForSection(section.header)
+                                            // If newly expanded, trigger content loading
+                                            if !wasExpanded, $0 {
+                                                loadContentForSection(section.header)
+                                            }
                                         }
+                                    )
+                                ) {
+                                    // Only render content if section is expanded
+                                    if expandedSections[section.header] == true {
+                                        sectionContent(for: section)
+                                    } else {
+                                        // Placeholder to reduce layout calculation
+                                        Color.clear.frame(height: 1)
                                     }
-                                )
-                            ) {
-                                sectionContent(for: section)
-                            } label: {
-                                Text(section.header)
-                                    .font(.headline)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                } label: {
+                                    Text(section.header)
+                                        .font(.headline)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .id(section.header)
+                                .padding([.leading, .trailing, .top])
                             }
-                            .id(section.header)
-                            .padding([.leading, .trailing, .top])
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .onChange(of: scrollToSection) { _, newSection in
                         if let section = newSection {
@@ -1550,6 +1617,7 @@ struct NewsDetailView: View {
 
         @State private var loadedAttributedString: NSAttributedString?
         @State private var isLoading = true
+        @State private var loadTask: Task<Void, Never>? = nil
 
         var body: some View {
             Group {
@@ -1559,14 +1627,20 @@ struct NewsDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if isLoading {
                     // Loading placeholder
-                    Text("Loading \(placeholder)...")
-                        .font(.callout)
-                        .italic()
-                        .foregroundColor(.secondary)
-                        .padding(.top, 6)
-                        .onAppear {
-                            loadContent()
-                        }
+                    VStack {
+                        ProgressView()
+                        Text("Loading \(placeholder)...")
+                            .font(.callout)
+                            .italic()
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 10)
+                    .onAppear {
+                        loadContent()
+                    }
+                    .onDisappear {
+                        loadTask?.cancel()
+                    }
                 } else {
                     // Fallback if loading fails
                     Text("Unable to format \(placeholder)")
@@ -1579,26 +1653,33 @@ struct NewsDetailView: View {
         }
 
         private func loadContent() {
+            // Cancel any previous task
+            loadTask?.cancel()
+
             // Only load if we don't already have the content
             if loadedAttributedString != nil {
                 isLoading = false
                 return
             }
 
-            DispatchQueue.global(qos: .userInitiated).async {
-                let attributedString = getAttributedString(
-                    for: field,
-                    from: notification,
-                    createIfMissing: true,
-                    customFontSize: fontSize
-                )
+            loadTask = Task { @MainActor in
+                // Run this in a background task but update UI on MainActor
+                let attributedString = await Task.detached(priority: .userInitiated) {
+                    getAttributedString(
+                        for: field,
+                        from: notification,
+                        createIfMissing: true,
+                        customFontSize: fontSize
+                    )
+                }.value
 
-                DispatchQueue.main.async {
-                    self.loadedAttributedString = attributedString
-                    self.isLoading = false
-                    if let attributedString = attributedString {
-                        onLoad?(attributedString)
-                    }
+                // Check if the task was cancelled
+                if Task.isCancelled { return }
+
+                self.loadedAttributedString = attributedString
+                self.isLoading = false
+                if let attributedString = attributedString {
+                    onLoad?(attributedString)
                 }
             }
         }
