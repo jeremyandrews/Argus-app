@@ -1321,8 +1321,8 @@ struct NewsDetailView: View {
 
     private func sectionContent(for section: ContentSection) -> some View {
         Group {
-            if section.header == "Source Analysis" {
-                // Source Analysis section with efficient caching
+            switch section.header {
+            case "Source Analysis":
                 VStack(alignment: .leading, spacing: 10) {
                     // Domain info at the top
                     HStack {
@@ -1349,38 +1349,18 @@ struct NewsDetailView: View {
                         let sourceText = sourceData["text"] as? String ?? ""
                         let sourceType = sourceData["sourceType"] as? String ?? ""
 
-                        // The actual source analysis content
-                        if !sourceText.isEmpty {
-                            if let attributedString = sourceAnalysisAttributedString {
-                                // Use existing cached attributed string if available
+                        if !sourceText.isEmpty, let notification = currentNotification {
+                            LazyLoadingContentView(
+                                notification: notification,
+                                field: .sourceAnalysis,
+                                placeholder: "source analysis",
+                                fontSize: 16,
+                                onLoad: { self.sourceAnalysisAttributedString = $0 }
+                            ) { attributedString in
                                 AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .textSelection(.enabled)
                                     .padding(.top, 4)
-                            } else if let notification = currentNotification,
-                                      let attrString = getAttributedString(
-                                          for: .sourceAnalysis,
-                                          from: notification,
-                                          createIfMissing: true,
-                                          customFontSize: 16
-                                      )
-                            {
-                                // Get the attributed string and cache it
-                                AccessibleAttributedText(attributedString: attrString, fontSize: 16)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .textSelection(.enabled)
-                                    .padding(.top, 4)
-                                    .onAppear {
-                                        // Cache for future use
-                                        sourceAnalysisAttributedString = attrString
-                                    }
-                            } else {
-                                Text(sourceText)
-                                    .font(.callout)
-                                    .textSelection(.enabled)
-                                    .padding(.top, 4)
-                                    .lineSpacing(2)
-                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         } else {
                             Text("No detailed source analysis available.")
@@ -1389,7 +1369,7 @@ struct NewsDetailView: View {
                                 .foregroundColor(.secondary)
                         }
 
-                        // Only source type at the bottom
+                        // Source type display
                         if !sourceType.isEmpty {
                             HStack(spacing: 4) {
                                 Image(systemName: sourceTypeIcon(for: sourceType))
@@ -1406,67 +1386,21 @@ struct NewsDetailView: View {
                 .padding(.top, 6)
                 .textSelection(.enabled)
 
-            } else if section.header == "Summary" {
-                // Summary section with efficient caching
-                if let attributedString = summaryAttributedString {
-                    // Use cached version if available
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                } else if let notification = currentNotification,
-                          let attributedString = getAttributedString(
-                              for: .summary,
-                              from: notification,
-                              createIfMissing: true,
-                              customFontSize: 16
-                          )
-                {
-                    // Get the attributed string and cache it
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                        .onAppear {
-                            // Cache for future use
-                            summaryAttributedString = attributedString
-                        }
-                } else {
-                    // Plain text fallback if no summary or loading failed
-                    Text(section.content as? String ?? "")
-                        .font(.callout)
-                        .padding(.top, 6)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-
-            } else if section.header == "Critical Analysis" {
-                // Critical Analysis section with efficient caching
-                if let attributedString = criticalAnalysisAttributedString {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                } else if let notification = currentNotification,
-                          let attributedString = getAttributedString(
-                              for: .criticalAnalysis,
-                              from: notification,
-                              createIfMissing: true,
-                              customFontSize: 16
-                          )
-                {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                        .onAppear {
-                            criticalAnalysisAttributedString = attributedString
-                        }
+            case "Summary", "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective":
+                if let notification = currentNotification {
+                    LazyLoadingContentView(
+                        notification: notification,
+                        field: getRichTextFieldForSection(section.header),
+                        placeholder: section.header.lowercased(),
+                        fontSize: 16,
+                        onLoad: { self.cacheAttributedString($0, for: section.header) }
+                    ) { attributedString in
+                        AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 6)
+                            .padding(.bottom, 2)
+                            .textSelection(.enabled)
+                    }
                 } else {
                     Text(section.content as? String ?? "")
                         .font(.callout)
@@ -1476,43 +1410,11 @@ struct NewsDetailView: View {
                         .textSelection(.enabled)
                 }
 
-            } else if section.header == "Logical Fallacies" {
-                // Logical Fallacies section with efficient caching
-                if let attributedString = logicalFallaciesAttributedString {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                } else if let notification = currentNotification,
-                          let attributedString = getAttributedString(
-                              for: .logicalFallacies,
-                              from: notification,
-                              createIfMissing: true,
-                              customFontSize: 16
-                          )
-                {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                        .onAppear {
-                            logicalFallaciesAttributedString = attributedString
-                        }
-                } else {
-                    Text(section.content as? String ?? "")
-                        .font(.callout)
-                        .padding(.top, 6)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-
-            } else if section.header == "Vector WIP" {
-                // Vector WIP section (content preserved)
+            case "Vector WIP":
+                // Vector WIP section
                 VStack(alignment: .leading, spacing: 8) {
                     if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
+                        // Existing similar articles handling
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Similar Articles")
                                 .font(.subheadline)
@@ -1550,12 +1452,12 @@ struct NewsDetailView: View {
                 }
                 .padding(.top, 6)
 
-            } else if section.header == "Argus Engine Stats", let details = section.argusDetails {
-                // Argus Engine Stats
-                ArgusDetailsView(data: details)
+            case "Argus Engine Stats":
+                if let details = section.argusDetails {
+                    ArgusDetailsView(data: details)
+                }
 
-            } else if section.header == "Preview" {
-                // Preview section content
+            case "Preview":
                 VStack(spacing: 8) {
                     if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
                         SafariView(url: articleURL)
@@ -1572,53 +1474,52 @@ struct NewsDetailView: View {
                     }
                 }
 
-            } else if section.content is String {
-                // For other fields, use direct creation without caching
-                if let notification = currentNotification,
-                   let attributedString = getAttributedString(
-                       for: getRichTextFieldForSection(section.header),
-                       from: notification,
-                       createIfMissing: true,
-                       customFontSize: 16
-                   )
-                {
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                } else {
-                    Text(section.content as? String ?? "")
-                        .font(.callout)
-                        .padding(.top, 6)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-            } else {
-                EmptyView()
+            default:
+                Text(section.content as? String ?? "")
+                    .font(.callout)
+                    .padding(.top, 6)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
         }
     }
 
-    struct LazyLoadingRichTextSection: View {
-        let title: String
-        let notification: NotificationData?
+    // Helper function to cache attributed strings by section
+    private func cacheAttributedString(_ attributedString: NSAttributedString, for section: String) {
+        switch section {
+        case "Summary":
+            summaryAttributedString = attributedString
+        case "Critical Analysis":
+            criticalAnalysisAttributedString = attributedString
+        case "Logical Fallacies":
+            logicalFallaciesAttributedString = attributedString
+        case "Source Analysis":
+            sourceAnalysisAttributedString = attributedString
+        default:
+            break // Other sections don't have cached properties
+        }
+    }
+
+    struct LazyLoadingContentView<Content: View>: View {
+        let notification: NotificationData
         let field: RichTextField
-        @State private var attributedString: NSAttributedString?
+        let placeholder: String
+        var fontSize: CGFloat = 16
+        var onLoad: ((NSAttributedString) -> Void)? = nil
+        @ViewBuilder var content: (NSAttributedString) -> Content
+
+        @State private var loadedAttributedString: NSAttributedString?
+        @State private var isLoading = true
 
         var body: some View {
-            VStack {
-                if let attributedString = self.attributedString {
-                    // Content loaded - display it
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                } else {
-                    // Content not loaded yet - show placeholder and trigger loading
-                    Text("Loading \(title.lowercased())...")
+            Group {
+                if let attributedString = loadedAttributedString {
+                    // Show the content using the provided view builder
+                    content(attributedString)
+                } else if isLoading {
+                    // Loading placeholder
+                    Text("Loading \(placeholder)...")
                         .font(.callout)
                         .italic()
                         .foregroundColor(.secondary)
@@ -1626,160 +1527,31 @@ struct NewsDetailView: View {
                         .onAppear {
                             loadContent()
                         }
+                } else {
+                    // Fallback if loading fails
+                    Text("Unable to format \(placeholder)")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 6)
                 }
             }
         }
 
         private func loadContent() {
-            guard let notification = notification else { return }
-            DispatchQueue.main.async {
-                self.attributedString = getAttributedString(
+            DispatchQueue.global(qos: .userInitiated).async {
+                let attributedString = getAttributedString(
                     for: field,
                     from: notification,
                     createIfMissing: true,
-                    customFontSize: 16
+                    customFontSize: fontSize
                 )
-            }
-        }
-    }
 
-    struct LazySourceAnalysisLoader: View {
-        let notification: NotificationData
-        let sourceData: [String: Any]
-        var onLoad: ((NSAttributedString) -> Void)? = nil
-        @State private var isLoading = true
-        @State private var loadedAttributedString: NSAttributedString?
-
-        var body: some View {
-            VStack {
-                if let attributedString = loadedAttributedString {
-                    // Show content once loaded
-                    AccessibleAttributedText(attributedString: attributedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                } else if isLoading {
-                    // Show loading indicator
-                    ProgressView()
-                        .padding()
-                } else {
-                    // Fallback to plain text if loading failed
-                    Text(sourceData["text"] as? String ?? "")
-                        .font(.callout)
-                }
-            }
-            .onAppear {
                 DispatchQueue.main.async {
-                    // This will only be called when the view is actually visible
-                    if let attrString = getAttributedString(
-                        for: .sourceAnalysis,
-                        from: notification,
-                        createIfMissing: true
-                    ) {
-                        loadedAttributedString = attrString
-                        onLoad?(attrString)
+                    self.loadedAttributedString = attributedString
+                    self.isLoading = false
+                    if let attributedString = attributedString {
+                        onLoad?(attributedString)
                     }
-                    isLoading = false
-                }
-            }
-        }
-    }
-
-    // Helper view for lazy loading section content
-    struct LazySectionContentView: View {
-        let header: String
-        let markdownContent: String
-        let attributedString: NSAttributedString?
-        let richTextField: RichTextField
-        let notification: NotificationData
-        var onLoad: ((NSAttributedString) -> Void)? = nil
-
-        // Use a state variable to track if we've loaded content
-        @State private var loadedAttributedString: NSAttributedString?
-
-        var body: some View {
-            Group {
-                if let existingString = attributedString {
-                    // Use existing attributed string if available
-                    AccessibleAttributedText(attributedString: existingString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                } else if let loadedString = loadedAttributedString {
-                    // Use our locally loaded attributed string
-                    AccessibleAttributedText(attributedString: loadedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                } else {
-                    // Show plain text while loading
-                    Text(markdownContent)
-                        .font(.callout)
-                        .padding(.top, 6)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .onAppear {
-                            // Load the attributed string when the view appears
-                            if let attrString = getAttributedString(
-                                for: richTextField,
-                                from: notification,
-                                createIfMissing: true,
-                                customFontSize: 16
-                            ) {
-                                loadedAttributedString = attrString
-                                onLoad?(attrString)
-                            }
-                        }
-                }
-            }
-        }
-    }
-
-    // Helper view specifically for Source Analysis content
-    struct LazySourceAnalysisView: View {
-        let sourceText: String
-        let attributedString: NSAttributedString?
-        let notification: NotificationData
-        var onLoad: ((NSAttributedString) -> Void)? = nil
-
-        @State private var loadedAttributedString: NSAttributedString?
-
-        var body: some View {
-            Group {
-                if let existingString = attributedString {
-                    // Use existing attributed string if available
-                    AccessibleAttributedText(attributedString: existingString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .padding(.top, 4)
-                } else if let loadedString = loadedAttributedString {
-                    // Use our locally loaded attributed string
-                    AccessibleAttributedText(attributedString: loadedString, fontSize: 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .padding(.top, 4)
-                } else {
-                    // Show plain text while loading
-                    Text(sourceText)
-                        .font(.callout)
-                        .textSelection(.enabled)
-                        .padding(.top, 4)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .onAppear {
-                            // Load the attributed string when the view appears
-                            if let attrString = getAttributedString(
-                                for: .sourceAnalysis,
-                                from: notification,
-                                createIfMissing: true,
-                                customFontSize: 16
-                            ) {
-                                loadedAttributedString = attrString
-                                onLoad?(attrString)
-                            }
-                        }
                 }
             }
         }
