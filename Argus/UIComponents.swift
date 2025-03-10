@@ -6,17 +6,18 @@ import UIKit
 
 struct AccessibleAttributedText: UIViewRepresentable {
     let attributedString: NSAttributedString
+    var fontSize: CGFloat? = nil // Add optional font size parameter
 
     func makeUIView(context _: Context) -> UITextView {
         let textView = UITextView()
         textView.attributedText = attributedString
         textView.isEditable = false
-        textView.isSelectable = false // Disable selection
+        textView.isSelectable = true
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear
 
-        // Remove default padding
-        textView.textContainerInset = UIEdgeInsets.zero
+        // Important: Make sure we have zero padding
+        textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
 
         // Enable Dynamic Type
@@ -24,6 +25,10 @@ struct AccessibleAttributedText: UIViewRepresentable {
 
         // Make sure it expands to fit content
         textView.setContentCompressionResistancePriority(.required, for: .vertical)
+
+        // CRITICAL: Set width explicitly to screen width minus padding
+        let screenWidth = UIScreen.main.bounds.width - 32
+        textView.textContainer.size.width = screenWidth
 
         // Disable scrolling indicators
         textView.showsHorizontalScrollIndicator = false
@@ -33,22 +38,42 @@ struct AccessibleAttributedText: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context _: Context) {
-        uiView.attributedText = attributedString
+        // Apply font size adjustment if provided
+        if let fontSize = fontSize {
+            let mutableAttrString = NSMutableAttributedString(attributedString: attributedString)
 
-        // Ensure it updates its layout
+            mutableAttrString.enumerateAttributes(in: NSRange(location: 0, length: mutableAttrString.length)) { attributes, range, _ in
+                if let existingFont = attributes[.font] as? UIFont {
+                    let newFont = UIFont(descriptor: existingFont.fontDescriptor, size: fontSize)
+                    mutableAttrString.addAttribute(.font, value: newFont, range: range)
+                } else {
+                    let defaultFont = UIFont.systemFont(ofSize: fontSize)
+                    mutableAttrString.addAttribute(.font, value: defaultFont, range: range)
+                }
+            }
+
+            uiView.attributedText = mutableAttrString
+        } else {
+            uiView.attributedText = attributedString
+        }
+
+        let screenWidth = UIScreen.main.bounds.width - 32
+        uiView.textContainer.size.width = screenWidth
+
+        // Ensure we update the layout
+        uiView.setNeedsLayout()
         uiView.layoutIfNeeded()
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize {
-        // Set width constraint if available
-        if let width = proposal.width {
-            uiView.textContainer.size.width = width
-            uiView.layoutIfNeeded()
-        }
+        // If a width is provided, use that, otherwise use screen width minus padding
+        let width = proposal.width ?? UIScreen.main.bounds.width - 32
+        uiView.textContainer.size.width = width
+        uiView.layoutIfNeeded()
 
-        // Get the natural size after layout
+        // Calculate height that fits all content
         let fittingSize = uiView.sizeThatFits(CGSize(
-            width: proposal.width ?? UIView.layoutFittingExpandedSize.width,
+            width: width,
             height: UIView.layoutFittingExpandedSize.height
         ))
 
