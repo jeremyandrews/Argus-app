@@ -418,53 +418,104 @@ struct NewsDetailView: View {
         // Cancel any pending tasks from previous navigations
         tabChangeTask?.cancel()
 
-        // Set transition state to preparing
-        tabTransitionState = .preparing
+        // Set initial loading state (brief "Loading article..." message)
         loadingStage = 1
-        isNavigating = true // Add this line to show loading state immediately
+        isNavigating = true
 
         // Start asynchronous work
         tabChangeTask = Task {
-            // Find the next valid article first before showing loading UI
-            let validArticleFound = await findValidArticle(from: direction == .next ? currentIndex + 1 : currentIndex - 1, direction: direction)
+            // Find the next valid article first
+            let targetIndex = (direction == .next) ? currentIndex + 1 : currentIndex - 1
+            let validArticleFound = await findValidArticle(from: targetIndex, direction: direction)
 
             if !validArticleFound {
                 // If we couldn't navigate, reset the state
                 await MainActor.run {
-                    tabTransitionState = .idle
                     loadingStage = 0
-                    isNavigating = false // Make sure to reset this
+                    isNavigating = false
                 }
                 return
             }
 
-            // We found a valid article, now switch to transitioning state
+            // We found a valid article, now prepare for transition
             await MainActor.run {
-                // Clear all content immediately before showing the new article
+                // Clear content and scroll to top
                 clearCurrentContent()
-
-                // Scroll to top immediately
                 scrollToTopTrigger = UUID()
-
-                loadingStage = 2 // Show "formatting content" message
             }
 
             // Handle pagination in the background
             await handlePagination(direction: direction, targetIndex: currentIndex)
 
-            // Mark as viewed in the background
+            // CRITICAL CHANGE: Load only essential content with minimal formatting
+            guard let notification = currentNotification else {
+                await MainActor.run {
+                    isNavigating = false
+                    loadingStage = 0
+                }
+                return
+            }
+
+            // Mark as viewed - quick operation
             await MainActor.run {
                 markAsViewed()
             }
 
-            // Preload minimum required content before showing article
-            await preloadArticleContent()
+            // Build content dictionary (fast operation, no formatting)
+            let basicContent = buildContentDictionary(from: notification)
 
-            // Update UI to show the article has loaded
+            // Load just the title and body attributes (typically already cached)
+            let titleString = await loadAttributedStringAsync(for: .title, from: notification)
+            let bodyString = await loadAttributedStringAsync(for: .body, from: notification)
+
+            // Update UI with what we have so far
             await MainActor.run {
+                additionalContent = basicContent
+                titleAttributedString = titleString
+                bodyAttributedString = bodyString
+
+                // We now have enough to display the article header
+                // Show the article header while we load the summary
                 isNavigating = false
-                tabTransitionState = .idle
                 loadingStage = 0
+            }
+
+            // After showing the article, then load summary in background
+            let summaryString = await loadAttributedStringAsync(for: .summary, from: notification)
+
+            await MainActor.run {
+                summaryAttributedString = summaryString
+            }
+        }
+    }
+
+    private func loadAttributedStringAsync(for field: RichTextField, from notification: NotificationData) async -> NSAttributedString? {
+        // Extract the markdown text OUTSIDE the closure to avoid capturing NotificationData
+        let markdownText: String?
+        switch field {
+        case .title: markdownText = notification.title
+        case .body: markdownText = notification.body
+        case .summary: markdownText = notification.summary
+        case .criticalAnalysis: markdownText = notification.critical_analysis
+        case .logicalFallacies: markdownText = notification.logical_fallacies
+        case .sourceAnalysis: markdownText = notification.source_analysis
+        case .relationToTopic: markdownText = notification.relation_to_topic
+        case .additionalInsights: markdownText = notification.additional_insights
+        }
+
+        // Also extract the text style outside the closure
+        let textStyle = field.textStyle
+
+        // Now use the extracted text in the continuation
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                // Since we extracted the text outside, we no longer capture notification
+                if let text = markdownText {
+                    let result = markdownToAttributedString(text, textStyle: textStyle)
+                    continuation.resume(returning: result)
+                } else {
+                    continuation.resume(returning: nil)
+                }
             }
         }
     }
@@ -745,7 +796,7 @@ struct NewsDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             } else if let content = additionalContent {
                 ScrollViewReader { proxy in
-                    LazyVStack(alignment: .leading) { // Use LazyVStack for better performance
+                    LazyVStack(alignment: .leading) {
                         ForEach(getSections(from: content), id: \.header) { section in
                             VStack(alignment: .leading) {
                                 Divider()
@@ -766,22 +817,32 @@ struct NewsDetailView: View {
                                 ) {
                                     // Only render content if section is expanded
                                     if expandedSections[section.header] == true {
-                                        // Use a placeholder if we haven't loaded the content yet
                                         if section.header == "Summary" && summaryAttributedString == nil {
+                                            // Special case for Summary section which is open by default
                                             ProgressView("Loading summary...")
                                                 .padding(.vertical, 10)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
                                         } else {
                                             sectionContent(for: section)
                                         }
                                     } else {
-                                        // Placeholder to reduce layout calculation
                                         Color.clear.frame(height: 1)
                                     }
                                 } label: {
-                                    Text(section.header)
-                                        .font(.headline)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    HStack {
+                                        Text(section.header)
+                                            .font(.headline)
+
+                                        // Show loading indicator next to section title if currently loading
+                                        if section.header == "Summary" &&
+                                            expandedSections[section.header] == true &&
+                                            summaryAttributedString == nil
+                                        {
+                                            Spacer()
+                                            ProgressView()
+                                                .scaleEffect(0.7)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 .id(section.header)
                                 .padding([.leading, .trailing, .top])
@@ -792,7 +853,7 @@ struct NewsDetailView: View {
                     .onChange(of: scrollToSection) { _, newSection in
                         if let section = newSection {
                             expandedSections[section] = true
-                            loadContentForSection(section) // Load content when scrolled to
+                            loadContentForSection(section)
                             withAnimation {
                                 proxy.scrollTo(section, anchor: .top)
                             }
@@ -1475,6 +1536,28 @@ struct NewsDetailView: View {
     @ViewBuilder
     private func sectionContent(for section: ContentSection) -> some View {
         switch section.header {
+        case "Summary":
+            if let attributedString = summaryAttributedString {
+                // Use the preloaded summary attributed string (no need for notification here)
+                NonSelectableRichTextView(attributedString: attributedString)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+                    .padding(.bottom, 2)
+                    .textSelection(.enabled)
+            } else {
+                // Fallback - use the plain text summary if available
+                Text(section.content as? String ?? "")
+                    .font(.callout)
+                    .padding(.top, 6)
+                    .lineSpacing(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+
         case "Source Analysis":
             VStack(alignment: .leading, spacing: 10) {
                 // Domain info at the top
@@ -1544,7 +1627,7 @@ struct NewsDetailView: View {
             .padding(.top, 6)
             .textSelection(.enabled)
 
-        case "Summary", "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective":
+        case "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective":
             if let notification = currentNotification {
                 LazyLoadingContentView(
                     notification: notification,
