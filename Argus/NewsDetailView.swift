@@ -488,11 +488,6 @@ struct NewsDetailView: View {
                         // Now that essential content is loaded, stop showing loading indicator
                         self.isNavigating = false
                         self.loadingStage = 0
-
-                        // Load remaining content in background
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            self.loadContent(contentType: .full)
-                        }
                     }
                 }
 
@@ -1137,10 +1132,8 @@ struct NewsDetailView: View {
                 return
 
             case .full:
-                fieldsToLoad = [
-                    .title, .body, .summary, .criticalAnalysis,
-                    .logicalFallacies, .sourceAnalysis, .relationToTopic, .additionalInsights,
-                ]
+                // The specific sections will be loaded when expanded
+                fieldsToLoad = [.title, .body]
 
             case let .specific(fields):
                 fieldsToLoad = fields
@@ -1148,29 +1141,48 @@ struct NewsDetailView: View {
 
             // Load the fields
             for field in fieldsToLoad {
-                let attributedString = getAttributedString(
-                    for: field,
-                    from: notification,
-                    createIfMissing: true
-                )
+                // FIX: Only load if the field hasn't already been loaded
+                let attributedString: NSAttributedString?
+                switch field {
+                case .title where self.titleAttributedString != nil:
+                    continue
+                case .body where self.bodyAttributedString != nil:
+                    continue
+                case .summary where self.summaryAttributedString != nil:
+                    continue
+                case .criticalAnalysis where self.criticalAnalysisAttributedString != nil:
+                    continue
+                case .logicalFallacies where self.logicalFallaciesAttributedString != nil:
+                    continue
+                case .sourceAnalysis where self.sourceAnalysisAttributedString != nil:
+                    continue
+                default:
+                    attributedString = getAttributedString(
+                        for: field,
+                        from: notification,
+                        createIfMissing: true
+                    )
+                }
 
                 // Store the attributed string in the appropriate property
-                switch field {
-                case .title:
-                    self.titleAttributedString = attributedString
-                case .body:
-                    self.bodyAttributedString = attributedString
-                case .summary:
-                    self.summaryAttributedString = attributedString
-                case .criticalAnalysis:
-                    self.criticalAnalysisAttributedString = attributedString
-                case .logicalFallacies:
-                    self.logicalFallaciesAttributedString = attributedString
-                case .sourceAnalysis:
-                    self.sourceAnalysisAttributedString = attributedString
-                case .relationToTopic, .additionalInsights:
-                    // These don't have dedicated properties but are loaded for on-demand use
-                    break
+                if let attributedString = attributedString {
+                    switch field {
+                    case .title:
+                        self.titleAttributedString = attributedString
+                    case .body:
+                        self.bodyAttributedString = attributedString
+                    case .summary:
+                        self.summaryAttributedString = attributedString
+                    case .criticalAnalysis:
+                        self.criticalAnalysisAttributedString = attributedString
+                    case .logicalFallacies:
+                        self.logicalFallaciesAttributedString = attributedString
+                    case .sourceAnalysis:
+                        self.sourceAnalysisAttributedString = attributedString
+                    case .relationToTopic, .additionalInsights:
+                        // These don't have dedicated properties but are loaded for on-demand use
+                        break
+                    }
                 }
             }
         }
@@ -1255,7 +1267,6 @@ struct NewsDetailView: View {
                         self.additionalContent = content
                         self.isLoadingAdditionalContent = false
 
-                        // Only load the summary attributed string if the summary section is expanded
                         if self.expandedSections["Summary"] == true {
                             self.summaryAttributedString = getAttributedString(
                                 for: .summary,
@@ -1538,6 +1549,12 @@ struct NewsDetailView: View {
         }
 
         private func loadContent() {
+            // Only load if we don't already have the content
+            if loadedAttributedString != nil {
+                isLoading = false
+                return
+            }
+
             DispatchQueue.global(qos: .userInitiated).async {
                 let attributedString = getAttributedString(
                     for: field,

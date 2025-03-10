@@ -182,7 +182,7 @@ func getAttributedString(
             customFontSize: customFontSize
         )
 
-        // Optionally store for future use
+        // Store for future use if we successfully created an attributed string
         if let attributedString = attributedString {
             _ = saveAttributedString(attributedString, for: field, in: notification)
         }
@@ -220,7 +220,9 @@ func createAllAttributedStrings(for notification: NotificationData) async {
         ]
 
         for field in fields {
-            if let text = field.getMarkdownText(from: notification),
+            // Only convert if blob doesn't exist yet
+            if field.getBlob(from: notification) == nil,
+               let text = field.getMarkdownText(from: notification),
                let attributedString = markdownToAttributedString(text, textStyle: field.textStyle)
             {
                 _ = saveAttributedString(attributedString, for: field, in: notification)
