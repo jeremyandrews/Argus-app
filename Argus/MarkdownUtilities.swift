@@ -209,24 +209,3 @@ func saveAttributedString(
     field.setBlob(data, on: notification)
     return true
 }
-
-/// Create attributed strings for all fields in a notification
-func createAllAttributedStrings(for notification: NotificationData) async {
-    await Task.detached(priority: .utility) {
-        // Process all fields consistently
-        let fields: [RichTextField] = [
-            .title, .body, .summary, .criticalAnalysis,
-            .logicalFallacies, .sourceAnalysis, .relationToTopic, .additionalInsights,
-        ]
-
-        for field in fields {
-            // Only convert if blob doesn't exist yet
-            if field.getBlob(from: notification) == nil,
-               let text = field.getMarkdownText(from: notification),
-               let attributedString = markdownToAttributedString(text, textStyle: field.textStyle)
-            {
-                _ = saveAttributedString(attributedString, for: field, in: notification)
-            }
-        }
-    }.value
-}
