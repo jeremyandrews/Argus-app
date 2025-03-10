@@ -182,18 +182,47 @@ struct ArgusApp: App {
 
         // Create ArticleQueueItem indexes if the table exists
         if let actualQueueTableName = articleQueueTableName {
-            // Create ArticleQueueItem indexes using the same loop pattern as the other tables
-            for (indexName, column) in articleQueueIndexes {
-                let isUnique = indexName.contains("jsonurl") // Make the jsonURL index unique
+            // Get column names for the ArticleQueueItem table
+            let columnQuery = "PRAGMA table_info(\(actualQueueTableName))"
+            var columnStatement: OpaquePointer?
+            var jsonURLColumnName: String?
 
-                let createIndexQuery = """
-                CREATE \(isUnique ? "UNIQUE " : "")INDEX IF NOT EXISTS \(indexName)
-                ON \(actualQueueTableName) (\(column));
+            if sqlite3_prepare_v2(db, columnQuery, -1, &columnStatement, nil) == SQLITE_OK {
+                while sqlite3_step(columnStatement) == SQLITE_ROW {
+                    if let columnNameCString = sqlite3_column_text(columnStatement, 1) {
+                        let columnName = String(cString: columnNameCString)
+                        // Look for column that contains "jsonURL" or "JSON_URL" (case insensitive)
+                        if columnName.lowercased().contains("jsonurl") || columnName.lowercased().contains("json_url") {
+                            jsonURLColumnName = columnName
+                            break
+                        }
+                    }
+                }
+            }
+            sqlite3_finalize(columnStatement)
+
+            // Now use the actual column name
+            if let jsonURLColumn = jsonURLColumnName {
+                let createUniqueIndexQuery = """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_articlequeue_jsonurl
+                ON \(actualQueueTableName) (\(jsonURLColumn));
                 """
 
-                if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
-                    print("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
+                if sqlite3_exec(db, createUniqueIndexQuery, nil, nil, nil) != SQLITE_OK {
+                    print("Warning: Failed to create index idx_articlequeue_jsonurl: \(String(cString: sqlite3_errmsg(db)))")
                 }
+            } else {
+                print("Could not find jsonURL column in \(actualQueueTableName)")
+            }
+
+            // Create the normal createdat index as before
+            let createDateIndexQuery = """
+            CREATE INDEX IF NOT EXISTS idx_articlequeue_createdat
+            ON \(actualQueueTableName) (ZCREATEDAT);
+            """
+
+            if sqlite3_exec(db, createDateIndexQuery, nil, nil, nil) != SQLITE_OK {
+                print("Warning: Failed to create index idx_articlequeue_createdat: \(String(cString: sqlite3_errmsg(db)))")
             }
         } else {
             print("ArticleQueueItem table not found - will skip creating indexes for it")
