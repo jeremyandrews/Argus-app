@@ -223,9 +223,6 @@ class SyncManager {
             similar_articles: similarArticlesJSON // Use the JSON string for similar articles
         )
 
-        // Create rich text for all fields
-        await createAllAttributedStrings(for: notification)
-
         // Insert the notification into the BACKGROUND context
         context.insert(notification)
 
@@ -467,14 +464,6 @@ class SyncManager {
             (notification.source_analysis == nil || notification.source_analysis_blob != nil) &&
             (notification.relation_to_topic == nil || notification.relation_to_topic_blob != nil) &&
             (notification.additional_insights == nil || notification.additional_insights_blob != nil)
-
-        // Convert only if we don't have rich text versions yet
-        if !hasRichText {
-            Task {
-                // Use our new helper to create all rich text fields at once
-                await createAllAttributedStrings(for: notification)
-            }
-        }
     }
 
     static func convertMarkdownToRichTextIfNeeded(for notification: NotificationData) {
@@ -487,16 +476,6 @@ class SyncManager {
             (notification.source_analysis == nil || notification.source_analysis_blob != nil) &&
             (notification.relation_to_topic == nil || notification.relation_to_topic_blob != nil) &&
             (notification.additional_insights == nil || notification.additional_insights_blob != nil)
-
-        // Convert only if we don't have rich text versions yet
-        if !hasRichText {
-            Task {
-                // Offload the CPU-intensive conversion to a detached task
-                await Task.detached(priority: .utility) {
-                    await createAllAttributedStrings(for: notification)
-                }.value
-            }
-        }
     }
 
     func addOrUpdateArticle(
@@ -575,11 +554,6 @@ class SyncManager {
                 try context.transaction {
                     for notification in newNotifications {
                         context.insert(notification)
-
-                        // Create rich text for all fields with the new helpers
-                        Task {
-                            await createAllAttributedStrings(for: notification)
-                        }
                     }
 
                     for seenArticle in newSeenArticles {
@@ -645,11 +619,6 @@ class SyncManager {
                 for (notification, seenArticle) in newArticles {
                     context.insert(notification)
                     context.insert(seenArticle)
-
-                    // Create rich text for all fields
-                    Task {
-                        await createAllAttributedStrings(for: notification)
-                    }
                 }
             }
 
@@ -858,11 +827,6 @@ class SyncManager {
                                 engineStats: article.engineStats, // Changed from engine_stats to engineStats
                                 similarArticles: article.similarArticles // Changed from similar_articles to similarArticles
                             ))
-
-                            // Create rich text for all fields using our new helper
-                            Task {
-                                await createAllAttributedStrings(for: notification)
-                            }
                         }
                     } else if !existingSeenURLs.contains(article.jsonURL) {
                         print("Creating new article: \(article.jsonURL)")
@@ -894,11 +858,6 @@ class SyncManager {
                             engine_stats: article.engineStats,
                             similar_articles: article.similarArticles
                         )
-
-                        // Create rich text for all fields using our new helper
-                        Task {
-                            await createAllAttributedStrings(for: notification)
-                        }
 
                         let seenArticle = SeenArticle(
                             id: notification.id,
