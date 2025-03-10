@@ -419,7 +419,7 @@ struct NewsDetailView: View {
         tabChangeTask?.cancel()
 
         // Set initial index based on direction
-        var targetIndex = (direction == .next) ? currentIndex + 1 : currentIndex - 1
+        let targetIndex = (direction == .next) ? currentIndex + 1 : currentIndex - 1
 
         // Set transition state to preparing
         tabTransitionState = .preparing
@@ -1662,24 +1662,31 @@ struct NewsDetailView: View {
                 return
             }
 
-            loadTask = Task { @MainActor in
-                // Run this in a background task but update UI on MainActor
-                let attributedString = await Task.detached(priority: .userInitiated) {
-                    getAttributedString(
-                        for: field,
-                        from: notification,
-                        createIfMissing: true,
-                        customFontSize: fontSize
-                    )
-                }.value
+            loadTask = Task {
+                // Load the attributed string in the background
+                let attributedString = await withCheckedContinuation { continuation in
+                    // Using DispatchQueue for NSAttributedString which isn't Sendable
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let result = getAttributedString(
+                            for: field,
+                            from: notification,
+                            createIfMissing: true,
+                            customFontSize: fontSize
+                        )
+                        continuation.resume(returning: result)
+                    }
+                }
 
-                // Check if the task was cancelled
-                if Task.isCancelled { return }
+                // Update UI on main thread
+                await MainActor.run {
+                    // Check if the task was cancelled
+                    if Task.isCancelled { return }
 
-                self.loadedAttributedString = attributedString
-                self.isLoading = false
-                if let attributedString = attributedString {
-                    onLoad?(attributedString)
+                    self.loadedAttributedString = attributedString
+                    self.isLoading = false
+                    if let attributedString = attributedString {
+                        onLoad?(attributedString)
+                    }
                 }
             }
         }
