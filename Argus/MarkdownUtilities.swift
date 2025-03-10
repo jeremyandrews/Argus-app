@@ -57,15 +57,32 @@ extension RichTextField {
 
     // Sets the blob data for this field on an object
     func setBlob(_ data: Data?, on notification: NotificationData) {
+        // Always ensure we're on the main thread when modifying SwiftData models
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                self.setBlob(data, on: notification)
+            }
+            return
+        }
+
+        // Now we can safely set all the blobs as they all exist in the model
         switch self {
-        case .title: notification.title_blob = data
-        case .body: notification.body_blob = data
-        case .summary: notification.summary_blob = data
-        case .criticalAnalysis: notification.critical_analysis_blob = data
-        case .logicalFallacies: notification.logical_fallacies_blob = data
-        case .sourceAnalysis: notification.source_analysis_blob = data
-        case .relationToTopic: notification.relation_to_topic_blob = data
-        case .additionalInsights: notification.additional_insights_blob = data
+        case .title:
+            notification.title_blob = data
+        case .body:
+            notification.body_blob = data
+        case .summary:
+            notification.summary_blob = data
+        case .criticalAnalysis:
+            notification.critical_analysis_blob = data
+        case .logicalFallacies:
+            notification.logical_fallacies_blob = data
+        case .sourceAnalysis:
+            notification.source_analysis_blob = data
+        case .relationToTopic:
+            notification.relation_to_topic_blob = data
+        case .additionalInsights:
+            notification.additional_insights_blob = data
         }
     }
 }
@@ -151,7 +168,14 @@ func getAttributedString(
     createIfMissing: Bool = true,
     customFontSize: CGFloat? = nil
 ) -> NSAttributedString? {
-    // First try loading from blob if available
+    // First check if the source text exists for this field
+    let markdownText = field.getMarkdownText(from: notification)
+    guard markdownText != nil, !markdownText!.isEmpty else {
+        // No source text to convert
+        return nil
+    }
+
+    // Try to use existing blob data if available
     if let blobData = field.getBlob(from: notification),
        let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
            ofClass: NSAttributedString.self,
@@ -175,7 +199,7 @@ func getAttributedString(
 
     // If no blob or failed to load, create fresh if requested
     if createIfMissing {
-        let markdownText = field.getMarkdownText(from: notification)
+        // Create a new attributed string
         let attributedString = markdownToAttributedString(
             markdownText,
             textStyle: field.textStyle,
@@ -184,7 +208,22 @@ func getAttributedString(
 
         // Store for future use if we successfully created an attributed string
         if let attributedString = attributedString {
-            _ = saveAttributedString(attributedString, for: field, in: notification)
+            // Use the model's built-in method but ensure it runs on the main thread
+            if Thread.isMainThread {
+                do {
+                    try notification.setRichText(attributedString, for: field)
+                } catch {
+                    print("Error saving rich text for \(field): \(error)")
+                }
+            } else {
+                DispatchQueue.main.async {
+                    do {
+                        try notification.setRichText(attributedString, for: field)
+                    } catch {
+                        print("Error saving rich text for \(field): \(error)")
+                    }
+                }
+            }
         }
 
         return attributedString
@@ -199,13 +238,24 @@ func saveAttributedString(
     for field: RichTextField,
     in notification: NotificationData
 ) -> Bool {
-    guard let data = try? NSKeyedArchiver.archivedData(
-        withRootObject: attributedString,
-        requiringSecureCoding: false
-    ) else {
+    // Use the model's built-in method
+    do {
+        // Ensure we're on the main thread
+        if Thread.isMainThread {
+            try notification.setRichText(attributedString, for: field)
+        } else {
+            // Dispatch to main thread
+            DispatchQueue.main.async {
+                do {
+                    try notification.setRichText(attributedString, for: field)
+                } catch {
+                    print("Error saving rich text on background thread: \(error)")
+                }
+            }
+        }
+        return true
+    } catch {
+        print("Error saving rich text: \(error)")
         return false
     }
-
-    field.setBlob(data, on: notification)
-    return true
 }

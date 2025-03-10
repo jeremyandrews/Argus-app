@@ -132,7 +132,6 @@ struct NewsDetailView: View {
             .onAppear {
                 setupDeletionHandling()
                 markAsViewed()
-                loadAdditionalContent()
                 loadContent(contentType: .summary)
                 if let section = initiallyExpandedSection {
                     expandedSections[section] = true
@@ -893,7 +892,6 @@ struct NewsDetailView: View {
             if currentIndex < notifications.count - 1 {
                 currentIndex += 1
                 markAsViewed()
-                loadAdditionalContent()
             } else {
                 dismiss()
             }
@@ -910,7 +908,6 @@ struct NewsDetailView: View {
             if currentIndex < notifications.count - 1 {
                 currentIndex += 1
                 markAsViewed()
-                loadAdditionalContent()
             } else {
                 dismiss()
             }
@@ -1438,48 +1435,6 @@ struct NewsDetailView: View {
                         sourceAnalysisAttributedString = attributedString
                     default:
                         break
-                    }
-                }
-            }
-        }
-    }
-
-    func loadAdditionalContent() {
-        guard let notification = currentNotification else { return }
-
-        // Check if we have basic data to display sections
-        if additionalContent == nil {
-            // Set initial content immediately so sections appear
-            additionalContent = buildContentDictionary(from: notification)
-        }
-
-        // If we need to fetch additional content from the network
-        if !hasRequiredContent(notification) {
-            isLoadingAdditionalContent = true
-
-            Task {
-                do {
-                    // Use the helper to fetch and update notification content if needed
-                    let updatedNotification = try await SyncManager.fetchFullContentIfNeeded(for: notification)
-
-                    // Build updated content dictionary from the updated notification
-                    let content = buildContentDictionary(from: updatedNotification)
-
-                    await MainActor.run {
-                        // Update the content and loading state on the main thread
-                        self.additionalContent = content
-                        self.isLoadingAdditionalContent = false
-
-                        if self.expandedSections["Summary"] == true {
-                            self.summaryAttributedString = getAttributedString(
-                                for: .summary,
-                                from: updatedNotification
-                            )
-                        }
-                    }
-                } catch {
-                    await MainActor.run {
-                        self.isLoadingAdditionalContent = false
                     }
                 }
             }

@@ -404,69 +404,18 @@ struct NewsView: View {
         }
 
         private func loadRichTextContent() {
-            // First check if rich text versions already exist
-            if let titleBlob = notification.title_blob,
-               let bodyBlob = notification.body_blob
-            {
-                // Use existing rich text BLOBs
-                do {
-                    if let attributedTitle = try NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self,
-                        from: titleBlob
-                    ) {
-                        titleAttributedString = attributedTitle
-                    }
+            // Use the new markdown utilities to get attributed strings
+            titleAttributedString = getAttributedString(
+                for: .title,
+                from: notification,
+                createIfMissing: true
+            )
 
-                    if let attributedBody = try NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self,
-                        from: bodyBlob
-                    ) {
-                        bodyAttributedString = attributedBody
-                    }
-                } catch {
-                    print("Error unarchiving rich text: \(error)")
-                }
-            } else {
-                // We need to convert and save the rich text versions - do this in background
-                Task {
-                    // Use the static method that handles conversion asynchronously
-                    // This properly delegates to the shared instance and handles all thread coordination
-                    SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
-
-                    // Wait a brief moment for the conversion to complete
-                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
-
-                    // Then retrieve the new rich text blobs on the main thread
-                    await MainActor.run {
-                        // Now that the blobs should be saved in the model, retrieve them
-                        if let titleBlob = notification.title_blob {
-                            do {
-                                if let attributedTitle = try NSKeyedUnarchiver.unarchivedObject(
-                                    ofClass: NSAttributedString.self,
-                                    from: titleBlob
-                                ) {
-                                    self.titleAttributedString = attributedTitle
-                                }
-                            } catch {
-                                print("Error unarchiving title after conversion: \(error)")
-                            }
-                        }
-
-                        if let bodyBlob = notification.body_blob {
-                            do {
-                                if let attributedBody = try NSKeyedUnarchiver.unarchivedObject(
-                                    ofClass: NSAttributedString.self,
-                                    from: bodyBlob
-                                ) {
-                                    self.bodyAttributedString = attributedBody
-                                }
-                            } catch {
-                                print("Error unarchiving body after conversion: \(error)")
-                            }
-                        }
-                    }
-                }
-            }
+            bodyAttributedString = getAttributedString(
+                for: .body,
+                from: notification,
+                createIfMissing: true
+            )
         }
     }
 
@@ -578,26 +527,14 @@ struct NewsView: View {
 
             isLoading = true
             Task {
-                do {
-                    // Use SyncManager to fetch and update the notification
-                    _ = try await SyncManager.fetchFullContentIfNeeded(for: notification)
+                // Generate rich text content for the fields based on what's currently available
+                _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
+                _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
 
-                    // After fetching, make sure rich text versions are created
-                    await MainActor.run {
-                        SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
-                    }
-
-                    // Update UI state
-                    await MainActor.run {
-                        isLoading = false
-                        loadError = nil
-                    }
-                } catch {
-                    await MainActor.run {
-                        isLoading = false
-                        loadError = error
-                        print("Failed to load content for \(notification.json_url): \(error)")
-                    }
+                // Update UI state
+                await MainActor.run {
+                    isLoading = false
+                    loadError = nil
                 }
             }
         }
@@ -636,87 +573,26 @@ struct NewsView: View {
         let isUnread = !notification.isViewed
 
         return VStack(alignment: .leading, spacing: 10) {
-            // Top row: topic pill + archived pill
-            HStack(spacing: 8) {
-                if let topic = notification.topic, !topic.isEmpty {
-                    TopicPill(topic: topic)
-                }
-                if notification.isArchived {
-                    ArchivedPill()
-                }
-                Spacer()
-                BookmarkButton(notification: notification)
-            }
+            // Top row
+            headerRow(notification)
 
             // Title
-            Text(notification.title)
-                .font(.headline)
-                .lineLimit(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.disabled)
+            titleView(notification)
 
             // Publication Date
-            if let pubDate = notification.pub_date {
-                Text(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .textSelection(.disabled)
-            }
+            publicationDateView(notification)
 
             // Summary
-            Group {
-                if let bodyBlob = notification.body_blob,
-                   let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
-                {
-                    NonSelectableRichTextView(attributedString: attributedBody, lineLimit: 3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(notification.body.isEmpty ? "Loading content..." : notification.body)
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(3)
-                        .textSelection(.disabled)
-                        .onAppear {
-                            // Trigger background conversion only when this row appears
-                            // and only if the rich text blob doesn't already exist
-                            if notification.body_blob == nil {
-                                Task {
-                                    // This will trigger the optimized conversion in background
-                                    SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
-                                }
-                            }
-                        }
-                }
-            }
+            summaryContent(notification)
 
             // Affected Field
-            if !notification.affected.isEmpty {
-                Text(notification.affected)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 3)
-                    .textSelection(.disabled)
-            }
+            affectedFieldView(notification)
 
             // Domain
-            if let domain = notification.domain, !domain.isEmpty {
-                Text(domain)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.blue)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 3)
-                    .textSelection(.disabled)
-            }
+            domainView(notification)
 
-            // LazyLoadingQualityBadges
-            HStack {
-                LazyLoadingQualityBadges(notification: notification)
-            }
-            .padding(.top, 5)
+            // Quality Badges
+            badgesView(notification)
         }
         .padding()
         .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
@@ -742,6 +618,109 @@ struct NewsView: View {
                     }
                 }
         )
+    }
+
+    // Helper functions for each part of the row
+    private func headerRow(_ notification: NotificationData) -> some View {
+        HStack(spacing: 8) {
+            if let topic = notification.topic, !topic.isEmpty {
+                TopicPill(topic: topic)
+            }
+            if notification.isArchived {
+                ArchivedPill()
+            }
+            Spacer()
+            BookmarkButton(notification: notification)
+        }
+    }
+
+    private func titleView(_ notification: NotificationData) -> some View {
+        Text(notification.title)
+            .font(.headline)
+            .lineLimit(3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.disabled)
+    }
+
+    private let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private func publicationDateView(_ notification: NotificationData) -> some View {
+        Group {
+            if let pubDate = notification.pub_date {
+                Text(dateFormatter.string(from: pubDate))
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .textSelection(.disabled)
+            }
+        }
+    }
+
+    private func summaryContent(_ notification: NotificationData) -> some View {
+        Group {
+            if let bodyBlob = notification.body_blob,
+               let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
+            {
+                NonSelectableRichTextView(attributedString: attributedBody, lineLimit: 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(notification.body.isEmpty ? "Loading content..." : notification.body)
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+                    .textSelection(.disabled)
+                    .onAppear {
+                        // Trigger background conversion only when this row appears
+                        // and only if the rich text blob doesn't already exist
+                        if notification.body_blob == nil {
+                            Task {
+                                // Use the new markdown utilities
+                                _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+                            }
+                        }
+                    }
+            }
+        }
+    }
+
+    private func affectedFieldView(_ notification: NotificationData) -> some View {
+        Group {
+            if !notification.affected.isEmpty {
+                Text(notification.affected)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 3)
+                    .textSelection(.disabled)
+            }
+        }
+    }
+
+    private func domainView(_ notification: NotificationData) -> some View {
+        Group {
+            if let domain = notification.domain, !domain.isEmpty {
+                Text(domain)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 3)
+                    .textSelection(.disabled)
+            }
+        }
+    }
+
+    private func badgesView(_ notification: NotificationData) -> some View {
+        HStack {
+            LazyLoadingQualityBadges(notification: notification)
+        }
+        .padding(.top, 5)
     }
 
     private func handleScrollBegin() {
@@ -790,18 +769,16 @@ struct NewsView: View {
             rootViewController.present(hostingController, animated: true)
         }
 
-        // Trigger content fetch and rich text conversion in the background
+        // Convert rich text for all relevant fields in the notification
         Task {
-            do {
-                let updatedNotification = try await SyncManager.fetchFullContentIfNeeded(for: notification)
-
-                // After fetching content, ensure rich text versions exist
-                await MainActor.run {
-                    SyncManager.convertMarkdownToRichTextIfNeeded(for: updatedNotification)
+            // Pre-generate attributed strings for all the main content fields
+            await MainActor.run {
+                // Just focus on the main fields needed
+                _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
+                _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+                if notification.summary != nil {
+                    _ = getAttributedString(for: .summary, from: notification, createIfMissing: true)
                 }
-            } catch {
-                print("Error pre-loading full content: \(error)")
-                // The UI will handle showing loading states if needed
             }
         }
     }
@@ -1633,8 +1610,9 @@ struct NewsView: View {
             }
         }
         .onAppear {
-            // Convert markdown to rich text if needed when row appears
-            SyncManager.convertMarkdownToRichTextIfNeeded(for: notification)
+            // Use the new utilities to create rich text if needed
+            _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
+            _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
         }
     }
 }

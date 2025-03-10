@@ -454,30 +454,6 @@ class SyncManager {
         }
     }
 
-    func convertMarkdownFieldsToRichText(for notification: NotificationData) {
-        // First check if rich text versions already exist to avoid unnecessary work
-        let hasRichText = notification.title_blob != nil &&
-            notification.body_blob != nil &&
-            (notification.summary == nil || notification.summary_blob != nil) &&
-            (notification.critical_analysis == nil || notification.critical_analysis_blob != nil) &&
-            (notification.logical_fallacies == nil || notification.logical_fallacies_blob != nil) &&
-            (notification.source_analysis == nil || notification.source_analysis_blob != nil) &&
-            (notification.relation_to_topic == nil || notification.relation_to_topic_blob != nil) &&
-            (notification.additional_insights == nil || notification.additional_insights_blob != nil)
-    }
-
-    static func convertMarkdownToRichTextIfNeeded(for notification: NotificationData) {
-        // Check if rich text versions already exist
-        let hasRichText = notification.title_blob != nil &&
-            notification.body_blob != nil &&
-            (notification.summary == nil || notification.summary_blob != nil) &&
-            (notification.critical_analysis == nil || notification.critical_analysis_blob != nil) &&
-            (notification.logical_fallacies == nil || notification.logical_fallacies_blob != nil) &&
-            (notification.source_analysis == nil || notification.source_analysis_blob != nil) &&
-            (notification.relation_to_topic == nil || notification.relation_to_topic_blob != nil) &&
-            (notification.additional_insights == nil || notification.additional_insights_blob != nil)
-    }
-
     func addOrUpdateArticle(
         title: String,
         body: String,
@@ -879,100 +855,6 @@ class SyncManager {
             if !suppressBadgeUpdate {
                 NotificationUtils.updateAppBadgeCount()
             }
-        }
-    }
-
-    static func fetchFullContentIfNeeded(for notification: NotificationData) async throws -> NotificationData {
-        // Check if the notification already has detailed content
-        if notification.summary != nil &&
-            notification.critical_analysis != nil &&
-            notification.logical_fallacies != nil
-        {
-            // Already has full content, ensure rich text conversions exist
-            convertMarkdownToRichTextIfNeeded(for: notification)
-            return notification
-        }
-
-        // Need to fetch the full content
-        print("Fetching full content for article: \(notification.json_url)")
-
-        guard let url = URL(string: notification.json_url) else {
-            throw NSError(domain: "com.arguspulse", code: 400, userInfo: [
-                NSLocalizedDescriptionKey: "Invalid JSON URL: \(notification.json_url)",
-            ])
-        }
-
-        // Fetch with timeout
-        do {
-            // Network request (off the main thread)
-            let (data, _) = try await withTimeout(seconds: 10) {
-                try await URLSession.shared.data(from: url)
-            }
-
-            // Process the JSON (off the main thread)
-            let processedArticle = await Task.detached { () -> PreparedArticle? in
-                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    print("Failed to parse JSON from \(url)")
-                    return nil
-                }
-
-                // Process the retrieved JSON
-                var jsonWithURL = json
-                // Ensure the json_url is in the processed data
-                if jsonWithURL["json_url"] == nil {
-                    jsonWithURL["json_url"] = notification.json_url
-                }
-
-                if let articleJSON = processArticleJSON(jsonWithURL) {
-                    return convertToPreparedArticle(articleJSON)
-                }
-
-                return nil
-            }.value
-
-            // If we have processed data, update the database
-            if let processedArticle = processedArticle {
-                try await shared.addOrUpdateArticlesWithExtendedData([(
-                    title: processedArticle.title,
-                    body: processedArticle.body,
-                    jsonURL: processedArticle.jsonURL,
-                    topic: processedArticle.topic,
-                    articleTitle: processedArticle.articleTitle,
-                    affected: processedArticle.affected,
-                    domain: processedArticle.domain,
-                    pubDate: processedArticle.pubDate,
-                    sourcesQuality: processedArticle.sourcesQuality,
-                    argumentQuality: processedArticle.argumentQuality,
-                    sourceType: processedArticle.sourceType,
-                    sourceAnalysis: processedArticle.sourceAnalysis,
-                    quality: processedArticle.quality,
-                    summary: processedArticle.summary,
-                    criticalAnalysis: processedArticle.criticalAnalysis,
-                    logicalFallacies: processedArticle.logicalFallacies,
-                    relationToTopic: processedArticle.relationToTopic,
-                    additionalInsights: processedArticle.additionalInsights,
-                    engineStats: processedArticle.engineStats,
-                    similarArticles: processedArticle.similarArticles
-                )])
-            } else {
-                print("Skipping article update: processedArticle is nil")
-            }
-
-            // Force a save to ensure SwiftData object tracking reflects updates
-            await MainActor.run {
-                try? ArgusApp.sharedModelContainer.mainContext.save()
-            }
-
-            // Return the updated notification object
-            return notification
-        } catch is TimeoutError {
-            print("Network request timed out for \(url)")
-            throw NSError(domain: "com.arguspulse", code: 408, userInfo: [
-                NSLocalizedDescriptionKey: "Request timed out fetching article content",
-            ])
-        } catch {
-            print("Failed to fetch article content: \(error)")
-            throw error
         }
     }
 }
