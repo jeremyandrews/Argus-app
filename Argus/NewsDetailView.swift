@@ -79,21 +79,27 @@ struct NewsDetailView: View {
                     VStack(spacing: 0) {
                         topBar
                         ScrollView {
-                            VStack {
-                                // Invisible anchor to scroll to top
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id("top")
+                            ScrollViewReader { proxy in
+                                VStack {
+                                    // Invisible anchor to scroll to top
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id("top")
 
-                                // Immediately show header with minimal data
-                                articleHeaderStyle
+                                    // Immediately show header with minimal data
+                                    articleHeaderStyle
 
-                                // All sections below, default collapsed
-                                additionalSectionsView
+                                    // All sections below, default collapsed
+                                    additionalSectionsView
+                                }
+                                .onAppear {
+                                    scrollViewProxy = proxy
+                                }
                             }
-                            .onChange(of: scrollToTopTrigger) { _, _ in
-                                // If we programmatically change "scrollToTopTrigger", scroll up
-                                // withAnimation { scrollViewToTop() }
+                        }
+                        .onChange(of: scrollToTopTrigger) { _, _ in
+                            withAnimation {
+                                scrollViewProxy?.scrollTo("top", anchor: .top)
                             }
                         }
                         bottomToolbar
@@ -388,7 +394,11 @@ struct NewsDetailView: View {
             guard await moveToNextValidArticle(direction: direction) else { return }
 
             // Clear currently displayed detail text so we don’t mix old data
-            await MainActor.run { clearCurrentContent() }
+            await MainActor.run {
+                clearCurrentContent()
+                // Trigger scroll to top when changing articles
+                scrollToTopTrigger = UUID()
+            }
 
             // Possibly handle pagination or queue expansions if needed
             // @TODO:
