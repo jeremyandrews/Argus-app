@@ -57,15 +57,7 @@ extension RichTextField {
 
     // Sets the blob data for this field on an object
     func setBlob(_ data: Data?, on notification: NotificationData) {
-        // Always ensure we're on the main thread when modifying SwiftData models
-        if !Thread.isMainThread {
-            DispatchQueue.main.async {
-                self.setBlob(data, on: notification)
-            }
-            return
-        }
-
-        // Now we can safely set all the blobs as they all exist in the model
+        // Just set the blob directly, without forcing DispatchQueue.main
         switch self {
         case .title:
             notification.title_blob = data

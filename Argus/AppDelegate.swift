@@ -194,89 +194,29 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // 2. Extract optional fields
-        let topic = data["topic"] as? String
-        let alert = aps["alert"] as? [String: String]
-        let title = alert?["title"] ?? (data["title"] as? String ?? "[no title]")
-        let body = alert?["body"] ?? (data["body"] as? String ?? "[no body]")
-        let articleTitle = data["article_title"] as? String ?? "[no article title]"
-        let affected = data["affected"] as? String ?? ""
-        let domain = data["domain"] as? String
-        var pubDate: Date? = nil
-        if let pubDateString = data["pub_date"] as? String {
-            let isoFormatter = ISO8601DateFormatter()
-            pubDate = isoFormatter.date(from: pubDateString)
-        }
-
-        // 3. Instead of direct processing, add to queue with 15-second timeout
+        // 2. Simply add to queue without additional processing
         Task {
             do {
-                // Create a unique ID for this notification
-                let notificationID = UUID()
-
-                // Add to queue with notification ID reference
+                // Add to queue
                 let context = ArgusApp.sharedModelContainer.mainContext
                 let queueManager = context.queueManager()
 
-                try await withTimeout(seconds: 15) {
-                    let added = try await queueManager.addArticleWithNotification(
-                        jsonURL: jsonURL,
-                        notificationID: notificationID
-                    )
+                // Generate a notification ID for reference
+                let notificationID = UUID()
 
-                    if added {
-                        print("Added article to processing queue: \(jsonURL)")
+                let added = try await queueManager.addArticleWithNotification(
+                    jsonURL: jsonURL,
+                    notificationID: notificationID
+                )
 
-                        // Create a base notification record right away for immediate display
-                        // This will be enriched later by the queue processor
-                        let notification = NotificationData(
-                            id: notificationID,
-                            date: Date(),
-                            title: title,
-                            body: body,
-                            json_url: jsonURL,
-                            topic: topic,
-                            article_title: articleTitle,
-                            affected: affected,
-                            domain: domain,
-                            pub_date: pubDate
-                        )
-
-                        context.insert(notification)
-
-                        // Also create a SeenArticle record
-                        let seenArticle = SeenArticle(
-                            id: notificationID,
-                            json_url: jsonURL,
-                            date: Date()
-                        )
-                        context.insert(seenArticle)
-                        try context.save()
-
-                        // Update badge count with the basic notification
-                        NotificationUtils.updateAppBadgeCount()
-
-                        // Process queue items immediately while in background
-                        // Try to process at least the current item (and possibly more)
-                        // within our background execution window
-                        let processedSome = await SyncManager.shared.processQueueWithTimeout(seconds: 10)
-
-                        if processedSome {
-                            print("Successfully processed queued items during background notification")
-                        } else {
-                            print("No items processed during background notification window")
-                        }
-                    } else {
-                        print("Article already in queue: \(jsonURL)")
-                    }
+                if added {
+                    print("Added article to processing queue: \(jsonURL)")
+                    try context.save()
+                    finish(.newData)
+                } else {
+                    print("Article already in queue: \(jsonURL)")
+                    finish(.noData)
                 }
-
-                // Signal success to the system
-                finish(.newData)
-
-            } catch is TimeoutError {
-                print("Timed out while trying to add article to queue")
-                finish(.failed)
             } catch {
                 print("Failed to add article to queue: \(error)")
                 finish(.failed)
@@ -376,73 +316,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             // For other connection types (like ethernet) or unknown,
             // we'll use the same setting as cellular
             return UserDefaults.standard.bool(forKey: "allowCellularSync")
-        }
-    }
-
-    private func handleRemoteNotification(userInfo: [String: AnyObject]) {
-        guard let aps = userInfo["aps"] as? [String: AnyObject],
-              let alert = aps["alert"] as? [String: String],
-              let title = alert["title"],
-              let body = alert["body"],
-              let data = userInfo["data"] as? [String: AnyObject],
-              let json_url = data["json_url"] as? String, !json_url.isEmpty
-        else {
-            print("Error: Missing required fields in push notification (title, body, or json_url)")
-            return
-        }
-
-        let topic = data["topic"] as? String
-        let articleTitle = data["article_title"] as? String ?? "[no article title]"
-        let affected = data["affected"] as? String ?? ""
-        let domain = data["domain"] as? String ?? "[unknown]"
-
-        // Extract pub_date
-        var pubDate: Date? = nil
-        if let pubDateString = data["pub_date"] as? String {
-            let isoFormatter = ISO8601DateFormatter()
-            pubDate = isoFormatter.date(from: pubDateString)
-        }
-
-        // Save the notification with all extracted details
-        saveNotification(
-            title: title,
-            body: body,
-            json_url: json_url,
-            topic: topic,
-            articleTitle: articleTitle,
-            affected: affected,
-            domain: domain,
-            pubDate: pubDate
-        )
-    }
-
-    private func saveNotification(
-        title: String,
-        body: String,
-        json_url: String,
-        topic: String?,
-        articleTitle: String,
-        affected: String,
-        domain: String?,
-        pubDate: Date? = nil,
-        suppressBadgeUpdate: Bool = false
-    ) {
-        Task {
-            do {
-                try await SyncManager.shared.addOrUpdateArticle(
-                    title: title,
-                    body: body,
-                    jsonURL: json_url,
-                    topic: topic,
-                    articleTitle: articleTitle,
-                    affected: affected,
-                    domain: domain,
-                    pubDate: pubDate,
-                    suppressBadgeUpdate: suppressBadgeUpdate
-                )
-            } catch {
-                print("Failed to save notification: \(error)")
-            }
         }
     }
 
