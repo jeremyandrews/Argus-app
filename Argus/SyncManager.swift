@@ -187,11 +187,6 @@ class SyncManager {
             date: date
         )
         context.insert(seenArticle)
-
-        // Pre-convert title and body from markdown to optimize display.
-        _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
-        _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
-        // @TODO: Consider adding Summary too.
     }
 
     func processQueueWithTimeout(seconds: Double) async -> Bool {

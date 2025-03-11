@@ -564,6 +564,31 @@ struct NewsView: View {
         }
     }
 
+    @MainActor
+    fileprivate func generateBodyBlob(notificationID: UUID) async {
+        // 1) Grab the main-context
+        let mainContext = ArgusApp.sharedModelContainer.mainContext
+
+        // 2) Re-fetch that same NotificationData in the main context
+        let descriptor = FetchDescriptor<NotificationData>(
+            predicate: #Predicate { $0.id == notificationID }
+        )
+        guard
+            let mainThreadNotification = try? mainContext.fetch(descriptor).first
+        else {
+            return
+        }
+
+        // 3) Build the attributed .body and persist it
+        _ = getAttributedString(for: .body, from: mainThreadNotification, createIfMissing: true)
+
+        do {
+            try mainContext.save()
+        } catch {
+            print("Failed to save body_blob in main context: \(error)")
+        }
+    }
+
     private func NotificationRow(
         notification: NotificationData,
         editMode: Binding<EditMode>?,
@@ -618,6 +643,14 @@ struct NewsView: View {
                     }
                 }
         )
+        .onAppear {
+            // If the blob doesn't exist yet, generate and save it on the main thread
+            if notification.body_blob == nil {
+                Task {
+                    await generateBodyBlob(notificationID: notification.id)
+                }
+            }
+        }
     }
 
     // Helper functions for each part of the row

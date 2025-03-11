@@ -412,8 +412,8 @@ struct NewsDetailView: View {
             // Build minimal dictionary, quickly load title & body
             guard let n = currentNotification else { return }
 
-            let newTitle = await loadFieldAsync(.title, n)
-            let newBody = await loadFieldAsync(.body, n)
+            let newTitle = getAttributedString(for: .title, from: n, createIfMissing: true)
+            let newBody = getAttributedString(for: .body, from: n, createIfMissing: true)
 
             // Update the UI with immediate content
             await MainActor.run {
@@ -422,7 +422,9 @@ struct NewsDetailView: View {
             }
 
             // Then load the summary in background (since “Summary” is default-open)
-            let newSummary = await loadFieldAsync(.summary, n)
+            let newSummary = getAttributedString(for: .summary, from: n, createIfMissing: true)
+
+            // Update the UI on the main actor:
             await MainActor.run {
                 summaryAttributedString = newSummary
             }
@@ -1253,30 +1255,35 @@ struct NewsDetailView: View {
     // - Parameter section: The name of the section to load content for
     private func loadContentForSection(_ section: String) {
         guard let n = currentNotification else { return }
-        Task {
-            let field: RichTextField?
-            switch section {
-            case "Summary": field = .summary
-            case "Critical Analysis": field = .criticalAnalysis
-            case "Logical Fallacies": field = .logicalFallacies
-            case "Source Analysis": field = .sourceAnalysis
-            case "Relevance": field = .relationToTopic
-            case "Context & Perspective": field = .additionalInsights
-            default: field = nil
-            }
-            guard let f = field else { return }
 
-            let loadedAttrString = await loadFieldAsync(f, n)
-            if Task.isCancelled { return }
-            await MainActor.run {
-                switch f {
-                case .summary: summaryAttributedString = loadedAttrString
-                case .criticalAnalysis: criticalAnalysisAttributedString = loadedAttrString
-                case .logicalFallacies: logicalFallaciesAttributedString = loadedAttrString
-                case .sourceAnalysis: sourceAnalysisAttributedString = loadedAttrString
-                default: break
-                }
-            }
+        let field: RichTextField?
+        switch section {
+        case "Summary": field = .summary
+        case "Critical Analysis": field = .criticalAnalysis
+        case "Logical Fallacies": field = .logicalFallacies
+        case "Source Analysis": field = .sourceAnalysis
+        case "Relevance": field = .relationToTopic
+        case "Context & Perspective": field = .additionalInsights
+        default:
+            field = nil
+        }
+        guard let f = field else { return }
+
+        // Just call getAttributedString directly, synchronously:
+        let loadedAttrString = getAttributedString(for: f, from: n, createIfMissing: true)
+
+        // Assign it to whichever State property you’re using
+        switch f {
+        case .summary:
+            summaryAttributedString = loadedAttrString
+        case .criticalAnalysis:
+            criticalAnalysisAttributedString = loadedAttrString
+        case .logicalFallacies:
+            logicalFallaciesAttributedString = loadedAttrString
+        case .sourceAnalysis:
+            sourceAnalysisAttributedString = loadedAttrString
+        default:
+            break
         }
     }
 
@@ -1583,38 +1590,13 @@ struct NewsDetailView: View {
         }
     }
 
-    private func loadFieldAsync(_ field: RichTextField, _ n: NotificationData) async -> NSAttributedString? {
-        // 1) Copy out just the text we need
-        let textToConvert: String
-        switch field {
-        case .title: textToConvert = n.title
-        case .body: textToConvert = n.body
-        case .summary: textToConvert = n.summary ?? ""
-        case .criticalAnalysis: textToConvert = n.critical_analysis ?? ""
-        case .logicalFallacies: textToConvert = n.logical_fallacies ?? ""
-        case .sourceAnalysis: textToConvert = n.source_analysis ?? ""
-        case .relationToTopic: textToConvert = n.relation_to_topic ?? ""
-        case .additionalInsights: textToConvert = n.additional_insights ?? ""
-        }
-
-        let style = field.textStyle
-
-        // 2) Now the closure only captures Sendable strings
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = markdownToAttributedString(textToConvert, textStyle: style)
-                continuation.resume(returning: result)
-            }
-        }
-    }
-
     private func loadInitialMinimalContent() {
         // Load just the basics for the current notification (if it’s valid)
         guard let n = currentNotification else { return }
         Task {
             // Grab title/body (the same we show in NewsView).
-            let newTitle = await loadFieldAsync(.title, n)
-            let newBody = await loadFieldAsync(.body, n)
+            let newTitle = getAttributedString(for: .title, from: n, createIfMissing: true)
+            let newBody = getAttributedString(for: .body, from: n, createIfMissing: true)
             await MainActor.run {
                 titleAttributedString = newTitle
                 bodyAttributedString = newBody
@@ -1622,7 +1604,9 @@ struct NewsDetailView: View {
 
             // If “Summary” is open by default, do that in background:
             if expandedSections["Summary"] == true {
-                let newSummary = await loadFieldAsync(.summary, n)
+                let newSummary = getAttributedString(for: .summary, from: n, createIfMissing: true)
+
+                // Update the UI on the main actor:
                 await MainActor.run {
                     summaryAttributedString = newSummary
                 }
