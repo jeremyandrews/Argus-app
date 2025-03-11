@@ -1298,15 +1298,6 @@ struct NewsDetailView: View {
         }
     }
 
-    /// A small model to hold Argus engine stats in one chunk
-    struct ArgusDetailsData {
-        let model: String
-        let elapsedTime: Double
-        let date: Date
-        let stats: String
-        let systemInfo: [String: Any]?
-    }
-
     /// Parses the `engine_stats` JSON string into a strongly-typed ArgusDetailsData
     private func parseEngineStatsJSON(_ jsonString: String, fallbackDate: Date) -> ArgusDetailsData? {
         guard let data = jsonString.data(using: .utf8),
@@ -1521,8 +1512,7 @@ struct NewsDetailView: View {
         // MARK: - Argus Engine Stats (argus_details)
 
         case "Argus Engine Stats":
-            // Here’s the line that was failing when “argusDetails” wasn't defined
-            if let details = section.argusDetails {
+            if let details = section.content as? ArgusDetailsData {
                 ArgusDetailsView(data: details)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
