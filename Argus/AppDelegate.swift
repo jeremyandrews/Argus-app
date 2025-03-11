@@ -629,7 +629,9 @@ class NotificationData {
 
     // Convenience methods to convert between NSAttributedString and Data
 
-    func setRichText(_ attributedString: NSAttributedString, for field: RichTextField) throws {
+    func setRichText(_ attributedString: NSAttributedString, for field: RichTextField,
+                     saveContext: Bool = true) throws
+    {
         let data = try NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false)
 
         switch field {
@@ -649,6 +651,11 @@ class NotificationData {
             relation_to_topic_blob = data
         case .additionalInsights:
             additional_insights_blob = data
+        }
+
+        // Save the context if requested and we can access it
+        if saveContext, let modelContext = modelContext {
+            try modelContext.save()
         }
     }
 

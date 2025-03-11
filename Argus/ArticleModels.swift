@@ -1,11 +1,11 @@
 import Foundation
 
 struct ArticleJSON {
-    let title: String
-    let body: String
+    let title: String // tiny_title
+    let body: String // tiny_summary
     let jsonURL: String
     let topic: String?
-    let articleTitle: String
+    let articleTitle: String // unused
     let affected: String
     let domain: String?
     let pubDate: Date?
@@ -24,8 +24,8 @@ struct ArticleJSON {
 }
 
 struct PreparedArticle {
-    let title: String
-    let body: String
+    let title: String // tiny_title
+    let body: String // tiny_summary
     let jsonURL: String
     let topic: String?
     let articleTitle: String
@@ -48,11 +48,11 @@ struct PreparedArticle {
 
 func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
     return PreparedArticle(
-        title: input.title,
-        body: input.body,
+        title: input.title, // tiny_title
+        body: input.body, // tiny_summary
         jsonURL: input.jsonURL,
         topic: input.topic,
-        articleTitle: input.articleTitle,
+        articleTitle: input.articleTitle, // unused
         affected: input.affected,
         domain: input.domain,
         pubDate: input.pubDate,

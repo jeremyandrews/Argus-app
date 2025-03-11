@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import SwiftyMarkdown
 import UIKit
 
@@ -203,14 +204,14 @@ func getAttributedString(
             // Use the model's built-in method but ensure it runs on the main thread
             if Thread.isMainThread {
                 do {
-                    try notification.setRichText(attributedString, for: field)
+                    try notification.setRichText(attributedString, for: field, saveContext: true)
                 } catch {
                     print("Error saving rich text for \(field): \(error)")
                 }
             } else {
                 DispatchQueue.main.async {
                     do {
-                        try notification.setRichText(attributedString, for: field)
+                        try notification.setRichText(attributedString, for: field, saveContext: true)
                     } catch {
                         print("Error saving rich text for \(field): \(error)")
                     }
@@ -234,12 +235,12 @@ func saveAttributedString(
     do {
         // Ensure we're on the main thread
         if Thread.isMainThread {
-            try notification.setRichText(attributedString, for: field)
+            try notification.setRichText(attributedString, for: field, saveContext: true)
         } else {
             // Dispatch to main thread
             DispatchQueue.main.async {
                 do {
-                    try notification.setRichText(attributedString, for: field)
+                    try notification.setRichText(attributedString, for: field, saveContext: true)
                 } catch {
                     print("Error saving rich text on background thread: \(error)")
                 }
