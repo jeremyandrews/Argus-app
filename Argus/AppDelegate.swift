@@ -801,55 +801,6 @@ class NotificationData {
     }
 }
 
-// Extension to help with converting between String and NSAttributedString
-extension NotificationData {
-    // Convert plain text to rich text and store in corresponding blob field
-    func updateRichTextFromPlainText(for field: RichTextField) {
-        let plainText: String?
-
-        switch field {
-        case .title:
-            plainText = title
-        case .body:
-            plainText = body
-        case .summary:
-            plainText = summary
-        case .criticalAnalysis:
-            plainText = critical_analysis
-        case .logicalFallacies:
-            plainText = logical_fallacies
-        case .sourceAnalysis:
-            plainText = source_analysis
-        case .relationToTopic:
-            plainText = relation_to_topic
-        case .additionalInsights:
-            plainText = additional_insights
-        }
-
-        guard let text = plainText, !text.isEmpty else { return }
-
-        let attributedString = NSAttributedString(string: text)
-        try? setRichText(attributedString, for: field)
-    }
-
-    // Convert HTML to rich text and store in corresponding blob field
-    func updateRichTextFromHTML(html: String, for field: RichTextField) {
-        guard let data = html.data(using: .utf8) else { return }
-
-        do {
-            let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
-                .documentType: NSAttributedString.DocumentType.html,
-                .characterEncoding: String.Encoding.utf8.rawValue,
-            ]
-
-            let attributedString = try NSAttributedString(data: data, options: options, documentAttributes: nil)
-            try setRichText(attributedString, for: field)
-        } catch {
-            print("Error converting HTML to rich text: \(error.localizedDescription)")
-        }
-    }
-}
-
 // Extension to provide computed property for effective date
 extension NotificationData {
     var effectiveDate: Date {
