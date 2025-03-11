@@ -17,8 +17,6 @@ struct NewsDetailView: View {
     @State private var batchSize: Int = 50
     @State private var scrollViewProxy: ScrollViewProxy? = nil
     @State private var scrollToTopTrigger = UUID()
-    @State private var isNavigating = false
-    @State private var loadingStage = 0 // 0: not loading, 1: loading, 2: formatting
 
     @State private var titleAttributedString: NSAttributedString?
     @State private var bodyAttributedString: NSAttributedString?
@@ -47,7 +45,6 @@ struct NewsDetailView: View {
     @State private var additionalContent: [String: Any]? = nil
     @State private var isLoadingAdditionalContent = false
     @State private var expandedSections: [String: Bool] = [
-        "Article": false,
         "Summary": true,
         "Relevance": false,
         "Critical Analysis": false,
@@ -78,43 +75,25 @@ struct NewsDetailView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if currentNotification != nil {
+                if let _ = currentNotification {
                     VStack(spacing: 0) {
                         topBar
                         ScrollView {
-                            ScrollViewReader { proxy in
-                                VStack {
-                                    // Add an invisible view at the top to scroll to
-                                    Color.clear
-                                        .frame(height: 1)
-                                        .id("top")
+                            VStack {
+                                // Invisible anchor to scroll to top
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("top")
 
-                                    if isNavigating {
-                                        // Show a loading indicator when navigating
-                                        VStack(spacing: 16) {
-                                            ProgressView()
-                                                .padding(.top, 40)
+                                // Immediately show header with minimal data
+                                articleHeaderStyle
 
-                                            Text(loadingStage == 1 ? "Loading article..." : "Formatting content...")
-                                                .foregroundColor(.secondary)
-
-                                            Spacer()
-                                        }
-                                        .frame(minHeight: 300)
-                                    } else {
-                                        articleHeaderStyle
-                                        additionalSectionsView
-                                    }
-                                }
-                                .onChange(of: scrollToTopTrigger) { _, _ in
-                                    // Scroll to top when the trigger changes
-                                    withAnimation {
-                                        proxy.scrollTo("top", anchor: .top)
-                                    }
-                                }
-                                .onAppear {
-                                    self.scrollViewProxy = proxy
-                                }
+                                // All sections below, default collapsed
+                                additionalSectionsView
+                            }
+                            .onChange(of: scrollToTopTrigger) { _, _ in
+                                // If we programmatically change "scrollToTopTrigger", scroll up
+                                // withAnimation { scrollViewToTop() }
                             }
                         }
                         bottomToolbar
@@ -122,7 +101,7 @@ struct NewsDetailView: View {
                 } else {
                     Text("Article no longer available")
                         .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                                 dismiss()
                             }
                         }
@@ -132,7 +111,7 @@ struct NewsDetailView: View {
             .onAppear {
                 setupDeletionHandling()
                 markAsViewed()
-                loadContent(contentType: .summary)
+                loadInitialMinimalContent()
                 if let section = initiallyExpandedSection {
                     expandedSections[section] = true
                 }
@@ -279,90 +258,79 @@ struct NewsDetailView: View {
         }
     }
 
+    /// Returns all sections (Article, Summary, etc.) for the “accordion” in NewsDetailView.
     private func getSections(from json: [String: Any]) -> [ContentSection] {
-        var sections = [ContentSection]()
+        var sections: [ContentSection] = []
 
-        // Use local data if available, otherwise use the JSON
-        if let notification = currentNotification {
-            // Summary section
-            let summaryContent = notification.summary ?? (json["summary"] as? String ?? "")
-            sections.append(ContentSection(header: "Summary", content: summaryContent))
+        // Bail out if we have no “currentNotification” (or no data):
+        guard let n = currentNotification else { return sections }
 
-            // Relevance section
-            let relevanceContent = notification.relation_to_topic ?? (json["relation_to_topic"] as? String ?? "")
-            sections.append(ContentSection(header: "Relevance", content: relevanceContent))
+        // 1) “Summary” section
+        let summaryContent = n.summary ?? (json["summary"] as? String ?? "")
+        sections.append(ContentSection(header: "Summary", content: summaryContent))
 
-            // Critical Analysis section
-            let analysisContent = notification.critical_analysis ?? (json["critical_analysis"] as? String ?? "")
-            sections.append(ContentSection(header: "Critical Analysis", content: analysisContent))
+        // 2) “Relevance” section
+        let relevanceContent = n.relation_to_topic ?? (json["relation_to_topic"] as? String ?? "")
+        sections.append(ContentSection(header: "Relevance", content: relevanceContent))
 
-            // Logical Fallacies section
-            let fallaciesContent = notification.logical_fallacies ?? (json["logical_fallacies"] as? String ?? "")
-            sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
+        // 3) “Critical Analysis” section
+        let criticalContent = n.critical_analysis ?? (json["critical_analysis"] as? String ?? "")
+        sections.append(ContentSection(header: "Critical Analysis", content: criticalContent))
 
-            // Source Analysis section - UPDATED TO USE THE source_analysis FIELD DIRECTLY
-            // Get source_analysis from JSON, ensuring it's not empty
-            let sourceAnalysis = (json["source_analysis"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                ?? notification.source_analysis // Fall back to stored source_analysis
-                ?? "" // Default to empty string if neither is available
+        // 4) “Logical Fallacies” section
+        let fallaciesContent = n.logical_fallacies ?? (json["logical_fallacies"] as? String ?? "")
+        sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
 
-            // Create a custom object to pass the sourceAnalysis text and source type only
-            let sourceAnalysisData: [String: Any] = [
-                "text": sourceAnalysis,
-                "sourceType": notification.source_type ?? (json["source_type"] as? String ?? ""),
-            ]
+        // 5) “Source Analysis” section
+        //    Often we store both the textual analysis AND the “sourceType” label. You can pass a little dictionary:
+        let sourceAnalysisText = n.source_analysis ?? (json["source_analysis"] as? String ?? "")
+        let sourceType = n.source_type ?? (json["source_type"] as? String ?? "")
+        let sourceAnalysisData: [String: Any] = [
+            "text": sourceAnalysisText,
+            "sourceType": sourceType,
+        ]
+        sections.append(ContentSection(header: "Source Analysis", content: sourceAnalysisData))
 
-            sections.append(ContentSection(header: "Source Analysis", content: sourceAnalysisData))
+        // 6) “Context & Perspective” (aka “additional_insights”)
+        let insights = n.additional_insights ?? (json["additional_insights"] as? String ?? "")
+        if !insights.isEmpty {
+            sections.append(ContentSection(header: "Context & Perspective", content: insights))
+        }
 
-            // Additional Insights section (optional)
-            if let insights = notification.additional_insights, !insights.isEmpty {
-                sections.append(ContentSection(header: "Context & Perspective", content: insights))
-            } else if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-                sections.append(ContentSection(header: "Context & Perspective", content: insights))
+        // 7) “Argus Engine Stats” (argus_details)
+        if let engineString = n.engine_stats {
+            // parseEngineStatsJSON returns an ArgusDetailsData if valid
+            if let parsed = parseEngineStatsJSON(engineString, fallbackDate: n.date) {
+                sections.append(ContentSection(header: "Argus Engine Stats", content: parsed))
             }
+        } else if
+            let model = json["model"] as? String,
+            let elapsed = json["elapsed_time"] as? Double,
+            let stats = json["stats"] as? String
+        {
+            // Create ArgusDetailsData for fallback
+            let dataObject = ArgusDetailsData(
+                model: model,
+                elapsedTime: elapsed,
+                date: n.date,
+                stats: stats,
+                systemInfo: json["system_info"] as? [String: Any]
+            )
+            sections.append(ContentSection(header: "Argus Engine Stats", content: dataObject))
+        }
 
-            // Argus Engine Stats section
-            if let engineStatsJson = notification.engine_stats,
-               let engineStats = getEngineStatsData(from: engineStatsJson)
-            {
-                sections.append(ContentSection(
-                    header: "Argus Engine Stats",
-                    content: (
-                        engineStats.model,
-                        engineStats.elapsedTime,
-                        engineStats.date,
-                        engineStats.stats,
-                        engineStats.systemInfo
-                    )
-                ))
-            } else if let model = json["model"] as? String,
-                      let elapsedTime = json["elapsed_time"] as? Double,
-                      let stats = json["stats"] as? String
-            {
-                sections.append(ContentSection(
-                    header: "Argus Engine Stats",
-                    content: (
-                        model,
-                        elapsedTime,
-                        notification.date,
-                        stats,
-                        json["system_info"] as? [String: Any]
-                    )
-                ))
+        // 8) “Preview” section
+        if let fullURL = getArticleUrl(n), !fullURL.isEmpty {
+            sections.append(ContentSection(header: "Preview", content: fullURL))
+        }
+
+        // 9) “Vector WIP” (similar_articles)
+        if let localSimilar = n.similar_articles {
+            if let parsedArray = parseSimilarArticlesJSON(localSimilar) {
+                sections.append(ContentSection(header: "Vector WIP", content: parsedArray))
             }
-
-            // Preview section
-            sections.append(ContentSection(header: "Preview", content: getArticleUrl(notification) ?? (json["url"] as? String ?? "")))
-
-            // Similar Articles section (Vector WIP)
-            if let similarArticlesJson = notification.similar_articles,
-               let similarArticles = getSimilarArticles(from: similarArticlesJson),
-               !similarArticles.isEmpty
-            {
-                sections.append(ContentSection(header: "Vector WIP", content: similarArticles))
-            } else if let similarArticles = json["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty {
-                sections.append(ContentSection(header: "Vector WIP", content: similarArticles))
-            }
+        } else if let fallbackArr = json["similar_articles"] as? [[String: Any]], !fallbackArr.isEmpty {
+            sections.append(ContentSection(header: "Vector WIP", content: fallbackArr))
         }
 
         return sections
@@ -412,80 +380,58 @@ struct NewsDetailView: View {
     }
 
     private func navigateToArticle(direction: NavigationDirection) {
-        guard isCurrentIndexValid else { return }
-
-        // Cancel any pending tasks from previous navigations
+        // Cancel any pending load from a previous rapid-tap
         tabChangeTask?.cancel()
 
-        // Set initial loading state (brief "Loading article..." message)
-        loadingStage = 1
-        isNavigating = true
-
-        // Start asynchronous work
         tabChangeTask = Task {
-            // Find the next valid article first
-            let targetIndex = (direction == .next) ? currentIndex + 1 : currentIndex - 1
-            let validArticleFound = await findValidArticle(from: targetIndex, direction: direction)
+            // Attempt to find a valid next/previous article that’s not deleted
+            guard await moveToNextValidArticle(direction: direction) else { return }
 
-            if !validArticleFound {
-                // If we couldn't navigate, reset the state
-                await MainActor.run {
-                    loadingStage = 0
-                    isNavigating = false
-                }
-                return
-            }
+            // Clear currently displayed detail text so we don’t mix old data
+            await MainActor.run { clearCurrentContent() }
 
-            // We found a valid article, now prepare for transition
-            await MainActor.run {
-                // Clear content and scroll to top
-                clearCurrentContent()
-                scrollToTopTrigger = UUID()
-            }
+            // Possibly handle pagination or queue expansions if needed
+            // @TODO:
+            // await handlePagination(direction: direction)
 
-            // Handle pagination in the background
-            await handlePagination(direction: direction, targetIndex: currentIndex)
-
-            // CRITICAL CHANGE: Load only essential content with minimal formatting
-            guard let notification = currentNotification else {
-                await MainActor.run {
-                    isNavigating = false
-                    loadingStage = 0
-                }
-                return
-            }
-
-            // Mark as viewed - quick operation
+            // Mark newly selected article as viewed
             await MainActor.run {
                 markAsViewed()
             }
 
-            // Build content dictionary (fast operation, no formatting)
-            let basicContent = buildContentDictionary(from: notification)
+            // Build minimal dictionary, quickly load title & body
+            guard let n = currentNotification else { return }
 
-            // Load just the title and body attributes (typically already cached)
-            let titleString = await loadAttributedStringAsync(for: .title, from: notification)
-            let bodyString = await loadAttributedStringAsync(for: .body, from: notification)
+            let newTitle = await loadFieldAsync(.title, n)
+            let newBody = await loadFieldAsync(.body, n)
 
-            // Update UI with what we have so far
+            // Update the UI with immediate content
             await MainActor.run {
-                additionalContent = basicContent
-                titleAttributedString = titleString
-                bodyAttributedString = bodyString
-
-                // We now have enough to display the article header
-                // Show the article header while we load the summary
-                isNavigating = false
-                loadingStage = 0
+                titleAttributedString = newTitle
+                bodyAttributedString = newBody
             }
 
-            // After showing the article, then load summary in background
-            let summaryString = await loadAttributedStringAsync(for: .summary, from: notification)
-
+            // Then load the summary in background (since “Summary” is default-open)
+            let newSummary = await loadFieldAsync(.summary, n)
             await MainActor.run {
-                summaryAttributedString = summaryString
+                summaryAttributedString = newSummary
             }
         }
+    }
+
+    private func moveToNextValidArticle(direction: NavigationDirection) async -> Bool {
+        var newIndex = direction == .next ? currentIndex + 1 : currentIndex - 1
+        while newIndex >= 0 && newIndex < notifications.count {
+            let candidate = notifications[newIndex]
+            if !deletedIDs.contains(candidate.id) {
+                await MainActor.run {
+                    currentIndex = newIndex
+                }
+                return true
+            }
+            newIndex += (direction == .next ? 1 : -1)
+        }
+        return false
     }
 
     private func loadAttributedStringAsync(for field: RichTextField, from notification: NotificationData) async -> NSAttributedString? {
@@ -546,14 +492,11 @@ struct NewsDetailView: View {
         criticalAnalysisAttributedString = nil
         logicalFallaciesAttributedString = nil
         sourceAnalysisAttributedString = nil
-        additionalContent = nil
 
-        // Reset expanded sections
-        var newExpandedSections: [String: Bool] = [:]
-        for (key, _) in expandedSections {
-            newExpandedSections[key] = (key == "Summary")
+        // Reset sections to false except summary = true
+        for key in expandedSections.keys {
+            expandedSections[key] = (key == "Summary")
         }
-        expandedSections = newExpandedSections
     }
 
     private func handlePagination(direction: NavigationDirection, targetIndex: Int) async {
@@ -683,186 +626,114 @@ struct NewsDetailView: View {
         VStack(alignment: .leading, spacing: 16) {
             // Topic pill + "Archived" pill
             HStack(spacing: 8) {
-                if let notification = currentNotification {
-                    if let topic = notification.topic, !topic.isEmpty {
+                if let n = currentNotification {
+                    if let topic = n.topic, !topic.isEmpty {
                         TopicPill(topic: topic)
                     }
-
-                    if notification.isArchived {
+                    if n.isArchived {
                         ArchivedPill()
                     }
                 }
                 Spacer()
             }
 
-            // Title - using NonSelectableRichTextView for better performance during transitions
-            if let notification = currentNotification {
-                if let content = additionalContent,
-                   let articleURLString = content["url"] as? String,
-                   let articleURL = URL(string: articleURLString)
-                {
-                    Link(destination: articleURL) {
-                        if let titleAttrString = titleAttributedString {
-                            NonSelectableRichTextView(attributedString: titleAttrString)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Text(notification.title)
-                                .font(.headline)
-                                .fontWeight(notification.isViewed ? .regular : .bold)
-                                .foregroundColor(.primary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .buttonStyle(PlainButtonStyle())
+            if let n = currentNotification {
+                // Title
+                if let titleAttrString = titleAttributedString {
+                    NonSelectableRichTextView(attributedString: titleAttrString)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    if let titleAttrString = titleAttributedString {
-                        NonSelectableRichTextView(attributedString: titleAttrString)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Text(notification.title)
-                            .font(.title2)
-                            .fontWeight(notification.isViewed ? .regular : .bold)
-                            .foregroundColor(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    Text(n.title)
+                        .font(.headline)
+                        .fontWeight(n.isViewed ? .regular : .bold)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 // Publication Date
-                if let pubDate = notification.pub_date {
+                if let pubDate = n.pub_date {
                     Text("Published: \(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
                         .font(.headline)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                // Body
                 if let bodyAttrString = bodyAttributedString {
                     NonSelectableRichTextView(attributedString: bodyAttrString)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .foregroundColor(.secondary)
-                        .padding(.horizontal, 4)
                 } else {
-                    Text(notification.body)
+                    Text(n.body)
                         .font(.body)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // Affected (optional)
-                if !notification.affected.isEmpty {
-                    Text(notification.affected)
+                // Affected
+                if !n.affected.isEmpty {
+                    Text(n.affected)
                         .font(.headline)
                         .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // Domain
-                if let domain = notification.domain, !domain.isEmpty {
+                // Domain + Lazy Quality Badges
+                if let domain = n.domain, !domain.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
                         Text(domain)
                             .font(.headline)
                             .foregroundColor(.blue)
                             .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        // No need to check for content here since we're directly using notification
                         LazyLoadingQualityBadges(
-                            notification: notification,
+                            notification: n,
                             onBadgeTap: { section in
                                 scrollToSection = section
                             }
                         )
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.top, 10)
-        .background(currentNotification?.isViewed ?? true ? Color.clear : Color.blue.opacity(0.15))
     }
 
     // MARK: - Additional Sections
 
     var additionalSectionsView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if isLoadingAdditionalContent {
-                ProgressView("Loading additional content...")
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .center)
-            } else if let content = additionalContent {
-                ScrollViewReader { proxy in
-                    LazyVStack(alignment: .leading) {
-                        ForEach(getSections(from: content), id: \.header) { section in
-                            VStack(alignment: .leading) {
-                                Divider()
+            // We build the content dictionary once, or on demand:
+            if let n = currentNotification {
+                let contentDict = buildContentDictionary(from: n)
+                let sections = getSections(from: contentDict)
 
-                                DisclosureGroup(
-                                    isExpanded: Binding(
-                                        get: { expandedSections[section.header] ?? false },
-                                        set: {
-                                            let wasExpanded = expandedSections[section.header] ?? false
-                                            expandedSections[section.header] = $0
-
-                                            // If newly expanded, trigger content loading
-                                            if !wasExpanded, $0 {
-                                                loadContentForSection(section.header)
-                                            }
-                                        }
-                                    )
-                                ) {
-                                    // Only render content if section is expanded
-                                    if expandedSections[section.header] == true {
-                                        if section.header == "Summary" && summaryAttributedString == nil {
-                                            // Special case for Summary section which is open by default
-                                            ProgressView("Loading summary...")
-                                                .padding(.vertical, 10)
-                                        } else {
-                                            sectionContent(for: section)
-                                        }
-                                    } else {
-                                        Color.clear.frame(height: 1)
-                                    }
-                                } label: {
-                                    HStack {
-                                        Text(section.header)
-                                            .font(.headline)
-
-                                        // Show loading indicator next to section title if currently loading
-                                        if section.header == "Summary" &&
-                                            expandedSections[section.header] == true &&
-                                            summaryAttributedString == nil
-                                        {
-                                            Spacer()
-                                            ProgressView()
-                                                .scaleEffect(0.7)
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                ForEach(sections, id: \.header) { section in
+                    Divider()
+                    DisclosureGroup(
+                        isExpanded: Binding(
+                            get: { expandedSections[section.header] ?? false },
+                            set: { newValue in
+                                let wasExpanded = expandedSections[section.header] ?? false
+                                expandedSections[section.header] = newValue
+                                if newValue, !wasExpanded {
+                                    // Only load that section’s content if we have not yet
+                                    loadContentForSection(section.header)
                                 }
-                                .id(section.header)
-                                .padding([.leading, .trailing, .top])
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        )
+                    ) {
+                        if expandedSections[section.header] == true {
+                            sectionContent(for: section)
                         }
+                    } label: {
+                        Text(section.header)
+                            .font(.headline)
                     }
-                    .onChange(of: scrollToSection) { _, newSection in
-                        if let section = newSection {
-                            expandedSections[section] = true
-                            loadContentForSection(section)
-                            withAnimation {
-                                proxy.scrollTo(section, anchor: .top)
-                            }
-                            scrollToSection = nil
-                        }
-                    }
+                    .id(section.header)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
     }
 
     // MARK: - Actions
@@ -1367,75 +1238,33 @@ struct NewsDetailView: View {
         }
     }
 
-    /**
-     Loads content for a specific section when it's expanded or scrolled to.
-     This is a helper that uses the main loadContent function with specific fields.
-
-     - Parameter section: The name of the section to load content for
-     */
+    // Loads content for a specific section when it's expanded or scrolled to.
+    // This is a helper that uses the main loadContent function with specific fields.
+    // - Parameter section: The name of the section to load content for
     private func loadContentForSection(_ section: String) {
-        // Map section name to field type
-        let field: RichTextField?
-        switch section {
-        case "Summary":
-            field = .summary
-            if summaryAttributedString != nil { return } // Already loaded
-        case "Critical Analysis":
-            field = .criticalAnalysis
-            if criticalAnalysisAttributedString != nil { return } // Already loaded
-        case "Logical Fallacies":
-            field = .logicalFallacies
-            if logicalFallaciesAttributedString != nil { return } // Already loaded
-        case "Source Analysis":
-            field = .sourceAnalysis
-            if sourceAnalysisAttributedString != nil { return } // Already loaded
-        case "Relevance":
-            field = .relationToTopic
-        case "Context & Perspective":
-            field = .additionalInsights
-        default:
-            field = nil // Unknown section
-        }
-
-        // Only proceed if we have a field to load and notification is available
-        guard let fieldToLoad = field, let notification = currentNotification else { return }
-
-        // Create a copy of the ID to avoid capturing the whole notification
-        let notificationId = notification.id
-
+        guard let n = currentNotification else { return }
         Task {
-            // Fetch notification on the task to avoid capturing it
-            let attributedString = await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    // Re-fetch notification using ID to avoid Sendable issues
-                    if let currentNotification = self.currentNotification, currentNotification.id == notificationId {
-                        let result = getAttributedString(
-                            for: fieldToLoad,
-                            from: currentNotification,
-                            createIfMissing: true
-                        )
-                        continuation.resume(returning: result)
-                    } else {
-                        continuation.resume(returning: nil)
-                    }
-                }
+            let field: RichTextField?
+            switch section {
+            case "Summary": field = .summary
+            case "Critical Analysis": field = .criticalAnalysis
+            case "Logical Fallacies": field = .logicalFallacies
+            case "Source Analysis": field = .sourceAnalysis
+            case "Relevance": field = .relationToTopic
+            case "Context & Perspective": field = .additionalInsights
+            default: field = nil
             }
+            guard let f = field else { return }
 
-            if !Task.isCancelled, let attributedString = attributedString {
-                await MainActor.run {
-                    // Store the attributed string in the appropriate property
-                    switch fieldToLoad {
-                    case .summary:
-                        summaryAttributedString = attributedString
-                    case .criticalAnalysis:
-                        criticalAnalysisAttributedString = attributedString
-                    case .logicalFallacies:
-                        logicalFallaciesAttributedString = attributedString
-                    case .sourceAnalysis:
-                        sourceAnalysisAttributedString = attributedString
-                    default:
-                        break
-                    }
+            let loadedAttrString = await loadFieldAsync(f, n)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                switch f {
+                case .summary: summaryAttributedString = loadedAttrString
+                case .criticalAnalysis: criticalAnalysisAttributedString = loadedAttrString
+                case .logicalFallacies: logicalFallaciesAttributedString = loadedAttrString
+                case .sourceAnalysis: sourceAnalysisAttributedString = loadedAttrString
+                default: break
                 }
             }
         }
@@ -1469,31 +1298,59 @@ struct NewsDetailView: View {
         }
     }
 
-    struct ContentSection {
-        let header: String
-        let content: Any
-        var similarArticlesLoaded: Bool = false // New property to track loading state
+    /// A small model to hold Argus engine stats in one chunk
+    struct ArgusDetailsData {
+        let model: String
+        let elapsedTime: Double
+        let date: Date
+        let stats: String
+        let systemInfo: [String: Any]?
+    }
 
-        var argusDetails: ArgusDetailsData? {
-            if case let (model, elapsedTime, date, stats, systemInfo) as (String, Double, Date, String, [String: Any]?) = content {
-                return ArgusDetailsData(
-                    model: model,
-                    elapsedTime: elapsedTime,
-                    date: date,
-                    stats: stats,
-                    systemInfo: systemInfo
-                )
-            }
+    /// Parses the `engine_stats` JSON string into a strongly-typed ArgusDetailsData
+    private func parseEngineStatsJSON(_ jsonString: String, fallbackDate: Date) -> ArgusDetailsData? {
+        guard let data = jsonString.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return nil
         }
+
+        guard
+            let model = dict["model"] as? String,
+            let elapsedTime = dict["elapsed_time"] as? Double,
+            let stats = dict["stats"] as? String
+        else {
+            return nil
+        }
+
+        let systemInfo = dict["system_info"] as? [String: Any]
+        return ArgusDetailsData(
+            model: model,
+            elapsedTime: elapsedTime,
+            date: fallbackDate,
+            stats: stats,
+            systemInfo: systemInfo
+        )
+    }
+
+    /// Parses the `similar_articles` JSON string into an array of dictionaries
+    private func parseSimilarArticlesJSON(_ jsonString: String) -> [[String: Any]]? {
+        guard let data = jsonString.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              !arr.isEmpty
+        else {
+            return nil
+        }
+        return arr
     }
 
     @ViewBuilder
     private func sectionContent(for section: ContentSection) -> some View {
         switch section.header {
+        // MARK: - Summary
+
         case "Summary":
             if let attributedString = summaryAttributedString {
-                // Use the preloaded summary attributed string (no need for notification here)
                 NonSelectableRichTextView(attributedString: attributedString)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
@@ -1502,7 +1359,7 @@ struct NewsDetailView: View {
                     .padding(.bottom, 2)
                     .textSelection(.enabled)
             } else {
-                // Fallback - use the plain text summary if available
+                // Fallback: plain text if we haven’t loaded the rich text yet
                 Text(section.content as? String ?? "")
                     .font(.callout)
                     .padding(.top, 6)
@@ -1513,9 +1370,11 @@ struct NewsDetailView: View {
                     .textSelection(.enabled)
             }
 
+        // MARK: - Source Analysis
+
         case "Source Analysis":
             VStack(alignment: .leading, spacing: 10) {
-                // Domain info at the top
+                // (Optional) Domain info at the top
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Article Domain:")
@@ -1536,6 +1395,7 @@ struct NewsDetailView: View {
                     Spacer()
                 }
 
+                // The actual “source analysis” text and type
                 if let sourceData = section.content as? [String: Any] {
                     let sourceText = sourceData["text"] as? String ?? ""
                     let sourceType = sourceData["sourceType"] as? String ?? ""
@@ -1563,7 +1423,7 @@ struct NewsDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    // Source type display
+                    // Also show sourceType as a little “badge” or label
                     if !sourceType.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: sourceTypeIcon(for: sourceType))
@@ -1581,6 +1441,8 @@ struct NewsDetailView: View {
             .padding(.horizontal, 12)
             .padding(.top, 6)
             .textSelection(.enabled)
+
+        // MARK: - Multi-case fields (Critical, Fallacies, Relevance, etc.)
 
         case "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective":
             if let notification = currentNotification {
@@ -1600,6 +1462,7 @@ struct NewsDetailView: View {
                         .textSelection(.enabled)
                 }
             } else {
+                // Fallback for missing notification
                 Text(section.content as? String ?? "")
                     .font(.callout)
                     .padding(.top, 6)
@@ -1610,11 +1473,11 @@ struct NewsDetailView: View {
                     .textSelection(.enabled)
             }
 
+        // MARK: - Vector WIP (similar_articles)
+
         case "Vector WIP":
-            // Vector WIP section
             VStack(alignment: .leading, spacing: 8) {
                 if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
-                    // Existing similar articles handling
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Similar Articles")
                             .font(.subheadline)
@@ -1655,15 +1518,26 @@ struct NewsDetailView: View {
             .padding(.horizontal, 12)
             .padding(.top, 6)
 
+        // MARK: - Argus Engine Stats (argus_details)
+
         case "Argus Engine Stats":
+            // Here’s the line that was failing when “argusDetails” wasn't defined
             if let details = section.argusDetails {
                 ArgusDetailsView(data: details)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text("No engine statistics available.")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
             }
+
+        // MARK: - Preview (Optional)
 
         case "Preview":
             VStack(spacing: 8) {
-                if let urlString = section.content as? String, let articleURL = URL(string: urlString) {
+                if let urlString = section.content as? String,
+                   let articleURL = URL(string: urlString)
+                {
                     SafariView(url: articleURL)
                         .frame(height: 450)
                     Button("Open in Browser") {
@@ -1678,6 +1552,8 @@ struct NewsDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
+
+        // MARK: - Default fallback for anything else
 
         default:
             Text(section.content as? String ?? "")
@@ -1704,6 +1580,53 @@ struct NewsDetailView: View {
             sourceAnalysisAttributedString = attributedString
         default:
             break // Other sections don't have cached properties
+        }
+    }
+
+    private func loadFieldAsync(_ field: RichTextField, _ n: NotificationData) async -> NSAttributedString? {
+        // 1) Copy out just the text we need
+        let textToConvert: String
+        switch field {
+        case .title: textToConvert = n.title
+        case .body: textToConvert = n.body
+        case .summary: textToConvert = n.summary ?? ""
+        case .criticalAnalysis: textToConvert = n.critical_analysis ?? ""
+        case .logicalFallacies: textToConvert = n.logical_fallacies ?? ""
+        case .sourceAnalysis: textToConvert = n.source_analysis ?? ""
+        case .relationToTopic: textToConvert = n.relation_to_topic ?? ""
+        case .additionalInsights: textToConvert = n.additional_insights ?? ""
+        }
+
+        let style = field.textStyle
+
+        // 2) Now the closure only captures Sendable strings
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = markdownToAttributedString(textToConvert, textStyle: style)
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    private func loadInitialMinimalContent() {
+        // Load just the basics for the current notification (if it’s valid)
+        guard let n = currentNotification else { return }
+        Task {
+            // Grab title/body (the same we show in NewsView).
+            let newTitle = await loadFieldAsync(.title, n)
+            let newBody = await loadFieldAsync(.body, n)
+            await MainActor.run {
+                titleAttributedString = newTitle
+                bodyAttributedString = newBody
+            }
+
+            // If “Summary” is open by default, do that in background:
+            if expandedSections["Summary"] == true {
+                let newSummary = await loadFieldAsync(.summary, n)
+                await MainActor.run {
+                    summaryAttributedString = newSummary
+                }
+            }
         }
     }
 
@@ -2201,22 +2124,13 @@ struct ArgusDetailsData {
     let systemInfo: [String: Any]?
 }
 
-struct ContentSection {
+private struct ContentSection {
     let header: String
     let content: Any
-    var similarArticlesLoaded: Bool = false // New property to track loading state
 
+    /// If `content` is actually an `ArgusDetailsData`, return it; else nil.
     var argusDetails: ArgusDetailsData? {
-        if case let (model, elapsedTime, date, stats, systemInfo) as (String, Double, Date, String, [String: Any]?) = content {
-            return ArgusDetailsData(
-                model: model,
-                elapsedTime: elapsedTime,
-                date: date,
-                stats: stats,
-                systemInfo: systemInfo
-            )
-        }
-        return nil
+        content as? ArgusDetailsData
     }
 }
 

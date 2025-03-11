@@ -776,9 +776,6 @@ struct NewsView: View {
                 // Just focus on the main fields needed
                 _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
                 _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
-                if notification.summary != nil {
-                    _ = getAttributedString(for: .summary, from: notification, createIfMissing: true)
-                }
             }
         }
     }
