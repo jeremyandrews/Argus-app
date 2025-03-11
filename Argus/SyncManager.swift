@@ -180,6 +180,14 @@ class SyncManager {
         // Insert notification
         context.insert(notification)
 
+        if !notification.title.isEmpty {
+            _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
+        }
+        if !notification.body.isEmpty {
+            _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+        }
+        try context.save()
+
         // Insert SeenArticle record
         let seenArticle = SeenArticle(
             id: notificationID,
