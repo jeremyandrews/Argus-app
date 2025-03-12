@@ -81,6 +81,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.0) {
             Task { @MainActor in
                 self.cleanupOldArticles()
+                self.removeDuplicateNotifications()
             }
         }
     }
@@ -399,6 +400,41 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
+    func removeDuplicateNotifications() {
+        let context = ArgusApp.sharedModelContainer.mainContext
+
+        do {
+            // Fetch all notifications:
+            let allNotes = try context.fetch(FetchDescriptor<NotificationData>())
+
+            // Group them by their json_url
+            let grouped = Dictionary(grouping: allNotes, by: { $0.json_url })
+
+            for (_, group) in grouped {
+                // If group has 1 or 0, no duplicates
+                guard group.count > 1 else { continue }
+
+                // Sort them, e.g. keep the earliest one (or keep the latest)
+                // Then delete the rest
+                let sorted = group.sorted { a, b in
+                    (a.pub_date ?? a.date) < (b.pub_date ?? b.date)
+                }
+                let toKeep = sorted.first!
+                let toDelete = sorted.dropFirst() // everything after the first
+                print("Keeping \(toKeep.json_url), removing \(toDelete.count) duplicates...")
+
+                for dupe in toDelete {
+                    context.delete(dupe)
+                }
+            }
+
+            try context.save()
+            print("Duplicates removed successfully.")
+        } catch {
+            print("Error removing duplicates: \(error)")
+        }
+    }
+
     @MainActor
     func removeNotificationIfExists(jsonURL: String) {
         UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
@@ -522,6 +558,7 @@ class NotificationData {
     @Attribute var isViewed: Bool = false
     @Attribute var isBookmarked: Bool = false
     @Attribute var isArchived: Bool = false
+    // @Attribute(.unique) var json_url: String = ""
     @Attribute var json_url: String = ""
     @Attribute var topic: String?
     @Attribute var article_title: String = ""
