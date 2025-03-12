@@ -709,14 +709,7 @@ struct NewsView: View {
                     .lineLimit(3)
                     .textSelection(.disabled)
                     .onAppear {
-                        // Trigger background conversion only when this row appears
-                        // and only if the rich text blob doesn't already exist
-                        if notification.body_blob == nil {
-                            Task {
-                                // Use the new markdown utilities
-                                _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
-                            }
-                        }
+                        _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
                     }
             }
         }

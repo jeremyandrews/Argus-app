@@ -159,12 +159,13 @@ func getAttributedString(
     for field: RichTextField,
     from notification: NotificationData,
     createIfMissing: Bool = true,
-    customFontSize: CGFloat? = nil
+    customFontSize: CGFloat? = nil,
+    completion: ((NSAttributedString?) -> Void)? = nil
 ) -> NSAttributedString? {
     // First check if the source text exists for this field
     let markdownText = field.getMarkdownText(from: notification)
-    guard markdownText != nil, !markdownText!.isEmpty else {
-        // No source text to convert
+    guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
+        completion?(nil)
         return nil
     }
 
@@ -184,44 +185,60 @@ func getAttributedString(
                     mutable.addAttribute(.font, value: newFont, range: range)
                 }
             }
+            completion?(mutable)
             return mutable
         }
 
+        completion?(attributedString)
         return attributedString
     }
 
     // If no blob or failed to load, create fresh if requested
     if createIfMissing {
-        // Create a new attributed string
-        let attributedString = markdownToAttributedString(
-            markdownText,
-            textStyle: field.textStyle,
-            customFontSize: customFontSize
-        )
-
-        // Store for future use if we successfully created an attributed string
-        if let attributedString = attributedString {
-            // Use the model's built-in method but ensure it runs on the main thread
-            if Thread.isMainThread {
+        if Thread.isMainThread {
+            // Already on main thread, process synchronously
+            let attributedString = markdownToAttributedString(
+                unwrappedText,
+                textStyle: field.textStyle,
+                customFontSize: customFontSize
+            )
+            if let attributedString = attributedString {
                 do {
                     try notification.setRichText(attributedString, for: field, saveContext: true)
                 } catch {
                     print("Error saving rich text for \(field): \(error)")
                 }
-            } else {
-                DispatchQueue.main.async {
+                completion?(attributedString)
+                return attributedString
+            }
+        } else {
+            // When on background thread, we need to be careful about sync operations
+            // Dispatch asynchronously to avoid potential deadlocks
+            DispatchQueue.main.async {
+                let attributedString = markdownToAttributedString(
+                    unwrappedText,
+                    textStyle: field.textStyle,
+                    customFontSize: customFontSize
+                )
+                if let attributedString = attributedString {
                     do {
                         try notification.setRichText(attributedString, for: field, saveContext: true)
                     } catch {
                         print("Error saving rich text for \(field): \(error)")
                     }
+                    completion?(attributedString)
+                } else {
+                    completion?(nil)
                 }
             }
-        }
 
-        return attributedString
+            // Document this limitation clearly for callers
+            NSLog("Warning: getAttributedString called from background thread. Result will be delivered via completion handler.")
+            return nil
+        }
     }
 
+    completion?(nil)
     return nil
 }
 

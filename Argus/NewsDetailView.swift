@@ -1287,26 +1287,6 @@ struct NewsDetailView: View {
         }
     }
 
-    private func loadArticleContent(url: String) {
-        guard let url = URL(string: url) else { return }
-        articleContent = nil
-        Task {
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let htmlString = String(data: data, encoding: .utf8) {
-                    DispatchQueue.main.async {
-                        self.articleContent = htmlString
-                    }
-                }
-            } catch {
-                print("Failed to load article content: \(error)")
-                DispatchQueue.main.async {
-                    self.articleContent = "Failed to load article content. Please try again."
-                }
-            }
-        }
-    }
-
     private func saveModel() {
         do {
             try modelContext.save()
