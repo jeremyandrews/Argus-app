@@ -236,7 +236,9 @@ class SyncManager {
             critical_analysis: articleJSON.criticalAnalysis,
             logical_fallacies: articleJSON.logicalFallacies,
             relation_to_topic: articleJSON.relationToTopic,
-            additional_insights: articleJSON.additionalInsights
+            additional_insights: articleJSON.additionalInsights,
+            engine_stats: articleJSON.engineStats,
+            similar_articles: articleJSON.similarArticles
         )
 
         // Insert notification
