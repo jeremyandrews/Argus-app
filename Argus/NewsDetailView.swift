@@ -52,7 +52,7 @@ struct NewsDetailView: View {
         "Source Analysis": false,
         "Context & Perspective": false,
         "Argus Engine Stats": false,
-        "Vector WIP": false,
+        "Related Articles": false,
     ]
     @State private var isSharePresented = false
     @State private var selectedSections: Set<String> = []
@@ -288,7 +288,6 @@ struct NewsDetailView: View {
         sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
 
         // 5) “Source Analysis” section
-        //    Often we store both the textual analysis AND the “sourceType” label. You can pass a little dictionary:
         let sourceAnalysisText = n.source_analysis ?? (json["source_analysis"] as? String ?? "")
         let sourceType = n.source_type ?? (json["source_type"] as? String ?? "")
         let sourceAnalysisData: [String: Any] = [
@@ -330,13 +329,13 @@ struct NewsDetailView: View {
             sections.append(ContentSection(header: "Preview", content: fullURL))
         }
 
-        // 9) “Vector WIP” (similar_articles)
+        // 9) “Related Articles” (similar_articles)
         if let localSimilar = n.similar_articles {
             if let parsedArray = parseSimilarArticlesJSON(localSimilar) {
-                sections.append(ContentSection(header: "Vector WIP", content: parsedArray))
+                sections.append(ContentSection(header: "Related Articles", content: parsedArray))
             }
         } else if let fallbackArr = json["similar_articles"] as? [[String: Any]], !fallbackArr.isEmpty {
-            sections.append(ContentSection(header: "Vector WIP", content: fallbackArr))
+            sections.append(ContentSection(header: "Related Articles", content: fallbackArr))
         }
 
         return sections
@@ -400,10 +399,6 @@ struct NewsDetailView: View {
                 scrollToTopTrigger = UUID()
             }
 
-            // Possibly handle pagination or queue expansions if needed
-            // @TODO:
-            // await handlePagination(direction: direction)
-
             // Mark newly selected article as viewed
             await MainActor.run {
                 markAsViewed()
@@ -412,8 +407,8 @@ struct NewsDetailView: View {
             // Build minimal dictionary, quickly load title & body
             guard let n = currentNotification else { return }
 
-            let newTitle = getAttributedString(for: .title, from: n, createIfMissing: true)
-            let newBody = getAttributedString(for: .body, from: n, createIfMissing: true)
+            let newTitle = getAttributedString(for: .title, from: n)
+            let newBody = getAttributedString(for: .body, from: n)
 
             // Update the UI with immediate content
             await MainActor.run {
@@ -446,57 +441,6 @@ struct NewsDetailView: View {
         return false
     }
 
-    private func loadAttributedStringAsync(for field: RichTextField, from notification: NotificationData) async -> NSAttributedString? {
-        // Extract the markdown text OUTSIDE the closure to avoid capturing NotificationData
-        let markdownText: String?
-        switch field {
-        case .title: markdownText = notification.title
-        case .body: markdownText = notification.body
-        case .summary: markdownText = notification.summary
-        case .criticalAnalysis: markdownText = notification.critical_analysis
-        case .logicalFallacies: markdownText = notification.logical_fallacies
-        case .sourceAnalysis: markdownText = notification.source_analysis
-        case .relationToTopic: markdownText = notification.relation_to_topic
-        case .additionalInsights: markdownText = notification.additional_insights
-        }
-
-        // Also extract the text style outside the closure
-        let textStyle = field.textStyle
-
-        // Now use the extracted text in the continuation
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                // Since we extracted the text outside, we no longer capture notification
-                if let text = markdownText {
-                    let result = markdownToAttributedString(text, textStyle: textStyle)
-                    continuation.resume(returning: result)
-                } else {
-                    continuation.resume(returning: nil)
-                }
-            }
-        }
-    }
-
-    private func preloadArticleContent() async {
-        guard let notification = currentNotification else { return }
-
-        // First quickly build the basic content dictionary (fast operation)
-        let basicContent = buildContentDictionary(from: notification)
-
-        // Preload critical rich text content needed for initial display
-        let titleString = getAttributedString(for: .title, from: notification, createIfMissing: true)
-        let bodyString = getAttributedString(for: .body, from: notification, createIfMissing: true)
-        let summaryString = getAttributedString(for: .summary, from: notification, createIfMissing: true)
-
-        // Update UI on main thread with preloaded content
-        await MainActor.run {
-            additionalContent = basicContent
-            titleAttributedString = titleString
-            bodyAttributedString = bodyString
-            summaryAttributedString = summaryString
-        }
-    }
-
     private func clearCurrentContent() {
         titleAttributedString = nil
         bodyAttributedString = nil
@@ -511,125 +455,9 @@ struct NewsDetailView: View {
         }
     }
 
-    private func handlePagination(direction: NavigationDirection, targetIndex: Int) async {
-        if direction == .next && targetIndex >= notifications.count - 5 {
-            // If we're near the end of our loaded notifications, load more
-            let nextBatchSize = notifications.count + 50
-            if nextBatchSize <= allNotifications.count {
-                await MainActor.run {
-                    notifications = Array(allNotifications.prefix(nextBatchSize))
-                }
-            }
-        } else if direction == .previous && targetIndex <= 5 && notifications.count < allNotifications.count {
-            // If we're near the start and there are more notifications to load
-            let additionalItems = 50
-            let startIndex = max(0, notifications.count - additionalItems)
-            let newItems = Array(allNotifications[startIndex ..< min(startIndex + additionalItems, allNotifications.count)])
-
-            await MainActor.run {
-                notifications = newItems + notifications
-                // Adjust currentIndex to account for the newly prepended items
-                currentIndex += newItems.count
-            }
-        }
-    }
-
-    private func preloadMinimalContent() async {
-        guard let notification = currentNotification else { return }
-
-        // Build minimal content dictionary first (quick operation)
-        let basicContent = buildContentDictionary(from: notification)
-
-        // Get rich text content for immediately visible parts
-        let titleString = getAttributedString(for: .title, from: notification, createIfMissing: true)
-        let bodyString = getAttributedString(for: .body, from: notification, createIfMissing: true)
-        let summaryString = getAttributedString(for: .summary, from: notification, createIfMissing: true)
-
-        // Update UI on main thread with all preloaded content
-        await MainActor.run {
-            additionalContent = basicContent
-            titleAttributedString = titleString
-            bodyAttributedString = bodyString
-            summaryAttributedString = summaryString // Also set summary since it's open by default
-        }
-    }
-
     enum NavigationDirection {
         case next
         case previous
-    }
-
-    private func findValidArticle(from startIndex: Int, direction: NavigationDirection) async -> Bool {
-        var index = startIndex
-        let increment = (direction == .next) ? 1 : -1
-
-        // Check if the starting index is within valid range
-        while (direction == .next && index < notifications.count) ||
-            (direction == .previous && index >= 0)
-        {
-            // Check off main thread if possible
-            let isValidArticle = !deletedIDs.contains(notifications[index].id)
-            if isValidArticle {
-                // Update the index on main thread
-                await MainActor.run {
-                    currentIndex = index
-                }
-                return true
-            }
-
-            // Move to the next index based on direction
-            index += increment
-        }
-
-        return false
-    }
-
-    private func hasMinimalCachedContent(_ notification: NotificationData) -> Bool {
-        // Check for cached rich text content
-        let titleExists = checkAttributedStringExists(for: .title, in: notification)
-        let bodyExists = checkAttributedStringExists(for: .body, in: notification)
-        let summaryExists = checkAttributedStringExists(for: .summary, in: notification)
-
-        // Also check if we already have basic content fields filled
-        let hasBasicFields = notification.title.count > 0 &&
-            notification.body.count > 0 &&
-            notification.summary != nil
-
-        return (titleExists && bodyExists && summaryExists) || hasBasicFields
-    }
-
-    // Helper function to check if an attributed string exists without loading it
-    private func checkAttributedStringExists(for field: RichTextField, in notification: NotificationData) -> Bool {
-        let notificationId = notification.id.uuidString.lowercased()
-
-        // Convert RichTextField to a string identifier for the filename
-        let fieldIdentifier: String
-        switch field {
-        case .title:
-            fieldIdentifier = "title"
-        case .body:
-            fieldIdentifier = "body"
-        case .summary:
-            fieldIdentifier = "summary"
-        case .criticalAnalysis:
-            fieldIdentifier = "criticalAnalysis"
-        case .logicalFallacies:
-            fieldIdentifier = "logicalFallacies"
-        case .sourceAnalysis:
-            fieldIdentifier = "sourceAnalysis"
-        case .relationToTopic:
-            fieldIdentifier = "relationToTopic"
-        case .additionalInsights:
-            fieldIdentifier = "additionalInsights"
-        }
-
-        let filename = "\(notificationId)-\(fieldIdentifier).dat"
-
-        let fileManager = FileManager.default
-        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let fileURL = documentsDirectory.appendingPathComponent(filename)
-
-        return fileManager.fileExists(atPath: fileURL.path)
     }
 
     // MARK: - Article Header
@@ -800,29 +628,6 @@ struct NewsDetailView: View {
     }
 
     // MARK: - Helper Methods
-
-    private func getEngineStatsData(from jsonString: String?) -> ArgusDetailsData? {
-        guard let jsonString = jsonString,
-              let jsonData = jsonString.data(using: .utf8),
-              let statsDict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
-        else {
-            return nil
-        }
-
-        if let model = statsDict["model"] as? String,
-           let elapsedTime = statsDict["elapsed_time"] as? Double,
-           let stats = statsDict["stats"] as? String
-        {
-            return ArgusDetailsData(
-                model: model,
-                elapsedTime: elapsedTime,
-                date: currentNotification?.date ?? Date(),
-                stats: stats,
-                systemInfo: statsDict["system_info"] as? [String: Any]
-            )
-        }
-        return nil
-    }
 
     private func getSimilarArticles(from jsonString: String?) -> [[String: Any]]? {
         guard let jsonString = jsonString,
@@ -1461,9 +1266,9 @@ struct NewsDetailView: View {
                     .textSelection(.enabled)
             }
 
-        // MARK: - Vector WIP (similar_articles)
+        // MARK: - Related Articles (similar_articles)
 
-        case "Vector WIP":
+        case "Related Articles": // Changed from "Vector WIP"
             VStack(alignment: .leading, spacing: 8) {
                 if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -1575,8 +1380,8 @@ struct NewsDetailView: View {
         guard let n = currentNotification else { return }
         Task {
             // Grab title/body (the same we show in NewsView).
-            let newTitle = getAttributedString(for: .title, from: n, createIfMissing: true)
-            let newBody = getAttributedString(for: .body, from: n, createIfMissing: true)
+            let newTitle = getAttributedString(for: .title, from: n)
+            let newBody = getAttributedString(for: .body, from: n)
             await MainActor.run {
                 titleAttributedString = newTitle
                 bodyAttributedString = newBody
@@ -1691,9 +1496,9 @@ struct NewsDetailView: View {
         }
     }
 
-    private func loadVectorWIPArticles() {
+    private func loadRelatedArticles() {
         // Only load if we haven't already loaded the content
-        if expandedSections["Vector WIP"] == true {
+        if expandedSections["Related Articles"] == true {
             return // Already loaded
         }
 
@@ -1709,8 +1514,8 @@ struct NewsDetailView: View {
 
             // Update the UI on the main thread
             DispatchQueue.main.async {
-                // Mark the Vector WIP section as loaded
-                self.expandedSections["Vector WIP"] = true
+                // Mark the Related Articles section as loaded
+                self.expandedSections["Related Articles"] = true
             }
         }
     }

@@ -702,15 +702,12 @@ struct NewsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text(notification.body.isEmpty ? "Loading content..." : notification.body)
+                Text(notification.body.isEmpty ? "(Error: missing data)" : notification.body)
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(3)
                     .textSelection(.disabled)
-                    .onAppear {
-                        _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
-                    }
             }
         }
     }
@@ -793,16 +790,6 @@ struct NewsView: View {
            let rootViewController = window.rootViewController
         {
             rootViewController.present(hostingController, animated: true)
-        }
-
-        // Convert rich text for all relevant fields in the notification
-        Task {
-            // Pre-generate attributed strings for all the main content fields
-            await MainActor.run {
-                // Just focus on the main fields needed
-                _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
-                _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
-            }
         }
     }
 
@@ -1631,11 +1618,6 @@ struct NewsView: View {
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, 18)
             }
-        }
-        .onAppear {
-            // Use the new utilities to create rich text if needed
-            _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
-            _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
         }
     }
 }
