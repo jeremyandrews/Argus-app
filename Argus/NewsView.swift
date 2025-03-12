@@ -769,36 +769,19 @@ struct NewsView: View {
         }
     }
 
-    private func openArticleWithSection(_ notification: NotificationData, section: String? = nil) {
-        guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
-            return
-        }
-
-        let detailView = NewsDetailView(
-            notifications: filteredNotifications,
-            allNotifications: totalNotifications,
-            currentIndex: index,
-            initiallyExpandedSection: section
-        )
-        .environment(\.modelContext, modelContext)
-
-        let hostingController = UIHostingController(rootView: detailView)
-        hostingController.modalPresentationStyle = .fullScreen
-
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController
-        {
-            rootViewController.present(hostingController, animated: true)
-        }
-    }
-
     private func openArticle(_ notification: NotificationData) {
         guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
             return
         }
 
+        // Pre-load the rich text content synchronously before creating the detail view
+        let titleAttrString = getAttributedString(for: .title, from: notification)
+        let bodyAttrString = getAttributedString(for: .body, from: notification)
+
         let detailView = NewsDetailView(
+            notification: notification,
+            preloadedTitle: titleAttrString,
+            preloadedBody: bodyAttrString,
             notifications: filteredNotifications,
             allNotifications: totalNotifications,
             currentIndex: index

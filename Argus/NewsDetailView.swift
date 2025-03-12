@@ -29,12 +29,16 @@ struct NewsDetailView: View {
     @State private var tabChangeTask: Task<Void, Never>? = nil
     @State private var cachedContentBySection: [String: NSAttributedString] = [:]
     @State private var visibleTabIndex: Int? = nil
+    @State private var preloadedNotification: NotificationData?
 
     private var isCurrentIndexValid: Bool {
         currentIndex >= 0 && currentIndex < notifications.count
     }
 
     private var currentNotification: NotificationData? {
+        if let preloaded = preloadedNotification {
+            return preloaded
+        }
         guard isCurrentIndexValid else { return nil }
         return notifications[currentIndex]
     }
@@ -61,6 +65,9 @@ struct NewsDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     init(
+        notification: NotificationData? = nil,
+        preloadedTitle: NSAttributedString? = nil,
+        preloadedBody: NSAttributedString? = nil,
         notifications: [NotificationData],
         allNotifications: [NotificationData],
         currentIndex: Int,
@@ -69,6 +76,10 @@ struct NewsDetailView: View {
         _notifications = State(initialValue: notifications)
         _allNotifications = State(initialValue: allNotifications)
         _currentIndex = State(initialValue: currentIndex)
+        // If we have a direct notification, initialize our state with it
+        _preloadedNotification = State(initialValue: notification)
+        _titleAttributedString = State(initialValue: preloadedTitle)
+        _bodyAttributedString = State(initialValue: preloadedBody)
         self.initiallyExpandedSection = initiallyExpandedSection
     }
 
@@ -388,42 +399,52 @@ struct NewsDetailView: View {
         // Cancel any pending load from a previous rapid-tap
         tabChangeTask?.cancel()
 
-        tabChangeTask = Task {
-            // Attempt to find a valid next/previous article that’s not deleted
-            guard await moveToNextValidArticle(direction: direction) else { return }
+        // Load content synchronously, before creating the async task
+        // This ensures immediate update of both title and body
+        if let nextIndex = getNextValidIndex(direction: direction),
+           nextIndex >= 0 && nextIndex < notifications.count
+        {
+            let nextNotification = notifications[nextIndex]
 
-            // Clear currently displayed detail text so we don’t mix old data
-            await MainActor.run {
-                clearCurrentContent()
-                // Trigger scroll to top when changing articles
-                scrollToTopTrigger = UUID()
-            }
+            // Pre-load title and body synchronously
+            let preloadedTitle = getAttributedString(for: .title, from: nextNotification)
+            let preloadedBody = getAttributedString(for: .body, from: nextNotification)
 
-            // Mark newly selected article as viewed
-            await MainActor.run {
-                markAsViewed()
-            }
+            // Update UI immediately with both values
+            titleAttributedString = preloadedTitle
+            bodyAttributedString = preloadedBody
 
-            // Build minimal dictionary, quickly load title & body
-            guard let n = currentNotification else { return }
+            // Then handle the rest of the navigation asynchronously
+            tabChangeTask = Task {
+                await MainActor.run {
+                    currentIndex = nextIndex
+                    preloadedNotification = nil
+                    // Trigger scroll to top when changing articles
+                    scrollToTopTrigger = UUID()
+                    markAsViewed()
+                }
 
-            let newTitle = getAttributedString(for: .title, from: n)
-            let newBody = getAttributedString(for: .body, from: n)
-
-            // Update the UI with immediate content
-            await MainActor.run {
-                titleAttributedString = newTitle
-                bodyAttributedString = newBody
-            }
-
-            // Then load the summary in background (since “Summary” is default-open)
-            let newSummary = getAttributedString(for: .summary, from: n, createIfMissing: true)
-
-            // Update the UI on the main actor:
-            await MainActor.run {
-                summaryAttributedString = newSummary
+                // Load summary in background since it's default-open
+                if let n = currentNotification {
+                    let newSummary = getAttributedString(for: .summary, from: n, createIfMissing: true)
+                    await MainActor.run {
+                        summaryAttributedString = newSummary
+                    }
+                }
             }
         }
+    }
+
+    private func getNextValidIndex(direction: NavigationDirection) -> Int? {
+        var newIndex = direction == .next ? currentIndex + 1 : currentIndex - 1
+        while newIndex >= 0 && newIndex < notifications.count {
+            let candidate = notifications[newIndex]
+            if !deletedIDs.contains(candidate.id) {
+                return newIndex
+            }
+            newIndex += (direction == .next ? 1 : -1)
+        }
+        return nil
     }
 
     private func moveToNextValidArticle(direction: NavigationDirection) async -> Bool {
@@ -1379,12 +1400,19 @@ struct NewsDetailView: View {
         // Load just the basics for the current notification (if it’s valid)
         guard let n = currentNotification else { return }
         Task {
-            // Grab title/body (the same we show in NewsView).
-            let newTitle = getAttributedString(for: .title, from: n)
-            let newBody = getAttributedString(for: .body, from: n)
-            await MainActor.run {
-                titleAttributedString = newTitle
-                bodyAttributedString = newBody
+            // Only load title/body if they weren't preloaded
+            if titleAttributedString == nil {
+                let newTitle = getAttributedString(for: .title, from: n)
+                await MainActor.run {
+                    titleAttributedString = newTitle
+                }
+            }
+
+            if bodyAttributedString == nil {
+                let newBody = getAttributedString(for: .body, from: n)
+                await MainActor.run {
+                    bodyAttributedString = newBody
+                }
             }
 
             // If “Summary” is open by default, do that in background:
