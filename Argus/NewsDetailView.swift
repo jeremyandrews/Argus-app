@@ -574,6 +574,7 @@ struct NewsDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
+        .background(currentNotification?.isViewed ?? true ? Color.clear : Color.blue.opacity(0.15))
     }
 
     // MARK: - Additional Sections
