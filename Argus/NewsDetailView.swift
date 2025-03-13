@@ -985,52 +985,53 @@ struct NewsDetailView: View {
 
     /// Parses the `engine_stats` JSON string into a strongly-typed ArgusDetailsData
     private func parseEngineStatsJSON(_ jsonString: String, fallbackDate: Date) -> ArgusDetailsData? {
-        guard let data = jsonString.data(using: .utf8),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            return nil
-        }
-
-        // Extract top-level fields directly if present
-        if let model = dict["model"] as? String,
+        // Try to parse as JSON first
+        if let data = jsonString.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let model = dict["model"] as? String,
            let elapsedTime = dict["elapsed_time"] as? Double,
            let stats = dict["stats"] as? String
         {
-            let systemInfo = dict["system_info"] as? [String: Any]
             return ArgusDetailsData(
                 model: model,
                 elapsedTime: elapsedTime,
                 date: fallbackDate,
                 stats: stats,
-                systemInfo: systemInfo
+                systemInfo: dict["system_info"] as? [String: Any]
             )
         }
 
-        // Fallback to legacy format for backward compatibility
-        // Some older data might not have the expected structure
-        let model = dict["model"] as? String ?? "Unknown Model"
-        let elapsedTime = dict["elapsed_time"] as? Double ?? 0.0
-        let stats = dict["stats"] as? String ?? "0:0:0:0:0:0"
-        let systemInfo = dict["system_info"] as? [String: Any]
-
+        // If that fails, just create a hardcoded object with the raw text
+        print("DEBUG: Creating fallback ArgusDetailsData with raw content")
         return ArgusDetailsData(
-            model: model,
-            elapsedTime: elapsedTime,
+            model: "Argus Engine",
+            elapsedTime: 0.0,
             date: fallbackDate,
-            stats: stats,
-            systemInfo: systemInfo
+            stats: "0:0:0:0:0:0",
+            systemInfo: ["raw_content": jsonString as Any]
         )
     }
 
     /// Parses the `similar_articles` JSON string into an array of dictionaries
     private func parseSimilarArticlesJSON(_ jsonString: String) -> [[String: Any]]? {
-        guard let data = jsonString.data(using: .utf8),
-              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              !arr.isEmpty
-        else {
-            return nil
+        // Try to parse as JSON array first
+        if let data = jsonString.data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+           !arr.isEmpty
+        {
+            return arr
         }
-        return arr
+
+        print("DEBUG: Creating fallback similar articles with raw content")
+        // Create a synthetic article that contains the raw text
+        let fallbackArticle: [String: Any] = [
+            "title": "Raw Content",
+            "tiny_summary": "Content could not be parsed as JSON",
+            "published_date": Date().ISO8601Format(),
+            "raw_content": jsonString,
+        ]
+
+        return [fallbackArticle]
     }
 
     @ViewBuilder
@@ -1211,8 +1212,25 @@ struct NewsDetailView: View {
 
         case "Argus Engine Stats":
             if let details = section.content as? ArgusDetailsData {
-                ArgusDetailsView(data: details)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let rawMarkdown = details.systemInfo?["raw_markdown"] as? [String: Any],
+                   let content = rawMarkdown["content"] as? String
+                {
+                    // This means we have raw markdown - display it as text
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Engine Stats (Raw Content)")
+                            .font(.headline)
+                            .padding(.bottom, 4)
+
+                        Text(content)
+                            .font(.system(size: 14))
+                            .textSelection(.enabled)
+                    }
+                    .padding()
+                } else {
+                    // Normal detailed view
+                    ArgusDetailsView(data: details)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             } else {
                 Text("No engine statistics available.")
                     .font(.callout)
@@ -2061,69 +2079,56 @@ struct ShareSelectionView: View {
     private func prepareShareContent() {
         var shareText = ""
 
+        // Helper function to get article URL (replica of what's used in NewsDetailView)
+        func getArticleUrl() -> String? {
+            // If we have the URL cached in content dictionary, use that
+            if let url = content?["url"] as? String {
+                return url
+            }
+
+            // Otherwise try to construct a URL from the domain
+            if let domain = notification.domain {
+                return "https://\(domain)"
+            }
+
+            return nil
+        }
+
         for section in getSections(from: content ?? [:]) {
             if selectedSections.contains(section.header) {
                 var sectionContent: String? = nil
 
                 switch section.header {
                 case "Title":
-                    // Use our new helper for consistent handling
-                    sectionContent = getAttributedString(
-                        for: .title,
-                        from: notification
-                    )?.string ?? notification.title
+                    // Use title directly from notification
+                    sectionContent = notification.title
 
                 case "Brief Summary":
-                    // Use our new helper for consistent handling
-                    sectionContent = getAttributedString(
-                        for: .body,
-                        from: notification
-                    )?.string ?? notification.body
+                    // Use body directly from notification
+                    sectionContent = notification.body
 
                 case "Article URL":
-                    sectionContent = content?["url"] as? String
+                    // Use our local implementation of getArticleUrl
+                    sectionContent = getArticleUrl()
 
                 case "Summary":
-                    // Use our new helper for consistent handling
-                    sectionContent = getAttributedString(
-                        for: .summary,
-                        from: notification
-                    )?.string ?? notification.summary
+                    // Get from notification
+                    sectionContent = notification.summary
 
                 case "Critical Analysis":
-                    // Use our new helper for consistent handling
-                    sectionContent = getAttributedString(
-                        for: .criticalAnalysis,
-                        from: notification
-                    )?.string ?? notification.critical_analysis
+                    sectionContent = notification.critical_analysis
 
                 case "Logical Fallacies":
-                    // Use our new helper for consistent handling
-                    sectionContent = getAttributedString(
-                        for: .logicalFallacies,
-                        from: notification
-                    )?.string ?? notification.logical_fallacies
+                    sectionContent = notification.logical_fallacies
 
                 case "Source Analysis":
-                    // Use our new helper for consistent handling
-                    sectionContent = getAttributedString(
-                        for: .sourceAnalysis,
-                        from: notification
-                    )?.string ?? notification.source_analysis
+                    sectionContent = notification.source_analysis
 
                 case "Relevance":
-                    // Use our new helper for consistent handling
-                    sectionContent = getAttributedString(
-                        for: .relationToTopic,
-                        from: notification
-                    )?.string ?? notification.relation_to_topic
+                    sectionContent = notification.relation_to_topic
 
                 case "Context & Perspective":
-                    // Use our new helper for consistent handling
-                    sectionContent = getAttributedString(
-                        for: .additionalInsights,
-                        from: notification
-                    )?.string ?? notification.additional_insights
+                    sectionContent = notification.additional_insights
 
                 case "Argus Engine Stats":
                     if let details = section.argusDetails {
@@ -2137,10 +2142,11 @@ struct ShareSelectionView: View {
                         if let systemInfo = details.systemInfo {
                             sectionContent! += formatSystemInfo(systemInfo)
                         }
+                    } else if let engineStats = notification.engine_stats {
+                        sectionContent = "Engine Stats: \(engineStats)"
                     }
 
                 default:
-                    // For any other sections, use the content as is
                     sectionContent = section.content as? String
                 }
 
@@ -2149,7 +2155,7 @@ struct ShareSelectionView: View {
                         // Share these fields as raw content, without headers
                         shareText += "\(contentToShare)\n\n"
                     } else {
-                        // Keep headers for everything else
+                        // Keep headers for everything else with bold formatting
                         shareText += "**\(section.header):**\n\(contentToShare)\n\n"
                     }
                 }
@@ -2163,7 +2169,6 @@ struct ShareSelectionView: View {
 
         // Apply markdown formatting if enabled
         if formatText {
-            // Use the new consistent helper to convert markdown to attributed string
             if let attributedString = markdownToAttributedString(
                 shareText,
                 textStyle: "UIFontTextStyleBody"
@@ -2231,9 +2236,8 @@ struct ShareSelectionView: View {
             ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
         ]
 
-        if let insights = json["additional_insights"] as? String, !insights.isEmpty {
-            sections.append(ContentSection(header: "Context & Perspective", content: insights))
-        }
+        let insights = json["additional_insights"] as? String ?? notification.additional_insights ?? ""
+        sections.append(ContentSection(header: "Context & Perspective", content: insights))
 
         if let model = json["model"] as? String,
            let elapsedTime = json["elapsed_time"] as? Double,
