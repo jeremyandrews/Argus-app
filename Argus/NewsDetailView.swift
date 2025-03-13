@@ -48,21 +48,26 @@ struct NewsDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var additionalContent: [String: Any]? = nil
     @State private var isLoadingAdditionalContent = false
-    @State private var expandedSections: [String: Bool] = [
-        "Summary": true,
-        "Relevance": false,
-        "Critical Analysis": false,
-        "Logical Fallacies": false,
-        "Source Analysis": false,
-        "Context & Perspective": false,
-        "Argus Engine Stats": true,
-        "Related Articles": false,
-    ]
+    @State private var expandedSections: [String: Bool] = getDefaultExpandedSections()
     @State private var isSharePresented = false
     @State private var selectedSections: Set<String> = []
     @State private var articleContent: String? = nil
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+
+    // Define a private static helper to provide default section states
+    private static func getDefaultExpandedSections() -> [String: Bool] {
+        return [
+            "Summary": true,
+            "Relevance": false,
+            "Critical Analysis": false,
+            "Logical Fallacies": false,
+            "Source Analysis": false,
+            "Context & Perspective": false,
+            "Argus Engine Stats": true,
+            "Related Articles": false,
+        ]
+    }
 
     init(
         notification: NotificationData? = nil,
@@ -430,6 +435,9 @@ struct NewsDetailView: View {
             bodyAttributedString = preloadedBody
             // Set preloadedNotification immediately so all header fields update
             preloadedNotification = nextNotification
+
+            // Reset expanded sections to defaults
+            expandedSections = Self.getDefaultExpandedSections()
 
             // Then handle the rest of the navigation asynchronously
             tabChangeTask = Task {
