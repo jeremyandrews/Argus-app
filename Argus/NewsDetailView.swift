@@ -55,7 +55,7 @@ struct NewsDetailView: View {
         "Logical Fallacies": false,
         "Source Analysis": false,
         "Context & Perspective": false,
-        "Argus Engine Stats": false,
+        "Argus Engine Stats": true,
         "Related Articles": false,
     ]
     @State private var isSharePresented = false
@@ -277,10 +277,16 @@ struct NewsDetailView: View {
 
     /// Returns all sections (Article, Summary, etc.) for the “accordion” in NewsDetailView.
     private func getSections(from json: [String: Any]) -> [ContentSection] {
+        print("DEBUG: getSections called with json keys: \(json.keys)")
         var sections: [ContentSection] = []
 
         // Bail out if we have no “currentNotification” (or no data):
-        guard let n = currentNotification else { return sections }
+        guard let n = currentNotification else {
+            print("DEBUG: No currentNotification available")
+            return sections
+        }
+
+        print("DEBUG: Current notification ID: \(n.id)")
 
         // 1) “Summary” section
         let summaryContent = n.summary ?? (json["summary"] as? String ?? "")
@@ -314,16 +320,22 @@ struct NewsDetailView: View {
         }
 
         // 7) “Argus Engine Stats” (argus_details)
+        print("DEBUG: Checking engine_stats availability")
         if let engineString = n.engine_stats {
+            print("DEBUG: Found engine_stats string: \(engineString)")
             // parseEngineStatsJSON returns an ArgusDetailsData if valid
             if let parsed = parseEngineStatsJSON(engineString, fallbackDate: n.date) {
+                print("DEBUG: Successfully parsed engine_stats")
                 sections.append(ContentSection(header: "Argus Engine Stats", content: parsed))
+            } else {
+                print("DEBUG: Failed to parse engine_stats")
             }
         } else if
             let model = json["model"] as? String,
             let elapsed = json["elapsed_time"] as? Double,
             let stats = json["stats"] as? String
         {
+            print("DEBUG: Using fallback method for engine stats with model: \(model)")
             // Create ArgusDetailsData for fallback
             let dataObject = ArgusDetailsData(
                 model: model,
@@ -333,6 +345,8 @@ struct NewsDetailView: View {
                 systemInfo: json["system_info"] as? [String: Any]
             )
             sections.append(ContentSection(header: "Argus Engine Stats", content: dataObject))
+        } else {
+            print("DEBUG: No engine_stats data available")
         }
 
         // 8) “Preview” section
@@ -349,6 +363,7 @@ struct NewsDetailView: View {
             sections.append(ContentSection(header: "Related Articles", content: fallbackArr))
         }
 
+        print("DEBUG: Created \(sections.count) sections: \(sections.map { $0.header })")
         return sections
     }
 
@@ -410,9 +425,11 @@ struct NewsDetailView: View {
             let preloadedTitle = getAttributedString(for: .title, from: nextNotification)
             let preloadedBody = getAttributedString(for: .body, from: nextNotification)
 
-            // Update UI immediately with both values
+            // Update UI immediately with all header values
             titleAttributedString = preloadedTitle
             bodyAttributedString = preloadedBody
+            // Set preloadedNotification immediately so all header fields update
+            preloadedNotification = nextNotification
 
             // Then handle the rest of the navigation asynchronously
             tabChangeTask = Task {
@@ -1129,15 +1146,28 @@ struct NewsDetailView: View {
             return nil
         }
 
-        guard
-            let model = dict["model"] as? String,
-            let elapsedTime = dict["elapsed_time"] as? Double,
-            let stats = dict["stats"] as? String
-        else {
-            return nil
+        // Extract top-level fields directly if present
+        if let model = dict["model"] as? String,
+           let elapsedTime = dict["elapsed_time"] as? Double,
+           let stats = dict["stats"] as? String
+        {
+            let systemInfo = dict["system_info"] as? [String: Any]
+            return ArgusDetailsData(
+                model: model,
+                elapsedTime: elapsedTime,
+                date: fallbackDate,
+                stats: stats,
+                systemInfo: systemInfo
+            )
         }
 
+        // Fallback to legacy format for backward compatibility
+        // Some older data might not have the expected structure
+        let model = dict["model"] as? String ?? "Unknown Model"
+        let elapsedTime = dict["elapsed_time"] as? Double ?? 0.0
+        let stats = dict["stats"] as? String ?? "0:0:0:0:0:0"
         let systemInfo = dict["system_info"] as? [String: Any]
+
         return ArgusDetailsData(
             model: model,
             elapsedTime: elapsedTime,
@@ -2360,16 +2390,21 @@ struct ShareSelectionView: View {
             sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
 
-        sections.append(ContentSection(
-            header: "Argus Engine Stats",
-            content: (
-                json["model"] as? String ?? "Unknown",
-                (json["elapsed_time"] as? Double) ?? 0.0,
-                notification.date,
-                json["stats"] as? String ?? "N/A",
-                json["system_info"] as? [String: Any]
-            )
-        ))
+        if let model = json["model"] as? String,
+           let elapsedTime = json["elapsed_time"] as? Double,
+           let stats = json["stats"] as? String
+        {
+            sections.append(ContentSection(
+                header: "Argus Engine Stats",
+                content: ArgusDetailsData(
+                    model: model,
+                    elapsedTime: elapsedTime,
+                    date: notification.date,
+                    stats: stats,
+                    systemInfo: json["system_info"] as? [String: Any]
+                )
+            ))
+        }
 
         return sections
     }
