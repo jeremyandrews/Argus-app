@@ -10,6 +10,7 @@
 	<false/>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
+	    <string>com.arguspulse.articlesync</string>
 	    <string>com.arguspulse.articlefetch</string>
 	</array>
 </dict>

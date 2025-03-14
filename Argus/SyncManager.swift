@@ -16,7 +16,7 @@ class SyncManager {
     private var lastSyncTime: Date = .distantPast
     private let minimumSyncInterval: TimeInterval = 60
 
-    // Add to SyncManager.swift
+    // Network type enum
     private enum NetworkType {
         case wifi
         case cellular
@@ -24,40 +24,41 @@ class SyncManager {
         case unknown
     }
 
-    private var currentNetworkType: NetworkType = .unknown
-    private let networkMonitor = NWPathMonitor()
-    private let monitorQueue = DispatchQueue(label: "SyncNetworkMonitor")
-
-    // Start monitoring in init()
+    // Initialize without starting monitor - we'll use on-demand checking
     private init() {
-        startNetworkMonitoring()
+        // We no longer start network monitoring immediately
     }
 
-    private func startNetworkMonitoring() {
-        networkMonitor.pathUpdateHandler = { [weak self] path in
-            guard let self = self else { return }
+    // Check network condition only when needed
+    private func getCurrentNetworkType() async -> NetworkType {
+        return await withCheckedContinuation { continuation in
+            let monitor = NWPathMonitor()
+            monitor.pathUpdateHandler = { path in
+                defer {
+                    monitor.cancel()
+                }
 
-            if path.usesInterfaceType(.wifi) {
-                self.currentNetworkType = .wifi
-            } else if path.usesInterfaceType(.cellular) {
-                self.currentNetworkType = .cellular
-            } else if path.status == .satisfied {
-                self.currentNetworkType = .other
-            } else {
-                self.currentNetworkType = .unknown
+                if path.usesInterfaceType(.wifi) {
+                    continuation.resume(returning: .wifi)
+                } else if path.usesInterfaceType(.cellular) {
+                    continuation.resume(returning: .cellular)
+                } else if path.status == .satisfied {
+                    continuation.resume(returning: .other)
+                } else {
+                    continuation.resume(returning: .unknown)
+                }
             }
+            monitor.start(queue: DispatchQueue.global(qos: .utility))
         }
-        networkMonitor.start(queue: monitorQueue)
     }
 
     // Check if we should sync based on network type and settings
-    private func shouldAllowSync() -> Bool {
-        switch currentNetworkType {
+    private func shouldAllowSync() async -> Bool {
+        let networkType = await getCurrentNetworkType()
+        switch networkType {
         case .wifi:
             return true
-        case .cellular:
-            return UserDefaults.standard.bool(forKey: "allowCellularSync")
-        case .other, .unknown:
+        case .cellular, .other, .unknown:
             return UserDefaults.standard.bool(forKey: "allowCellularSync")
         }
     }
@@ -243,6 +244,12 @@ class SyncManager {
         let now = Date()
         guard now.timeIntervalSince(lastSyncTime) > minimumSyncInterval else {
             print("Sync throttled - last sync was \(Int(now.timeIntervalSince(lastSyncTime))) seconds ago")
+            return
+        }
+
+        // Check network conditions before proceeding
+        guard await shouldAllowSync() else {
+            print("Sync skipped due to network conditions and user preferences")
             return
         }
 
