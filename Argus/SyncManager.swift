@@ -13,7 +13,7 @@ class SyncManager {
 
     // Throttling parameters
     private var syncInProgress = false
-    private var syncInProgressTimestamp: Date? // New: track when sync started
+    private var syncInProgressTimestamp: Date?
     private var lastSyncTime: Date = .distantPast
     private let minimumSyncInterval: TimeInterval = 60
     private let syncTimeoutInterval: TimeInterval = 300 // 5 minutes timeout
@@ -170,6 +170,7 @@ class SyncManager {
             }
             let backgroundContext = ModelContext(container)
             let queueManager = backgroundContext.queueManager()
+
             // Process items until we hit the time limit or run out of items
             while Date().timeIntervalSince(startTime) < timeLimit {
                 // Get a batch of items to process
@@ -179,6 +180,7 @@ class SyncManager {
                 }
                 print("Processing batch of \(itemsToProcess.count) queue items")
                 var processedItems = [ArticleQueueItem]()
+
                 for item in itemsToProcess {
                     if Task.isCancelled {
                         break
@@ -187,6 +189,15 @@ class SyncManager {
                     if Date().timeIntervalSince(startTime) >= timeLimit {
                         break
                     }
+
+                    // Check if this article is already in the database
+                    // This is a critical check to prevent duplicates
+                    if await isArticleAlreadyProcessed(jsonURL: item.jsonURL, context: backgroundContext) {
+                        print("Skipping already processed article: \(item.jsonURL)")
+                        processedItems.append(item) // Mark as processed so it gets removed
+                        continue
+                    }
+
                     do {
                         try await processQueueItem(item, context: backgroundContext)
                         processedItems.append(item)
@@ -195,6 +206,7 @@ class SyncManager {
                         print("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
                     }
                 }
+
                 if !processedItems.isEmpty {
                     try backgroundContext.save()
                     for item in processedItems {
@@ -206,13 +218,15 @@ class SyncManager {
                     }
                 }
             }
+
             let timeElapsed = Date().timeIntervalSince(startTime)
             print("Queue processing completed: \(processedCount) items in \(String(format: "%.2f", timeElapsed)) seconds")
+
             // If we processed items and there might be more, schedule another processing run soon
             if processedCount > 0 {
                 let remainingCount = try await queueManager.queueCount()
                 if remainingCount > 0 {
-                    // We have more items,  but we'll let the background task system handle it
+                    // We have more items, but we'll let the background task system handle it
                     await MainActor.run {
                         // Signal the system that we'd like to process more items soon
                         scheduleBackgroundFetch()
@@ -220,14 +234,40 @@ class SyncManager {
                     print("More items remaining (\(remainingCount)). Background task scheduled.")
                 }
             }
+
             let remainingCount = try await queueManager.queueCount()
             hasMoreItems = remainingCount > 0
+
             // Return the state
             return hasMoreItems
         } catch {
             print("Queue processing error: \(error.localizedDescription)")
             return false
         }
+    }
+
+    // Helper method to check if an article is already processed
+    private func isArticleAlreadyProcessed(jsonURL: String, context: ModelContext) async -> Bool {
+        // Check in NotificationData
+        let notificationFetchRequest = FetchDescriptor<NotificationData>(
+            predicate: #Predicate<NotificationData> { notification in
+                notification.json_url == jsonURL
+            }
+        )
+
+        // Check in SeenArticle
+        let seenFetchRequest = FetchDescriptor<SeenArticle>(
+            predicate: #Predicate<SeenArticle> { seen in
+                seen.json_url == jsonURL
+            }
+        )
+
+        // Execute both fetch requests directly - no need for async let and tasks
+        let isNotificationPresent = (try? context.fetch(notificationFetchRequest).first) != nil
+        let isSeenPresent = (try? context.fetch(seenFetchRequest).first) != nil
+
+        // Return true if the article exists in either table
+        return isNotificationPresent || isSeenPresent
     }
 
     func registerBackgroundTasks() {
@@ -367,8 +407,7 @@ class SyncManager {
                 let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
 
-                if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
-                    print("Server returned \(unseenUrls.count) unseen articles - queuing for processing")
+                if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty { print("Server returned \(unseenUrls.count) unseen articles - queuing for processing")
                     await queueArticlesForProcessing(urls: unseenUrls)
 
                     // Start processing immediately if we received new articles
@@ -397,28 +436,10 @@ class SyncManager {
     private func processQueueItem(_ item: ArticleQueueItem, context: ModelContext) async throws {
         let itemJsonURL = item.jsonURL
 
-        // Check if we've already seen this article
-        let seenFetchRequest = FetchDescriptor<SeenArticle>(
-            predicate: #Predicate<SeenArticle> { seen in
-                seen.json_url == itemJsonURL
-            }
-        )
-
-        if let _ = try? context.fetch(seenFetchRequest).first {
-            print("[Warning] Skipping already seen article: \(item.jsonURL)")
-            return
-        }
-
-        // Check if the article has already been processed as a notification
-        let notificationFetchRequest = FetchDescriptor<NotificationData>(
-            predicate: #Predicate<NotificationData> { notification in
-                notification.json_url == itemJsonURL
-            }
-        )
-
-        if let _ = try? context.fetch(notificationFetchRequest).first {
-            print("[Warning] Skipping duplicate notification: \(item.jsonURL)")
-
+        // Double-check that we're not creating duplicates
+        // This is important as the queue might have been processed already in another context
+        if await isArticleAlreadyProcessed(jsonURL: itemJsonURL, context: context) {
+            print("[Warning] Skipping already processed article: \(itemJsonURL)")
             return
         }
 
@@ -527,11 +548,27 @@ class SyncManager {
         let backgroundContext = ModelContext(container)
         let queueManager = backgroundContext.queueManager()
 
-        // Process each URL in the background
+        // Prepare for batch checking
+        var newUrls = [String]()
+
+        // First check which articles need to be queued (not already in system)
         for jsonURL in urls {
+            if !(await isArticleAlreadyProcessed(jsonURL: jsonURL, context: backgroundContext)) {
+                newUrls.append(jsonURL)
+            } else {
+                print("Skipping already processed article: \(jsonURL)")
+            }
+        }
+
+        // Only queue articles that aren't already processed
+        if newUrls.isEmpty {
+            print("No new articles to queue - all are already processed")
+            return
+        }
+
+        // Process each new URL
+        for jsonURL in newUrls {
             do {
-                // Try to add the article to the queue
-                // The addArticle method will check for duplicates and ignore them
                 let added = try await queueManager.addArticle(jsonURL: jsonURL)
                 if added {
                     print("Queued article: \(jsonURL)")
@@ -542,5 +579,7 @@ class SyncManager {
                 print("Failed to queue article \(jsonURL): \(error)")
             }
         }
+
+        print("Added \(newUrls.count) new articles to processing queue")
     }
 }
