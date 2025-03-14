@@ -50,9 +50,6 @@ struct ArgusApp: App {
                             self.appDelegate.cleanupOldArticles()
                             self.appDelegate.removeDuplicateNotifications()
                         }
-                        Task {
-                            await SyncManager.shared.sendRecentArticlesToServer()
-                        }
                     }
                 }
         }

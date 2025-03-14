@@ -66,11 +66,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             self.verifyDatabaseIndexes()
         }
 
-        // Auto-sync with the server with networking prioritization
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1.0) {
-            self.performAutoSync()
-        }
-
         // Start queue processing for article downloads
         DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1.5) {
             // Start processing the article queue in the background
@@ -94,16 +89,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
         } catch {
             print("Database index creation failed: \(error)")
-        }
-    }
-
-    private func performAutoSync() {
-        Task {
-            if shouldAllowSync() {
-                await SyncManager.shared.sendRecentArticlesToServer()
-            } else {
-                print("Skipping initial sync - waiting for WiFi or user permission for cellular data")
-            }
         }
     }
 
@@ -193,13 +178,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
             if path.usesInterfaceType(.wifi) {
                 self.currentNetworkType = .wifi
-
-                // If we've switched to WiFi, trigger a sync
-                DispatchQueue.main.async {
-                    Task {
-                        await SyncManager.shared.sendRecentArticlesToServer()
-                    }
-                }
             } else if path.usesInterfaceType(.cellular) {
                 self.currentNetworkType = .cellular
             } else if path.status == .satisfied {

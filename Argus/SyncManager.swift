@@ -6,6 +6,11 @@ import UIKit
 class SyncManager {
     static let shared = SyncManager()
 
+    // Background task identifier
+    private let backgroundSyncIdentifier = "com.arguspulse.articlesync"
+    private let backgroundFetchIdentifier = "com.arguspulse.articlefetch"
+
+    // Throttling parameters
     private var syncInProgress = false
     private var lastSyncTime: Date = .distantPast
     private let minimumSyncInterval: TimeInterval = 60
@@ -93,43 +98,65 @@ class SyncManager {
     }
 
     func registerBackgroundTasks() {
-        // Register the background task identifier
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.arguspulse.articlefetch", using: nil) { task in
-            // Cast the task to app refresh task
+        // Register article fetch task (for processing queue)
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundFetchIdentifier, using: nil) { task in
             guard let appRefreshTask = task as? BGAppRefreshTask else { return }
 
-            // Create a task that processes the queue
             let processingTask = Task {
                 let didProcess = await self.processQueueItems()
-                // Complete the background task
                 appRefreshTask.setTaskCompleted(success: didProcess)
             }
 
-            // Set up a task cancellation handler
             appRefreshTask.expirationHandler = {
                 processingTask.cancel()
             }
 
-            // Schedule the next background task when this one completes
             self.scheduleBackgroundFetch()
         }
 
-        // Schedule the first background fetch
+        // Register the sync task (for syncing with server)
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundSyncIdentifier, using: nil) { task in
+            guard let appRefreshTask = task as? BGAppRefreshTask else { return }
+
+            let syncTask = Task {
+                await self.sendRecentArticlesToServer()
+                appRefreshTask.setTaskCompleted(success: true)
+            }
+
+            appRefreshTask.expirationHandler = {
+                syncTask.cancel()
+            }
+
+            self.scheduleBackgroundSync()
+        }
+
+        // Schedule initial tasks
         scheduleBackgroundFetch()
-        print("Background task registration complete")
+        scheduleBackgroundSync()
+        print("Background tasks registered: fetch and sync")
     }
 
     func scheduleBackgroundFetch() {
-        let request = BGAppRefreshTaskRequest(identifier: "com.arguspulse.articlefetch")
-
-        // Set this to run at least 15 minutes from now (similar to your original timer)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+        let request = BGAppRefreshTaskRequest(identifier: backgroundFetchIdentifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // 15 minutes
 
         do {
             try BGTaskScheduler.shared.submit(request)
             print("Background fetch scheduled")
         } catch {
             print("Could not schedule background fetch: \(error)")
+        }
+    }
+
+    func scheduleBackgroundSync() {
+        let request = BGAppRefreshTaskRequest(identifier: backgroundSyncIdentifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 30 * 60) // 30 minutes
+
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            print("Background sync scheduled")
+        } catch {
+            print("Could not schedule background sync: \(error)")
         }
     }
 
@@ -146,16 +173,66 @@ class SyncManager {
         }
     }
 
-    // For backward compatibility with iOS 12 and earlier
-    func handleBackgroundFetch(completion: @escaping (UIBackgroundFetchResult) -> Void) {
-        Task {
-            let didProcess = await processQueueItems()
-            completion(didProcess ? .newData : .noData)
+    // MARK: - Sync Methods
 
-            // Schedule the next background fetch
-            await MainActor.run {
-                self.scheduleBackgroundFetch()
+    // Manual trigger with throttling - for UI "pull to refresh" or explicit user action
+    func manualSync() async -> Bool {
+        let now = Date()
+        guard now.timeIntervalSince(lastSyncTime) > minimumSyncInterval else {
+            print("Manual sync requested too soon (last sync was \(Int(now.timeIntervalSince(lastSyncTime))) seconds ago)")
+            return false
+        }
+
+        await sendRecentArticlesToServer()
+        return true
+    }
+
+    func sendRecentArticlesToServer() async {
+        guard !syncInProgress else {
+            print("Sync is already in progress. Skipping this call.")
+            return
+        }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastSyncTime) > minimumSyncInterval else {
+            print("Sync throttled - last sync was \(Int(now.timeIntervalSince(lastSyncTime))) seconds ago")
+            return
+        }
+
+        syncInProgress = true
+        defer { syncInProgress = false }
+        lastSyncTime = now
+
+        print("Starting server sync...")
+
+        do {
+            let recentArticles = await fetchRecentArticles()
+            let jsonUrls = recentArticles.map { $0.json_url }
+
+            // APIClient handles timeouts internally
+            let url = URL(string: "https://api.arguspulse.com/articles/sync")!
+            let payload = ["seen_articles": jsonUrls]
+
+            do {
+                let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
+
+                let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
+                if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
+                    print("Server returned \(unseenUrls.count) unseen articles - queuing for processing")
+                    await queueArticlesForProcessing(urls: unseenUrls)
+                } else {
+                    print("Server says there are no unseen articles.")
+                }
+            } catch let error as URLError where error.code == .timedOut {
+                print("Sync operation timed out")
             }
+        } catch {
+            print("Failed to sync articles: \(error)")
+        }
+
+        // Always schedule next background sync
+        await MainActor.run {
+            self.scheduleBackgroundSync()
         }
     }
 
@@ -280,50 +357,6 @@ class SyncManager {
 
         // Save immediately to prevent race conditions
         try context.save()
-    }
-
-    func sendRecentArticlesToServer() async {
-        guard !syncInProgress else {
-            print("Sync is already in progress. Skipping this call.")
-            return
-        }
-
-        let now = Date()
-        guard now.timeIntervalSince(lastSyncTime) > minimumSyncInterval else {
-            // Sync called too soon; skipping.
-            return
-        }
-
-        syncInProgress = true
-        defer { syncInProgress = false }
-        lastSyncTime = now
-
-        do {
-            let recentArticles = await fetchRecentArticles()
-            let jsonUrls = recentArticles.map { $0.json_url }
-
-            // APIClient handles timeouts internally
-            let url = URL(string: "https://api.arguspulse.com/articles/sync")!
-            let payload = ["seen_articles": jsonUrls]
-
-            do {
-                // APIClient handles timeouts internally
-                let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
-
-                let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
-                if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
-                    // Queue the unseen articles instead of fetching them immediately
-                    await queueArticlesForProcessing(urls: unseenUrls)
-                } else {
-                    print("Server says there are no unseen articles.")
-                }
-            } catch let error as URLError where error.code == .timedOut {
-                // Handle timeout specifically
-                print("Sync operation timed out")
-            }
-        } catch {
-            print("Failed to sync articles: \(error)")
-        }
     }
 
     private func fetchRecentArticles() async -> [SeenArticle] {
