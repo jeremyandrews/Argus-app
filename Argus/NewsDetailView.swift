@@ -355,7 +355,7 @@ struct NewsDetailView: View {
         }
 
         // 8) “Preview” section
-        if let fullURL = getArticleUrl(n), !fullURL.isEmpty {
+        if let fullURL = n.getArticleUrl(additionalContent: additionalContent), !fullURL.isEmpty {
             sections.append(ContentSection(header: "Preview", content: fullURL))
         }
 
@@ -684,25 +684,6 @@ struct NewsDetailView: View {
             return nil
         }
         return similarArticles
-    }
-
-    private func getArticleUrl(_ notification: NotificationData) -> String? {
-        // First check for the direct article_url field we added
-        if let directURL = notification.article_url, !directURL.isEmpty {
-            return directURL
-        }
-
-        // If we have the URL cached in additionalContent, use that
-        if let content = additionalContent, let url = content["url"] as? String {
-            return url
-        }
-
-        // Otherwise try to construct a URL from the domain
-        if let domain = notification.domain {
-            return "https://\(domain)"
-        }
-
-        return nil
     }
 
     // Helper to build source analysis content
@@ -2083,26 +2064,7 @@ struct ShareSelectionView: View {
 
     private func prepareShareContent() {
         var shareText = ""
-
-        // Helper function to get article URL (replica of what's used in NewsDetailView)
-        func getArticleUrl() -> String? {
-            // First check for direct article_url
-            if let directURL = notification.article_url, !directURL.isEmpty {
-                return directURL
-            }
-
-            // If we have the URL cached in content dictionary, use that
-            if let url = content?["url"] as? String {
-                return url
-            }
-
-            // Otherwise try to construct a URL from the domain
-            if let domain = notification.domain {
-                return "https://\(domain)"
-            }
-
-            return nil
-        }
+        var articleURL: String? = nil
 
         for section in getSections(from: content ?? [:]) {
             if selectedSections.contains(section.header) {
@@ -2118,8 +2080,8 @@ struct ShareSelectionView: View {
                     sectionContent = notification.body
 
                 case "Article URL":
-                    // Use our local implementation of getArticleUrl
-                    sectionContent = getArticleUrl()
+                    articleURL = notification.getArticleUrl(additionalContent: content)
+                    continue // SKip adding this to shareText
 
                 case "Summary":
                     // Get from notification
@@ -2161,7 +2123,7 @@ struct ShareSelectionView: View {
                 }
 
                 if let contentToShare = sectionContent, !contentToShare.isEmpty {
-                    if section.header == "Title" || section.header == "Brief Summary" || section.header == "Article URL" {
+                    if section.header == "Title" || section.header == "Brief Summary" {
                         // Share these fields as raw content, without headers
                         shareText += "\(contentToShare)\n\n"
                     } else {
@@ -2170,6 +2132,12 @@ struct ShareSelectionView: View {
                     }
                 }
             }
+        }
+
+        // If we have a URL, add it at the very end of the text
+        if let url = articleURL, selectedSections.contains("Article URL") {
+            shareText = shareText.trimmingCharacters(in: .whitespacesAndNewlines)
+            shareText += "\n\n\(url)"
         }
 
         // If no sections were selected, avoid sharing empty content
@@ -2305,4 +2273,26 @@ struct SafariView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_: SFSafariViewController, context _: Context) {}
+}
+
+extension NotificationData {
+    // Get the best available URL for this article
+    func getArticleUrl(additionalContent: [String: Any]? = nil) -> String? {
+        // First check for the direct article_url field we added
+        if let directURL = article_url, !directURL.isEmpty {
+            return directURL
+        }
+
+        // If we have the URL cached in additionalContent, use that
+        if let content = additionalContent, let url = content["url"] as? String {
+            return url
+        }
+
+        // Otherwise try to construct a URL from the domain
+        if let domain = domain {
+            return "https://\(domain)"
+        }
+
+        return nil
+    }
 }
