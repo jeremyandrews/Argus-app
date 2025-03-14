@@ -16,6 +16,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
 
+        // Setup the badge update system
+        NotificationUtils.setupBadgeUpdateSystem()
+
         // Register background tasks
         SyncManager.shared.registerBackgroundTasks()
 
