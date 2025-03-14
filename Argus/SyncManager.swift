@@ -13,8 +13,13 @@ class SyncManager {
 
     // Throttling parameters
     private var syncInProgress = false
+    private var syncInProgressTimestamp: Date? // New: track when sync started
     private var lastSyncTime: Date = .distantPast
     private let minimumSyncInterval: TimeInterval = 60
+    private let syncTimeoutInterval: TimeInterval = 300 // 5 minutes timeout
+
+    // Notification names for app state changes
+    private let notificationCenter = NotificationCenter.default
 
     // Network type enum
     private enum NetworkType {
@@ -24,9 +29,99 @@ class SyncManager {
         case unknown
     }
 
-    // Initialize without starting monitor - we'll use on-demand checking
+    // Initialize and register for app lifecycle notifications
     private init() {
-        // We no longer start network monitoring immediately
+        // Register for app lifecycle notifications on the main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            // App will enter foreground
+            self.notificationCenter.addObserver(
+                self,
+                selector: #selector(self.appWillEnterForeground),
+                name: UIApplication.willEnterForegroundNotification,
+                object: nil
+            )
+
+            // App did enter background
+            self.notificationCenter.addObserver(
+                self,
+                selector: #selector(self.appDidEnterBackground),
+                name: UIApplication.didEnterBackgroundNotification,
+                object: nil
+            )
+
+            // App did become active
+            self.notificationCenter.addObserver(
+                self,
+                selector: #selector(self.appDidBecomeActive),
+                name: UIApplication.didBecomeActiveNotification,
+                object: nil
+            )
+        }
+    }
+
+    deinit {
+        notificationCenter.removeObserver(self)
+    }
+
+    // Called when app comes to foreground
+    @objc private func appWillEnterForeground() {
+        print("App will enter foreground - checking sync status")
+        checkAndResetSyncIfStuck()
+
+        // Schedule a sync after a short delay to ensure network is ready
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            Task {
+                let networkReady = await self.shouldAllowSync()
+                if networkReady {
+                    print("Network is ready - triggering foreground sync")
+                    await self.triggerForegroundSync()
+                } else {
+                    print("Network not ready for sync")
+                }
+            }
+        }
+    }
+
+    // Called when app becomes active
+    @objc private func appDidBecomeActive() {
+        print("App did become active")
+        // Process queued items when app becomes active
+        startQueueProcessing()
+    }
+
+    // Called when app enters background
+    @objc private func appDidEnterBackground() {
+        print("App did enter background - scheduling background tasks")
+        scheduleBackgroundSync()
+        scheduleBackgroundFetch()
+    }
+
+    // Check if sync is stuck and reset if necessary
+    private func checkAndResetSyncIfStuck() {
+        if syncInProgress,
+           let timestamp = syncInProgressTimestamp,
+           Date().timeIntervalSince(timestamp) > syncTimeoutInterval
+        {
+            print("Sync appears stuck (running > \(Int(syncTimeoutInterval)) seconds). Resetting status.")
+            syncInProgress = false
+            syncInProgressTimestamp = nil
+        }
+    }
+
+    // Trigger a foreground sync with appropriate throttling
+    private func triggerForegroundSync() async {
+        // Shorter throttle for foreground syncs
+        let now = Date()
+        let foregroundSyncInterval: TimeInterval = 30 // 30 seconds for foreground
+
+        if now.timeIntervalSince(lastSyncTime) > foregroundSyncInterval {
+            print("Triggering foreground sync")
+            await sendRecentArticlesToServer()
+        } else {
+            print("Foreground sync skipped - last sync was \(Int(now.timeIntervalSince(lastSyncTime))) seconds ago")
+        }
     }
 
     // Check network condition only when needed
@@ -37,7 +132,6 @@ class SyncManager {
                 defer {
                     monitor.cancel()
                 }
-
                 if path.usesInterfaceType(.wifi) {
                     continuation.resume(returning: .wifi)
                 } else if path.usesInterfaceType(.cellular) {
@@ -69,39 +163,30 @@ class SyncManager {
         let startTime = Date()
         var processedCount = 0
         var hasMoreItems = false
-
         print("Processing queue items (max \(timeLimit) seconds)")
-
         do {
             let container = await MainActor.run {
                 ArgusApp.sharedModelContainer
             }
             let backgroundContext = ModelContext(container)
             let queueManager = backgroundContext.queueManager()
-
             // Process items until we hit the time limit or run out of items
             while Date().timeIntervalSince(startTime) < timeLimit {
                 // Get a batch of items to process
                 let itemsToProcess = try await queueManager.getItemsToProcess(limit: 5)
-
                 if itemsToProcess.isEmpty {
                     break // No more items to process
                 }
-
                 print("Processing batch of \(itemsToProcess.count) queue items")
-
                 var processedItems = [ArticleQueueItem]()
-
                 for item in itemsToProcess {
                     if Task.isCancelled {
                         break
                     }
-
                     // Check if we've exceeded the time limit
                     if Date().timeIntervalSince(startTime) >= timeLimit {
                         break
                     }
-
                     do {
                         try await processQueueItem(item, context: backgroundContext)
                         processedItems.append(item)
@@ -110,30 +195,24 @@ class SyncManager {
                         print("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
                     }
                 }
-
                 if !processedItems.isEmpty {
                     try backgroundContext.save()
-
                     for item in processedItems {
                         try queueManager.removeItem(item)
                     }
-
                     print("Successfully processed and saved batch of \(processedItems.count) items")
-
                     await MainActor.run {
                         NotificationUtils.updateAppBadgeCount()
                     }
                 }
             }
-
             let timeElapsed = Date().timeIntervalSince(startTime)
             print("Queue processing completed: \(processedCount) items in \(String(format: "%.2f", timeElapsed)) seconds")
-
             // If we processed items and there might be more, schedule another processing run soon
             if processedCount > 0 {
                 let remainingCount = try await queueManager.queueCount()
                 if remainingCount > 0 {
-                    // We have more items, but we'll let the background task system handle it
+                    // We have more items,  but we'll let the background task system handle it
                     await MainActor.run {
                         // Signal the system that we'd like to process more items soon
                         scheduleBackgroundFetch()
@@ -141,13 +220,10 @@ class SyncManager {
                     print("More items remaining (\(remainingCount)). Background task scheduled.")
                 }
             }
-
             let remainingCount = try await queueManager.queueCount()
             hasMoreItems = remainingCount > 0
-
             // Return the state
             return hasMoreItems
-
         } catch {
             print("Queue processing error: \(error.localizedDescription)")
             return false
@@ -158,35 +234,27 @@ class SyncManager {
         // Register article fetch task (for processing queue)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundFetchIdentifier, using: nil) { task in
             guard let appRefreshTask = task as? BGAppRefreshTask else { return }
-
             let processingTask = Task {
                 let didProcess = await self.processQueueItems()
                 appRefreshTask.setTaskCompleted(success: didProcess)
             }
-
             appRefreshTask.expirationHandler = {
                 processingTask.cancel()
             }
-
             self.scheduleBackgroundFetch()
         }
-
         // Register the sync task (for syncing with server)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundSyncIdentifier, using: nil) { task in
             guard let appRefreshTask = task as? BGAppRefreshTask else { return }
-
             let syncTask = Task {
                 await self.sendRecentArticlesToServer()
                 appRefreshTask.setTaskCompleted(success: true)
             }
-
             appRefreshTask.expirationHandler = {
                 syncTask.cancel()
             }
-
             self.scheduleBackgroundSync()
         }
-
         // Schedule initial tasks
         scheduleBackgroundFetch()
         scheduleBackgroundSync()
@@ -196,7 +264,6 @@ class SyncManager {
     func scheduleBackgroundFetch() {
         let request = BGAppRefreshTaskRequest(identifier: backgroundFetchIdentifier)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // 15 minutes
-
         do {
             try BGTaskScheduler.shared.submit(request)
             print("Background fetch scheduled")
@@ -208,7 +275,6 @@ class SyncManager {
     func scheduleBackgroundSync() {
         let request = BGAppRefreshTaskRequest(identifier: backgroundSyncIdentifier)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 30 * 60) // 30 minutes
-
         do {
             try BGTaskScheduler.shared.submit(request)
             print("Background sync scheduled")
@@ -221,11 +287,9 @@ class SyncManager {
         // Process queue once, then rely on scheduled background tasks
         Task.detached(priority: .utility) {
             let hasMoreItems = await self.processQueueItems()
-
             // Schedule background fetch - let the system determine the best time
             await MainActor.run {
                 self.scheduleBackgroundFetch()
-
                 // Only if we know there are pending items, we can request expedited processing
                 if hasMoreItems {
                     self.requestExpediteBackgroundProcessing()
@@ -240,7 +304,6 @@ class SyncManager {
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
         request.earliestBeginDate = Date(timeIntervalSinceNow: 60) // Minimum 1 minute
-
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
@@ -257,12 +320,14 @@ class SyncManager {
             print("Manual sync requested too soon (last sync was \(Int(now.timeIntervalSince(lastSyncTime))) seconds ago)")
             return false
         }
-
         await sendRecentArticlesToServer()
         return true
     }
 
     func sendRecentArticlesToServer() async {
+        // Check for a stuck sync operation first
+        checkAndResetSyncIfStuck()
+
         guard !syncInProgress else {
             print("Sync is already in progress. Skipping this call.")
             return
@@ -281,9 +346,13 @@ class SyncManager {
         }
 
         syncInProgress = true
-        defer { syncInProgress = false }
-        lastSyncTime = now
+        syncInProgressTimestamp = now // Record when sync started
+        defer {
+            syncInProgress = false
+            syncInProgressTimestamp = nil
+        }
 
+        lastSyncTime = now
         print("Starting server sync...")
 
         do {
@@ -296,11 +365,14 @@ class SyncManager {
 
             do {
                 let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
-
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
+
                 if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
                     print("Server returned \(unseenUrls.count) unseen articles - queuing for processing")
                     await queueArticlesForProcessing(urls: unseenUrls)
+
+                    // Start processing immediately if we received new articles
+                    startQueueProcessing()
                 } else {
                     print("Server says there are no unseen articles.")
                 }
@@ -326,20 +398,27 @@ class SyncManager {
         let itemJsonURL = item.jsonURL
 
         // Check if we've already seen this article
-        let seenFetchRequest = FetchDescriptor<SeenArticle>(predicate: #Predicate<SeenArticle> { seen in
-            seen.json_url == itemJsonURL
-        })
+        let seenFetchRequest = FetchDescriptor<SeenArticle>(
+            predicate: #Predicate<SeenArticle> { seen in
+                seen.json_url == itemJsonURL
+            }
+        )
+
         if let _ = try? context.fetch(seenFetchRequest).first {
             print("[Warning] Skipping already seen article: \(item.jsonURL)")
             return
         }
 
         // Check if the article has already been processed as a notification
-        let notificationFetchRequest = FetchDescriptor<NotificationData>(predicate: #Predicate<NotificationData> { notification in
-            notification.json_url == itemJsonURL
-        })
+        let notificationFetchRequest = FetchDescriptor<NotificationData>(
+            predicate: #Predicate<NotificationData> { notification in
+                notification.json_url == itemJsonURL
+            }
+        )
+
         if let _ = try? context.fetch(notificationFetchRequest).first {
             print("[Warning] Skipping duplicate notification: \(item.jsonURL)")
+
             return
         }
 
@@ -354,7 +433,6 @@ class SyncManager {
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 10
         let session = URLSession(configuration: config)
-
         let (data, _) = try await session.data(from: url)
 
         guard let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -376,7 +454,6 @@ class SyncManager {
 
         let date = Date()
         let notificationID = item.notificationID ?? UUID()
-
         if item.notificationID == nil {
             item.notificationID = notificationID
         }
@@ -422,7 +499,6 @@ class SyncManager {
         try context.transaction {
             context.insert(notification)
             context.insert(seenArticle)
-
             _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
             _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
         }
@@ -435,7 +511,6 @@ class SyncManager {
         await MainActor.run {
             let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
             let context = ArgusApp.sharedModelContainer.mainContext
-
             return (try? context.fetch(FetchDescriptor<SeenArticle>(
                 predicate: #Predicate { $0.date >= oneDayAgo }
             ))) ?? []
