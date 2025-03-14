@@ -47,25 +47,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func executeDeferredStartupTasks() {
-        // Sanity check.
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.2) {
+        // Single dispatch with sequential timing
+        DispatchQueue.global(qos: .utility).async {
             ArgusApp.logDatabaseTableSizes()
-        }
 
-        // Ensure database indexes a bit delayed
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.5) {
+            Thread.sleep(forTimeInterval: 0.3)
             self.verifyDatabaseIndexes()
-        }
 
-        // Start queue processing for article downloads
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1.5) {
-            // Start processing the article queue in the background
+            Thread.sleep(forTimeInterval: 0.5)
             SyncManager.shared.startQueueProcessing()
-        }
 
-        // Cleanup old articles in the background
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.0) {
-            Task { @MainActor in
+            Thread.sleep(forTimeInterval: 0.5)
+
+            DispatchQueue.main.async {
                 self.cleanupOldArticles()
                 self.removeDuplicateNotifications()
             }
