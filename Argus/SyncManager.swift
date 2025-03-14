@@ -168,12 +168,21 @@ class SyncManager {
     private func processQueueItem(_ item: ArticleQueueItem, context: ModelContext) async throws {
         let itemJsonURL = item.jsonURL
 
+        // Check if we've already seen this article
+        let seenFetchRequest = FetchDescriptor<SeenArticle>(predicate: #Predicate<SeenArticle> { seen in
+            seen.json_url == itemJsonURL
+        })
+        if let _ = try? context.fetch(seenFetchRequest).first {
+            print("[Warning] Skipping already seen article: \(item.jsonURL)")
+            return
+        }
+
         // Check if the article has already been processed as a notification
         let notificationFetchRequest = FetchDescriptor<NotificationData>(predicate: #Predicate<NotificationData> { notification in
             notification.json_url == itemJsonURL
         })
         if let _ = try? context.fetch(notificationFetchRequest).first {
-            print("[Warning] Skipping duplicate article: \(item.jsonURL)")
+            print("[Warning] Skipping duplicate notification: \(item.jsonURL)")
             return
         }
 
@@ -241,19 +250,24 @@ class SyncManager {
             similar_articles: articleJSON.similarArticles
         )
 
-        // Insert notification
-        context.insert(notification)
-
-        _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
-        _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
-
-        // Insert SeenArticle record
+        // Create SeenArticle record
         let seenArticle = SeenArticle(
             id: notificationID,
             json_url: articleJSON.jsonURL,
             date: date
         )
-        context.insert(seenArticle)
+
+        // Insert both the notification and SeenArticle in a transaction to ensure atomicity
+        try context.transaction {
+            context.insert(notification)
+            context.insert(seenArticle)
+
+            _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
+            _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+        }
+
+        // Save immediately to prevent race conditions
+        try context.save()
     }
 
     func sendRecentArticlesToServer() async {
