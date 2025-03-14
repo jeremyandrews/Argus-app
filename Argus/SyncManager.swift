@@ -1,5 +1,6 @@
 import BackgroundTasks
 import Foundation
+import Network
 import SwiftData
 import UIKit
 
@@ -14,6 +15,52 @@ class SyncManager {
     private var syncInProgress = false
     private var lastSyncTime: Date = .distantPast
     private let minimumSyncInterval: TimeInterval = 60
+
+    // Add to SyncManager.swift
+    private enum NetworkType {
+        case wifi
+        case cellular
+        case other
+        case unknown
+    }
+
+    private var currentNetworkType: NetworkType = .unknown
+    private let networkMonitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "SyncNetworkMonitor")
+
+    // Start monitoring in init()
+    private init() {
+        startNetworkMonitoring()
+    }
+
+    private func startNetworkMonitoring() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            guard let self = self else { return }
+
+            if path.usesInterfaceType(.wifi) {
+                self.currentNetworkType = .wifi
+            } else if path.usesInterfaceType(.cellular) {
+                self.currentNetworkType = .cellular
+            } else if path.status == .satisfied {
+                self.currentNetworkType = .other
+            } else {
+                self.currentNetworkType = .unknown
+            }
+        }
+        networkMonitor.start(queue: monitorQueue)
+    }
+
+    // Check if we should sync based on network type and settings
+    private func shouldAllowSync() -> Bool {
+        switch currentNetworkType {
+        case .wifi:
+            return true
+        case .cellular:
+            return UserDefaults.standard.bool(forKey: "allowCellularSync")
+        case .other, .unknown:
+            return UserDefaults.standard.bool(forKey: "allowCellularSync")
+        }
+    }
 
     // Process queue items with a hard 10-second time limit
     private func processQueueItems() async -> Bool {

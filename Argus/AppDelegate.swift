@@ -9,24 +9,12 @@ import UserNotifications
 class AppDelegate: UIResponder, UIApplicationDelegate {
     private let networkMonitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "NetworkMonitor")
-    private var currentNetworkType: NetworkType = .unknown
 
     // Background task identifiers
     private let backgroundFetchIdentifier = "com.arguspulse.articlefetch"
 
-    // Enum to track network connection type
-    private enum NetworkType {
-        case wifi
-        case cellular
-        case other
-        case unknown
-    }
-
     func application(_: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
-
-        // Start monitoring network type
-        startNetworkMonitoring()
 
         // Register background tasks
         SyncManager.shared.registerBackgroundTasks()
@@ -168,38 +156,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 print("Failed to add article to queue: \(error)")
                 finish(.failed)
             }
-        }
-    }
-
-    // Start monitoring network type
-    private func startNetworkMonitoring() {
-        networkMonitor.pathUpdateHandler = { [weak self] path in
-            guard let self = self else { return }
-
-            if path.usesInterfaceType(.wifi) {
-                self.currentNetworkType = .wifi
-            } else if path.usesInterfaceType(.cellular) {
-                self.currentNetworkType = .cellular
-            } else if path.status == .satisfied {
-                self.currentNetworkType = .other
-            } else {
-                self.currentNetworkType = .unknown
-            }
-        }
-        networkMonitor.start(queue: monitorQueue)
-    }
-
-    // Check if we should sync based on network type and settings
-    private func shouldAllowSync() -> Bool {
-        switch currentNetworkType {
-        case .wifi:
-            return true
-        case .cellular:
-            return UserDefaults.standard.bool(forKey: "allowCellularSync")
-        case .other, .unknown:
-            // For other connection types (like ethernet) or unknown,
-            // we'll use the same setting as cellular
-            return UserDefaults.standard.bool(forKey: "allowCellularSync")
         }
     }
 
