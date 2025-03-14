@@ -687,6 +687,11 @@ struct NewsDetailView: View {
     }
 
     private func getArticleUrl(_ notification: NotificationData) -> String? {
+        // First check for the direct article_url field we added
+        if let directURL = notification.article_url, !directURL.isEmpty {
+            return directURL
+        }
+
         // If we have the URL cached in additionalContent, use that
         if let content = additionalContent, let url = content["url"] as? String {
             return url
@@ -2081,6 +2086,11 @@ struct ShareSelectionView: View {
 
         // Helper function to get article URL (replica of what's used in NewsDetailView)
         func getArticleUrl() -> String? {
+            // First check for direct article_url
+            if let directURL = notification.article_url, !directURL.isEmpty {
+                return directURL
+            }
+
             // If we have the URL cached in content dictionary, use that
             if let url = content?["url"] as? String {
                 return url

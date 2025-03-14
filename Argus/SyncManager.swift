@@ -221,13 +221,14 @@ class SyncManager {
             item.notificationID = notificationID
         }
 
-        // Create NotificationData instance
+        // Create NotificationData instance with article_url
         let notification = NotificationData(
             id: notificationID,
             date: date,
             title: articleJSON.title,
             body: articleJSON.body,
             json_url: articleJSON.jsonURL,
+            article_url: articleJSON.url, // Use the URL field from articleJSON
             topic: articleJSON.topic,
             article_title: articleJSON.articleTitle,
             affected: articleJSON.affected,

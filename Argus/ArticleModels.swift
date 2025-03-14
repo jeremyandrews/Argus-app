@@ -4,6 +4,7 @@ struct ArticleJSON {
     let title: String // tiny_title
     let body: String // tiny_summary
     let jsonURL: String
+    let url: String?
     let topic: String?
     let articleTitle: String // unused
     let affected: String
@@ -27,6 +28,7 @@ struct PreparedArticle {
     let title: String // tiny_title
     let body: String // tiny_summary
     let jsonURL: String
+    let url: String?
     let topic: String?
     let articleTitle: String
     let affected: String
@@ -51,6 +53,7 @@ func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
         title: input.title, // tiny_title
         body: input.body, // tiny_summary
         jsonURL: input.jsonURL,
+        url: input.url, // Pass the URL
         topic: input.topic,
         articleTitle: input.articleTitle, // unused
         affected: input.affected,
@@ -80,8 +83,8 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         return nil
     }
 
-    let url = json["url"] as? String ?? ""
-    let domain = extractDomain(from: url)
+    let url = json["url"] as? String // Extract the URL but don't make it required
+    let domain = extractDomain(from: url ?? "")
 
     // Include quality badge information in the first pass
     let sourcesQuality = json["sources_quality"] as? Int
@@ -93,6 +96,8 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         title: title, // Maps from local "title" to ArticleJSON.title (originally from "tiny_title")
         body: body, // Maps from local "body" to ArticleJSON.body (originally from "tiny_summary")
         jsonURL: jsonURL, // Maps from local "jsonURL" to ArticleJSON.jsonURL (originally from "json_url")
+
+        url: url, // Store the raw URL value
 
         // Optional fields with no default value (will be nil if missing)
         topic: json["topic"] as? String, // Direct mapping, same name

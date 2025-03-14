@@ -560,6 +560,7 @@ class NotificationData {
     @Attribute var isArchived: Bool = false
     // @Attribute(.unique) var json_url: String = ""
     @Attribute var json_url: String = ""
+    @Attribute var article_url: String? = nil
     @Attribute var topic: String?
     @Attribute var article_title: String = ""
     @Attribute var affected: String = ""
@@ -600,6 +601,7 @@ class NotificationData {
         title: String,
         body: String,
         json_url: String,
+        article_url: String? = nil,
         topic: String? = nil,
         article_title: String,
         affected: String,
@@ -634,6 +636,7 @@ class NotificationData {
         self.title = title
         self.body = body
         self.json_url = json_url
+        self.article_url = article_url
         self.topic = topic
         self.article_title = article_title
         self.affected = affected
