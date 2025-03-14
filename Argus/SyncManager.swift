@@ -1,3 +1,4 @@
+import BackgroundTasks
 import Foundation
 import SwiftData
 import UIKit
@@ -30,15 +31,10 @@ func withTimeout<T>(seconds: Double, operation: @escaping () async throws -> T) 
 
 class SyncManager {
     static let shared = SyncManager()
-    private init() {
-        // Initialize timer when SyncManager is created
-        setupQueueProcessingTimer()
-    }
 
     private var syncInProgress = false
     private var lastSyncTime: Date = .distantPast
     private let minimumSyncInterval: TimeInterval = 60
-    private var queueProcessingTimer: Timer?
 
     // Process queue items with a hard 10-second time limit
     private func processQueueItems() async -> Bool {
@@ -122,25 +118,71 @@ class SyncManager {
         }
     }
 
-    // Set up a timer to process the queue periodically (every 15 minutes)
-    private func setupQueueProcessingTimer() {
-        // Cancel any existing timer
-        queueProcessingTimer?.invalidate()
+    func registerBackgroundTasks() {
+        // Register the background task identifier
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.arguspulse.articlefetch", using: nil) { task in
+            // Cast the task to app refresh task
+            guard let appRefreshTask = task as? BGAppRefreshTask else { return }
 
-        // Create a new timer that fires every 15 minutes
-        queueProcessingTimer = Timer.scheduledTimer(
-            withTimeInterval: 15 * 60, // 15 minutes
-            repeats: true
-        ) { [weak self] _ in
-            Task {
-                await self?.processQueueItems()
+            // Create a task that processes the queue
+            let processingTask = Task {
+                let didProcess = await self.processQueueItems()
+                // Complete the background task
+                appRefreshTask.setTaskCompleted(success: didProcess)
             }
+
+            // Set up a task cancellation handler
+            appRefreshTask.expirationHandler = {
+                processingTask.cancel()
+            }
+
+            // Schedule the next background task when this one completes
+            self.scheduleBackgroundFetch()
         }
 
-        // Make sure timer runs even when scrolling
-        RunLoop.current.add(queueProcessingTimer!, forMode: .common)
+        // Schedule the first background fetch
+        scheduleBackgroundFetch()
+        print("Background task registration complete")
+    }
 
-        print("Queue processing timer set up - will run every 15 minutes")
+    func scheduleBackgroundFetch() {
+        let request = BGAppRefreshTaskRequest(identifier: "com.arguspulse.articlefetch")
+
+        // Set this to run at least 15 minutes from now (similar to your original timer)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            print("Background fetch scheduled")
+        } catch {
+            print("Could not schedule background fetch: \(error)")
+        }
+    }
+
+    // Start a background task to process queue items (called when app launches/becomes active)
+    func startQueueProcessing() {
+        // Process queue immediately when called.
+        Task.detached(priority: .utility) {
+            _ = await self.processQueueItems()
+
+            // Always schedule the next background fetch
+            await MainActor.run {
+                self.scheduleBackgroundFetch()
+            }
+        }
+    }
+
+    // For backward compatibility with iOS 12 and earlier
+    func handleBackgroundFetch(completion: @escaping (UIBackgroundFetchResult) -> Void) {
+        Task {
+            let didProcess = await processQueueItems()
+            completion(didProcess ? .newData : .noData)
+
+            // Schedule the next background fetch
+            await MainActor.run {
+                self.scheduleBackgroundFetch()
+            }
+        }
     }
 
     // Schedule an extra processing run after a short delay (for when we know there are more items)
@@ -149,14 +191,6 @@ class SyncManager {
             Task {
                 await self?.processQueueItems()
             }
-        }
-    }
-
-    // Start a background task to process queue items periodically
-    func startQueueProcessing() {
-        // Process queue immediately when called.
-        Task.detached(priority: .utility) {
-            await self.processQueueItems()
         }
     }
 

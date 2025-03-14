@@ -269,3 +269,195 @@ func saveAttributedString(
         return false
     }
 }
+
+@Model
+class NotificationData {
+    @Attribute var id: UUID = UUID()
+    @Attribute var date: Date = Date()
+    @Attribute var title: String = ""
+    @Attribute var body: String = ""
+    @Attribute var isViewed: Bool = false
+    @Attribute var isBookmarked: Bool = false
+    @Attribute var isArchived: Bool = false
+    // @Attribute(.unique) var json_url: String = ""
+    @Attribute var json_url: String = ""
+    @Attribute var article_url: String? = nil
+    @Attribute var topic: String?
+    @Attribute var article_title: String = ""
+    @Attribute var affected: String = ""
+    @Attribute var domain: String?
+    @Attribute var pub_date: Date?
+
+    // New fields for analytics and content
+    @Attribute var sources_quality: Int?
+    @Attribute var argument_quality: Int?
+    @Attribute var source_type: String?
+    @Attribute var quality: Int?
+
+    // Text fields for source content
+    @Attribute var summary: String?
+    @Attribute var critical_analysis: String?
+    @Attribute var logical_fallacies: String?
+    @Attribute var source_analysis: String?
+    @Attribute var relation_to_topic: String?
+    @Attribute var additional_insights: String?
+
+    // BLOB fields for rich text versions
+    @Attribute var title_blob: Data?
+    @Attribute var body_blob: Data?
+    @Attribute var summary_blob: Data?
+    @Attribute var critical_analysis_blob: Data?
+    @Attribute var logical_fallacies_blob: Data?
+    @Attribute var source_analysis_blob: Data?
+    @Attribute var relation_to_topic_blob: Data?
+    @Attribute var additional_insights_blob: Data?
+
+    // Engine statistics and similar articles stored as JSON strings
+    @Attribute var engine_stats: String?
+    @Attribute var similar_articles: String?
+
+    init(
+        id: UUID = UUID(),
+        date: Date,
+        title: String,
+        body: String,
+        json_url: String,
+        article_url: String? = nil,
+        topic: String? = nil,
+        article_title: String,
+        affected: String,
+        domain: String? = nil,
+        pub_date: Date? = nil,
+        isViewed: Bool = false,
+        isBookmarked: Bool = false,
+        isArchived: Bool = false,
+        sources_quality: Int? = nil,
+        argument_quality: Int? = nil,
+        source_type: String? = nil,
+        source_analysis: String? = nil,
+        quality: Int? = nil,
+        summary: String? = nil,
+        critical_analysis: String? = nil,
+        logical_fallacies: String? = nil,
+        relation_to_topic: String? = nil,
+        additional_insights: String? = nil,
+        title_blob: Data? = nil,
+        body_blob: Data? = nil,
+        summary_blob: Data? = nil,
+        critical_analysis_blob: Data? = nil,
+        logical_fallacies_blob: Data? = nil,
+        source_analysis_blob: Data? = nil,
+        relation_to_topic_blob: Data? = nil,
+        additional_insights_blob: Data? = nil,
+        engine_stats: String? = nil,
+        similar_articles: String? = nil
+    ) {
+        self.id = id
+        self.date = date
+        self.title = title
+        self.body = body
+        self.json_url = json_url
+        self.article_url = article_url
+        self.topic = topic
+        self.article_title = article_title
+        self.affected = affected
+        self.domain = domain
+        self.pub_date = pub_date
+        self.isViewed = isViewed
+        self.isBookmarked = isBookmarked
+        self.isArchived = isArchived
+        self.sources_quality = sources_quality
+        self.argument_quality = argument_quality
+        self.source_type = source_type
+        self.source_analysis = source_analysis
+        self.quality = quality
+        self.summary = summary
+        self.critical_analysis = critical_analysis
+        self.logical_fallacies = logical_fallacies
+        self.relation_to_topic = relation_to_topic
+        self.additional_insights = additional_insights
+        self.title_blob = title_blob
+        self.body_blob = body_blob
+        self.summary_blob = summary_blob
+        self.critical_analysis_blob = critical_analysis_blob
+        self.logical_fallacies_blob = logical_fallacies_blob
+        self.source_analysis_blob = source_analysis_blob
+        self.relation_to_topic_blob = relation_to_topic_blob
+        self.additional_insights_blob = additional_insights_blob
+        self.engine_stats = engine_stats
+        self.similar_articles = similar_articles
+    }
+
+    // Convenience methods to convert between NSAttributedString and Data
+
+    func setRichText(_ attributedString: NSAttributedString, for field: RichTextField,
+                     saveContext: Bool = true) throws
+    {
+        let data = try NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false)
+
+        switch field {
+        case .title:
+            title_blob = data
+        case .body:
+            body_blob = data
+        case .summary:
+            summary_blob = data
+        case .criticalAnalysis:
+            critical_analysis_blob = data
+        case .logicalFallacies:
+            logical_fallacies_blob = data
+        case .sourceAnalysis:
+            source_analysis_blob = data
+        case .relationToTopic:
+            relation_to_topic_blob = data
+        case .additionalInsights:
+            additional_insights_blob = data
+        }
+
+        // Save the context if requested and we can access it
+        if saveContext, let modelContext = modelContext {
+            try modelContext.save()
+        }
+    }
+
+    private func getBlobData(for field: RichTextField) -> Data? {
+        switch field {
+        case .title:
+            return title_blob
+        case .body:
+            return body_blob
+        case .summary:
+            return summary_blob
+        case .criticalAnalysis:
+            return critical_analysis_blob
+        case .logicalFallacies:
+            return logical_fallacies_blob
+        case .sourceAnalysis:
+            return source_analysis_blob
+        case .relationToTopic:
+            return relation_to_topic_blob
+        case .additionalInsights:
+            return additional_insights_blob
+        }
+    }
+}
+
+// Extension to provide computed property for effective date
+extension NotificationData {
+    var effectiveDate: Date {
+        return pub_date ?? date
+    }
+}
+
+@Model
+class SeenArticle {
+    @Attribute var id: UUID = UUID()
+    @Attribute var json_url: String = ""
+    @Attribute var date: Date = Date()
+
+    init(id: UUID, json_url: String, date: Date) {
+        self.id = id
+        self.json_url = json_url
+        self.date = date
+    }
+}

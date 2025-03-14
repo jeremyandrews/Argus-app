@@ -8,5 +8,9 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+	    <string>com.arguspulse.articlefetch</string>
+	</array>
 </dict>
 </plist>
