@@ -55,7 +55,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             self.verifyDatabaseIndexes()
 
             Thread.sleep(forTimeInterval: 0.5)
-            SyncManager.shared.startQueueProcessing()
+            // Instead of starting indefinite processing, just queue one cycle
+            Task {
+                _ = await SyncManager.shared.processQueue()
+            }
 
             Thread.sleep(forTimeInterval: 0.5)
 

@@ -68,6 +68,7 @@ class SyncManager {
         let timeLimit = 10.0 // Always limit to 10 seconds
         let startTime = Date()
         var processedCount = 0
+        var hasMoreItems = false
 
         print("Processing queue items (max \(timeLimit) seconds)")
 
@@ -132,12 +133,20 @@ class SyncManager {
             if processedCount > 0 {
                 let remainingCount = try await queueManager.queueCount()
                 if remainingCount > 0 {
-                    // If there are more items to process, schedule another run soon
-                    scheduleExtraQueueProcessing()
+                    // We have more items, but we'll let the background task system handle it
+                    await MainActor.run {
+                        // Signal the system that we'd like to process more items soon
+                        scheduleBackgroundFetch()
+                    }
+                    print("More items remaining (\(remainingCount)). Background task scheduled.")
                 }
             }
 
-            return processedCount > 0
+            let remainingCount = try await queueManager.queueCount()
+            hasMoreItems = remainingCount > 0
+
+            // Return the state
+            return hasMoreItems
 
         } catch {
             print("Queue processing error: \(error.localizedDescription)")
@@ -208,16 +217,34 @@ class SyncManager {
         }
     }
 
-    // Start a background task to process queue items (called when app launches/becomes active)
     func startQueueProcessing() {
-        // Process queue immediately when called.
+        // Process queue once, then rely on scheduled background tasks
         Task.detached(priority: .utility) {
-            _ = await self.processQueueItems()
+            let hasMoreItems = await self.processQueueItems()
 
-            // Always schedule the next background fetch
+            // Schedule background fetch - let the system determine the best time
             await MainActor.run {
                 self.scheduleBackgroundFetch()
+
+                // Only if we know there are pending items, we can request expedited processing
+                if hasMoreItems {
+                    self.requestExpediteBackgroundProcessing()
+                }
             }
+        }
+    }
+
+    func requestExpediteBackgroundProcessing() {
+        // Request expedited processing only if truly needed
+        let request = BGProcessingTaskRequest(identifier: backgroundFetchIdentifier)
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 60) // Minimum 1 minute
+
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            print("Could not schedule expedited processing: \(error)")
         }
     }
 
@@ -287,15 +314,6 @@ class SyncManager {
         // Always schedule next background sync
         await MainActor.run {
             self.scheduleBackgroundSync()
-        }
-    }
-
-    // Schedule an extra processing run after a short delay (for when we know there are more items)
-    private func scheduleExtraQueueProcessing() {
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30) { [weak self] in
-            Task {
-                await self?.processQueueItems()
-            }
         }
     }
 
