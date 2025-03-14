@@ -48,6 +48,7 @@ struct ArgusApp: App {
                     if newPhase == .active {
                         Task { @MainActor in
                             self.appDelegate.cleanupOldArticles()
+                            self.appDelegate.removeDuplicateNotifications()
                         }
                         Task {
                             await SyncManager.shared.sendRecentArticlesToServer()
