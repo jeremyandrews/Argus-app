@@ -3,32 +3,6 @@ import Foundation
 import SwiftData
 import UIKit
 
-extension Task where Success == Never, Failure == Never {
-    static func timeout(seconds: Double) async throws {
-        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-        throw TimeoutError()
-    }
-}
-
-struct TimeoutError: Error {}
-
-func withTimeout<T>(seconds: Double, operation: @escaping () async throws -> T) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask {
-            try await operation()
-        }
-
-        group.addTask {
-            try await Task.timeout(seconds: seconds)
-            fatalError("Timeout task should never complete normally")
-        }
-
-        let result = try await group.next()!
-        group.cancelAll()
-        return result
-    }
-}
-
 class SyncManager {
     static let shared = SyncManager()
 
@@ -227,9 +201,12 @@ class SyncManager {
         }
 
         // Fetch with timeout
-        let (data, _) = try await withTimeout(seconds: 10) {
-            try await URLSession.shared.data(from: url)
-        }
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForResource = 10
+        let session = URLSession(configuration: config)
+
+        let (data, _) = try await session.data(from: url)
 
         guard let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw NSError(domain: "com.arguspulse", code: 400, userInfo: [
@@ -325,21 +302,25 @@ class SyncManager {
             let recentArticles = await fetchRecentArticles()
             let jsonUrls = recentArticles.map { $0.json_url }
 
-            try await withTimeout(seconds: 10) {
-                let url = URL(string: "https://api.arguspulse.com/articles/sync")!
-                let payload = ["seen_articles": jsonUrls]
+            // APIClient handles timeouts internally
+            let url = URL(string: "https://api.arguspulse.com/articles/sync")!
+            let payload = ["seen_articles": jsonUrls]
+
+            do {
+                // APIClient handles timeouts internally
                 let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
 
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
                 if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
                     // Queue the unseen articles instead of fetching them immediately
-                    await self.queueArticlesForProcessing(urls: unseenUrls)
+                    await queueArticlesForProcessing(urls: unseenUrls)
                 } else {
                     print("Server says there are no unseen articles.")
                 }
+            } catch let error as URLError where error.code == .timedOut {
+                // Handle timeout specifically
+                print("Sync operation timed out")
             }
-        } catch is TimeoutError {
-            print("Sync operation timed out after 10 seconds.")
         } catch {
             print("Failed to sync articles: \(error)")
         }
