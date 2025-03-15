@@ -419,45 +419,87 @@ struct NewsDetailView: View {
         // Cancel any pending load from a previous rapid-tap
         tabChangeTask?.cancel()
 
-        // Load content synchronously, before creating the async task
-        // This ensures immediate update of both title and body
-        if let nextIndex = getNextValidIndex(direction: direction),
-           nextIndex >= 0 && nextIndex < notifications.count
-        {
-            let nextNotification = notifications[nextIndex]
+        // Get the next valid index
+        guard let nextIndex = getNextValidIndex(direction: direction),
+              nextIndex >= 0 && nextIndex < notifications.count
+        else {
+            return
+        }
 
-            // Pre-load title and body synchronously
-            let preloadedTitle = getAttributedString(for: .title, from: nextNotification)
-            let preloadedBody = getAttributedString(for: .body, from: nextNotification)
+        let nextNotification = notifications[nextIndex]
 
-            // Update UI immediately with all header values
-            titleAttributedString = preloadedTitle
-            bodyAttributedString = preloadedBody
-            // Set preloadedNotification immediately so all header fields update
-            preloadedNotification = nextNotification
+        // Clear out content from all sections to avoid showing old content briefly
+        clearSectionContent()
 
-            // Reset expanded sections to defaults
-            expandedSections = Self.getDefaultExpandedSections()
+        // Pre-load title and body synchronously as they're always visible
+        let preloadedTitle = getAttributedString(for: .title, from: nextNotification)
+        let preloadedBody = getAttributedString(for: .body, from: nextNotification)
 
-            // Then handle the rest of the navigation asynchronously
-            tabChangeTask = Task {
-                await MainActor.run {
-                    currentIndex = nextIndex
-                    preloadedNotification = nil
-                    // Trigger scroll to top when changing articles
-                    scrollToTopTrigger = UUID()
-                    markAsViewed()
-                }
+        // Update UI immediately with title and body
+        titleAttributedString = preloadedTitle
+        bodyAttributedString = preloadedBody
 
-                // Load summary in background since it's default-open
-                if let n = currentNotification {
-                    let newSummary = getAttributedString(for: .summary, from: n, createIfMissing: true)
-                    await MainActor.run {
-                        summaryAttributedString = newSummary
-                    }
-                }
+        // Set preloadedNotification immediately so all header fields update
+        preloadedNotification = nextNotification
+
+        // Reset expanded sections to defaults
+        let defaultExpandedSections = Self.getDefaultExpandedSections()
+        expandedSections = defaultExpandedSections
+
+        // Preload content for any sections that are expanded by default
+        for (sectionName, isExpanded) in defaultExpandedSections {
+            if isExpanded {
+                preloadContentForSection(sectionName, from: nextNotification)
             }
         }
+
+        // Then handle the rest of the navigation asynchronously
+        tabChangeTask = Task {
+            await MainActor.run {
+                currentIndex = nextIndex
+                preloadedNotification = nil
+                // Trigger scroll to top when changing articles
+                scrollToTopTrigger = UUID()
+                markAsViewed()
+            }
+        }
+    }
+
+    private func preloadContentForSection(_ sectionName: String, from notification: NotificationData) {
+        let field = getRichTextFieldForSection(sectionName)
+        let attributedString = getAttributedString(for: field, from: notification, createIfMissing: true)
+
+        // Store the attributed string in the appropriate property
+        switch field {
+        case .summary:
+            summaryAttributedString = attributedString
+        case .criticalAnalysis:
+            criticalAnalysisAttributedString = attributedString
+        case .logicalFallacies:
+            logicalFallaciesAttributedString = attributedString
+        case .sourceAnalysis:
+            sourceAnalysisAttributedString = attributedString
+        case .relationToTopic, .additionalInsights:
+            // These don't have dedicated properties but we can store in cachedContentBySection
+            if let attributedString = attributedString {
+                cachedContentBySection[sectionName] = attributedString
+            }
+        case .title, .body:
+            // Already handled separately
+            break
+        }
+    }
+
+    private func clearSectionContent() {
+        // Clear all cached attributed strings except title and body
+        // which we'll immediately replace
+        summaryAttributedString = nil
+        criticalAnalysisAttributedString = nil
+        logicalFallaciesAttributedString = nil
+        sourceAnalysisAttributedString = nil
+
+        // Clear any other cached section content
+        cachedContentBySection = [:]
     }
 
     private func getNextValidIndex(direction: NavigationDirection) -> Int? {
