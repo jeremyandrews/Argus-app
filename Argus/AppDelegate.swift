@@ -7,6 +7,10 @@ import UIKit
 import UserNotifications
 
 class AppDelegate: UIResponder, UIApplicationDelegate {
+    private var isRunningUITests: Bool {
+        ProcessInfo.processInfo.arguments.contains("UI_TESTING")
+    }
+
     private let networkMonitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "NetworkMonitor")
 
@@ -25,15 +29,30 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Request notification permissions separately from other app startup routines
         requestNotificationPermissions()
 
-        // Defer non-crucial tasks to minimize startup freeze
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            self.executeDeferredStartupTasks()
+        // Check if we're running UI tests and should set up test data
+        if isRunningUITests {
+            setupTestDataIfNeeded()
+        } else {
+            // Only execute deferred startup tasks when not running tests
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                self.executeDeferredStartupTasks()
+            }
         }
 
         return true
     }
 
     private func requestNotificationPermissions() {
+        // Skip requesting permissions if we're in UI Testing mode
+        if ProcessInfo.processInfo.arguments.contains("UI_TESTING_PERMISSIONS_GRANTED") {
+            print("UI Testing: Skipping notification permission request")
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: Notification.Name("NotificationPermissionGranted"), object: nil)
+            }
+            return
+        }
+
+        // Normal permission request for real app usage
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if granted {
                 DispatchQueue.main.async {
@@ -305,6 +324,77 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             } catch {
                 print("Failed to authenticate device: \(error)")
             }
+        }
+    }
+
+    private func setupTestDataIfNeeded() {
+        // Only proceed if the environment variable is set (adds extra safety)
+        guard
+            isRunningUITests,
+            ProcessInfo.processInfo.environment["SETUP_TEST_DATA"] == "1"
+        else {
+            return
+        }
+
+        let context = ArgusApp.sharedModelContainer.mainContext
+
+        // Check if we already have test data
+        do {
+            let existingCount = try context.fetchCount(FetchDescriptor<NotificationData>())
+            if existingCount > 0 {
+                // We already have data, no need to create more
+                print("UI Tests: Using \(existingCount) existing notifications for testing")
+                return
+            }
+
+            print("UI Tests: Creating test notification data")
+
+            // Create a sample notification for testing
+            let testNotification = NotificationData(
+                id: UUID(),
+                date: Date(), // Now in correct order
+                title: "Test Article Title for UI Tests",
+                body: "This is a test article body with enough content to display properly in our UI tests.",
+                json_url: "https://example.com/test.json",
+                article_url: "https://example.com/test-article",
+                topic: "Technology",
+                article_title: "Test Article Title for UI Tests",
+                affected: "",
+                domain: "example.com",
+                pub_date: Date(),
+                isViewed: false,
+                isBookmarked: true,
+                isArchived: false,
+                sources_quality: 3,
+                argument_quality: 4,
+                source_type: "News",
+                source_analysis: "The source appears to be reputable.",
+                quality: 3,
+                summary: "This is a summary of the test article.",
+                critical_analysis: "This is a critical analysis of the article.",
+                logical_fallacies: "The article contains some logical fallacies.",
+                relation_to_topic: "This article is highly relevant to the topic.",
+                additional_insights: "Here are some additional contextual insights."
+            )
+
+            // Add the analysis fields needed for the test
+            testNotification.summary = "This is a summary of the test article."
+            testNotification.critical_analysis = "This is a critical analysis of the article."
+            testNotification.logical_fallacies = "The article contains some logical fallacies."
+            testNotification.source_analysis = "The source appears to be reputable."
+            testNotification.relation_to_topic = "This article is highly relevant to the topic."
+            testNotification.additional_insights = "Here are some additional contextual insights."
+            testNotification.source_type = "News"
+            testNotification.sources_quality = 3
+            testNotification.argument_quality = 4
+
+            // Save to the container
+            context.insert(testNotification)
+            try context.save()
+
+            print("UI Tests: Test data created successfully")
+        } catch {
+            print("UI Tests: Error setting up test data: \(error)")
         }
     }
 }
