@@ -473,6 +473,45 @@ class SyncManager {
             ])
         }
 
+        // Create engine stats JSON string if the required fields are present in the raw JSON
+        var engineStatsJSON: String?
+        var engineStatsDict: [String: Any] = [:]
+
+        if let model = enrichedJson["model"] as? String {
+            engineStatsDict["model"] = model
+        }
+
+        if let elapsedTime = enrichedJson["elapsed_time"] as? Double {
+            engineStatsDict["elapsed_time"] = elapsedTime
+        }
+
+        if let stats = enrichedJson["stats"] as? String {
+            engineStatsDict["stats"] = stats
+        }
+
+        if let systemInfo = enrichedJson["system_info"] as? [String: Any] {
+            engineStatsDict["system_info"] = systemInfo
+        }
+
+        // Only create the JSON if we have some data to include
+        if !engineStatsDict.isEmpty {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: engineStatsDict),
+               let jsonString = String(data: jsonData, encoding: .utf8)
+            {
+                engineStatsJSON = jsonString
+            }
+        }
+
+        // Create similar articles JSON string if available in the raw JSON
+        var similarArticlesJSON: String?
+        if let similarArticles = enrichedJson["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: similarArticles),
+               let jsonString = String(data: jsonData, encoding: .utf8)
+            {
+                similarArticlesJSON = jsonString
+            }
+        }
+
         let date = Date()
         let notificationID = item.notificationID ?? UUID()
         if item.notificationID == nil {
@@ -505,8 +544,8 @@ class SyncManager {
             logical_fallacies: articleJSON.logicalFallacies,
             relation_to_topic: articleJSON.relationToTopic,
             additional_insights: articleJSON.additionalInsights,
-            engine_stats: articleJSON.engineStats,
-            similar_articles: articleJSON.similarArticles
+            engine_stats: engineStatsJSON,
+            similar_articles: similarArticlesJSON
         )
 
         // Create SeenArticle record
