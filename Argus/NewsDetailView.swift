@@ -30,6 +30,8 @@ struct NewsDetailView: View {
     @State private var cachedContentBySection: [String: NSAttributedString] = [:]
     @State private var visibleTabIndex: Int? = nil
     @State private var preloadedNotification: NotificationData?
+    @State private var isLoadingNextArticle = false
+    @State private var contentTransitionID = UUID() // To force proper layout recalculation
 
     private var isCurrentIndexValid: Bool {
         currentIndex >= 0 && currentIndex < notifications.count
@@ -107,6 +109,8 @@ struct NewsDetailView: View {
 
                                     // All sections below, default collapsed
                                     additionalSectionsView
+                                        .opacity(isLoadingNextArticle ? 0.3 : 1.0) // Fade sections during transitions
+                                        .animation(.easeInOut(duration: 0.2), value: isLoadingNextArticle)
                                 }
                                 .onAppear {
                                     scrollViewProxy = proxy
@@ -403,6 +407,9 @@ struct NewsDetailView: View {
     }
 
     private func navigateToArticle(direction: NavigationDirection) {
+        // Set loading flag
+        isLoadingNextArticle = true
+
         // Cancel any pending load from a previous rapid-tap
         tabChangeTask?.cancel()
 
@@ -410,44 +417,44 @@ struct NewsDetailView: View {
         guard let nextIndex = getNextValidIndex(direction: direction),
               nextIndex >= 0 && nextIndex < notifications.count
         else {
+            isLoadingNextArticle = false
             return
         }
 
         let nextNotification = notifications[nextIndex]
 
-        // Clear out content from all sections to avoid showing old content briefly
-        clearSectionContent()
-
-        // Pre-load title and body synchronously as they're always visible
+        // Pre-calculate all content before making any view updates
         let preloadedTitle = getAttributedString(for: .title, from: nextNotification)
         let preloadedBody = getAttributedString(for: .body, from: nextNotification)
 
-        // Update UI immediately with title and body
-        titleAttributedString = preloadedTitle
-        bodyAttributedString = preloadedBody
-
-        // Set preloadedNotification immediately so all header fields update
-        preloadedNotification = nextNotification
-
-        // Reset expanded sections to defaults
-        let defaultExpandedSections = Self.getDefaultExpandedSections()
-        expandedSections = defaultExpandedSections
-
-        // Preload content for any sections that are expanded by default
-        for (sectionName, isExpanded) in defaultExpandedSections {
-            if isExpanded {
-                preloadContentForSection(sectionName, from: nextNotification)
-            }
-        }
-
-        // Then handle the rest of the navigation asynchronously
+        // Two-phase update: change content then layout
         tabChangeTask = Task {
+            // First phase: change the content reference, but keep the old size
             await MainActor.run {
+                // Update content references while still loading
+                clearSectionContent()
+                titleAttributedString = preloadedTitle
+                bodyAttributedString = preloadedBody
+                preloadedNotification = nextNotification
+            }
+
+            // Brief pause for the first update to complete
+            try? await Task.sleep(for: .milliseconds(50))
+
+            // Second phase: trigger a full layout recalculation
+            await MainActor.run {
+                // Force layout recalculation with new ID
+                contentTransitionID = UUID()
                 currentIndex = nextIndex
                 preloadedNotification = nil
-                // Trigger scroll to top when changing articles
                 scrollToTopTrigger = UUID()
                 markAsViewed()
+
+                // Reset expanded sections to defaults
+                expandedSections = Self.getDefaultExpandedSections()
+
+                // Complete transition
+                isLoadingNextArticle = false
             }
         }
     }
@@ -557,11 +564,13 @@ struct NewsDetailView: View {
                 if let titleAttrString = titleAttributedString {
                     NonSelectableRichTextView(attributedString: titleAttrString)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text(n.title)
                         .font(.headline)
                         .fontWeight(n.isViewed ? .regular : .bold)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Publication Date
@@ -577,12 +586,14 @@ struct NewsDetailView: View {
                     NonSelectableRichTextView(attributedString: bodyAttrString)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text(n.body)
                         .font(.body)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Affected
@@ -609,9 +620,12 @@ struct NewsDetailView: View {
                 }
             }
         }
+        .id(contentTransitionID) // Force layout recalculation when this changes
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .background(currentNotification?.isViewed ?? true ? Color.clear : Color.blue.opacity(0.15))
+        .opacity(isLoadingNextArticle ? 0.5 : 1.0) // Fade during transitions
+        .animation(.easeInOut(duration: 0.2), value: isLoadingNextArticle)
     }
 
     // MARK: - Additional Sections
