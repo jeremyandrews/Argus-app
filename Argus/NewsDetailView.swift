@@ -31,7 +31,9 @@ struct NewsDetailView: View {
     @State private var visibleTabIndex: Int? = nil
     @State private var preloadedNotification: NotificationData?
     @State private var isLoadingNextArticle = false
-    @State private var contentTransitionID = UUID() // To force proper layout recalculation
+    @State private var contentTransitionID = UUID()
+    // Store loading tasks per section to be able to cancel them during navigation
+    @State private var sectionLoadingTasks: [String: Task<Void, Never>] = [:]
 
     private var isCurrentIndexValid: Bool {
         currentIndex >= 0 && currentIndex < notifications.count
@@ -406,12 +408,16 @@ struct NewsDetailView: View {
         }
     }
 
+    // Make sure we clean up properly when navigating between articles
     private func navigateToArticle(direction: NavigationDirection) {
         // Set loading flag
         isLoadingNextArticle = true
 
         // Cancel any pending load from a previous rapid-tap
         tabChangeTask?.cancel()
+
+        // Reset content state before navigating
+        resetContentState()
 
         // Get the next valid index
         guard let nextIndex = getNextValidIndex(direction: direction),
@@ -453,35 +459,69 @@ struct NewsDetailView: View {
                 // Reset expanded sections to defaults
                 expandedSections = Self.getDefaultExpandedSections()
 
+                // Pre-load summary content if it's expanded by default
+                if expandedSections["Summary"] == true {
+                    loadContentForSection("Summary")
+                }
+
                 // Complete transition
                 isLoadingNextArticle = false
             }
         }
     }
 
-    private func preloadContentForSection(_ sectionName: String, from notification: NotificationData) {
-        let field = getRichTextFieldForSection(sectionName)
-        let attributedString = getAttributedString(for: field, from: notification, createIfMissing: true)
+    // Modified to handle section loading with better task management
+    private func loadContentForSection(_ section: String) {
+        guard currentNotification != nil else { return }
 
-        // Store the attributed string in the appropriate property
-        switch field {
-        case .summary:
-            summaryAttributedString = attributedString
-        case .criticalAnalysis:
-            criticalAnalysisAttributedString = attributedString
-        case .logicalFallacies:
-            logicalFallaciesAttributedString = attributedString
-        case .sourceAnalysis:
-            sourceAnalysisAttributedString = attributedString
-        case .relationToTopic, .additionalInsights:
-            // These don't have dedicated properties but we can store in cachedContentBySection
-            if let attributedString = attributedString {
-                cachedContentBySection[sectionName] = attributedString
-            }
-        case .title, .body:
-            // Already handled separately
-            break
+        // Check if content is already loaded
+        if getAttributedStringForSection(section) != nil {
+            return // Already loaded, nothing to do
         }
+
+        // Cancel any existing task for this section
+        sectionLoadingTasks[section]?.cancel()
+
+        let field = getRichTextFieldForSection(section)
+
+        // Create and store the new task
+        let loadingTask = Task { @MainActor in
+            // We're already on the main actor, so we can safely work with non-Sendable types
+            let attributedString = getAttributedString(
+                for: field,
+                from: currentNotification!, // Safe because we checked above
+                createIfMissing: true
+            )
+
+            // If task wasn't cancelled, update UI state
+            if !Task.isCancelled {
+                // Clear loading state
+                sectionLoadingTasks[section] = nil
+
+                // Store the result in the appropriate property
+                if let attributedString = attributedString {
+                    switch field {
+                    case .summary:
+                        summaryAttributedString = attributedString
+                    case .criticalAnalysis:
+                        criticalAnalysisAttributedString = attributedString
+                    case .logicalFallacies:
+                        logicalFallaciesAttributedString = attributedString
+                    case .sourceAnalysis:
+                        sourceAnalysisAttributedString = attributedString
+                    case .relationToTopic:
+                        cachedContentBySection["Relevance"] = attributedString
+                    case .additionalInsights:
+                        cachedContentBySection["Context & Perspective"] = attributedString
+                    default:
+                        break
+                    }
+                }
+            }
+        }
+
+        // Store the task immediately
+        sectionLoadingTasks[section] = loadingTask
     }
 
     private func clearSectionContent() {
@@ -632,7 +672,7 @@ struct NewsDetailView: View {
 
     var additionalSectionsView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // We build the content dictionary once, or on demand:
+            // Build the content dictionary once
             if let n = currentNotification {
                 let contentDict = buildContentDictionary(from: n)
                 let sections = getSections(from: contentDict)
@@ -646,20 +686,19 @@ struct NewsDetailView: View {
                                 let wasExpanded = expandedSections[section.header] ?? false
                                 expandedSections[section.header] = newValue
                                 if newValue, !wasExpanded {
-                                    // Only load that section’s content if we have not yet
+                                    // Only load content when newly expanding
                                     loadContentForSection(section.header)
                                 }
                             }
                         )
                     ) {
-                        if expandedSections[section.header] == true {
-                            sectionContent(for: section)
-                        }
+                        sectionContent(for: section)
                     } label: {
                         Text(section.header)
                             .font(.headline)
                     }
                     .id(section.header)
+                    .animation(.easeInOut(duration: 0.3), value: expandedSections[section.header])
                 }
             }
         }
@@ -967,40 +1006,25 @@ struct NewsDetailView: View {
         }
     }
 
-    // Loads content for a specific section when it's expanded or scrolled to.
-    // This is a helper that uses the main loadContent function with specific fields.
-    // - Parameter section: The name of the section to load content for
-    private func loadContentForSection(_ section: String) {
-        guard let n = currentNotification else { return }
-
-        let field: RichTextField?
-        switch section {
-        case "Summary": field = .summary
-        case "Critical Analysis": field = .criticalAnalysis
-        case "Logical Fallacies": field = .logicalFallacies
-        case "Source Analysis": field = .sourceAnalysis
-        case "Relevance": field = .relationToTopic
-        case "Context & Perspective": field = .additionalInsights
-        default:
-            field = nil
-        }
-        guard let f = field else { return }
-
-        // Just call getAttributedString directly, synchronously:
-        let loadedAttrString = getAttributedString(for: f, from: n, createIfMissing: true)
-
-        // Assign it to whichever State property you’re using
-        switch f {
-        case .summary:
-            summaryAttributedString = loadedAttrString
-        case .criticalAnalysis:
-            criticalAnalysisAttributedString = loadedAttrString
-        case .logicalFallacies:
-            logicalFallaciesAttributedString = loadedAttrString
-        case .sourceAnalysis:
-            sourceAnalysisAttributedString = loadedAttrString
-        default:
-            break
+    // Helper function to load attributed string asynchronously with better error handling
+    private func loadAttributedStringAsync(for field: RichTextField, from notification: NotificationData) async -> NSAttributedString? {
+        // Use actor isolation to safely perform the operation
+        return await withTaskCancellationHandler {
+            // The actual task
+            await withCheckedContinuation { continuation in
+                // Use the main queue for simplicity and to avoid Sendable issues
+                DispatchQueue.main.async {
+                    // This is the synchronous function that generates the attributed string
+                    let result = getAttributedString(
+                        for: field,
+                        from: notification,
+                        createIfMissing: true
+                    )
+                    continuation.resume(returning: result)
+                }
+            }
+        } onCancel: {
+            // Nothing to do on cancellation - the continuation won't be resumed
         }
     }
 
@@ -1062,37 +1086,97 @@ struct NewsDetailView: View {
         return [fallbackArticle]
     }
 
+    // Helper view for consistent content loading display
+    private struct SectionContentView: View {
+        let section: ContentSection
+        let attributedString: NSAttributedString?
+        let isLoading: Bool
+
+        var body: some View {
+            Group {
+                if let attributedString = attributedString {
+                    // Show formatted rich text when available
+                    NonSelectableRichTextView(attributedString: attributedString)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                        .textSelection(.enabled)
+                } else if isLoading {
+                    // Show loading indicator when content is being generated
+                    VStack(spacing: 8) {
+                        ProgressView()
+                        Text("Formatting text...")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                } else {
+                    // Fallback for plain text
+                    Text(section.content as? String ?? "No content available")
+                        .font(.callout)
+                        .padding(.top, 6)
+                        .lineSpacing(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    // Helper function to get cached attributed string for a section
+    private func getAttributedStringForSection(_ section: String) -> NSAttributedString? {
+        switch section {
+        case "Summary": return summaryAttributedString
+        case "Critical Analysis": return criticalAnalysisAttributedString
+        case "Logical Fallacies": return logicalFallaciesAttributedString
+        case "Source Analysis": return sourceAnalysisAttributedString
+        default: return cachedContentBySection[section]
+        }
+    }
+
+    // Helper function to check if section content is being loaded
+    private func isSectionLoading(_ section: String) -> Bool {
+        return sectionLoadingTasks[section] != nil
+    }
+
+    // Reset loading state and content when navigating to a new article
+    private func resetContentState() {
+        // Cancel all loading tasks
+        for (_, task) in sectionLoadingTasks {
+            task.cancel()
+        }
+        sectionLoadingTasks = [:]
+
+        // Clear cached content
+        summaryAttributedString = nil
+        criticalAnalysisAttributedString = nil
+        logicalFallaciesAttributedString = nil
+        sourceAnalysisAttributedString = nil
+        cachedContentBySection = [:]
+    }
+
     @ViewBuilder
     private func sectionContent(for section: ContentSection) -> some View {
         switch section.header {
         // MARK: - Summary
 
         case "Summary":
-            if let attributedString = summaryAttributedString {
-                NonSelectableRichTextView(attributedString: attributedString)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 6)
-                    .padding(.bottom, 2)
-                    .textSelection(.enabled)
-            } else {
-                // Fallback: plain text if we haven’t loaded the rich text yet
-                Text(section.content as? String ?? "")
-                    .font(.callout)
-                    .padding(.top, 6)
-                    .lineSpacing(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            }
+            SectionContentView(
+                section: section,
+                attributedString: summaryAttributedString,
+                isLoading: isSectionLoading(section.header)
+            )
 
         // MARK: - Source Analysis
 
         case "Source Analysis":
             VStack(alignment: .leading, spacing: 10) {
-                // (Optional) Domain info at the top
+                // Domain info at the top
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Article Domain:")
@@ -1113,35 +1197,17 @@ struct NewsDetailView: View {
                     Spacer()
                 }
 
-                // The actual “source analysis” text and type
+                // The source analysis text
                 if let sourceData = section.content as? [String: Any] {
-                    let sourceText = sourceData["text"] as? String ?? ""
                     let sourceType = sourceData["sourceType"] as? String ?? ""
 
-                    if !sourceText.isEmpty, let notification = currentNotification {
-                        LazyLoadingContentView(
-                            notification: notification,
-                            field: .sourceAnalysis,
-                            placeholder: "source analysis",
-                            fontSize: 16,
-                            onLoad: { self.sourceAnalysisAttributedString = $0 }
-                        ) { attributedString in
-                            NonSelectableRichTextView(attributedString: attributedString)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 4)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
-                                .padding(.top, 4)
-                        }
-                    } else {
-                        Text("No detailed source analysis available.")
-                            .font(.callout)
-                            .italic()
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    SectionContentView(
+                        section: ContentSection(header: section.header, content: sourceData["text"] ?? ""),
+                        attributedString: sourceAnalysisAttributedString,
+                        isLoading: isSectionLoading(section.header)
+                    )
 
-                    // Also show sourceType as a little “badge” or label
+                    // Source type badge
                     if !sourceType.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: sourceTypeIcon(for: sourceType))
@@ -1160,40 +1226,58 @@ struct NewsDetailView: View {
             .padding(.top, 6)
             .textSelection(.enabled)
 
-        // MARK: - Multi-case fields (Critical, Fallacies, Relevance, etc.)
+        // MARK: - Critical Analysis
 
-        case "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective":
-            if let notification = currentNotification {
-                LazyLoadingContentView(
-                    notification: notification,
-                    field: getRichTextFieldForSection(section.header),
-                    placeholder: section.header.lowercased(),
-                    fontSize: 16,
-                    onLoad: { self.cacheAttributedString($0, for: section.header) }
-                ) { attributedString in
-                    NonSelectableRichTextView(attributedString: attributedString)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                        .textSelection(.enabled)
-                }
-            } else {
-                // Fallback for missing notification
-                Text(section.content as? String ?? "")
-                    .font(.callout)
-                    .padding(.top, 6)
-                    .lineSpacing(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+        case "Critical Analysis":
+            SectionContentView(
+                section: section,
+                attributedString: criticalAnalysisAttributedString,
+                isLoading: isSectionLoading(section.header)
+            )
+            .onAppear {
+                // Ensure content is loaded when this section appears
+                loadContentForSection("Critical Analysis")
             }
 
-        // MARK: - Related Articles (similar_articles)
+        // MARK: - Logical Fallacies
 
-        case "Related Articles": // Changed from "Vector WIP"
+        case "Logical Fallacies":
+            SectionContentView(
+                section: section,
+                attributedString: logicalFallaciesAttributedString,
+                isLoading: isSectionLoading(section.header)
+            )
+            .onAppear {
+                loadContentForSection("Logical Fallacies")
+            }
+
+        // MARK: - Relevance
+
+        case "Relevance":
+            SectionContentView(
+                section: section,
+                attributedString: cachedContentBySection["Relevance"],
+                isLoading: isSectionLoading(section.header)
+            )
+            .onAppear {
+                loadContentForSection("Relevance")
+            }
+
+        // MARK: - Context & Perspective
+
+        case "Context & Perspective":
+            SectionContentView(
+                section: section,
+                attributedString: cachedContentBySection["Context & Perspective"],
+                isLoading: isSectionLoading(section.header)
+            )
+            .onAppear {
+                loadContentForSection("Context & Perspective")
+            }
+
+        // MARK: - Related Articles
+
+        case "Related Articles":
             VStack(alignment: .leading, spacing: 8) {
                 if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -1231,7 +1315,7 @@ struct NewsDetailView: View {
             .padding(.horizontal, 12)
             .padding(.top, 6)
 
-        // MARK: - Argus Engine Stats (argus_details)
+        // MARK: - Argus Engine Stats
 
         case "Argus Engine Stats":
             if let details = section.content as? ArgusDetailsData {
@@ -1260,7 +1344,7 @@ struct NewsDetailView: View {
                     .foregroundColor(.secondary)
             }
 
-        // MARK: - Preview (Optional)
+        // MARK: - Preview
 
         case "Preview":
             VStack(spacing: 8) {
@@ -1282,7 +1366,7 @@ struct NewsDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
-        // MARK: - Default fallback for anything else
+        // MARK: - Default fallback
 
         default:
             Text(section.content as? String ?? "")
@@ -1428,6 +1512,7 @@ struct NewsDetailView: View {
         }
     }
 
+    // This explicitly maps section names to field types, addressing potential mismatches
     private func getRichTextFieldForSection(_ header: String) -> RichTextField {
         switch header {
         case "Summary": return .summary
@@ -1436,7 +1521,7 @@ struct NewsDetailView: View {
         case "Source Analysis": return .sourceAnalysis
         case "Relevance": return .relationToTopic
         case "Context & Perspective": return .additionalInsights
-        default: return .body // Default fallback
+        default: return .body
         }
     }
 
