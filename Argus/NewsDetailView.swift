@@ -679,30 +679,74 @@ struct NewsDetailView: View {
 
                 ForEach(sections, id: \.header) { section in
                     Divider()
-                    DisclosureGroup(
-                        isExpanded: Binding(
-                            get: { expandedSections[section.header] ?? false },
-                            set: { newValue in
-                                let wasExpanded = expandedSections[section.header] ?? false
-                                expandedSections[section.header] = newValue
-                                if newValue, !wasExpanded {
-                                    // Only load content when newly expanding
-                                    loadContentForSection(section.header)
+
+                    VStack(spacing: 0) {
+                        Button(action: {
+                            // Toggle section state immediately without animation delay
+                            let wasExpanded = expandedSections[section.header] ?? false
+                            expandedSections[section.header] = !wasExpanded
+
+                            if !wasExpanded, needsConversion(section.header) {
+                                // Only load rich text content when newly expanding sections that need conversion
+                                loadContentForSection(section.header)
+                            }
+                        }) {
+                            HStack {
+                                Text(section.header)
+                                    .font(.headline)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    // Remove the separate animation modifier to make it instant
+                                    .rotationEffect(.degrees(expandedSections[section.header] ?? false ? 90 : 0))
+                            }
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        if expandedSections[section.header] ?? false {
+                            // Use no transition animation for content
+                            Group {
+                                if needsConversion(section.header) && getAttributedStringForSection(section.header) == nil {
+                                    // Only show spinner for sections that need rich text conversion
+                                    HStack {
+                                        Spacer()
+                                        VStack(spacing: 8) {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle())
+                                            Text("Converting text...")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding()
+                                } else {
+                                    // Use existing content display for everything else
+                                    sectionContent(for: section)
                                 }
                             }
-                        )
-                    ) {
-                        sectionContent(for: section)
-                    } label: {
-                        Text(section.header)
-                            .font(.headline)
+                        }
                     }
                     .id(section.header)
-                    .animation(.easeInOut(duration: 0.3), value: expandedSections[section.header])
+                    .padding(.horizontal, 8)
                 }
             }
         }
         .padding(.horizontal, 8)
+    }
+
+    // Add this helper function to determine which sections need conversion
+    private func needsConversion(_ sectionHeader: String) -> Bool {
+        switch sectionHeader {
+        case "Summary", "Critical Analysis", "Logical Fallacies",
+             "Source Analysis", "Relevance", "Context & Perspective":
+            return true
+        case "Argus Engine Stats", "Preview", "Related Articles":
+            return false
+        default:
+            return false
+        }
     }
 
     // MARK: - Actions
