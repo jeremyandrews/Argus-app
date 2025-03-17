@@ -106,14 +106,15 @@ class SyncManager {
         }
     }
 
-    // Check network condition only when needed
+    // Check network condition only when needed - one-time check instead of monitoring
     private func getCurrentNetworkType() async -> NetworkType {
         return await withCheckedContinuation { continuation in
-            let monitor = NWPathMonitor()
-            monitor.pathUpdateHandler = { path in
+            let pathMonitor = NWPathMonitor()
+            pathMonitor.pathUpdateHandler = { path in
                 defer {
-                    monitor.cancel()
+                    pathMonitor.cancel()
                 }
+
                 if path.usesInterfaceType(.wifi) {
                     continuation.resume(returning: .wifi)
                 } else if path.usesInterfaceType(.cellular) {
@@ -124,7 +125,7 @@ class SyncManager {
                     continuation.resume(returning: .unknown)
                 }
             }
-            monitor.start(queue: DispatchQueue.global(qos: .utility))
+            pathMonitor.start(queue: DispatchQueue.global(qos: .utility))
         }
     }
 
@@ -256,22 +257,42 @@ class SyncManager {
         // Register article fetch task (for processing queue)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundFetchIdentifier, using: nil) { task in
             guard let appRefreshTask = task as? BGAppRefreshTask else { return }
+
             let processingTask = Task {
-                let didProcess = await self.processQueueItems()
-                appRefreshTask.setTaskCompleted(success: didProcess)
+                // First check if the current network state meets the user's requirements
+                let networkAllowed = await self.shouldAllowSync()
+
+                if networkAllowed {
+                    let didProcess = await self.processQueueItems()
+                    appRefreshTask.setTaskCompleted(success: didProcess)
+                } else {
+                    print("Background fetch skipped - cellular not allowed by user")
+                    appRefreshTask.setTaskCompleted(success: false)
+                }
             }
+
             appRefreshTask.expirationHandler = {
                 processingTask.cancel()
             }
+
             self.scheduleBackgroundFetch()
         }
+
         // Register the sync task (for syncing with server)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundSyncIdentifier, using: nil) { task in
             guard let processingTask = task as? BGProcessingTask else { return }
 
             let syncTask = Task {
-                await self.sendRecentArticlesToServer()
-                processingTask.setTaskCompleted(success: true)
+                // First check if the current network state meets the user's requirements
+                let networkAllowed = await self.shouldAllowSync()
+
+                if networkAllowed {
+                    await self.sendRecentArticlesToServer()
+                    processingTask.setTaskCompleted(success: true)
+                } else {
+                    print("Background sync skipped - cellular not allowed by user")
+                    processingTask.setTaskCompleted(success: false)
+                }
             }
 
             processingTask.expirationHandler = {
@@ -289,8 +310,13 @@ class SyncManager {
 
     func scheduleBackgroundFetch() {
         let request = BGProcessingTaskRequest(identifier: backgroundFetchIdentifier)
-        // Let iOS decide when to run the task - much better for battery
+
+        // Require network connectivity
         request.requiresNetworkConnectivity = true
+
+        // Only set whether cellular is allowed based on user preferences
+        // This allows the system to be smarter about when to schedule the task
+        let allowCellular = UserDefaults.standard.bool(forKey: "allowCellularSync")
         request.requiresExternalPower = false
 
         // Only set a minimum delay, not a fixed schedule
@@ -298,7 +324,7 @@ class SyncManager {
 
         do {
             try BGTaskScheduler.shared.submit(request)
-            print("Background fetch scheduled with system optimization")
+            print("Background fetch scheduled with system optimization (cellular allowed: \(allowCellular))")
         } catch {
             print("Could not schedule background fetch: \(error)")
         }
@@ -307,11 +333,11 @@ class SyncManager {
     func scheduleBackgroundSync() {
         let request = BGProcessingTaskRequest(identifier: backgroundSyncIdentifier)
 
-        // Get the cellular sync preference from user settings
-        let allowCellular = UserDefaults.standard.bool(forKey: "allowCellularSync")
-
         // Always require network connectivity
         request.requiresNetworkConnectivity = true
+
+        // Set whether cellular is allowed based on user preferences
+        let allowCellular = UserDefaults.standard.bool(forKey: "allowCellularSync")
 
         // No charging requirement in your app's settings
         request.requiresExternalPower = false
@@ -321,7 +347,7 @@ class SyncManager {
 
         do {
             try BGTaskScheduler.shared.submit(request)
-            print("Background sync scheduled with system optimization")
+            print("Background sync scheduled with system optimization (cellular allowed: \(allowCellular))")
         } catch let error as BGTaskScheduler.Error {
             switch error.code {
             case .notPermitted:
@@ -358,9 +384,14 @@ class SyncManager {
         let request = BGProcessingTaskRequest(identifier: backgroundFetchIdentifier)
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
+
+        // Consider user cellular preferences
+        let allowCellular = UserDefaults.standard.bool(forKey: "allowCellularSync")
+
         request.earliestBeginDate = Date(timeIntervalSinceNow: 60) // Minimum 1 minute
         do {
             try BGTaskScheduler.shared.submit(request)
+            print("Expedited processing scheduled (cellular allowed: \(allowCellular))")
         } catch {
             print("Could not schedule expedited processing: \(error)")
         }
@@ -386,7 +417,7 @@ class SyncManager {
             return
         }
 
-        // Check network conditions before proceeding
+        // Check network conditions before proceeding - one-time check, not continuous monitoring
         guard await shouldAllowSync() else {
             print("Sync skipped due to network conditions and user preferences")
             return
@@ -407,7 +438,8 @@ class SyncManager {
                 let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
 
-                if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty { print("Server returned \(unseenUrls.count) unseen articles - queuing for processing")
+                if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
+                    print("Server returned \(unseenUrls.count) unseen articles - queuing for processing")
                     await queueArticlesForProcessing(urls: unseenUrls)
 
                     // Start processing immediately if we received new articles
