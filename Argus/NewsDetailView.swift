@@ -433,36 +433,39 @@ struct NewsDetailView: View {
         let preloadedTitle = getAttributedString(for: .title, from: nextNotification)
         let preloadedBody = getAttributedString(for: .body, from: nextNotification)
 
-        // Two-phase update: change content then layout
+        // Use a more direct update approach to avoid layout conflicts
         tabChangeTask = Task {
-            // First phase: change the content reference, but keep the old size
+            // Brief pause to let any ongoing rendering finish
+            try? await Task.sleep(for: .milliseconds(10))
+
             await MainActor.run {
-                // Update content references while still loading
+                // Reset expanded sections BEFORE updating content
+                expandedSections = Self.getDefaultExpandedSections()
+
+                // Clear all content
                 clearSectionContent()
-                titleAttributedString = preloadedTitle
-                bodyAttributedString = preloadedBody
-                preloadedNotification = nextNotification
-            }
 
-            // Brief pause for the first update to complete
-            try? await Task.sleep(for: .milliseconds(50))
-
-            // Second phase: trigger a full layout recalculation
-            await MainActor.run {
-                // Force layout recalculation with new ID
-                contentTransitionID = UUID()
+                // Update index and notification
                 currentIndex = nextIndex
                 preloadedNotification = nil
-                scrollToTopTrigger = UUID()
-                markAsViewed()
 
-                // Reset expanded sections to defaults
-                expandedSections = Self.getDefaultExpandedSections()
+                // Update header content in a single step
+                titleAttributedString = preloadedTitle
+                bodyAttributedString = preloadedBody
+
+                // Force complete layout recalculation
+                contentTransitionID = UUID()
+
+                // Scroll to top
+                scrollToTopTrigger = UUID()
 
                 // Pre-load summary content if it's expanded by default
                 if expandedSections["Summary"] == true {
                     loadContentForSection("Summary")
                 }
+
+                // Mark as viewed
+                markAsViewed()
 
                 // Complete transition
                 isLoadingNextArticle = false
@@ -584,6 +587,7 @@ struct NewsDetailView: View {
 
     // MARK: - Article Header
 
+    // In articleHeaderStyle computed property
     private var articleHeaderStyle: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Topic pill + "Archived" pill
@@ -664,8 +668,6 @@ struct NewsDetailView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .background(currentNotification?.isViewed ?? true ? Color.clear : Color.blue.opacity(0.15))
-        .opacity(isLoadingNextArticle ? 0.5 : 1.0) // Fade during transitions
-        .animation(.easeInOut(duration: 0.2), value: isLoadingNextArticle)
     }
 
     // MARK: - Additional Sections
@@ -696,7 +698,6 @@ struct NewsDetailView: View {
                                     .font(.headline)
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    // Remove the separate animation modifier to make it instant
                                     .rotationEffect(.degrees(expandedSections[section.header] ?? false ? 90 : 0))
                             }
                             .padding(.vertical, 8)
@@ -705,26 +706,25 @@ struct NewsDetailView: View {
                         .buttonStyle(PlainButtonStyle())
 
                         if expandedSections[section.header] ?? false {
-                            // Use no transition animation for content
-                            Group {
-                                if needsConversion(section.header) && getAttributedStringForSection(section.header) == nil {
-                                    // Only show spinner for sections that need rich text conversion
-                                    HStack {
-                                        Spacer()
-                                        VStack(spacing: 8) {
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle())
-                                            Text("Converting text...")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        Spacer()
+                            // Remove ANY animation wrapper
+                            if needsConversion(section.header) && getAttributedStringForSection(section.header) == nil {
+                                // Only show spinner for sections that need rich text conversion
+                                HStack {
+                                    Spacer()
+                                    VStack(spacing: 8) {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle())
+                                        Text("Converting text...")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
                                     }
-                                    .padding()
-                                } else {
-                                    // Use existing content display for everything else
-                                    sectionContent(for: section)
+                                    Spacer()
                                 }
+                                .padding()
+                            } else {
+                                // Use existing content display for everything else
+                                // Remove any animations that might cause fuzzy appearance
+                                sectionContent(for: section)
                             }
                         }
                     }
@@ -734,9 +734,9 @@ struct NewsDetailView: View {
             }
         }
         .padding(.horizontal, 8)
+        .id(contentTransitionID) // Ensure layout recalculation by binding to contentTransitionID
     }
 
-    // Add this helper function to determine which sections need conversion
     private func needsConversion(_ sectionHeader: String) -> Bool {
         switch sectionHeader {
         case "Summary", "Critical Analysis", "Logical Fallacies",
@@ -1139,7 +1139,7 @@ struct NewsDetailView: View {
         var body: some View {
             Group {
                 if let attributedString = attributedString {
-                    // Show formatted rich text when available
+                    // Show formatted rich text when available - NO ANIMATIONS
                     NonSelectableRichTextView(attributedString: attributedString)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 4)
@@ -1148,7 +1148,7 @@ struct NewsDetailView: View {
                         .padding(.bottom, 2)
                         .textSelection(.enabled)
                 } else if isLoading {
-                    // Show loading indicator when content is being generated
+                    // Show loading indicator when content is being generated - NO ANIMATIONS
                     VStack(spacing: 8) {
                         ProgressView()
                         Text("Formatting text...")
@@ -1158,7 +1158,7 @@ struct NewsDetailView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                 } else {
-                    // Fallback for plain text
+                    // Fallback for plain text - NO ANIMATIONS
                     Text(section.content as? String ?? "No content available")
                         .font(.callout)
                         .padding(.top, 6)
