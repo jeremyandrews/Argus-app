@@ -12,8 +12,9 @@ class SyncManager {
     private let backgroundFetchIdentifier = "com.arguspulse.articlefetch"
 
     // Throttling parameters
-    private var lastSyncTime: Date = .distantPast
-    private let minimumSyncInterval: TimeInterval = 60
+    private var syncInProgress = false
+    private let manualSyncThrottle: TimeInterval = 30
+    private var lastManualSyncTime = Date.distantPast
 
     // Notification names for app state changes
     private let notificationCenter = NotificationCenter.default
@@ -70,7 +71,7 @@ class SyncManager {
                 let networkReady = await self.shouldAllowSync()
                 if networkReady {
                     print("Network is ready - triggering foreground sync")
-                    await self.triggerForegroundSync()
+                    await self.sendRecentArticlesToServer()
                 } else {
                     print("Network not ready for sync")
                 }
@@ -90,20 +91,6 @@ class SyncManager {
         print("App did enter background - scheduling background tasks")
         scheduleBackgroundSync()
         scheduleBackgroundFetch()
-    }
-
-    // Trigger a foreground sync with appropriate throttling
-    private func triggerForegroundSync() async {
-        // Shorter throttle for foreground syncs
-        let now = Date()
-        let foregroundSyncInterval: TimeInterval = 30 // 30 seconds for foreground
-
-        if now.timeIntervalSince(lastSyncTime) > foregroundSyncInterval {
-            print("Triggering foreground sync")
-            await sendRecentArticlesToServer()
-        } else {
-            print("Foreground sync skipped - last sync was \(Int(now.timeIntervalSince(lastSyncTime))) seconds ago")
-        }
     }
 
     // Check network condition only when needed - one-time check instead of monitoring
@@ -271,8 +258,10 @@ class SyncManager {
                 }
             }
 
+            // Let the system handle task expiration
             appRefreshTask.expirationHandler = {
                 processingTask.cancel()
+                print("Background fetch task expired and was cancelled by the system")
             }
 
             self.scheduleBackgroundFetch()
@@ -283,7 +272,7 @@ class SyncManager {
             guard let processingTask = task as? BGProcessingTask else { return }
 
             let syncTask = Task {
-                // First check if the current network state meets the user's requirements
+                // Check network conditions
                 let networkAllowed = await self.shouldAllowSync()
 
                 if networkAllowed {
@@ -295,8 +284,10 @@ class SyncManager {
                 }
             }
 
+            // Let the system handle task expiration
             processingTask.expirationHandler = {
                 syncTask.cancel()
+                print("Background sync task expired and was cancelled by the system")
             }
 
             self.scheduleBackgroundSync()
@@ -399,31 +390,41 @@ class SyncManager {
 
     // MARK: - Sync Methods
 
-    // Manual trigger with throttling - for UI "pull to refresh" or explicit user action
+    // Simplified manual sync method
     func manualSync() async -> Bool {
+        // Only throttle explicit user actions
         let now = Date()
-        guard now.timeIntervalSince(lastSyncTime) > minimumSyncInterval else {
-            print("Manual sync requested too soon (last sync was \(Int(now.timeIntervalSince(lastSyncTime))) seconds ago)")
+        guard now.timeIntervalSince(lastManualSyncTime) > manualSyncThrottle else {
+            print("Manual sync requested too soon")
             return false
         }
+
+        lastManualSyncTime = now
         await sendRecentArticlesToServer()
         return true
     }
 
     func sendRecentArticlesToServer() async {
-        let now = Date()
-        guard now.timeIntervalSince(lastSyncTime) > minimumSyncInterval else {
-            print("Sync throttled - last sync was \(Int(now.timeIntervalSince(lastSyncTime))) seconds ago")
+        // Simple guard against concurrent execution
+        guard !syncInProgress else {
+            print("Sync already in progress, skipping")
             return
         }
 
-        // Check network conditions before proceeding - one-time check, not continuous monitoring
+        // Check network conditions before proceeding
         guard await shouldAllowSync() else {
             print("Sync skipped due to network conditions and user preferences")
             return
         }
 
-        lastSyncTime = now
+        // Set flag to prevent concurrent execution
+        syncInProgress = true
+        defer {
+            syncInProgress = false
+            // Update last sync time only for throttling manual actions
+            lastManualSyncTime = Date()
+        }
+
         print("Starting server sync...")
 
         do {
