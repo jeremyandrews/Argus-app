@@ -70,10 +70,10 @@ class SyncManager {
             Task {
                 let networkReady = await self.shouldAllowSync()
                 if networkReady {
-                    print("Network is ready - triggering foreground sync")
+                    AppLogger.sync.debug("Network is ready - triggering foreground sync")
                     await self.sendRecentArticlesToServer()
                 } else {
-                    print("Network not ready for sync")
+                    AppLogger.sync.error("Network not ready for sync")
                 }
             }
         }
@@ -81,14 +81,14 @@ class SyncManager {
 
     // Called when app becomes active
     @objc private func appDidBecomeActive() {
-        print("App did become active")
+        AppLogger.sync.debug("App did become active")
         // Process queued items when app becomes active
         startQueueProcessing()
     }
 
     // Called when app enters background
     @objc private func appDidEnterBackground() {
-        print("App did enter background - scheduling background tasks")
+        AppLogger.sync.debug("App did enter background - scheduling background tasks")
         scheduleBackgroundSync()
         scheduleBackgroundFetch()
     }
@@ -133,7 +133,7 @@ class SyncManager {
         let startTime = Date()
         var processedCount = 0
         var hasMoreItems = false
-        print("Processing queue items (max \(timeLimit) seconds)")
+        AppLogger.sync.debug("Processing queue items (max \(timeLimit) seconds)")
         do {
             let container = await MainActor.run {
                 ArgusApp.sharedModelContainer
@@ -148,7 +148,7 @@ class SyncManager {
                 if itemsToProcess.isEmpty {
                     break // No more items to process
                 }
-                print("Processing batch of \(itemsToProcess.count) queue items")
+                AppLogger.sync.debug("Processing batch of \(itemsToProcess.count) queue items")
                 var processedItems = [ArticleQueueItem]()
 
                 for item in itemsToProcess {
@@ -163,7 +163,7 @@ class SyncManager {
                     // Check if this article is already in the database
                     // This is a critical check to prevent duplicates
                     if await isArticleAlreadyProcessed(jsonURL: item.jsonURL, context: backgroundContext) {
-                        print("Skipping already processed article: \(item.jsonURL)")
+                        AppLogger.sync.debug("Skipping already processed article: \(item.jsonURL)")
                         processedItems.append(item) // Mark as processed so it gets removed
                         continue
                     }
@@ -173,7 +173,7 @@ class SyncManager {
                         processedItems.append(item)
                         processedCount += 1
                     } catch {
-                        print("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
+                        AppLogger.sync.error("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
                     }
                 }
 
@@ -182,7 +182,7 @@ class SyncManager {
                     for item in processedItems {
                         try queueManager.removeItem(item)
                     }
-                    print("Successfully processed and saved batch of \(processedItems.count) items")
+                    AppLogger.sync.debug("Successfully processed and saved batch of \(processedItems.count) items")
                     await MainActor.run {
                         NotificationUtils.updateAppBadgeCount()
                     }
@@ -190,7 +190,7 @@ class SyncManager {
             }
 
             let timeElapsed = Date().timeIntervalSince(startTime)
-            print("Queue processing completed: \(processedCount) items in \(String(format: "%.2f", timeElapsed)) seconds")
+            AppLogger.sync.debug("Queue processing completed: \(processedCount) items in \(String(format: "%.2f", timeElapsed)) seconds")
 
             // If we processed items and there might be more, schedule another processing run soon
             if processedCount > 0 {
@@ -201,7 +201,7 @@ class SyncManager {
                         // Signal the system that we'd like to process more items soon
                         scheduleBackgroundFetch()
                     }
-                    print("More items remaining (\(remainingCount)). Background task scheduled.")
+                    AppLogger.sync.debug("More items remaining (\(remainingCount)). Background task scheduled.")
                 }
             }
 
@@ -211,7 +211,7 @@ class SyncManager {
             // Return the state
             return hasMoreItems
         } catch {
-            print("Queue processing error: \(error.localizedDescription)")
+            AppLogger.sync.error("Queue processing error: \(error.localizedDescription)")
             return false
         }
     }
@@ -253,7 +253,7 @@ class SyncManager {
                     let didProcess = await self.processQueueItems()
                     appRefreshTask.setTaskCompleted(success: didProcess)
                 } else {
-                    print("Background fetch skipped - cellular not allowed by user")
+                    AppLogger.sync.debug("Background fetch skipped - cellular not allowed by user")
                     appRefreshTask.setTaskCompleted(success: false)
                 }
             }
@@ -261,7 +261,7 @@ class SyncManager {
             // Let the system handle task expiration
             appRefreshTask.expirationHandler = {
                 processingTask.cancel()
-                print("Background fetch task expired and was cancelled by the system")
+                AppLogger.sync.debug("Background fetch task expired and was cancelled by the system")
             }
 
             self.scheduleBackgroundFetch()
@@ -279,7 +279,7 @@ class SyncManager {
                     await self.sendRecentArticlesToServer()
                     processingTask.setTaskCompleted(success: true)
                 } else {
-                    print("Background sync skipped - cellular not allowed by user")
+                    AppLogger.sync.debug("Background sync skipped - cellular not allowed by user")
                     processingTask.setTaskCompleted(success: false)
                 }
             }
@@ -287,7 +287,7 @@ class SyncManager {
             // Let the system handle task expiration
             processingTask.expirationHandler = {
                 syncTask.cancel()
-                print("Background sync task expired and was cancelled by the system")
+                AppLogger.sync.debug("Background sync task expired and was cancelled by the system")
             }
 
             self.scheduleBackgroundSync()
@@ -296,7 +296,7 @@ class SyncManager {
         // Schedule initial tasks
         scheduleBackgroundFetch()
         scheduleBackgroundSync()
-        print("Background tasks registered: fetch and sync")
+        AppLogger.sync.debug("Background tasks registered: fetch and sync")
     }
 
     func scheduleBackgroundFetch() {
@@ -315,9 +315,9 @@ class SyncManager {
 
         do {
             try BGTaskScheduler.shared.submit(request)
-            print("Background fetch scheduled with system optimization (cellular allowed: \(allowCellular))")
+            AppLogger.sync.debug("Background fetch scheduled with system optimization (cellular allowed: \(allowCellular))")
         } catch {
-            print("Could not schedule background fetch: \(error)")
+            AppLogger.sync.error("Could not schedule background fetch: \(error)")
         }
     }
 
@@ -338,20 +338,20 @@ class SyncManager {
 
         do {
             try BGTaskScheduler.shared.submit(request)
-            print("Background sync scheduled with system optimization (cellular allowed: \(allowCellular))")
+            AppLogger.sync.debug("Background sync scheduled with system optimization (cellular allowed: \(allowCellular))")
         } catch let error as BGTaskScheduler.Error {
             switch error.code {
             case .notPermitted:
-                print("Background sync not permitted: \(error)")
+                AppLogger.sync.error("Background sync not permitted: \(error)")
             case .tooManyPendingTaskRequests:
-                print("Too many pending background sync tasks: \(error)")
+                AppLogger.sync.error("Too many pending background sync tasks: \(error)")
             case .unavailable:
-                print("Background sync unavailable: \(error)")
+                AppLogger.sync.error("Background sync unavailable: \(error)")
             @unknown default:
-                print("Unknown background sync scheduling error: \(error)")
+                AppLogger.sync.error("Unknown background sync scheduling error: \(error)")
             }
         } catch {
-            print("Could not schedule background sync: \(error)")
+            AppLogger.sync.error("Could not schedule background sync: \(error)")
         }
     }
 
@@ -382,9 +382,9 @@ class SyncManager {
         request.earliestBeginDate = Date(timeIntervalSinceNow: 60) // Minimum 1 minute
         do {
             try BGTaskScheduler.shared.submit(request)
-            print("Expedited processing scheduled (cellular allowed: \(allowCellular))")
+            AppLogger.sync.debug("Expedited processing scheduled (cellular allowed: \(allowCellular))")
         } catch {
-            print("Could not schedule expedited processing: \(error)")
+            AppLogger.sync.error("Could not schedule expedited processing: \(error)")
         }
     }
 
@@ -395,7 +395,7 @@ class SyncManager {
         // Only throttle explicit user actions
         let now = Date()
         guard now.timeIntervalSince(lastManualSyncTime) > manualSyncThrottle else {
-            print("Manual sync requested too soon")
+            AppLogger.sync.debug("Manual sync requested too soon")
             return false
         }
 
@@ -407,13 +407,13 @@ class SyncManager {
     func sendRecentArticlesToServer() async {
         // Simple guard against concurrent execution
         guard !syncInProgress else {
-            print("Sync already in progress, skipping")
+            AppLogger.sync.debug("Sync already in progress, skipping")
             return
         }
 
         // Check network conditions before proceeding
         guard await shouldAllowSync() else {
-            print("Sync skipped due to network conditions and user preferences")
+            AppLogger.sync.debug("Sync skipped due to network conditions and user preferences")
             return
         }
 
@@ -425,7 +425,7 @@ class SyncManager {
             lastManualSyncTime = Date()
         }
 
-        print("Starting server sync...")
+        AppLogger.sync.debug("Starting server sync...")
 
         do {
             let recentArticles = await fetchRecentArticles()
@@ -440,19 +440,19 @@ class SyncManager {
                 let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
 
                 if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
-                    print("Server returned \(unseenUrls.count) unseen articles - queuing for processing")
+                    AppLogger.sync.debug("Server returned \(unseenUrls.count) unseen articles - queuing for processing")
                     await queueArticlesForProcessing(urls: unseenUrls)
 
                     // Start processing immediately if we received new articles
                     startQueueProcessing()
                 } else {
-                    print("Server says there are no unseen articles.")
+                    AppLogger.sync.debug("Server says there are no unseen articles.")
                 }
             } catch let error as URLError where error.code == .timedOut {
-                print("Sync operation timed out")
+                AppLogger.sync.error("Sync operation timed out")
             }
         } catch {
-            print("Failed to sync articles: \(error)")
+            AppLogger.sync.error("Failed to sync articles: \(error)")
         }
 
         // Always schedule next background sync
@@ -472,7 +472,7 @@ class SyncManager {
         // Double-check that we're not creating duplicates
         // This is important as the queue might have been processed already in another context
         if await isArticleAlreadyProcessed(jsonURL: itemJsonURL, context: context) {
-            print("[Warning] Skipping already processed article: \(itemJsonURL)")
+            AppLogger.sync.debug("[Warning] Skipping already processed article: \(itemJsonURL)")
             return
         }
 
@@ -628,13 +628,13 @@ class SyncManager {
             if !(await isArticleAlreadyProcessed(jsonURL: jsonURL, context: backgroundContext)) {
                 newUrls.append(jsonURL)
             } else {
-                print("Skipping already processed article: \(jsonURL)")
+                AppLogger.sync.debug("Skipping already processed article: \(jsonURL)")
             }
         }
 
         // Only queue articles that aren't already processed
         if newUrls.isEmpty {
-            print("No new articles to queue - all are already processed")
+            AppLogger.sync.debug("No new articles to queue - all are already processed")
             return
         }
 
@@ -643,15 +643,15 @@ class SyncManager {
             do {
                 let added = try await queueManager.addArticle(jsonURL: jsonURL)
                 if added {
-                    print("Queued article: \(jsonURL)")
+                    AppLogger.sync.debug("Queued article: \(jsonURL)")
                 } else {
-                    print("Skipped duplicate article: \(jsonURL)")
+                    AppLogger.sync.debug("Skipped duplicate article: \(jsonURL)")
                 }
             } catch {
-                print("Failed to queue article \(jsonURL): \(error)")
+                AppLogger.sync.error("Failed to queue article \(jsonURL): \(error)")
             }
         }
 
-        print("Added \(newUrls.count) new articles to processing queue")
+        AppLogger.sync.debug("Added \(newUrls.count) new articles to processing queue")
     }
 }

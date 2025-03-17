@@ -48,16 +48,16 @@ class APIClient {
                 return try await sendRequest(to: url, method: method, token: token, body: body)
             } catch {
                 if let urlError = error as? URLError, urlError.code == .userAuthenticationRequired {
-                    print("Token expired. Re-authenticating...")
+                    AppLogger.api.info("Token expired. Re-authenticating...")
                 } else {
-                    print("Request failed with error: \(error.localizedDescription)")
+                    AppLogger.api.error("Request failed with error: \(error.localizedDescription)")
                     throw error
                 }
             }
         }
 
         // If token is missing or expired, re-authenticate
-        print("No token found or expired. Authenticating...")
+        AppLogger.api.info("No token found or expired. Authenticating...")
         let newToken = try await authenticateDevice()
         return try await sendRequest(to: url, method: method, token: newToken, body: body)
     }
@@ -77,7 +77,7 @@ class APIClient {
         let (data, response) = try await session.data(for: request)
 
         if let httpResponse = response as? HTTPURLResponse {
-            print("Response status code: \(httpResponse.statusCode)")
+            AppLogger.api.info("Response status code: \(httpResponse.statusCode)")
 
             if httpResponse.statusCode == 401 {
                 throw URLError(.userAuthenticationRequired)
@@ -85,7 +85,7 @@ class APIClient {
 
             guard httpResponse.statusCode == 200 else {
                 if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    print("Server error details: \(errorJson)")
+                    AppLogger.api.error("Server error details: \(errorJson)")
                 }
                 throw URLError(.badServerResponse)
             }

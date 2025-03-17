@@ -28,9 +28,9 @@ struct ArgusApp: App {
             Task {
                 do {
                     let _ = try ensureDatabaseIndexes()
-                    print("Database indexes created successfully")
+                    AppLogger.database.info("Database indexes created successfully")
                 } catch {
-                    print("Failed to create database indexes: \(error)")
+                    AppLogger.database.error("Failed to create database indexes: \(error)")
                 }
             }
 
@@ -156,10 +156,10 @@ struct ArgusApp: App {
 
             if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
                 let error = String(cString: sqlite3_errmsg(db))
-                // Only print an error if it's not about the column not existing
+                // Only show an error if it's not about the column not existing
                 // This handles the case where we're trying to index a new column that doesn't exist yet
                 if !error.contains("no such column") {
-                    print("Warning: Failed to create index \(indexName): \(error)")
+                    AppLogger.database.error("Warning: Failed to create index \(indexName): \(error)")
                 }
                 continue
             }
@@ -173,7 +173,7 @@ struct ArgusApp: App {
             """
 
             if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
-                print("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
+                AppLogger.database.error("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
                 continue
             }
         }
@@ -190,11 +190,11 @@ struct ArgusApp: App {
                 """
 
                 if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
-                    print("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
+                    AppLogger.database.error("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
                 }
             }
         } else {
-            print("ArticleQueueItem table not found - will skip creating indexes for it")
+            AppLogger.database.error("ArticleQueueItem table not found - will skip creating indexes for it")
         }
 
         return true
@@ -215,35 +215,35 @@ struct ArgusApp: App {
             do {
                 // Count NotificationData entries
                 let notificationCount = try context.fetchCount(FetchDescriptor<NotificationData>())
-                print("📊 Database Stats: NotificationData table size: \(notificationCount) records")
+                AppLogger.database.info("📊 Database Stats: NotificationData table size: \(notificationCount) records")
 
                 // Count SeenArticle entries
                 let seenArticleCount = try context.fetchCount(FetchDescriptor<SeenArticle>())
-                print("📊 Database Stats: SeenArticle table size: \(seenArticleCount) records")
+                AppLogger.database.info("📊 Database Stats: SeenArticle table size: \(seenArticleCount) records")
 
                 // Count ArticleQueueItem entries
                 let queueItemCount = try context.fetchCount(FetchDescriptor<ArticleQueueItem>())
-                print("📊 Database Stats: ArticleQueueItem table size: \(queueItemCount) records")
+                AppLogger.database.info("📊 Database Stats: ArticleQueueItem table size: \(queueItemCount) records")
 
                 // Calculate total records
                 let totalRecords = notificationCount + seenArticleCount + queueItemCount
-                print("📊 Database Stats: Total records across all tables: \(totalRecords)")
+                AppLogger.database.info("📊 Database Stats: Total records across all tables: \(totalRecords)")
 
                 // Log additional stats about viewed/unviewed status
                 let unviewedCount = try context.fetchCount(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
                 )
-                print("📊 Database Stats: Unviewed notifications: \(unviewedCount) records")
+                AppLogger.database.info("📊 Database Stats: Unviewed notifications: \(unviewedCount) records")
 
                 let bookmarkedCount = try context.fetchCount(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isBookmarked })
                 )
-                print("📊 Database Stats: Bookmarked notifications: \(bookmarkedCount) records")
+                AppLogger.database.info("📊 Database Stats: Bookmarked notifications: \(bookmarkedCount) records")
 
                 let archivedCount = try context.fetchCount(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isArchived })
                 )
-                print("📊 Database Stats: Archived notifications: \(archivedCount) records")
+                AppLogger.database.info("📊 Database Stats: Archived notifications: \(archivedCount) records")
 
                 // Calculate statistics for articles eligible for cleanup
                 let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
@@ -259,10 +259,10 @@ struct ArgusApp: App {
                             }
                         )
                     )
-                    print("📊 Database Stats: Notifications eligible for cleanup: \(eligibleForCleanupCount) records")
+                    AppLogger.database.info("📊 Database Stats: Notifications eligible for cleanup: \(eligibleForCleanupCount) records")
                 }
             } catch {
-                print("Error fetching database table sizes: \(error)")
+                AppLogger.database.error("Error fetching database table sizes: \(error)")
             }
         }
     }

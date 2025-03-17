@@ -45,7 +45,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     private func requestNotificationPermissions() {
         // Skip requesting permissions if we're in UI Testing mode
         if ProcessInfo.processInfo.arguments.contains("UI_TESTING_PERMISSIONS_GRANTED") {
-            print("UI Testing: Skipping notification permission request")
+            AppLogger.app.info("UI Testing: Skipping notification permission request")
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: Notification.Name("NotificationPermissionGranted"), object: nil)
             }
@@ -60,7 +60,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                     NotificationCenter.default.post(name: Notification.Name("NotificationPermissionGranted"), object: nil)
                 }
             } else if let error = error {
-                print("Error requesting notification authorization: \(error)")
+                AppLogger.app.error("Error requesting notification authorization: \(error)")
             }
         }
     }
@@ -92,23 +92,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         do {
             let success = try ArgusApp.ensureDatabaseIndexes()
             if success {
-                print("Database indexes verified successfully")
+                AppLogger.app.info("Database indexes verified successfully")
             }
         } catch {
-            print("Database index creation failed: \(error)")
+            AppLogger.app.error("Database index creation failed: \(error)")
         }
     }
 
     func application(_: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        print("Device Token: \(token)")
+        AppLogger.app.info("Device Token: \(token)")
 
         // Save the token for later use
         UserDefaults.standard.set(token, forKey: "deviceToken")
     }
 
     func application(_: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("Failed to register: \(error)")
+        AppLogger.app.error("Failed to register: \(error)")
     }
 
     func application(
@@ -164,15 +164,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 )
 
                 if added {
-                    print("Added article to processing queue: \(jsonURL)")
+                    AppLogger.app.info("Added article to processing queue: \(jsonURL)")
                     try context.save()
                     finish(.newData)
                 } else {
-                    print("Article already in queue: \(jsonURL)")
+                    AppLogger.app.info("Article already in queue: \(jsonURL)")
                     finish(.noData)
                 }
             } catch {
-                print("Failed to add article to queue: \(error)")
+                AppLogger.app.error("Failed to add article to queue: \(error)")
                 finish(.failed)
             }
         }
@@ -192,16 +192,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             do {
                 let _ = try context.fetch(FetchDescriptor<SeenArticle>())
             } catch {
-                print("Failed to fetch SeenArticle entries: \(error)")
+                AppLogger.app.error("Failed to fetch SeenArticle entries: \(error)")
             }
 
             do {
                 try context.save()
             } catch {
-                print("Failed to save context: \(error)")
+                AppLogger.app.error("Failed to save context: \(error)")
             }
         } catch {
-            print("Failed to populate SeenArticle table: \(error)")
+            AppLogger.app.error("Failed to populate SeenArticle table: \(error)")
         }
     }
 
@@ -214,7 +214,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         do {
             try context.save()
         } catch {
-            print("Failed to save seen article: \(error)")
+            AppLogger.app.error("Failed to save seen article: \(error)")
         }
     }
 
@@ -253,7 +253,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 NotificationUtils.updateAppBadgeCount()
 
             } catch {
-                print("Cleanup error: \(error)")
+                AppLogger.app.error("Cleanup error: \(error)")
             }
         }
     }
@@ -279,7 +279,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 }
                 let toKeep = sorted.first!
                 let toDelete = sorted.dropFirst() // everything after the first
-                print("Keeping \(toKeep.json_url), removing \(toDelete.count) duplicates...")
+                AppLogger.app.info("Keeping \(toKeep.json_url), removing \(toDelete.count) duplicates...")
 
                 for dupe in toDelete {
                     context.delete(dupe)
@@ -287,9 +287,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
 
             try context.save()
-            print("Duplicates removed successfully.")
+            AppLogger.app.info("Duplicates removed successfully.")
         } catch {
-            print("Error removing duplicates: \(error)")
+            AppLogger.app.error("Error removing duplicates: \(error)")
         }
     }
 
@@ -322,7 +322,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 let token = try await APIClient.shared.authenticateDevice()
                 UserDefaults.standard.set(token, forKey: "jwtToken")
             } catch {
-                print("Failed to authenticate device: \(error)")
+                AppLogger.app.error("Failed to authenticate device: \(error)")
             }
         }
     }
@@ -343,11 +343,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             let existingCount = try context.fetchCount(FetchDescriptor<NotificationData>())
             if existingCount > 0 {
                 // We already have data, no need to create more
-                print("UI Tests: Using \(existingCount) existing notifications for testing")
+                AppLogger.app.info("UI Tests: Using \(existingCount) existing notifications for testing")
                 return
             }
 
-            print("UI Tests: Creating test notification data")
+            AppLogger.app.info("UI Tests: Creating test notification data")
 
             // Create a sample notification for testing
             let testNotification = NotificationData(
@@ -392,9 +392,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             context.insert(testNotification)
             try context.save()
 
-            print("UI Tests: Test data created successfully")
+            AppLogger.app.info("UI Tests: Test data created successfully")
         } catch {
-            print("UI Tests: Error setting up test data: \(error)")
+            AppLogger.app.error("UI Tests: Error setting up test data: \(error)")
         }
     }
 }
@@ -446,7 +446,7 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         guard let notification = try? context.fetch(
             FetchDescriptor<NotificationData>(predicate: #Predicate { $0.json_url == jsonURL })
         ).first else {
-            print("No matching NotificationData found for json_url=\(jsonURL)")
+            AppLogger.app.error("No matching NotificationData found for json_url=\(jsonURL)")
             return
         }
 

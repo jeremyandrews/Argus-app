@@ -517,7 +517,7 @@ struct NewsView: View {
                         }
                     }
                 } catch {
-                    print("Error fetching metadata from database: \(error)")
+                    AppLogger.database.error("Error fetching metadata from database: \(error)")
                 }
             }
         }
@@ -585,7 +585,7 @@ struct NewsView: View {
         do {
             try mainContext.save()
         } catch {
-            print("Failed to save body_blob in main context: \(error)")
+            AppLogger.database.error("Failed to save body_blob in main context: \(error)")
         }
     }
 
@@ -973,7 +973,7 @@ struct NewsView: View {
             updateFilteredNotifications()
             selectedNotificationIDs.removeAll()
         } catch {
-            print("Failed to delete notification: \(error)")
+            AppLogger.database.error("Failed to delete notification: \(error)")
         }
     }
 
@@ -999,7 +999,7 @@ struct NewsView: View {
             // Also clean up related notification, if any.
             AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
         } catch {
-            print("Failed to toggle read status: \(error)")
+            AppLogger.database.error("Failed to toggle read status: \(error)")
         }
     }
 
@@ -1041,7 +1041,7 @@ struct NewsView: View {
             try modelContext.save()
             NotificationUtils.updateAppBadgeCount()
         } catch {
-            print("Failed to save changes: \(error)")
+            AppLogger.database.error("Failed to save changes: \(error)")
         }
     }
 
@@ -1139,7 +1139,7 @@ struct NewsView: View {
             // Update last loaded date for next pagination
             if let lastItem = fetchedNotifications.last {
                 lastLoadedDate = lastItem.pub_date ?? lastItem.date
-                print("Updated lastLoadedDate to: \(lastLoadedDate?.description ?? "nil")")
+                AppLogger.database.debug("Updated lastLoadedDate to: \(lastLoadedDate?.description ?? "nil")")
             }
 
             // Determine if we have more content to load
@@ -1154,7 +1154,7 @@ struct NewsView: View {
                 await processNextPage(fetchedNotifications)
             }
         } catch {
-            print("Error fetching notifications: \(error)")
+            AppLogger.sync.error("Error fetching notifications: \(error)")
         }
     }
 
@@ -1174,7 +1174,7 @@ struct NewsView: View {
     private func processNextPage(_ newNotifications: [NotificationData]) async {
         // Don't process if there's nothing new
         guard !newNotifications.isEmpty else {
-            print("No more notifications to load")
+            AppLogger.sync.debug("No more notifications to load")
             return
         }
 
@@ -1187,7 +1187,7 @@ struct NewsView: View {
         filteredNotifications = sortedCombined
 
         updateGrouping()
-        print("Added \(newNotifications.count) more notifications, total: \(sortedCombined.count)")
+        AppLogger.database.info("Added \(newNotifications.count) more notifications, total: \(sortedCombined.count)")
     }
 
     private func sortNotifications(_ notifications: [NotificationData]) -> [NotificationData] {
@@ -1239,19 +1239,19 @@ struct NewsView: View {
 
             // Debug the sorting
             await MainActor.run {
-                print("-- Sorting Diagnostics --")
-                print("Sort order: \(currentSortOrder)")
+                AppLogger.database.debug("-- Sorting Diagnostics --")
+                AppLogger.database.debug("Sort order: \(currentSortOrder)")
                 if let firstFew = sortedTotal.prefix(3).map({ "\($0.effectiveDate): \($0.title.prefix(20))..." }).joined(separator: "\n- ").nilIfEmpty {
-                    print("First few sorted items:\n- \(firstFew)")
+                    AppLogger.database.debug("First few sorted items:\n- \(firstFew)")
                 }
 
                 // Extra diagnostics - check pub_date vs date
                 for notification in sortedTotal.prefix(3) {
-                    print("ID: \(notification.id)")
-                    print("  pub_date: \(String(describing: notification.pub_date))")
-                    print("  date: \(notification.date)")
-                    print("  effectiveDate: \(notification.effectiveDate)")
-                    print("  title: \(notification.title.prefix(30))")
+                    AppLogger.database.debug("ID: \(notification.id)")
+                    AppLogger.database.debug("  pub_date: \(String(describing: notification.pub_date))")
+                    AppLogger.database.debug("  date: \(notification.date)")
+                    AppLogger.database.debug("  effectiveDate: \(notification.effectiveDate)")
+                    AppLogger.database.debug("  title: \(notification.title.prefix(30))")
                 }
             }
 
@@ -1349,7 +1349,7 @@ struct NewsView: View {
             let newNotifications = try modelContext.fetch(descriptor)
             return !newNotifications.isEmpty
         } catch {
-            print("Error checking for new content: \(error)")
+            AppLogger.sync.error("Error checking for new content: \(error)")
             return false
         }
     }
@@ -1363,19 +1363,19 @@ struct NewsView: View {
             let currentBatchSize = await self.batchSize
 
             // Add debug logging to see what's happening
-            print("Sort order: \(currentSortOrder)")
+            AppLogger.database.debug("Sort order: \(currentSortOrder)")
 
             // Make sure we consistently use effectiveDate, not a mix of date types
             let sortedNotifications = notifications.sorted { n1, n2 in
-                // Debug: Print sample of what we're comparing
+                // Debug: Show a sample of what we're comparing
                 if notifications.count > 0 && n1.id == notifications[0].id {
-                    print("Comparing dates for sorting:")
-                    print("  n1 pub_date: \(String(describing: n1.pub_date))")
-                    print("  n1 date: \(n1.date)")
-                    print("  n1 effectiveDate: \(n1.pub_date ?? n1.date)")
-                    print("  n2 pub_date: \(String(describing: n2.pub_date))")
-                    print("  n2 date: \(n2.date)")
-                    print("  n2 effectiveDate: \(n2.pub_date ?? n2.date)")
+                    AppLogger.database.debug("Comparing dates for sorting:")
+                    AppLogger.database.debug("  n1 pub_date: \(String(describing: n1.pub_date))")
+                    AppLogger.database.debug("  n1 date: \(n1.date)")
+                    AppLogger.database.debug("  n1 effectiveDate: \(n1.pub_date ?? n1.date)")
+                    AppLogger.database.debug("  n2 pub_date: \(String(describing: n2.pub_date))")
+                    AppLogger.database.debug("  n2 date: \(n2.date)")
+                    AppLogger.database.debug("  n2 effectiveDate: \(n2.pub_date ?? n2.date)")
                 }
 
                 // Use direct date comparison with explicit property access
@@ -1402,11 +1402,11 @@ struct NewsView: View {
                 }
             }
 
-            // Print first few sorted items to verify
-            print("After sorting (\(currentSortOrder)):")
+            // Show the first few sorted items to verify
+            AppLogger.database.debug("After sorting (\(currentSortOrder)):")
             for (i, notification) in sortedNotifications.prefix(3).enumerated() {
                 let date = notification.pub_date ?? notification.date
-                print("  \(i). \(date) - \(notification.title.prefix(20))...")
+                AppLogger.database.debug("  \(i). \(date) - \(notification.title.prefix(20))...")
             }
 
             // Create the batched array

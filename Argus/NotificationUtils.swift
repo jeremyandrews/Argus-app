@@ -66,7 +66,7 @@ class NotificationUtils {
                 cachedUnviewedCount = unviewedCount
             }
         } catch {
-            print("Failed to fetch unviewed notifications: \(error)")
+            AppLogger.database.error("Failed to fetch unviewed notifications: \(error)")
         }
     }
 
@@ -76,7 +76,7 @@ class NotificationUtils {
         return await withCheckedContinuation { continuation in
             UNUserNotificationCenter.current().setBadgeCount(count) { error in
                 if let error = error {
-                    print("Failed to update badge count: \(error)")
+                    AppLogger.ui.error("Failed to update badge count: \(error)")
                 }
                 continuation.resume()
             }

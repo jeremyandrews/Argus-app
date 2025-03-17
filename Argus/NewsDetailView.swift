@@ -796,7 +796,7 @@ struct NewsDetailView: View {
                 dismiss()
             }
         } catch {
-            print("Failed to delete notification: \(error)")
+            AppLogger.database.error("Failed to delete notification: \(error)")
         }
     }
 
@@ -1076,7 +1076,7 @@ struct NewsDetailView: View {
         do {
             try modelContext.save()
         } catch {
-            print("Failed to save context: \(error)")
+            AppLogger.database.error("Failed to save context: \(error)")
         }
     }
 
@@ -1099,7 +1099,7 @@ struct NewsDetailView: View {
         }
 
         // If that fails, just create a hardcoded object with the raw text
-        print("DEBUG: Creating fallback ArgusDetailsData with raw content")
+        AppLogger.database.debug("DEBUG: Creating fallback ArgusDetailsData with raw content")
         return ArgusDetailsData(
             model: "Argus Engine",
             elapsedTime: 0.0,
@@ -1937,7 +1937,7 @@ struct SimilarArticleRow: View {
                     }
                 }
             } catch {
-                print("Failed to fetch similar article: \(error)")
+                AppLogger.sync.error("Failed to fetch similar article: \(error)")
                 await MainActor.run {
                     showError = true
                 }

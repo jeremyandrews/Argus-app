@@ -259,13 +259,13 @@ func saveAttributedString(
                 do {
                     try notification.setRichText(attributedString, for: field, saveContext: true)
                 } catch {
-                    print("Error saving rich text on background thread: \(error)")
+                    AppLogger.database.error("Error saving rich text on background thread: \(error)")
                 }
             }
         }
         return true
     } catch {
-        print("Error saving rich text: \(error)")
+        AppLogger.database.error("Error saving rich text: \(error)")
         return false
     }
 }
