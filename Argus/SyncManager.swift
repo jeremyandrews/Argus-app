@@ -12,11 +12,8 @@ class SyncManager {
     private let backgroundFetchIdentifier = "com.arguspulse.articlefetch"
 
     // Throttling parameters
-    private var syncInProgress = false
-    private var syncInProgressTimestamp: Date?
     private var lastSyncTime: Date = .distantPast
     private let minimumSyncInterval: TimeInterval = 60
-    private let syncTimeoutInterval: TimeInterval = 300 // 5 minutes timeout
 
     // Notification names for app state changes
     private let notificationCenter = NotificationCenter.default
@@ -67,9 +64,6 @@ class SyncManager {
 
     // Called when app comes to foreground
     @objc private func appWillEnterForeground() {
-        print("App will enter foreground - checking sync status")
-        checkAndResetSyncIfStuck()
-
         // Schedule a sync after a short delay to ensure network is ready
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             Task {
@@ -96,18 +90,6 @@ class SyncManager {
         print("App did enter background - scheduling background tasks")
         scheduleBackgroundSync()
         scheduleBackgroundFetch()
-    }
-
-    // Check if sync is stuck and reset if necessary
-    private func checkAndResetSyncIfStuck() {
-        if syncInProgress,
-           let timestamp = syncInProgressTimestamp,
-           Date().timeIntervalSince(timestamp) > syncTimeoutInterval
-        {
-            print("Sync appears stuck (running > \(Int(syncTimeoutInterval)) seconds). Resetting status.")
-            syncInProgress = false
-            syncInProgressTimestamp = nil
-        }
     }
 
     // Trigger a foreground sync with appropriate throttling
@@ -285,16 +267,20 @@ class SyncManager {
         }
         // Register the sync task (for syncing with server)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundSyncIdentifier, using: nil) { task in
-            guard let appRefreshTask = task as? BGAppRefreshTask else { return }
+            guard let processingTask = task as? BGProcessingTask else { return }
+
             let syncTask = Task {
                 await self.sendRecentArticlesToServer()
-                appRefreshTask.setTaskCompleted(success: true)
+                processingTask.setTaskCompleted(success: true)
             }
-            appRefreshTask.expirationHandler = {
+
+            processingTask.expirationHandler = {
                 syncTask.cancel()
             }
+
             self.scheduleBackgroundSync()
         }
+
         // Schedule initial tasks
         scheduleBackgroundFetch()
         scheduleBackgroundSync()
@@ -302,22 +288,51 @@ class SyncManager {
     }
 
     func scheduleBackgroundFetch() {
-        let request = BGAppRefreshTaskRequest(identifier: backgroundFetchIdentifier)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // 15 minutes
+        let request = BGProcessingTaskRequest(identifier: backgroundFetchIdentifier)
+        // Let iOS decide when to run the task - much better for battery
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
+
+        // Only set a minimum delay, not a fixed schedule
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 60 * 5) // 5 minutes minimum
+
         do {
             try BGTaskScheduler.shared.submit(request)
-            print("Background fetch scheduled")
+            print("Background fetch scheduled with system optimization")
         } catch {
             print("Could not schedule background fetch: \(error)")
         }
     }
 
     func scheduleBackgroundSync() {
-        let request = BGAppRefreshTaskRequest(identifier: backgroundSyncIdentifier)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 30 * 60) // 30 minutes
+        let request = BGProcessingTaskRequest(identifier: backgroundSyncIdentifier)
+
+        // Get the cellular sync preference from user settings
+        let allowCellular = UserDefaults.standard.bool(forKey: "allowCellularSync")
+
+        // Always require network connectivity
+        request.requiresNetworkConnectivity = true
+
+        // No charging requirement in your app's settings
+        request.requiresExternalPower = false
+
+        // Use a reasonable minimum delay (30 minutes)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 1800)
+
         do {
             try BGTaskScheduler.shared.submit(request)
-            print("Background sync scheduled")
+            print("Background sync scheduled with system optimization")
+        } catch let error as BGTaskScheduler.Error {
+            switch error.code {
+            case .notPermitted:
+                print("Background sync not permitted: \(error)")
+            case .tooManyPendingTaskRequests:
+                print("Too many pending background sync tasks: \(error)")
+            case .unavailable:
+                print("Background sync unavailable: \(error)")
+            @unknown default:
+                print("Unknown background sync scheduling error: \(error)")
+            }
         } catch {
             print("Could not schedule background sync: \(error)")
         }
@@ -365,14 +380,6 @@ class SyncManager {
     }
 
     func sendRecentArticlesToServer() async {
-        // Check for a stuck sync operation first
-        checkAndResetSyncIfStuck()
-
-        guard !syncInProgress else {
-            print("Sync is already in progress. Skipping this call.")
-            return
-        }
-
         let now = Date()
         guard now.timeIntervalSince(lastSyncTime) > minimumSyncInterval else {
             print("Sync throttled - last sync was \(Int(now.timeIntervalSince(lastSyncTime))) seconds ago")
@@ -383,13 +390,6 @@ class SyncManager {
         guard await shouldAllowSync() else {
             print("Sync skipped due to network conditions and user preferences")
             return
-        }
-
-        syncInProgress = true
-        syncInProgressTimestamp = now // Record when sync started
-        defer {
-            syncInProgress = false
-            syncInProgressTimestamp = nil
         }
 
         lastSyncTime = now
