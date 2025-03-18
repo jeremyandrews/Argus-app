@@ -777,9 +777,15 @@ struct NewsView: View {
             return
         }
 
-        // Launch the article detail view immediately
+        // Pre-load the rich text content synchronously before creating the detail view
+        // This ensures formatted content is shown immediately
+        let titleAttrString = getAttributedString(for: .title, from: notification, createIfMissing: true)
+        let bodyAttrString = getAttributedString(for: .body, from: notification, createIfMissing: true)
+
         let detailView = NewsDetailView(
             notification: notification,
+            preloadedTitle: titleAttrString,
+            preloadedBody: bodyAttrString,
             notifications: filteredNotifications,
             allNotifications: totalNotifications,
             currentIndex: index
