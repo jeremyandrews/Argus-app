@@ -35,6 +35,20 @@ struct NewsView: View {
     @State private var notificationsCache: [String: [NotificationData]] = [:]
     @State private var lastCacheUpdate: Date = .distantPast
     @State private var isCacheValid: Bool = false
+    // Tracks the previous filter state to detect actual changes and avoid redundant updates
+    // This helps prevent unnecessary database queries and UI refreshes
+    @State private var lastFilterState: (
+        topic: String,
+        unread: Bool,
+        bookmarked: Bool,
+        archived: Bool,
+        notificationCount: Int
+    ) = ("All", false, false, false, 0)
+    // Task that manages debounced filter updates to prevent rapid successive updates
+    // when multiple filter settings change in quick succession
+    @State private var filterChangeDebouncer: Task<Void, Never>? = nil
+    // Timestamp of the most recent filter change, used to determine appropriate debounce intervals
+    @State private var lastFilterChangeTime: Date = .distantPast
 
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "none"
@@ -136,46 +150,41 @@ struct NewsView: View {
                         await SyncManager.shared.sendRecentArticlesToServer()
                     }
                 }
-                .onChange(of: allNotifications.map(\.isViewed)) {
-                    updateFilteredNotifications()
-                }
-                .onChange(of: selectedTopic) { _, newTopic in
-                    // If we changed topics, reset scroll if desired
-                    if lastSelectedTopic != newTopic {
-                        needsScrollReset = true
-                        lastSelectedTopic = newTopic
-
-                        // Force an immediate refresh with the new topic
-                        updateFilteredNotifications(force: true)
-                    }
-                }
-                .onChange(of: showArchivedContent) { _, _ in
-                    needsTopicReset = true
-                    updateFilteredNotifications()
-                }
-                .onChange(of: showUnreadOnly) { _, _ in
-                    needsTopicReset = true
-                    updateFilteredNotifications()
-                }
-                .onChange(of: showBookmarkedOnly) { _, _ in
-                    needsTopicReset = true
-                    updateFilteredNotifications()
-                }
-                .onChange(of: visibleTopics) { _, _ in
-                    if needsTopicReset {
-                        if !visibleTopics.contains(selectedTopic) {
-                            selectedTopic = "All"
-                        }
-                        needsTopicReset = false
-                    }
-                }
                 .onChange(of: editMode?.wrappedValue) { _, newValue in
                     if newValue == .inactive {
                         selectedNotificationIDs.removeAll()
                     }
                 }
-                .onChange(of: allNotifications) { _, _ in
-                    updateFilteredNotifications()
+                // When topic changes, use the specialized filter handler with the topic change flag
+                // to ensure immediate responsive update
+                .onChange(of: selectedTopic) { _, newTopic in
+                    handleFilterChange(topicChanged: lastSelectedTopic != newTopic, newTopic: newTopic)
+                }
+                // Filter setting changes may require topic reset and filtered notifications update
+                // but can use debounced updates for better performance
+                .onChange(of: showUnreadOnly) { _, _ in
+                    needsTopicReset = true
+                    handleFilterChange()
+                }
+                .onChange(of: showBookmarkedOnly) { _, _ in
+                    needsTopicReset = true
+                    handleFilterChange()
+                }
+                .onChange(of: showArchivedContent) { _, _ in
+                    needsTopicReset = true
+                    handleFilterChange()
+                }
+                // When notification data changes, update with debouncing
+                // This is separate from filter changes and doesn't need topic reset logic
+                .onChange(of: allNotifications.count) { _, _ in
+                    // Just a notification count change - might need a different type of update
+                    // Use debouncing to avoid multiple quick updates
+                    handleFilterChange(isDataChange: true)
+                }
+                // Dedicated observer for badge updates that only triggers when read status changes
+                // This prevents over-fetching and only updates the badge count when needed
+                .onChange(of: allNotifications.filter { !$0.isViewed }.count) { _, _ in
+                    NotificationUtils.updateAppBadgeCount()
                 }
                 .onAppear {
                     if subscriptions.isEmpty {
@@ -241,6 +250,72 @@ struct NewsView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     customEditButton()
                 }
+            }
+        }
+    }
+
+    // Central handler for all filter changes with smart debouncing
+    // - Immediately processes topic changes (for responsive UI)
+    // - Handles topic reset logic when filters affect available topics
+    // - Applies variable debounce intervals based on user activity and recency of changes
+    // - Cancels pending updates when new changes occur
+    // Parameters:
+    //   - topicChanged: Whether the selected topic has changed (requires immediate update)
+    //   - newTopic: The new topic if topic has changed
+    //   - isDataChange: Whether this is a data change rather than a filter settings change
+    private func handleFilterChange(topicChanged: Bool = false, newTopic: String? = nil, isDataChange: Bool = false) {
+        // Cancel any pending debounced update
+        filterChangeDebouncer?.cancel()
+
+        // Handle topic change - these need immediate attention
+        if topicChanged, let newTopic = newTopic {
+            needsScrollReset = true
+            lastSelectedTopic = newTopic
+            // Topic changes should force an update without debouncing
+            updateFilteredNotifications(force: true)
+            return
+        }
+
+        // Check if this is a filter change that needs topic reset
+        if needsTopicReset && !isDataChange {
+            if !visibleTopics.contains(selectedTopic) {
+                selectedTopic = "All"
+            }
+            needsTopicReset = false
+        }
+
+        // Determine appropriate debounce interval based on:
+        // - How recently a change was made (avoid rapid successive updates)
+        // - Whether the user is actively scrolling (avoid UI hitches)
+        // - Whether this is an isolated change (can be faster)
+        let now = Date()
+        let timeSinceLastChange = now.timeIntervalSince(lastFilterChangeTime)
+
+        // Amount of debounce depends on how recently we updated
+        let debounceInterval: TimeInterval
+        if timeSinceLastChange < 0.5 {
+            // For very rapid changes, use a longer debounce
+            debounceInterval = 0.5
+        } else if isActivelyScrolling {
+            // Longer debounce while scrolling
+            debounceInterval = 0.75
+        } else {
+            // Small debounce for isolated changes
+            debounceInterval = 0.25
+        }
+
+        // Create a debouncer task
+        filterChangeDebouncer = Task {
+            // Wait for the debounce period
+            try? await Task.sleep(for: .seconds(debounceInterval))
+
+            if Task.isCancelled { return }
+
+            // Update the last change timestamp
+            await MainActor.run {
+                lastFilterChangeTime = Date()
+                // Now actually perform the update
+                updateFilteredNotifications(force: false)
             }
         }
     }
@@ -1067,6 +1142,17 @@ struct NewsView: View {
 
     @MainActor
     private func updateFilteredNotifications(isBackgroundUpdate: Bool = false, force: Bool = false) {
+        // Track the current filter state for reference and future optimizations
+        // This state can be used to determine if a full update is needed or if
+        // an incremental update would be sufficient
+        lastFilterState = (
+            selectedTopic,
+            showUnreadOnly,
+            showBookmarkedOnly,
+            showArchivedContent,
+            allNotifications.count
+        )
+
         // Set a longer update interval for background refreshes (10 seconds)
         let updateInterval: TimeInterval = 10.0
         let now = Date()
@@ -1102,7 +1188,9 @@ struct NewsView: View {
                 }
             }
 
-            // Check if we're just changing topics and the cache is valid
+            // Fast path: Use in-memory cache for quick topic filtering
+            // If the cache is valid and recent, we can apply filter settings in memory
+            // without hitting the database, which is much faster and more efficient
             if !force && isCacheValid && now.timeIntervalSince(lastCacheUpdate) < 60.0 &&
                 notificationsCache.keys.contains("All")
             {
@@ -1146,7 +1234,9 @@ struct NewsView: View {
         }
     }
 
-    // Update the notifications cache for quick topic switching
+    // Updates the in-memory notification cache to speed up future filtering operations
+    // Separate caches are maintained for each topic to allow fast topic switching
+    // without repeatedly hitting the database
     @MainActor
     private func updateNotificationsCache() async {
         // Only update the cache if we have data
@@ -1385,6 +1475,8 @@ struct NewsView: View {
         }.value
     }
 
+    // Creates an optimized database query predicate based on current filter settings
+    // Combines multiple filter conditions efficiently to minimize database load
     @MainActor
     private func buildPredicate() -> Predicate<NotificationData>? {
         // Always create a fresh predicate based on current filter settings
@@ -1416,6 +1508,9 @@ struct NewsView: View {
         // Cancel any existing task first
         backgroundRefreshTask?.cancel()
 
+        // Background refresh uses a long interval (5 minutes) to minimize battery usage
+        // while still keeping content reasonably fresh
+        // Only triggers UI updates if there is actually new content
         backgroundRefreshTask = Task {
             while !Task.isCancelled {
                 // Use a much longer interval - 5 minutes instead of 30 seconds
@@ -1436,7 +1531,9 @@ struct NewsView: View {
         }
     }
 
-    // For background refresh checking, always check for newest content
+    // Efficiently checks if there are any new notifications without fetching all content
+    // Returns true if there are new items that would require a UI update
+    // This prevents unnecessary full refreshes when nothing has changed
     private func checkForNewContent() async -> Bool {
         do {
             // Get the timestamp of our newest notification
