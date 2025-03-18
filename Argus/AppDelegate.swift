@@ -23,7 +23,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Setup the badge update system
         NotificationUtils.setupBadgeUpdateSystem()
 
-        // Register background tasks
+        // Register background tasks MUST happen during app launch
+        // This can't be deferred as it triggered the crash
         SyncManager.shared.registerBackgroundTasks()
 
         // Request notification permissions separately from other app startup routines
@@ -33,8 +34,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         if isRunningUITests {
             setupTestDataIfNeeded()
         } else {
-            // Only execute deferred startup tasks when not running tests
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            // Schedule non-essential tasks to run after UI is visible
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
                 self.executeDeferredStartupTasks()
             }
         }
@@ -66,22 +67,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func executeDeferredStartupTasks() {
-        // Single dispatch with sequential timing
-        DispatchQueue.global(qos: .utility).async {
+        // Run tasks with absolute minimal priority
+        DispatchQueue.global(qos: .background).async {
+            // Add a bit more delay to ensure we're well after startup
+            Thread.sleep(forTimeInterval: 1.0)
+
+            // Log table sizes after UI is fully interactive
             ArgusApp.logDatabaseTableSizes()
 
-            Thread.sleep(forTimeInterval: 0.3)
+            Thread.sleep(forTimeInterval: 2.0)
             self.verifyDatabaseIndexes()
 
-            Thread.sleep(forTimeInterval: 0.5)
-            // Instead of starting indefinite processing, just queue one cycle
-            Task {
+            Thread.sleep(forTimeInterval: 2.0)
+            // Process queue much later with very low priority
+            Task(priority: .background) {
                 _ = await SyncManager.shared.processQueue()
             }
 
-            Thread.sleep(forTimeInterval: 0.5)
+            Thread.sleep(forTimeInterval: 2.0)
 
-            DispatchQueue.main.async {
+            // Move cleanup tasks to MainActor but ensure they run in idle time
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 self.cleanupOldArticles()
                 self.removeDuplicateNotifications()
             }
@@ -262,18 +268,49 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let context = ArgusApp.sharedModelContainer.mainContext
 
         do {
+            // First, fix duplicate IDs
             // Fetch all notifications:
             let allNotes = try context.fetch(FetchDescriptor<NotificationData>())
 
-            // Group them by their json_url
-            let grouped = Dictionary(grouping: allNotes, by: { $0.json_url })
+            // Group by ID to find duplicates
+            let groupedById = Dictionary(grouping: allNotes, by: { $0.id })
 
-            for (_, group) in grouped {
+            // Track if we've fixed any IDs
+            var anyDuplicateIdsFixed = false
+
+            for (id, group) in groupedById {
+                // If group has more than 1 item, we have duplicate IDs
+                guard group.count > 1 else { continue }
+
+                // Keep the first one with original ID, assign new IDs to others
+                for (index, dupe) in group.enumerated() {
+                    if index > 0 { // Skip the first one
+                        // Generate a new UUID for this duplicate
+                        dupe.id = UUID()
+                        anyDuplicateIdsFixed = true
+                        AppLogger.app.info("Fixed duplicate ID \(id) by assigning new ID \(dupe.id)")
+                    }
+                }
+            }
+
+            // Save the model if we made any changes to fix duplicate IDs
+            if anyDuplicateIdsFixed {
+                try context.save()
+                AppLogger.app.info("Fixed \(anyDuplicateIdsFixed) duplicate IDs")
+            }
+
+            // Now handle duplicate json_urls in a separate transaction
+            // Re-fetch to get updated state
+            let updatedNotes = try context.fetch(FetchDescriptor<NotificationData>())
+            let groupedByUrl = Dictionary(grouping: updatedNotes, by: { $0.json_url })
+
+            var duplicatesRemoved = 0
+
+            for (_, group) in groupedByUrl {
                 // If group has 1 or 0, no duplicates
                 guard group.count > 1 else { continue }
 
                 // Sort them, e.g. keep the earliest one (or keep the latest)
-                // Then delete the rest
                 let sorted = group.sorted { a, b in
                     (a.pub_date ?? a.date) < (b.pub_date ?? b.date)
                 }
@@ -283,11 +320,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
                 for dupe in toDelete {
                     context.delete(dupe)
+                    duplicatesRemoved += 1
                 }
             }
 
-            try context.save()
-            AppLogger.app.info("Duplicates removed successfully.")
+            // If we removed any duplicates, save the changes
+            if duplicatesRemoved > 0 {
+                try context.save()
+                AppLogger.app.info("Removed \(duplicatesRemoved) duplicate notifications by json_url")
+            }
         } catch {
             AppLogger.app.error("Error removing duplicates: \(error)")
         }

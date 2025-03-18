@@ -24,8 +24,9 @@ struct ArgusApp: App {
         do {
             let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
 
-            // Create database indexes after container is set up
-            Task {
+            // Delay database index creation significantly but avoid Thread.sleep
+            // which can block main-thread-sensitive operations
+            DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 10) {
                 do {
                     let _ = try ensureDatabaseIndexes()
                     AppLogger.database.info("Database indexes created successfully")
@@ -209,20 +210,26 @@ struct ArgusApp: App {
     }
 
     static func logDatabaseTableSizes() {
-        Task { @MainActor in
-            let context = sharedModelContainer.mainContext
+        Task.detached(priority: .background) {
+            // Access the container on the main actor first
+            let container = await MainActor.run {
+                sharedModelContainer
+            }
+
+            // Create a new background context instead of using the main context
+            let backgroundContext = ModelContext(container)
 
             do {
                 // Count NotificationData entries
-                let notificationCount = try context.fetchCount(FetchDescriptor<NotificationData>())
+                let notificationCount = try backgroundContext.fetchCount(FetchDescriptor<NotificationData>())
                 AppLogger.database.info("📊 Database Stats: NotificationData table size: \(notificationCount) records")
 
                 // Count SeenArticle entries
-                let seenArticleCount = try context.fetchCount(FetchDescriptor<SeenArticle>())
+                let seenArticleCount = try backgroundContext.fetchCount(FetchDescriptor<SeenArticle>())
                 AppLogger.database.info("📊 Database Stats: SeenArticle table size: \(seenArticleCount) records")
 
                 // Count ArticleQueueItem entries
-                let queueItemCount = try context.fetchCount(FetchDescriptor<ArticleQueueItem>())
+                let queueItemCount = try backgroundContext.fetchCount(FetchDescriptor<ArticleQueueItem>())
                 AppLogger.database.info("📊 Database Stats: ArticleQueueItem table size: \(queueItemCount) records")
 
                 // Calculate total records
@@ -230,17 +237,17 @@ struct ArgusApp: App {
                 AppLogger.database.info("📊 Database Stats: Total records across all tables: \(totalRecords)")
 
                 // Log additional stats about viewed/unviewed status
-                let unviewedCount = try context.fetchCount(
+                let unviewedCount = try backgroundContext.fetchCount(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
                 )
                 AppLogger.database.info("📊 Database Stats: Unviewed notifications: \(unviewedCount) records")
 
-                let bookmarkedCount = try context.fetchCount(
+                let bookmarkedCount = try backgroundContext.fetchCount(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isBookmarked })
                 )
                 AppLogger.database.info("📊 Database Stats: Bookmarked notifications: \(bookmarkedCount) records")
 
-                let archivedCount = try context.fetchCount(
+                let archivedCount = try backgroundContext.fetchCount(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isArchived })
                 )
                 AppLogger.database.info("📊 Database Stats: Archived notifications: \(archivedCount) records")
@@ -250,7 +257,7 @@ struct ArgusApp: App {
                 if daysSetting > 0 {
                     let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date())!
 
-                    let eligibleForCleanupCount = try context.fetchCount(
+                    let eligibleForCleanupCount = try backgroundContext.fetchCount(
                         FetchDescriptor<NotificationData>(
                             predicate: #Predicate { notification in
                                 notification.date < cutoffDate &&

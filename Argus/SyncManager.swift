@@ -82,8 +82,25 @@ class SyncManager {
     // Called when app becomes active
     @objc private func appDidBecomeActive() {
         AppLogger.sync.debug("App did become active")
-        // Process queued items when app becomes active
-        startQueueProcessing()
+        // Process queued items much later to ensure UI is highly responsive
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            self.startQueueProcessing()
+        }
+    }
+
+    func startQueueProcessing() {
+        // Process queue with lowest priority, ensuring UI stays responsive
+        Task.detached(priority: .background) {
+            let hasMoreItems = await self.processQueueItems()
+            // Schedule background fetch - let the system determine the best time
+            await MainActor.run {
+                self.scheduleBackgroundFetch()
+                // Only if we know there are pending items, we can request expedited processing
+                if hasMoreItems {
+                    self.requestExpediteBackgroundProcessing()
+                }
+            }
+        }
     }
 
     // Called when app enters background
@@ -352,21 +369,6 @@ class SyncManager {
             }
         } catch {
             AppLogger.sync.error("Could not schedule background sync: \(error)")
-        }
-    }
-
-    func startQueueProcessing() {
-        // Process queue once, then rely on scheduled background tasks
-        Task.detached(priority: .utility) {
-            let hasMoreItems = await self.processQueueItems()
-            // Schedule background fetch - let the system determine the best time
-            await MainActor.run {
-                self.scheduleBackgroundFetch()
-                // Only if we know there are pending items, we can request expedited processing
-                if hasMoreItems {
-                    self.requestExpediteBackgroundProcessing()
-                }
-            }
         }
     }
 
