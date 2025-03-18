@@ -32,6 +32,9 @@ struct NewsView: View {
     @State private var isActivelyScrolling: Bool = false
     @State private var pendingUpdateNeeded: Bool = false
     @State private var scrollIdleTimer: Task<Void, Never>? = nil
+    @State private var notificationsCache: [String: [NotificationData]] = [:]
+    @State private var lastCacheUpdate: Date = .distantPast
+    @State private var isCacheValid: Bool = false
 
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "none"
@@ -774,14 +777,9 @@ struct NewsView: View {
             return
         }
 
-        // Pre-load the rich text content synchronously before creating the detail view
-        let titleAttrString = getAttributedString(for: .title, from: notification)
-        let bodyAttrString = getAttributedString(for: .body, from: notification)
-
+        // Launch the article detail view immediately
         let detailView = NewsDetailView(
             notification: notification,
-            preloadedTitle: titleAttrString,
-            preloadedBody: bodyAttrString,
             notifications: filteredNotifications,
             allNotifications: totalNotifications,
             currentIndex: index
@@ -796,6 +794,22 @@ struct NewsView: View {
            let rootViewController = window.rootViewController
         {
             rootViewController.present(hostingController, animated: true)
+        }
+
+        // After presenting the view, start a background task to prepare the next few articles
+        // This makes swiping through articles smoother
+        Task(priority: .userInitiated) {
+            // Find the next few articles (up to 3) that might be viewed next
+            let nextIndices = [index + 1, index + 2, index + 3].filter { $0 < filteredNotifications.count }
+
+            // Pre-load their rich text content (but with less priority than the current article)
+            for nextIndex in nextIndices {
+                let nextNotification = filteredNotifications[nextIndex]
+                // This will cache the blobs if they don't exist yet
+                Task(priority: .background) {
+                    await generateBodyBlob(notificationID: nextNotification.id)
+                }
+            }
         }
     }
 
@@ -1073,6 +1087,26 @@ struct NewsView: View {
                 lastUpdateTime = Date()
             }
 
+            // Check if we're just changing topics and the cache is valid
+            if !force && isCacheValid && now.timeIntervalSince(lastCacheUpdate) < 60.0 &&
+                notificationsCache.keys.contains("All")
+            {
+                // We can use the cache for quick topic filtering
+                if let cachedData = notificationsCache["All"] {
+                    // Apply topic filter in memory
+                    if selectedTopic == "All" {
+                        self.filteredNotifications = filterNotificationsWithCurrentSettings(cachedData)
+                    } else {
+                        let topicFiltered = cachedData.filter { $0.topic == selectedTopic }
+                        self.filteredNotifications = filterNotificationsWithCurrentSettings(topicFiltered)
+                    }
+
+                    self.updateGrouping()
+                    return
+                }
+            }
+
+            // If we reach here, we need a fresh load from the database
             // Reset pagination state when filters change
             self.lastLoadedDate = nil
             self.hasMoreContent = true
@@ -1081,7 +1115,41 @@ struct NewsView: View {
 
             // Load the first page
             await loadPage(isInitialLoad: true)
+
+            // Cache the results
+            await updateNotificationsCache()
         }
+    }
+
+    // Helper function to filter notifications with current settings
+    private func filterNotificationsWithCurrentSettings(_ notifications: [NotificationData]) -> [NotificationData] {
+        return notifications.filter { note in
+            let archivedCondition = showArchivedContent || !note.isArchived
+            let unreadCondition = !showUnreadOnly || !note.isViewed
+            let bookmarkedCondition = !showBookmarkedOnly || note.isBookmarked
+            return archivedCondition && unreadCondition && bookmarkedCondition
+        }
+    }
+
+    // Update the notifications cache for quick topic switching
+    @MainActor
+    private func updateNotificationsCache() async {
+        // Only update the cache if we have data
+        guard !filteredNotifications.isEmpty else { return }
+
+        // Store in the cache based on topic
+        notificationsCache["All"] = totalNotifications
+
+        // Get unique topics and store them separately
+        let topics = Set(totalNotifications.compactMap { $0.topic })
+        for topic in topics {
+            let topicNotifications = totalNotifications.filter { $0.topic == topic }
+            notificationsCache[topic] = topicNotifications
+        }
+
+        // Mark the cache as valid and update the timestamp
+        lastCacheUpdate = Date()
+        isCacheValid = true
     }
 
     @MainActor
