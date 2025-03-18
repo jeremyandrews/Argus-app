@@ -1087,6 +1087,15 @@ struct NewsView: View {
                 lastUpdateTime = Date()
             }
 
+            // Always check for new content when forced
+            if force {
+                let hasNewContent = await checkForNewContent()
+                if hasNewContent {
+                    // If we have new content, invalidate the cache
+                    isCacheValid = false
+                }
+            }
+
             // Check if we're just changing topics and the cache is valid
             if !force && isCacheValid && now.timeIntervalSince(lastCacheUpdate) < 60.0 &&
                 notificationsCache.keys.contains("All")
@@ -1167,9 +1176,14 @@ struct NewsView: View {
             var datePredicateWrapper: Predicate<NotificationData>? = nil
             if let oldestSoFar = lastLoadedDate, !isInitialLoad {
                 // This predicate finds items older than the last one we loaded
+                // Use strict inequality to avoid duplicates
                 datePredicateWrapper = #Predicate<NotificationData> {
                     // Handle both pub_date and date with a fallback
-                    ($0.pub_date ?? $0.date) < oldestSoFar
+                    if let pubDate = $0.pub_date {
+                        return pubDate < oldestSoFar
+                    } else {
+                        return $0.date < oldestSoFar
+                    }
                 }
             }
 
@@ -1192,17 +1206,33 @@ struct NewsView: View {
                 predicate: combinedPredicate
             )
 
-            // Always sort by date in descending order
-            descriptor.sortBy = [
-                SortDescriptor(\.pub_date, order: .reverse),
-                SortDescriptor(\.date, order: .reverse),
-            ]
+            // Always sort by date in descending order (newest first) or ascending (oldest first)
+            // depending on the sortOrder
+            if sortOrder == "oldest" {
+                descriptor.sortBy = [
+                    SortDescriptor(\.pub_date, order: .forward),
+                    SortDescriptor(\.date, order: .forward),
+                ]
+            } else {
+                descriptor.sortBy = [
+                    SortDescriptor(\.pub_date, order: .reverse),
+                    SortDescriptor(\.date, order: .reverse),
+                ]
+            }
 
-            // Limit the number of results per page
-            descriptor.fetchLimit = pageSize
+            // For the initial load, do NOT set a fetch limit to ensure we get the newest/oldest items
+            // For subsequent page loads, use pagination
+            if !isInitialLoad {
+                descriptor.fetchLimit = pageSize
+            }
 
             // Fetch the notifications
             let fetchedNotifications = try modelContext.fetch(descriptor)
+
+            // For initial load with a lot of results, limit what we display initially
+            let notificationsToProcess = isInitialLoad && fetchedNotifications.count > pageSize * 2
+                ? Array(fetchedNotifications.prefix(pageSize))
+                : fetchedNotifications
 
             // Update last loaded date for next pagination
             if let lastItem = fetchedNotifications.last {
@@ -1211,15 +1241,22 @@ struct NewsView: View {
             }
 
             // Determine if we have more content to load
-            hasMoreContent = !fetchedNotifications.isEmpty && fetchedNotifications.count == pageSize
+            hasMoreContent = !fetchedNotifications.isEmpty &&
+                (isInitialLoad ? fetchedNotifications.count > pageSize : fetchedNotifications.count == pageSize)
+
+            // Store the complete fetched set (even if we're only displaying a subset)
+            // This ensures we have ALL notifications for caching purposes
+            if isInitialLoad {
+                totalNotifications = fetchedNotifications
+            }
 
             // Process the fetched notifications
             if isInitialLoad {
                 // For initial load, replace the current content
-                await processInitialPage(fetchedNotifications)
+                await processInitialPage(notificationsToProcess)
             } else {
                 // For pagination, append the new content
-                await processNextPage(fetchedNotifications)
+                await processNextPage(notificationsToProcess)
             }
         } catch {
             AppLogger.sync.error("Error fetching notifications: \(error)")
@@ -1393,16 +1430,19 @@ struct NewsView: View {
         }
     }
 
+    // For background refresh checking, always check for newest content
     private func checkForNewContent() async -> Bool {
-        // This could check for new notifications since the last known one
-        // without triggering a full UI refresh
         do {
             // Get the timestamp of our newest notification
             let newestTimestamp = filteredNotifications.first?.pub_date ?? .distantPast
 
-            // Create a predicate to find only newer items
+            // Create a predicate to find only newer items - especially careful with date checking
             let newerPredicate = #Predicate<NotificationData> {
-                ($0.pub_date ?? $0.date) > newestTimestamp
+                if let pubDate = $0.pub_date {
+                    return pubDate > newestTimestamp
+                } else {
+                    return $0.date > newestTimestamp
+                }
             }
 
             // Create the fetch descriptor with our predicate
@@ -1415,6 +1455,14 @@ struct NewsView: View {
 
             // Check if there are any new notifications
             let newNotifications = try modelContext.fetch(descriptor)
+
+            // If there are new notifications, invalidate the cache to force a refresh
+            if !newNotifications.isEmpty {
+                await MainActor.run {
+                    isCacheValid = false
+                }
+            }
+
             return !newNotifications.isEmpty
         } catch {
             AppLogger.sync.error("Error checking for new content: \(error)")
