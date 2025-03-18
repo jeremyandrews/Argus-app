@@ -27,7 +27,9 @@ class SyncManager {
         case unknown
     }
 
-    // Initialize and register for app lifecycle notifications
+    // Initializes the SyncManager singleton and registers for app lifecycle notifications.
+    // Sets up observers for foreground, background, and active state transitions
+    // to ensure sync operations happen at appropriate times.
     private init() {
         // Register for app lifecycle notifications on the main thread
         DispatchQueue.main.async { [weak self] in
@@ -59,11 +61,14 @@ class SyncManager {
         }
     }
 
+    // Cleans up by removing all notification observers when the SyncManager is deallocated.
     deinit {
         notificationCenter.removeObserver(self)
     }
 
-    // Called when app comes to foreground
+    // Handles app returning to foreground by triggering a sync operation after a short delay.
+    // The delay ensures that network connectivity is established before attempting to sync.
+    // Only proceeds with sync if the network conditions meet user preferences.
     @objc private func appWillEnterForeground() {
         // Schedule a sync after a short delay to ensure network is ready
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -79,7 +84,8 @@ class SyncManager {
         }
     }
 
-    // Called when app becomes active
+    // Responds to the app becoming active by scheduling queue processing with a delay.
+    // The delay ensures UI responsiveness during app launch/resume by deferring background work.
     @objc private func appDidBecomeActive() {
         AppLogger.sync.debug("App did become active")
         // Process queued items much later to ensure UI is highly responsive
@@ -88,6 +94,10 @@ class SyncManager {
         }
     }
 
+    // Initiates background processing of the article queue with lowest priority.
+    // Ensures UI remains responsive by using background priority for the task.
+    // Schedules further background processing if more items remain in the queue.
+    // May request expedited processing for pending items.
     func startQueueProcessing() {
         // Process queue with lowest priority, ensuring UI stays responsive
         Task.detached(priority: .background) {
@@ -103,14 +113,17 @@ class SyncManager {
         }
     }
 
-    // Called when app enters background
+    // Prepares for app entering background state by scheduling background tasks.
+    // Ensures both sync and fetch operations will continue even when app is not active.
     @objc private func appDidEnterBackground() {
         AppLogger.sync.debug("App did enter background - scheduling background tasks")
         scheduleBackgroundSync()
         scheduleBackgroundFetch()
     }
 
-    // Check network condition only when needed - one-time check instead of monitoring
+    // Performs a one-time check of the current network connectivity type.
+    // Returns an enum value indicating wifi, cellular, or other connectivity status.
+    // Uses continuation to make the NWPathMonitor callback-based API compatible with async/await.
     private func getCurrentNetworkType() async -> NetworkType {
         return await withCheckedContinuation { continuation in
             let pathMonitor = NWPathMonitor()
@@ -133,7 +146,9 @@ class SyncManager {
         }
     }
 
-    // Check if we should sync based on network type and settings
+    // Determines if sync should be allowed based on current network conditions and user preferences.
+    // Returns true if on WiFi or if cellular sync is explicitly allowed by user settings.
+    // Used as a gatekeeper before initiating any network operations.
     private func shouldAllowSync() async -> Bool {
         let networkType = await getCurrentNetworkType()
         switch networkType {
@@ -144,6 +159,12 @@ class SyncManager {
         }
     }
 
+    // Processes pending items in the article queue within time constraints.
+    // Adjusts processing behavior based on whether the app is active or in background.
+    // Uses cooperative time-checking to ensure UI responsiveness when app is active.
+    // Avoids processing duplicate articles through explicit duplicate checking.
+    // Updates metrics and schedules follow-up tasks if needed.
+    // Returns whether more items remain in the queue.
     private func processQueueItems() async -> Bool {
         // Check if app is in foreground - if so, use shorter time limit
         let appActive = await MainActor.run {
@@ -276,7 +297,10 @@ class SyncManager {
         }
     }
 
-    // Helper method to check if an article is already processed
+    // Checks if an article has already been processed by looking for its URL in both
+    // NotificationData and SeenArticle tables.
+    // Prevents duplicate processing of the same article content.
+    // Returns true if article exists in either table, false otherwise.
     private func isArticleAlreadyProcessed(jsonURL: String, context: ModelContext) async -> Bool {
         // Check in NotificationData
         let notificationFetchRequest = FetchDescriptor<NotificationData>(
@@ -300,6 +324,10 @@ class SyncManager {
         return isNotificationPresent || isSeenPresent
     }
 
+    // Registers the app's background tasks with the system for queue processing and server sync.
+    // Sets up handlers for both BGAppRefreshTask (article fetch) and BGProcessingTask (sync).
+    // Includes proper task cancellation handling and scheduling of follow-up tasks.
+    // Schedules initial background tasks after registration.
     func registerBackgroundTasks() {
         // Register article fetch task (for processing queue)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundFetchIdentifier, using: nil) { task in
@@ -377,6 +405,10 @@ class SyncManager {
         AppLogger.sync.debug("Background tasks registered: fetch and sync")
     }
 
+    // Schedules a background app refresh task for processing the article queue.
+    // Dynamically adjusts scheduling delay based on recency of app usage.
+    // Uses BGAppRefreshTaskRequest which has limited configuration options but can run
+    // in more restrictive conditions than processing tasks.
     func scheduleBackgroundFetch() {
         // For app refresh tasks, we need to use BGAppRefreshTaskRequest
         let request = BGAppRefreshTaskRequest(identifier: backgroundFetchIdentifier)
@@ -401,6 +433,10 @@ class SyncManager {
         }
     }
 
+    // Schedules a background processing task for syncing with the server.
+    // Dynamically sets power requirements based on queue size and time since last processing.
+    // Ensures sync will happen eventually even if optimal conditions aren't met after 24 hours.
+    // Requires network connectivity but adapts power requirements based on needs.
     func scheduleBackgroundSync() {
         let request = BGProcessingTaskRequest(identifier: backgroundSyncIdentifier)
         request.requiresNetworkConnectivity = true
@@ -437,6 +473,9 @@ class SyncManager {
         }
     }
 
+    // Requests expedited background processing when needed.
+    // Creates a minimal-requirements background task request to run as soon as possible.
+    // Used when the system needs to process queue items with higher priority.
     func requestExpediteBackgroundProcessing() {
         // Request expedited processing only if truly needed
         let request = BGProcessingTaskRequest(identifier: backgroundFetchIdentifier)
@@ -457,7 +496,9 @@ class SyncManager {
 
     // MARK: - Sync Methods
 
-    // Simplified manual sync method
+    // Initiates a user-requested manual sync operation with throttling protection.
+    // Prevents excessive sync operations by enforcing a minimum time between manual syncs.
+    // Returns a boolean indicating whether the sync was started or skipped due to throttling.
     func manualSync() async -> Bool {
         // Only throttle explicit user actions
         let now = Date()
@@ -471,6 +512,11 @@ class SyncManager {
         return true
     }
 
+    // Syncs recent article history with the server and retrieves unseen articles.
+    // Uses a flag to prevent concurrent execution of multiple sync operations.
+    // Checks network conditions before proceeding.
+    // Sends recently seen article URLs to the server and processes any unseen articles returned.
+    // Schedules the next background sync regardless of operation outcome.
     func sendRecentArticlesToServer() async {
         // Simple guard against concurrent execution
         guard !syncInProgress else {
@@ -528,11 +574,21 @@ class SyncManager {
         }
     }
 
-    // For explicit queue processing with feedback (e.g. from UI)
+    // Public method to explicitly process the article queue, typically from UI actions.
+    // Provides feedback about whether processing was completed and if more items remain.
+    // Simply delegates to the main queue processing function.
     func processQueue() async -> Bool {
         return await processQueueItems()
     }
 
+    // Processes a single article queue item by:
+    // 1. Verifying it's not already processed
+    // 2. Fetching the article JSON from the provided URL
+    // 3. Processing the JSON into structured article data
+    // 4. Extracting engine stats and similar articles if available
+    // 5. Creating NotificationData and SeenArticle records in the database
+    // 6. Generating and storing attributed strings for title and body
+    // Uses transaction for atomicity and immediately saves to prevent race conditions.
     private func processQueueItem(_ item: ArticleQueueItem, context: ModelContext) async throws {
         let itemJsonURL = item.jsonURL
 
@@ -667,6 +723,9 @@ class SyncManager {
         try context.save()
     }
 
+    // Retrieves article records from the last 24 hours.
+    // Used to build the list of seen articles to send to the server during sync.
+    // Executes on the main actor to access the shared model container.
     private func fetchRecentArticles() async -> [SeenArticle] {
         await MainActor.run {
             let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
@@ -677,6 +736,10 @@ class SyncManager {
         }
     }
 
+    // Adds articles to the processing queue that aren't already in the system.
+    // Performs duplicate checking to avoid queuing already processed articles.
+    // Takes an array of article JSON URLs and adds each to the queue if new.
+    // Reports progress via logs.
     func queueArticlesForProcessing(urls: [String]) async {
         // Get the model container on the main actor
         let container = await MainActor.run {
