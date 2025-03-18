@@ -144,37 +144,64 @@ class SyncManager {
         }
     }
 
-    // Process queue items with a hard 10-second time limit
     private func processQueueItems() async -> Bool {
-        let timeLimit = 10.0 // Always limit to 10 seconds
+        // Check if app is in foreground - if so, use shorter time limit
+        let appActive = await MainActor.run {
+            UIApplication.shared.applicationState == .active
+        }
+
+        // Use shorter time limit if user is active to avoid UI lag
+        let timeLimit = appActive ? 3.0 : 10.0
+
         let startTime = Date()
         var processedCount = 0
         var hasMoreItems = false
-        AppLogger.sync.debug("Processing queue items (max \(timeLimit) seconds)")
+
+        AppLogger.sync.debug("Processing queue items (max \(timeLimit) seconds, app \(appActive ? "active" : "inactive"))")
+
         do {
             let container = await MainActor.run {
                 ArgusApp.sharedModelContainer
             }
+
             let backgroundContext = ModelContext(container)
             let queueManager = backgroundContext.queueManager()
 
             // Process items until we hit the time limit or run out of items
             while Date().timeIntervalSince(startTime) < timeLimit {
-                // Get a batch of items to process
-                let itemsToProcess = try await queueManager.getItemsToProcess(limit: 5)
+                // Check if task was cancelled
+                if Task.isCancelled {
+                    AppLogger.sync.debug("Queue processing cancelled")
+                    break
+                }
+
+                // Get a batch of items to process - smaller batch in active mode
+                let batchSize = appActive ? 2 : 5
+                let itemsToProcess = try await queueManager.getItemsToProcess(limit: batchSize)
+
                 if itemsToProcess.isEmpty {
                     break // No more items to process
                 }
+
                 AppLogger.sync.debug("Processing batch of \(itemsToProcess.count) queue items")
                 var processedItems = [ArticleQueueItem]()
+
+                // Use a cooperative approach to check time more frequently when app is active
+                let timeCheckInterval = appActive ? 1 : 3
+                var itemsProcessedSinceTimeCheck = 0
 
                 for item in itemsToProcess {
                     if Task.isCancelled {
                         break
                     }
-                    // Check if we've exceeded the time limit
-                    if Date().timeIntervalSince(startTime) >= timeLimit {
-                        break
+
+                    // More frequent time checks when app is active
+                    itemsProcessedSinceTimeCheck += 1
+                    if appActive && itemsProcessedSinceTimeCheck >= timeCheckInterval {
+                        itemsProcessedSinceTimeCheck = 0
+                        if Date().timeIntervalSince(startTime) >= timeLimit {
+                            break
+                        }
                     }
 
                     // Check if this article is already in the database
@@ -186,11 +213,17 @@ class SyncManager {
                     }
 
                     do {
+                        // Use a lower timeout when app is active
                         try await processQueueItem(item, context: backgroundContext)
                         processedItems.append(item)
                         processedCount += 1
                     } catch {
                         AppLogger.sync.error("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
+                    }
+
+                    // If app is active, yield to main thread more frequently
+                    if appActive && processedCount % 2 == 0 {
+                        try await Task.sleep(nanoseconds: 10_000_000) // 10ms pause
                     }
                 }
 
@@ -200,33 +233,43 @@ class SyncManager {
                         try queueManager.removeItem(item)
                     }
                     AppLogger.sync.debug("Successfully processed and saved batch of \(processedItems.count) items")
-                    await MainActor.run {
-                        NotificationUtils.updateAppBadgeCount()
+
+                    // Update badge count if we processed any items
+                    if processedCount > 0 {
+                        await MainActor.run {
+                            NotificationUtils.updateAppBadgeCount()
+                        }
                     }
+                }
+
+                // If app is active, yield after each batch
+                if appActive {
+                    try await Task.sleep(nanoseconds: 20_000_000) // 20ms pause
                 }
             }
 
             let timeElapsed = Date().timeIntervalSince(startTime)
             AppLogger.sync.debug("Queue processing completed: \(processedCount) items in \(String(format: "%.2f", timeElapsed)) seconds")
 
-            // If we processed items and there might be more, schedule another processing run soon
-            if processedCount > 0 {
-                let remainingCount = try await queueManager.queueCount()
-                if remainingCount > 0 {
-                    // We have more items, but we'll let the background task system handle it
-                    await MainActor.run {
-                        // Signal the system that we'd like to process more items soon
-                        scheduleBackgroundFetch()
-                    }
-                    AppLogger.sync.debug("More items remaining (\(remainingCount)). Background task scheduled.")
-                }
-            }
-
+            // Check if there are more items to process
             let remainingCount = try await queueManager.queueCount()
             hasMoreItems = remainingCount > 0
 
-            // Return the state
+            // *** ADDED: Update metrics for future scheduling decisions ***
+            UserDefaults.standard.set(remainingCount, forKey: "currentQueueSize")
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "queueSizeLastUpdate")
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastQueueProcessingTime")
+
+            if hasMoreItems {
+                await MainActor.run {
+                    // Signal the system that we'd like to process more items
+                    scheduleBackgroundFetch()
+                }
+                AppLogger.sync.debug("More items remaining (\(remainingCount)). Background task scheduled.")
+            }
+
             return hasMoreItems
+
         } catch {
             AppLogger.sync.error("Queue processing error: \(error.localizedDescription)")
             return false
@@ -262,6 +305,7 @@ class SyncManager {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundFetchIdentifier, using: nil) { task in
             guard let appRefreshTask = task as? BGAppRefreshTask else { return }
 
+            // Create a cancellable task
             let processingTask = Task {
                 // First check if the current network state meets the user's requirements
                 let networkAllowed = await self.shouldAllowSync()
@@ -275,21 +319,30 @@ class SyncManager {
                 }
             }
 
-            // Let the system handle task expiration
+            // Handle task expiration cleanly
             appRefreshTask.expirationHandler = {
                 processingTask.cancel()
                 AppLogger.sync.debug("Background fetch task expired and was cancelled by the system")
             }
 
-            self.scheduleBackgroundFetch()
+            // Schedule the next fetch after this completes
+            Task {
+                // Wait for the task to complete without throwing errors
+                _ = await processingTask.value
+
+                await MainActor.run {
+                    self.scheduleBackgroundFetch()
+                }
+            }
         }
 
         // Register the sync task (for syncing with server)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundSyncIdentifier, using: nil) { task in
             guard let processingTask = task as? BGProcessingTask else { return }
 
+            // Create a cancellable task
             let syncTask = Task {
-                // Check network conditions
+                // Check network conditions before proceeding
                 let networkAllowed = await self.shouldAllowSync()
 
                 if networkAllowed {
@@ -301,38 +354,48 @@ class SyncManager {
                 }
             }
 
-            // Let the system handle task expiration
+            // Handle task expiration cleanly
             processingTask.expirationHandler = {
                 syncTask.cancel()
                 AppLogger.sync.debug("Background sync task expired and was cancelled by the system")
             }
 
-            self.scheduleBackgroundSync()
+            // Schedule the next sync after this completes
+            Task {
+                // Wait for the task to complete without throwing errors
+                _ = await syncTask.value
+
+                await MainActor.run {
+                    self.scheduleBackgroundSync()
+                }
+            }
         }
 
-        // Schedule initial tasks
+        // Schedule initial tasks - let the system determine when to run them
         scheduleBackgroundFetch()
         scheduleBackgroundSync()
         AppLogger.sync.debug("Background tasks registered: fetch and sync")
     }
 
     func scheduleBackgroundFetch() {
-        let request = BGProcessingTaskRequest(identifier: backgroundFetchIdentifier)
+        // For app refresh tasks, we need to use BGAppRefreshTaskRequest
+        let request = BGAppRefreshTaskRequest(identifier: backgroundFetchIdentifier)
 
-        // Require network connectivity
-        request.requiresNetworkConnectivity = true
+        // BGAppRefreshTaskRequest doesn't have network connectivity or power requirements settings
+        // We can only set the earliest begin date for this type of request
 
-        // Only set whether cellular is allowed based on user preferences
-        // This allows the system to be smarter about when to schedule the task
-        let allowCellular = UserDefaults.standard.bool(forKey: "allowCellularSync")
-        request.requiresExternalPower = false
+        // Adjust the delay based on app usage patterns - longer delay if user just used app
+        let lastActiveTime = UserDefaults.standard.double(forKey: "lastAppActiveTimestamp")
+        let currentTime = Date().timeIntervalSince1970
+        let minutesSinceActive = (currentTime - lastActiveTime) / 60
 
-        // Only set a minimum delay, not a fixed schedule
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 60 * 5) // 5 minutes minimum
+        // More dynamic scheduling - if recently used, delay more
+        let delayMinutes = minutesSinceActive < 30 ? 15 : 5
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 60 * Double(delayMinutes))
 
         do {
             try BGTaskScheduler.shared.submit(request)
-            AppLogger.sync.debug("Background fetch scheduled with system optimization (cellular allowed: \(allowCellular))")
+            AppLogger.sync.debug("Background fetch scheduled in approximately \(delayMinutes) minutes")
         } catch {
             AppLogger.sync.error("Could not schedule background fetch: \(error)")
         }
@@ -340,33 +403,35 @@ class SyncManager {
 
     func scheduleBackgroundSync() {
         let request = BGProcessingTaskRequest(identifier: backgroundSyncIdentifier)
-
-        // Always require network connectivity
         request.requiresNetworkConnectivity = true
 
-        // Set whether cellular is allowed based on user preferences
-        let allowCellular = UserDefaults.standard.bool(forKey: "allowCellularSync")
+        // Get the cached queue size
+        let queueSize = UserDefaults.standard.integer(forKey: "currentQueueSize")
+        let lastQueueUpdateTime = UserDefaults.standard.double(forKey: "queueSizeLastUpdate")
+        let currentTime = Date().timeIntervalSince1970
 
-        // No charging requirement in your app's settings
-        request.requiresExternalPower = false
+        // Only use queue size for power requirements if the data is recent (last 6 hours)
+        if currentTime - lastQueueUpdateTime < 6 * 60 * 60 {
+            // Require power for large queues
+            request.requiresExternalPower = queueSize > 10
+        } else {
+            // If we don't have recent data, be conservative
+            request.requiresExternalPower = false
+        }
 
-        // Use a reasonable minimum delay (30 minutes)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 1800)
+        // Add a timeout mechanism - if the queue hasn't been processed in 24 hours,
+        // schedule it to run regardless of power state
+        let lastProcessingTime = UserDefaults.standard.double(forKey: "lastQueueProcessingTime")
+        if currentTime - lastProcessingTime > 24 * 60 * 60 {
+            request.requiresExternalPower = false
+        }
+
+        // Schedule with appropriate timing
+        request.earliestBeginDate = Date(timeIntervalSinceNow: queueSize > 10 ? 900 : 1800) // 15 or 30 mins
 
         do {
             try BGTaskScheduler.shared.submit(request)
-            AppLogger.sync.debug("Background sync scheduled with system optimization (cellular allowed: \(allowCellular))")
-        } catch let error as BGTaskScheduler.Error {
-            switch error.code {
-            case .notPermitted:
-                AppLogger.sync.error("Background sync not permitted: \(error)")
-            case .tooManyPendingTaskRequests:
-                AppLogger.sync.error("Too many pending background sync tasks: \(error)")
-            case .unavailable:
-                AppLogger.sync.error("Background sync unavailable: \(error)")
-            @unknown default:
-                AppLogger.sync.error("Unknown background sync scheduling error: \(error)")
-            }
+            AppLogger.sync.debug("Background sync scheduled with power requirement: \(request.requiresExternalPower)")
         } catch {
             AppLogger.sync.error("Could not schedule background sync: \(error)")
         }

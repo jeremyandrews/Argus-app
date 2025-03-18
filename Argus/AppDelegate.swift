@@ -67,29 +67,26 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func executeDeferredStartupTasks() {
-        // Run tasks with absolute minimal priority
+        // Use async scheduling instead of sleep
         DispatchQueue.global(qos: .background).async {
-            // Add a bit more delay to ensure we're well after startup
-            Thread.sleep(forTimeInterval: 1.0)
+            // Initial delay
+            DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1.0) {
+                ArgusApp.logDatabaseTableSizes()
 
-            // Log table sizes after UI is fully interactive
-            ArgusApp.logDatabaseTableSizes()
+                DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 2.0) {
+                    self.verifyDatabaseIndexes()
 
-            Thread.sleep(forTimeInterval: 2.0)
-            self.verifyDatabaseIndexes()
+                    DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 2.0) {
+                        Task(priority: .background) {
+                            _ = await SyncManager.shared.processQueue()
+                        }
 
-            Thread.sleep(forTimeInterval: 2.0)
-            // Process queue much later with very low priority
-            Task(priority: .background) {
-                _ = await SyncManager.shared.processQueue()
-            }
-
-            Thread.sleep(forTimeInterval: 2.0)
-
-            // Move cleanup tasks to MainActor but ensure they run in idle time
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                self.cleanupOldArticles()
-                self.removeDuplicateNotifications()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            self.cleanupOldArticles()
+                            self.removeDuplicateNotifications()
+                        }
+                    }
+                }
             }
         }
     }
