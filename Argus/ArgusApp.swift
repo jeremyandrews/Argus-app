@@ -119,20 +119,20 @@ struct ArgusApp: App {
             ("idx_notification_json_url", "ZJSON_URL"),
 
             // Composite indexes for common query combinations
-            ("idx_notification_archived_date", "(ZISARCHIVED, ZDATE)"),
-            ("idx_notification_viewed_date", "(ZISVIEWED, ZDATE)"),
-            ("idx_notification_bookmarked_date", "(ZISBOOKMARKED, ZDATE)"),
+            ("idx_notification_archived_date", "ZISARCHIVED, ZDATE"),
+            ("idx_notification_viewed_date", "ZISVIEWED, ZDATE"),
+            ("idx_notification_bookmarked_date", "ZISBOOKMARKED, ZDATE"),
 
-            // Composite indexes for topic + filtering combinations (very common in the NewsView)
-            ("idx_notification_topic_viewed", "(ZTOPIC, ZISVIEWED)"),
-            ("idx_notification_topic_bookmarked", "(ZTOPIC, ZISBOOKMARKED)"),
-            ("idx_notification_topic_archived", "(ZTOPIC, ZISARCHIVED)"),
-            ("idx_notification_topic_date", "(ZTOPIC, ZDATE)"),
-            ("idx_notification_topic_pubdate", "(ZTOPIC, ZPUB_DATE)"),
+            // Composite indexes for topic + filtering combinations
+            ("idx_notification_topic_viewed", "ZTOPIC, ZISVIEWED"),
+            ("idx_notification_topic_bookmarked", "ZTOPIC, ZISBOOKMARKED"),
+            ("idx_notification_topic_archived", "ZTOPIC, ZISARCHIVED"),
+            ("idx_notification_topic_date", "ZTOPIC, ZDATE"),
+            ("idx_notification_topic_pubdate", "ZTOPIC, ZPUB_DATE"),
 
             // This covers the most common sorting + filtering scenarios
-            ("idx_notification_viewed_pubdate", "(ZISVIEWED, ZPUB_DATE)"),
-            ("idx_notification_bookmarked_pubdate", "(ZISBOOKMARKED, ZPUB_DATE)"),
+            ("idx_notification_viewed_pubdate", "ZISVIEWED, ZPUB_DATE"),
+            ("idx_notification_bookmarked_pubdate", "ZISBOOKMARKED, ZPUB_DATE"),
 
             // Additional indexes for detail view operations
             ("idx_notification_domain", "ZDOMAIN"),

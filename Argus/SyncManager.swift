@@ -595,9 +595,22 @@ class SyncManager {
     private func processQueueItem(_ item: ArticleQueueItem, context: ModelContext) async throws {
         let itemJsonURL = item.jsonURL
 
-        // Double-check that we're not creating duplicates
-        // This is important as the queue might have been processed already in another context
-        if await isArticleAlreadyProcessed(jsonURL: itemJsonURL, context: context) {
+        // Double-check that we're not creating duplicates by using a fresh fetch
+        // This is more reliable than using the cached check from earlier
+        var notificationDescriptor = FetchDescriptor<NotificationData>(
+            predicate: #Predicate<NotificationData> { $0.json_url == itemJsonURL }
+        )
+        notificationDescriptor.fetchLimit = 1
+
+        var seenDescriptor = FetchDescriptor<SeenArticle>(
+            predicate: #Predicate<SeenArticle> { $0.json_url == itemJsonURL }
+        )
+        seenDescriptor.fetchLimit = 1
+
+        // Check BEFORE trying to insert - critical for avoiding duplicates
+        if (try? context.fetch(notificationDescriptor).first) != nil ||
+            (try? context.fetch(seenDescriptor).first) != nil
+        {
             AppLogger.sync.debug("[Warning] Skipping already processed article: \(itemJsonURL)")
             return
         }
