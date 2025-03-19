@@ -265,77 +265,191 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
+    // removeDuplicateNotifications: Comprehensively identifies and removes duplicate articles
+    // from the database to maintain data integrity and prevent UI issues.
+    //
+    // Duplication criteria:
+    // 1. Articles with the same UUID (id) are definite duplicates
+    // 2. Articles with the same json_url are content duplicates
+    // 3. Articles with the same article_url are content duplicates
+    //
+    // The function processes each type of duplication in order, using intelligent selection
+    // criteria to determine which version to keep:
+    // - Prioritizes bookmarked and archived articles
+    // - Prefers articles with additional metadata/analysis
+    // - Falls back to keeping the newest version when other factors are equal
+    //
+    // This prevents ForEach UUID collision errors in the UI while ensuring
+    // that the most valuable version of each article is preserved.
     func removeDuplicateNotifications() {
         // Move database operations to a background context to avoid blocking the UI
         Task {
             await BackgroundContextManager.shared.performBackgroundTask { context in
                 do {
-                    // First, fix duplicate IDs
-                    // Fetch all notifications:
-                    let allNotes = try context.fetch(FetchDescriptor<NotificationData>())
+                    // Track metrics for logging
+                    var duplicatesByIdRemoved = 0
+                    var duplicatesByJsonUrlRemoved = 0
+                    var duplicatesByArticleUrlRemoved = 0
 
-                    // Group by ID to find duplicates
+                    // PHASE 1: Handle duplicate IDs (highest priority - direct UUID conflicts)
+                    let allNotes = try context.fetch(FetchDescriptor<NotificationData>())
                     let groupedById = Dictionary(grouping: allNotes, by: { $0.id })
 
-                    // Track if we've fixed any IDs
-                    var anyDuplicateIdsFixed = false
-
                     for (id, group) in groupedById {
-                        // If group has more than 1 item, we have duplicate IDs
+                        // Skip groups with only one item
                         guard group.count > 1 else { continue }
 
-                        // Keep the first one with original ID, assign new IDs to others
-                        for (index, dupe) in group.enumerated() {
-                            if index > 0 { // Skip the first one
-                                // Generate a new UUID for this duplicate
-                                dupe.id = UUID()
-                                anyDuplicateIdsFixed = true
-                                AppLogger.app.debug("Fixed duplicate ID \(id) by assigning new ID \(dupe.id)")
-                            }
-                        }
-                    }
+                        AppLogger.app.debug("Found \(group.count) duplicates with ID \(id)")
 
-                    // Save the model if we made any changes to fix duplicate IDs
-                    if anyDuplicateIdsFixed {
-                        try context.save()
-                        AppLogger.app.debug("Fixed \(anyDuplicateIdsFixed) duplicate IDs")
-                    }
-
-                    // Now handle duplicate json_urls in a separate transaction
-                    // Re-fetch to get updated state
-                    let updatedNotes = try context.fetch(FetchDescriptor<NotificationData>())
-                    let groupedByUrl = Dictionary(grouping: updatedNotes, by: { $0.json_url })
-
-                    var duplicatesRemoved = 0
-
-                    for (_, group) in groupedByUrl {
-                        // If group has 1 or 0, no duplicates
-                        guard group.count > 1 else { continue }
-
-                        // Sort them, e.g. keep the earliest one (or keep the latest)
-                        let sorted = group.sorted { a, b in
-                            (a.pub_date ?? a.date) < (b.pub_date ?? b.date)
-                        }
-                        let toKeep = sorted.first!
-                        let toDelete = sorted.dropFirst() // everything after the first
-                        AppLogger.app.debug("Keeping \(toKeep.json_url), removing \(toDelete.count) duplicates...")
+                        // Keep the most valuable version using a consistent selection strategy
+                        let toKeep = self.selectBestArticle(from: group)
+                        let toDelete = group.filter { $0 !== toKeep }
 
                         for dupe in toDelete {
                             context.delete(dupe)
-                            duplicatesRemoved += 1
+                            duplicatesByIdRemoved += 1
                         }
                     }
 
-                    // If we removed any duplicates, save the changes
-                    if duplicatesRemoved > 0 {
+                    // Save after ID deduplication to ensure clean state for next phase
+                    if duplicatesByIdRemoved > 0 {
                         try context.save()
-                        AppLogger.app.debug("Removed \(duplicatesRemoved) duplicate notifications by json_url")
+                        AppLogger.app.debug("Removed \(duplicatesByIdRemoved) notifications with duplicate IDs")
+                    }
+
+                    // PHASE 2: Handle duplicate json_urls
+                    // Re-fetch to get clean state after deletions
+                    let updatedAfterIdFix = try context.fetch(FetchDescriptor<NotificationData>())
+                    let groupedByJsonUrl = Dictionary(grouping: updatedAfterIdFix) { $0.json_url }
+
+                    for (url, group) in groupedByJsonUrl {
+                        // Skip empty URLs and non-duplicates
+                        guard group.count > 1 && !url.isEmpty else { continue }
+
+                        let toKeep = self.selectBestArticle(from: group)
+                        let toDelete = group.filter { $0 !== toKeep }
+
+                        for dupe in toDelete {
+                            context.delete(dupe)
+                            duplicatesByJsonUrlRemoved += 1
+                        }
+                    }
+
+                    // Save after json_url deduplication
+                    if duplicatesByJsonUrlRemoved > 0 {
+                        try context.save()
+                        AppLogger.app.debug("Removed \(duplicatesByJsonUrlRemoved) duplicate notifications by json_url")
+                    }
+
+                    // PHASE 3: Handle duplicate article_urls (new)
+                    // Re-fetch again for clean state
+                    let updatedAfterJsonUrlFix = try context.fetch(FetchDescriptor<NotificationData>())
+
+                    // Filter out empty article URLs first to improve grouping performance
+                    let notesWithArticleUrls = updatedAfterJsonUrlFix.filter {
+                        $0.article_url != nil && !$0.article_url!.isEmpty
+                    }
+
+                    let groupedByArticleUrl = Dictionary(grouping: notesWithArticleUrls) { $0.article_url ?? "" }
+
+                    for (url, group) in groupedByArticleUrl {
+                        // Skip empty URLs and non-duplicates
+                        guard group.count > 1 && !url.isEmpty else { continue }
+
+                        let toKeep = self.selectBestArticle(from: group)
+                        let toDelete = group.filter { $0 !== toKeep }
+
+                        for dupe in toDelete {
+                            context.delete(dupe)
+                            duplicatesByArticleUrlRemoved += 1
+                        }
+                    }
+
+                    // Save after article_url deduplication
+                    if duplicatesByArticleUrlRemoved > 0 {
+                        try context.save()
+                        AppLogger.app.debug("Removed \(duplicatesByArticleUrlRemoved) duplicate notifications by article_url")
+                    }
+
+                    // VERIFICATION: Check for any remaining duplicates
+                    let finalCheck = try context.fetch(FetchDescriptor<NotificationData>())
+                    let finalGroupById = Dictionary(grouping: finalCheck, by: { $0.id })
+
+                    var remainingDuplicates = 0
+                    for (_, group) in finalGroupById {
+                        if group.count > 1 {
+                            remainingDuplicates += group.count - 1
+                        }
+                    }
+
+                    if remainingDuplicates > 0 {
+                        AppLogger.app.warning("WARNING: \(remainingDuplicates) duplicate IDs still remain after cleanup")
+                    }
+
+                    // Update badge count if we made any changes
+                    let totalDuplicatesRemoved = duplicatesByIdRemoved + duplicatesByJsonUrlRemoved + duplicatesByArticleUrlRemoved
+                    if totalDuplicatesRemoved > 0 {
+                        AppLogger.app.info("✅ Removed \(totalDuplicatesRemoved) total duplicates: \(duplicatesByIdRemoved) by ID, \(duplicatesByJsonUrlRemoved) by json_url, \(duplicatesByArticleUrlRemoved) by article_url")
+
+                        Task { @MainActor in
+                            NotificationUtils.updateAppBadgeCount()
+                        }
                     }
                 } catch {
                     AppLogger.app.error("Error removing duplicates: \(error)")
                 }
             }
         }
+    }
+
+    // Helper function that implements the article selection logic consistently across all deduplication phases
+    private func selectBestArticle(from articles: [NotificationData]) -> NotificationData {
+        // Sort the articles by multiple criteria to determine which one to keep
+        return articles.sorted { a, b in
+            // 1. Bookmarked status (highest priority)
+            if a.isBookmarked != b.isBookmarked {
+                return a.isBookmarked
+            }
+
+            // 2. Archive status
+            if a.isArchived != b.isArchived {
+                return a.isArchived
+            }
+
+            // 3. Read status (prefer unread for better user experience)
+            if a.isViewed != b.isViewed {
+                return !a.isViewed
+            }
+
+            // 4. Metadata completeness
+            let aHasAnalysis = a.sources_quality != nil || a.argument_quality != nil ||
+                a.source_type != nil || a.quality != nil
+            let bHasAnalysis = b.sources_quality != nil || b.argument_quality != nil ||
+                b.source_type != nil || b.quality != nil
+
+            if aHasAnalysis != bHasAnalysis {
+                return aHasAnalysis
+            }
+
+            // 5. Rich text content
+            let aHasRichText = a.title_blob != nil || a.body_blob != nil
+            let bHasRichText = b.title_blob != nil || b.body_blob != nil
+
+            if aHasRichText != bHasRichText {
+                return aHasRichText
+            }
+
+            // 6. Content length (prefer more detailed content if available)
+            let aContentLength = a.title.count + a.body.count
+            let bContentLength = b.title.count + b.body.count
+
+            if aContentLength != bContentLength {
+                return aContentLength > bContentLength
+            }
+
+            // 7. Finally, publication date (prefer newer content)
+            return (a.pub_date ?? a.date) > (b.pub_date ?? b.date)
+        }.first!
     }
 
     @MainActor
