@@ -1150,8 +1150,8 @@ struct NewsView: View {
     // This significantly improves responsiveness when filtering large datasets
     @MainActor
     private func updateFilteredNotifications(isBackgroundUpdate: Bool = false, force: Bool = false) {
-        // Track the current filter state for reference and future optimizations
-        let lastFilterState = (
+        // Update the instance property instead of creating a new local variable
+        lastFilterState = (
             selectedTopic,
             showUnreadOnly,
             showBookmarkedOnly,
