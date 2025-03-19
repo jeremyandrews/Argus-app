@@ -29,18 +29,29 @@ class ArticleQueueManager {
         self.modelContext = modelContext
     }
 
-    // Add a new article to the queue if it doesn't already exist
+    // Add a new article to the queue if it doesn't already exist and hasn't been processed yet
     func addArticle(jsonURL: String) async throws -> Bool {
-        // Check if the article is already in the queue
+        // 1) First check if the article is already in NotificationData or SeenArticle
+        let alreadyProcessed = await SyncManager.shared.isArticleAlreadyProcessed(
+            jsonURL: jsonURL,
+            context: modelContext
+        )
+
+        if alreadyProcessed {
+            AppLogger.app.debug("Skipping addArticle: article is already in NotificationData or SeenArticle")
+            return false
+        }
+
+        // 2) Then check if the article is already in the queue
         let descriptor = FetchDescriptor<ArticleQueueItem>(
             predicate: #Predicate { $0.jsonURL == jsonURL }
         )
 
         if let _ = try? modelContext.fetch(descriptor).first {
-            // Item already exists, ignore it
+            // Item already exists in queue, ignore it
             return false
         } else {
-            // Create a new queue item
+            // 3) Create a new queue item if it doesn't exist anywhere
             let newItem = ArticleQueueItem(jsonURL: jsonURL)
             modelContext.insert(newItem)
             try modelContext.save()
@@ -48,18 +59,29 @@ class ArticleQueueManager {
         }
     }
 
-    // Add a new article to the queue with notification ID if it doesn't already exist
+    // Add a new article to the queue with notification ID if it doesn't already exist and hasn't been processed yet
     func addArticleWithNotification(jsonURL: String, notificationID: UUID) async throws -> Bool {
-        // Check if the article is already in the queue
+        // 1) First check if the article is already in NotificationData or SeenArticle
+        let alreadyProcessed = await SyncManager.shared.isArticleAlreadyProcessed(
+            jsonURL: jsonURL,
+            context: modelContext
+        )
+
+        if alreadyProcessed {
+            AppLogger.app.debug("Skipping addArticleWithNotification: article is already in NotificationData or SeenArticle")
+            return false
+        }
+
+        // 2) Then check if the article is already in the queue
         let descriptor = FetchDescriptor<ArticleQueueItem>(
             predicate: #Predicate { $0.jsonURL == jsonURL }
         )
 
         if let _ = try? modelContext.fetch(descriptor).first {
-            // Item already exists, ignore it
+            // Item already exists in queue, ignore it
             return false
         } else {
-            // Create a new queue item
+            // 3) Create a new queue item if it doesn't exist anywhere
             let newItem = ArticleQueueItem(
                 jsonURL: jsonURL,
                 notificationID: notificationID

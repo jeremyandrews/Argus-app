@@ -304,7 +304,7 @@ class SyncManager {
     // NotificationData and SeenArticle tables.
     // Prevents duplicate processing of the same article content.
     // Returns true if article exists in either table, false otherwise.
-    private func isArticleAlreadyProcessed(jsonURL: String, context: ModelContext) async -> Bool {
+    func isArticleAlreadyProcessed(jsonURL: String, context: ModelContext) async -> Bool {
         // Check in NotificationData
         let notificationFetchRequest = FetchDescriptor<NotificationData>(
             predicate: #Predicate<NotificationData> { notification in
