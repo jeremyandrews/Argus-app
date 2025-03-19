@@ -1229,15 +1229,13 @@ struct NewsDetailView: View {
                 isLoading: isSectionLoading(section.header)
             )
 
-        // MARK: - Source Analysis
+            // MARK: - Source Analysis
 
         case "Source Analysis":
             VStack(alignment: .leading, spacing: 10) {
-                // Domain info at the top
+                // Domain info at the top with source type badge
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Article Domain:")
-                            .font(.subheadline)
                         if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
                            !domain.isEmpty
                         {
@@ -1251,21 +1249,14 @@ struct NewsDetailView: View {
                                 }
                         }
                     }
+
                     Spacer()
-                }
 
-                // The source analysis text
-                if let sourceData = section.content as? [String: Any] {
-                    let sourceType = sourceData["sourceType"] as? String ?? ""
-
-                    SectionContentView(
-                        section: ContentSection(header: section.header, content: sourceData["text"] ?? ""),
-                        attributedString: sourceAnalysisAttributedString,
-                        isLoading: isSectionLoading(section.header)
-                    )
-
-                    // Source type badge
-                    if !sourceType.isEmpty {
+                    // Source type badge moved here
+                    if let sourceData = section.content as? [String: Any],
+                       let sourceType = sourceData["sourceType"] as? String,
+                       !sourceType.isEmpty
+                    {
                         HStack(spacing: 4) {
                             Image(systemName: sourceTypeIcon(for: sourceType))
                                 .font(.footnote)
@@ -1274,12 +1265,21 @@ struct NewsDetailView: View {
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                         }
-                        .padding(.top, 6)
                     }
+                }
+                .padding(.horizontal, 4) // Match other sections' padding
+
+                // The source analysis text
+                if let sourceData = section.content as? [String: Any] {
+                    SectionContentView(
+                        section: ContentSection(header: section.header, content: sourceData["text"] ?? ""),
+                        attributedString: sourceAnalysisAttributedString,
+                        isLoading: isSectionLoading(section.header)
+                    )
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 8) // Match other sections - this is key to prevent shifting
             .padding(.top, 6)
             .textSelection(.enabled)
 

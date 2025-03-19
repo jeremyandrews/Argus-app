@@ -59,7 +59,7 @@ struct QualityBadges: View {
             }
 
             // 4. Optional context badge (only if we have room)
-            if let sourceType = sourceType, sourcesQuality == nil || argumentQuality == nil {
+            if let _ = sourceType, sourcesQuality == nil || argumentQuality == nil {
                 QualityBadge(
                     label: "Context",
                     color: .purple,
