@@ -722,6 +722,8 @@ struct NewsView: View {
                 }
         )
         .onAppear {
+            loadMoreNotificationsIfNeeded(currentItem: notification)
+
             // If the blob doesn't exist yet, generate and save it on the main thread
             if notification.body_blob == nil {
                 Task {
@@ -1140,11 +1142,15 @@ struct NewsView: View {
         }
     }
 
+    // Handles filter changes with minimal UI blocking by:
+    // 1. Using in-memory cache for fast topic filtering when possible
+    // 2. Moving heavy database operations to background threads
+    // 3. Only updating UI state on the main thread once data is ready
+    // 4. Implementing smart debouncing to avoid redundant updates
+    // This significantly improves responsiveness when filtering large datasets
     @MainActor
     private func updateFilteredNotifications(isBackgroundUpdate: Bool = false, force: Bool = false) {
         // Track the current filter state for reference and future optimizations
-        // This state can be used to determine if a full update is needed or if
-        // an incremental update would be sufficient
         lastFilterState = (
             selectedTopic,
             showUnreadOnly,
@@ -1153,11 +1159,9 @@ struct NewsView: View {
             allNotifications.count
         )
 
-        // Set a longer update interval for background refreshes (10 seconds)
+        // Check update timing and scrolling constraints
         let updateInterval: TimeInterval = 10.0
         let now = Date()
-
-        // For background updates, enforce a minimum time between updates
         if isBackgroundUpdate {
             guard now.timeIntervalSince(lastUpdateTime) > updateInterval,
                   !isUpdating
@@ -1166,7 +1170,6 @@ struct NewsView: View {
             }
         }
 
-        // Skip updates if we're actively scrolling, unless force=true (user explicitly tapped)
         if !force && isActivelyScrolling {
             pendingUpdateNeeded = true
             return
@@ -1179,44 +1182,41 @@ struct NewsView: View {
                 lastUpdateTime = Date()
             }
 
-            // Always check for new content when forced
+            // Check for new content when forced
             if force {
                 let hasNewContent = await checkForNewContent()
                 if hasNewContent {
-                    // If we have new content, invalidate the cache
                     isCacheValid = false
                 }
             }
 
-            // Fast path: Use in-memory cache for quick topic filtering
-            // If the cache is valid and recent, we can apply filter settings in memory
-            // without hitting the database, which is much faster and more efficient
+            // Fast path: Use cache for quick filtering
             if !force && isCacheValid && now.timeIntervalSince(lastCacheUpdate) < 60.0 &&
                 notificationsCache.keys.contains("All")
             {
-                // We can use the cache for quick topic filtering
                 if let cachedData = notificationsCache["All"] {
-                    // Apply topic filter in memory
-                    if selectedTopic == "All" {
-                        self.filteredNotifications = filterNotificationsWithCurrentSettings(cachedData)
-                    } else {
-                        let topicFiltered = cachedData.filter { $0.topic == selectedTopic }
-                        self.filteredNotifications = filterNotificationsWithCurrentSettings(topicFiltered)
+                    await MainActor.run {
+                        if selectedTopic == "All" {
+                            self.filteredNotifications = filterNotificationsWithCurrentSettings(cachedData)
+                        } else {
+                            let topicFiltered = cachedData.filter { $0.topic == selectedTopic }
+                            self.filteredNotifications = filterNotificationsWithCurrentSettings(topicFiltered)
+                        }
+                        self.updateGrouping()
                     }
-
-                    self.updateGrouping()
                     return
                 }
             }
 
-            // If we reach here, we need a fresh load from the database
-            // Reset pagination state when filters change
-            self.lastLoadedDate = nil
-            self.hasMoreContent = true
-            self.totalNotifications = []
-            self.filteredNotifications = []
+            // Reset pagination state
+            await MainActor.run {
+                self.lastLoadedDate = nil
+                self.hasMoreContent = true
+                self.totalNotifications = []
+                self.filteredNotifications = []
+            }
 
-            // Load the first page
+            // Load the first page in the background
             await loadPage(isInitialLoad: true)
 
             // Cache the results
@@ -1234,128 +1234,203 @@ struct NewsView: View {
         }
     }
 
-    // Updates the in-memory notification cache to speed up future filtering operations
-    // Separate caches are maintained for each topic to allow fast topic switching
-    // without repeatedly hitting the database
-    @MainActor
+    // Updates notification caches in the background to speed up future filtering.
+    // Key optimizations:
+    // 1. Performs all processing work on a background thread
+    // 2. Creates separate caches for each topic to enable instant topic switching
+    // 3. Only builds the cache once but can reuse it for multiple filter operations
+    // 4. Only returns to the main thread to update the final cache references
+    // This dramatically improves performance by avoiding repeated database queries
     private func updateNotificationsCache() async {
-        // Only update the cache if we have data
-        guard !filteredNotifications.isEmpty else { return }
+        await BackgroundContextManager.shared.performBackgroundTask { _ in
+            // Only update the cache if we have data
+            guard !self.totalNotifications.isEmpty else { return }
 
-        // Store in the cache based on topic
-        notificationsCache["All"] = totalNotifications
+            // Create a copy of the data for thread safety
+            let notificationsToCache = self.totalNotifications
 
-        // Get unique topics and store them separately
-        let topics = Set(totalNotifications.compactMap { $0.topic })
-        for topic in topics {
-            let topicNotifications = totalNotifications.filter { $0.topic == topic }
-            notificationsCache[topic] = topicNotifications
+            // Store in the cache based on topic
+            var newCache: [String: [NotificationData]] = [:]
+            newCache["All"] = notificationsToCache
+
+            // Get unique topics and store them separately
+            let topics = Set(notificationsToCache.compactMap { $0.topic })
+            for topic in topics {
+                let topicNotifications = notificationsToCache.filter { $0.topic == topic }
+                newCache[topic] = topicNotifications
+            }
+
+            // Update the main thread cache
+            Task { @MainActor in
+                self.notificationsCache = newCache
+                self.lastCacheUpdate = Date()
+                self.isCacheValid = true
+            }
         }
-
-        // Mark the cache as valid and update the timestamp
-        lastCacheUpdate = Date()
-        isCacheValid = true
     }
 
-    @MainActor
+    // Performs efficient paginated database fetching on a background thread.
+    // Optimizations include:
+    // 1. Building predicates in the background to avoid main thread work
+    // 2. Using SwiftData's sortDescriptors to let the database handle sorting
+    // 3. Setting appropriate fetch limits to only load what's needed
+    // 4. Capturing state variables before background work to avoid race conditions
+    // 5. Only returning to the main thread for final UI updates
+    // This keeps scrolling smooth even with large datasets
     private func loadPage(isInitialLoad: Bool = false) async {
         guard !isLoadingMorePages && (isInitialLoad || hasMoreContent) else { return }
 
-        isLoadingMorePages = true
-        defer { isLoadingMorePages = false }
+        await MainActor.run {
+            isLoadingMorePages = true
+        }
 
-        do {
-            // Create the base predicate from filters
-            let basePredicate = buildPredicate()
+        defer {
+            Task { @MainActor in
+                isLoadingMorePages = false
+            }
+        }
 
-            // Create date boundary predicate if this isn't the first page
-            var datePredicateWrapper: Predicate<NotificationData>? = nil
-            if let oldestSoFar = lastLoadedDate, !isInitialLoad {
-                // This predicate finds items older than the last one we loaded
-                // Use strict inequality to avoid duplicates
-                datePredicateWrapper = #Predicate<NotificationData> {
-                    // Handle both pub_date and date with a fallback
-                    if let pubDate = $0.pub_date {
-                        return pubDate < oldestSoFar
+        // Capture values needed for background processing
+        let currentTopic = selectedTopic
+        let currentShowUnreadOnly = showUnreadOnly
+        let currentShowBookmarkedOnly = showBookmarkedOnly
+        let currentShowArchivedContent = showArchivedContent
+        let currentSortOrder = sortOrder
+        let currentLastLoadedDate = lastLoadedDate
+        let currentPageSize = pageSize
+
+        // Perform the fetch in a background context
+        let result = await BackgroundContextManager.shared.performBackgroundTask { backgroundContext in
+            do {
+                // Build the predicate
+                var basePredicate: Predicate<NotificationData>?
+
+                // Topic filter
+                if currentTopic != "All" {
+                    basePredicate = #Predicate<NotificationData> { $0.topic == currentTopic }
+                }
+
+                // Archive filter
+                if !currentShowArchivedContent {
+                    let archivePredicate = #Predicate<NotificationData> { !$0.isArchived }
+                    if let existing = basePredicate {
+                        basePredicate = #Predicate<NotificationData> {
+                            existing.evaluate($0) && archivePredicate.evaluate($0)
+                        }
                     } else {
-                        return $0.date < oldestSoFar
+                        basePredicate = archivePredicate
                     }
                 }
-            }
 
-            // Combine the base predicate with the date boundary
-            var combinedPredicate: Predicate<NotificationData>?
-            if let basePredicate = basePredicate {
-                if let datePredicateWrapper = datePredicateWrapper {
-                    combinedPredicate = #Predicate<NotificationData> {
-                        basePredicate.evaluate($0) && datePredicateWrapper.evaluate($0)
+                // Unread filter
+                if currentShowUnreadOnly {
+                    let unreadPredicate = #Predicate<NotificationData> { !$0.isViewed }
+                    if let existing = basePredicate {
+                        basePredicate = #Predicate<NotificationData> {
+                            existing.evaluate($0) && unreadPredicate.evaluate($0)
+                        }
+                    } else {
+                        basePredicate = unreadPredicate
+                    }
+                }
+
+                // Bookmark filter
+                if currentShowBookmarkedOnly {
+                    let bookmarkPredicate = #Predicate<NotificationData> { $0.isBookmarked }
+                    if let existing = basePredicate {
+                        basePredicate = #Predicate<NotificationData> {
+                            existing.evaluate($0) && bookmarkPredicate.evaluate($0)
+                        }
+                    } else {
+                        basePredicate = bookmarkPredicate
+                    }
+                }
+
+                // Date boundary predicate for pagination
+                var datePredicateWrapper: Predicate<NotificationData>? = nil
+                if let oldestSoFar = currentLastLoadedDate, !isInitialLoad {
+                    datePredicateWrapper = #Predicate<NotificationData> {
+                        if let pubDate = $0.pub_date {
+                            return pubDate < oldestSoFar
+                        } else {
+                            return $0.date < oldestSoFar
+                        }
+                    }
+                }
+
+                // Combine predicates
+                var combinedPredicate: Predicate<NotificationData>?
+                if let basePredicate = basePredicate {
+                    if let datePredicateWrapper = datePredicateWrapper {
+                        combinedPredicate = #Predicate<NotificationData> {
+                            basePredicate.evaluate($0) && datePredicateWrapper.evaluate($0)
+                        }
+                    } else {
+                        combinedPredicate = basePredicate
                     }
                 } else {
-                    combinedPredicate = basePredicate
+                    combinedPredicate = datePredicateWrapper
                 }
-            } else {
-                combinedPredicate = datePredicateWrapper
+
+                // Create the fetch descriptor
+                var descriptor = FetchDescriptor<NotificationData>(
+                    predicate: combinedPredicate
+                )
+
+                // Sort by date
+                if currentSortOrder == "oldest" {
+                    descriptor.sortBy = [
+                        SortDescriptor(\.pub_date, order: .forward),
+                        SortDescriptor(\.date, order: .forward),
+                    ]
+                } else {
+                    descriptor.sortBy = [
+                        SortDescriptor(\.pub_date, order: .reverse),
+                        SortDescriptor(\.date, order: .reverse),
+                    ]
+                }
+
+                // Set fetch limit for pagination
+                // For initial load, still use a reasonable page size
+                descriptor.fetchLimit = currentPageSize
+
+                // Fetch the notifications
+                let fetchedNotifications = try backgroundContext.fetch(descriptor)
+
+                // Track last loaded date for pagination
+                let newLastLoadedDate: Date? = fetchedNotifications.last?.pub_date ?? fetchedNotifications.last?.date
+
+                // Determine if we have more content to load
+                let hasMore = !fetchedNotifications.isEmpty && fetchedNotifications.count == currentPageSize
+
+                return (fetchedNotifications, newLastLoadedDate, hasMore)
+            } catch {
+                AppLogger.sync.error("Error fetching notifications: \(error)")
+                return ([], nil, false)
+            }
+        }
+
+        // Process results on the main thread
+        await MainActor.run {
+            let (notificationsToProcess, newLastLoadedDate, hasMore) = result
+
+            if let newLastLoadedDate = newLastLoadedDate {
+                self.lastLoadedDate = newLastLoadedDate
             }
 
-            // Create the fetch descriptor with our combined predicate
-            var descriptor = FetchDescriptor<NotificationData>(
-                predicate: combinedPredicate
-            )
+            self.hasMoreContent = hasMore
 
-            // Always sort by date in descending order (newest first) or ascending (oldest first)
-            // depending on the sortOrder
-            if sortOrder == "oldest" {
-                descriptor.sortBy = [
-                    SortDescriptor(\.pub_date, order: .forward),
-                    SortDescriptor(\.date, order: .forward),
-                ]
-            } else {
-                descriptor.sortBy = [
-                    SortDescriptor(\.pub_date, order: .reverse),
-                    SortDescriptor(\.date, order: .reverse),
-                ]
-            }
-
-            // For the initial load, do NOT set a fetch limit to ensure we get the newest/oldest items
-            // For subsequent page loads, use pagination
-            if !isInitialLoad {
-                descriptor.fetchLimit = pageSize
-            }
-
-            // Fetch the notifications
-            let fetchedNotifications = try modelContext.fetch(descriptor)
-
-            // For initial load with a lot of results, limit what we display initially
-            let notificationsToProcess = isInitialLoad && fetchedNotifications.count > pageSize * 2
-                ? Array(fetchedNotifications.prefix(pageSize))
-                : fetchedNotifications
-
-            // Update last loaded date for next pagination
-            if let lastItem = fetchedNotifications.last {
-                lastLoadedDate = lastItem.pub_date ?? lastItem.date
-                AppLogger.database.debug("Updated lastLoadedDate to: \(lastLoadedDate?.description ?? "nil")")
-            }
-
-            // Determine if we have more content to load
-            hasMoreContent = !fetchedNotifications.isEmpty &&
-                (isInitialLoad ? fetchedNotifications.count > pageSize : fetchedNotifications.count == pageSize)
-
-            // Store the complete fetched set (even if we're only displaying a subset)
-            // This ensures we have ALL notifications for caching purposes
             if isInitialLoad {
-                totalNotifications = fetchedNotifications
+                self.totalNotifications = notificationsToProcess
+                self.filteredNotifications = notificationsToProcess
+            } else {
+                // For pagination, add the newly fetched items
+                self.totalNotifications.append(contentsOf: notificationsToProcess)
+                self.filteredNotifications.append(contentsOf: notificationsToProcess)
             }
 
-            // Process the fetched notifications
-            if isInitialLoad {
-                // For initial load, replace the current content
-                await processInitialPage(notificationsToProcess)
-            } else {
-                // For pagination, append the new content
-                await processNextPage(notificationsToProcess)
-            }
-        } catch {
-            AppLogger.sync.error("Error fetching notifications: \(error)")
+            // Update grouping
+            updateGrouping()
         }
     }
 
@@ -1388,7 +1463,7 @@ struct NewsView: View {
         filteredNotifications = sortedCombined
 
         updateGrouping()
-        AppLogger.database.info("Added \(newNotifications.count) more notifications, total: \(sortedCombined.count)")
+        AppLogger.database.debug("Added \(newNotifications.count) more notifications, total: \(sortedCombined.count)")
     }
 
     private func sortNotifications(_ notifications: [NotificationData]) -> [NotificationData] {
@@ -1531,45 +1606,43 @@ struct NewsView: View {
         }
     }
 
-    // Efficiently checks if there are any new notifications without fetching all content
-    // Returns true if there are new items that would require a UI update
-    // This prevents unnecessary full refreshes when nothing has changed
+    // Efficiently determines if new content exists without fetching all items.
+    // Optimizations:
+    // 1. Uses a background context for the database query
+    // 2. Creates a targeted predicate that only looks for newer items
+    // 3. Sets a fetchLimit=1 to return as soon as any new item is found
+    // 4. Returns just a boolean result rather than fetching actual content
+    // This allows for frequent polling without performance penalties
     private func checkForNewContent() async -> Bool {
-        do {
-            // Get the timestamp of our newest notification
-            let newestTimestamp = filteredNotifications.first?.pub_date ?? .distantPast
+        return await BackgroundContextManager.shared.performBackgroundTask { backgroundContext in
+            do {
+                // Get the timestamp of our newest notification
+                let newestTimestamp = self.filteredNotifications.first?.pub_date ?? .distantPast
 
-            // Create a predicate to find only newer items - especially careful with date checking
-            let newerPredicate = #Predicate<NotificationData> {
-                if let pubDate = $0.pub_date {
-                    return pubDate > newestTimestamp
-                } else {
-                    return $0.date > newestTimestamp
+                // Create a predicate to find only newer items
+                let newerPredicate = #Predicate<NotificationData> {
+                    if let pubDate = $0.pub_date {
+                        return pubDate > newestTimestamp
+                    } else {
+                        return $0.date > newestTimestamp
+                    }
                 }
+
+                // Create the fetch descriptor with our predicate
+                var descriptor = FetchDescriptor<NotificationData>(
+                    predicate: newerPredicate
+                )
+
+                // We just need to know if there are any, not fetch them all
+                descriptor.fetchLimit = 1
+
+                // Check if there are any new notifications
+                let newNotifications = try backgroundContext.fetch(descriptor)
+                return !newNotifications.isEmpty
+            } catch {
+                AppLogger.sync.error("Error checking for new content: \(error)")
+                return false
             }
-
-            // Create the fetch descriptor with our predicate
-            var descriptor = FetchDescriptor<NotificationData>(
-                predicate: newerPredicate
-            )
-
-            // We just need to know if there are any, not fetch them all
-            descriptor.fetchLimit = 1
-
-            // Check if there are any new notifications
-            let newNotifications = try modelContext.fetch(descriptor)
-
-            // If there are new notifications, invalidate the cache to force a refresh
-            if !newNotifications.isEmpty {
-                await MainActor.run {
-                    isCacheValid = false
-                }
-            }
-
-            return !newNotifications.isEmpty
-        } catch {
-            AppLogger.sync.error("Error checking for new content: \(error)")
-            return false
         }
     }
 
@@ -1657,12 +1730,23 @@ struct NewsView: View {
         }
     }
 
+    // Performs expensive sorting and grouping operations on a background thread.
+    // Benefits include:
+    // 1. Moving Dictionary grouping operations off the main thread
+    // 2. Performing date calculations in the background
+    // 3. Handling complex sorting logic without blocking UI
+    // 4. Only dispatching back to main thread for the final UI update
+    // This prevents UI hitches when changing grouping styles or when data updates
     private func updateGrouping() {
-        // Use Task and MainActor rather than Task.detached to balance performance
-        Task(priority: .userInitiated) {
-            // Performing the sort and group operation in a non-blocking way to the main thread
-            let sorted = filteredNotifications.sorted { n1, n2 in
-                switch sortOrder {
+        // Capture the current state for processing in the background
+        let currentFilteredNotifications = filteredNotifications
+        let currentSortOrder = sortOrder
+        let currentGroupingStyle = groupingStyle
+
+        Task.detached(priority: .userInitiated) {
+            // Sort notifications in background
+            let sorted = currentFilteredNotifications.sorted { n1, n2 in
+                switch currentSortOrder {
                 case "oldest":
                     let date1 = n1.pub_date ?? n1.date
                     let date2 = n2.pub_date ?? n2.date
@@ -1681,9 +1765,10 @@ struct NewsView: View {
                 }
             }
 
+            // Group notifications
             let newGroupingData: [(key: String, displayKey: String, notifications: [NotificationData])]
 
-            switch groupingStyle {
+            switch currentGroupingStyle {
             case "date":
                 let groupedByDay = Dictionary(grouping: sorted) {
                     Calendar.current.startOfDay(for: $0.pub_date ?? $0.date)
@@ -1703,16 +1788,11 @@ struct NewsView: View {
                 newGroupingData = [("", "", sorted)]
             }
 
-            // Exit early if there's no difference to prevent unnecessary animation
-            if areGroupingArraysEqual(self.sortedAndGroupedNotifications,
-                                      newGroupingData.map { ($0.displayKey, $0.notifications) })
-            {
-                return
-            }
+            let finalResult = newGroupingData.map { ($0.displayKey, $0.notifications) }
 
-            // Update on the main actor/UI
-            await MainActor.run {
-                self.sortedAndGroupedNotifications = newGroupingData.map { ($0.displayKey, $0.notifications) }
+            // Update the UI on the main thread
+            Task { @MainActor in
+                self.sortedAndGroupedNotifications = finalResult
             }
         }
     }
@@ -1844,5 +1924,21 @@ struct FilterView: View {
         .background(Color(UIColor.systemBackground))
         .cornerRadius(15, corners: [.topLeft, .topRight])
         .shadow(radius: 10)
+    }
+}
+
+// MARK: - Background context
+
+// BackgroundContextManager provides thread-safe access to background contexts.
+// This centralizes the creation of background ModelContexts, ensuring we don't
+// accidentally perform database operations on the main thread.
+class BackgroundContextManager {
+    static let shared = BackgroundContextManager()
+
+    func performBackgroundTask<T>(_ task: @escaping (ModelContext) -> T) async -> T {
+        return await Task.detached {
+            let context = await ModelContext(ArgusApp.sharedModelContainer)
+            return task(context)
+        }.value
     }
 }

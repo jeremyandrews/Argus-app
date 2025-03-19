@@ -29,7 +29,7 @@ struct ArgusApp: App {
             DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 10) {
                 do {
                     let _ = try ensureDatabaseIndexes()
-                    AppLogger.database.info("Database indexes created successfully")
+                    AppLogger.database.debug("Database indexes created successfully")
                 } catch {
                     AppLogger.database.error("Failed to create database indexes: \(error)")
                 }
@@ -222,35 +222,35 @@ struct ArgusApp: App {
             do {
                 // Count NotificationData entries
                 let notificationCount = try backgroundContext.fetchCount(FetchDescriptor<NotificationData>())
-                AppLogger.database.info("📊 Database Stats: NotificationData table size: \(notificationCount) records")
+                AppLogger.database.debug("📊 Database Stats: NotificationData table size: \(notificationCount) records")
 
                 // Count SeenArticle entries
                 let seenArticleCount = try backgroundContext.fetchCount(FetchDescriptor<SeenArticle>())
-                AppLogger.database.info("📊 Database Stats: SeenArticle table size: \(seenArticleCount) records")
+                AppLogger.database.debug("📊 Database Stats: SeenArticle table size: \(seenArticleCount) records")
 
                 // Count ArticleQueueItem entries
                 let queueItemCount = try backgroundContext.fetchCount(FetchDescriptor<ArticleQueueItem>())
-                AppLogger.database.info("📊 Database Stats: ArticleQueueItem table size: \(queueItemCount) records")
+                AppLogger.database.debug("📊 Database Stats: ArticleQueueItem table size: \(queueItemCount) records")
 
                 // Calculate total records
                 let totalRecords = notificationCount + seenArticleCount + queueItemCount
-                AppLogger.database.info("📊 Database Stats: Total records across all tables: \(totalRecords)")
+                AppLogger.database.debug("📊 Database Stats: Total records across all tables: \(totalRecords)")
 
                 // Log additional stats about viewed/unviewed status
                 let unviewedCount = try backgroundContext.fetchCount(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
                 )
-                AppLogger.database.info("📊 Database Stats: Unviewed notifications: \(unviewedCount) records")
+                AppLogger.database.debug("📊 Database Stats: Unviewed notifications: \(unviewedCount) records")
 
                 let bookmarkedCount = try backgroundContext.fetchCount(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isBookmarked })
                 )
-                AppLogger.database.info("📊 Database Stats: Bookmarked notifications: \(bookmarkedCount) records")
+                AppLogger.database.debug("📊 Database Stats: Bookmarked notifications: \(bookmarkedCount) records")
 
                 let archivedCount = try backgroundContext.fetchCount(
                     FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isArchived })
                 )
-                AppLogger.database.info("📊 Database Stats: Archived notifications: \(archivedCount) records")
+                AppLogger.database.debug("📊 Database Stats: Archived notifications: \(archivedCount) records")
 
                 // Calculate statistics for articles eligible for cleanup
                 let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
@@ -266,7 +266,7 @@ struct ArgusApp: App {
                             }
                         )
                     )
-                    AppLogger.database.info("📊 Database Stats: Notifications eligible for cleanup: \(eligibleForCleanupCount) records")
+                    AppLogger.database.debug("📊 Database Stats: Notifications eligible for cleanup: \(eligibleForCleanupCount) records")
                 }
             } catch {
                 AppLogger.database.error("Error fetching database table sizes: \(error)")

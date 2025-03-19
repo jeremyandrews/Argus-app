@@ -46,7 +46,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     private func requestNotificationPermissions() {
         // Skip requesting permissions if we're in UI Testing mode
         if ProcessInfo.processInfo.arguments.contains("UI_TESTING_PERMISSIONS_GRANTED") {
-            AppLogger.app.info("UI Testing: Skipping notification permission request")
+            AppLogger.app.debug("UI Testing: Skipping notification permission request")
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: Notification.Name("NotificationPermissionGranted"), object: nil)
             }
@@ -95,7 +95,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         do {
             let success = try ArgusApp.ensureDatabaseIndexes()
             if success {
-                AppLogger.app.info("Database indexes verified successfully")
+                AppLogger.app.debug("Database indexes verified successfully")
             }
         } catch {
             AppLogger.app.error("Database index creation failed: \(error)")
@@ -167,11 +167,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 )
 
                 if added {
-                    AppLogger.app.info("Added article to processing queue: \(jsonURL)")
+                    AppLogger.app.debug("Added article to processing queue: \(jsonURL)")
                     try context.save()
                     finish(.newData)
                 } else {
-                    AppLogger.app.info("Article already in queue: \(jsonURL)")
+                    AppLogger.app.debug("Article already in queue: \(jsonURL)")
                     finish(.noData)
                 }
             } catch {
@@ -285,7 +285,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                         // Generate a new UUID for this duplicate
                         dupe.id = UUID()
                         anyDuplicateIdsFixed = true
-                        AppLogger.app.info("Fixed duplicate ID \(id) by assigning new ID \(dupe.id)")
+                        AppLogger.app.debug("Fixed duplicate ID \(id) by assigning new ID \(dupe.id)")
                     }
                 }
             }
@@ -293,7 +293,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             // Save the model if we made any changes to fix duplicate IDs
             if anyDuplicateIdsFixed {
                 try context.save()
-                AppLogger.app.info("Fixed \(anyDuplicateIdsFixed) duplicate IDs")
+                AppLogger.app.debug("Fixed \(anyDuplicateIdsFixed) duplicate IDs")
             }
 
             // Now handle duplicate json_urls in a separate transaction
@@ -313,7 +313,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 }
                 let toKeep = sorted.first!
                 let toDelete = sorted.dropFirst() // everything after the first
-                AppLogger.app.info("Keeping \(toKeep.json_url), removing \(toDelete.count) duplicates...")
+                AppLogger.app.debug("Keeping \(toKeep.json_url), removing \(toDelete.count) duplicates...")
 
                 for dupe in toDelete {
                     context.delete(dupe)
@@ -324,7 +324,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             // If we removed any duplicates, save the changes
             if duplicatesRemoved > 0 {
                 try context.save()
-                AppLogger.app.info("Removed \(duplicatesRemoved) duplicate notifications by json_url")
+                AppLogger.app.debug("Removed \(duplicatesRemoved) duplicate notifications by json_url")
             }
         } catch {
             AppLogger.app.error("Error removing duplicates: \(error)")
@@ -381,11 +381,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             let existingCount = try context.fetchCount(FetchDescriptor<NotificationData>())
             if existingCount > 0 {
                 // We already have data, no need to create more
-                AppLogger.app.info("UI Tests: Using \(existingCount) existing notifications for testing")
+                AppLogger.app.debug("UI Tests: Using \(existingCount) existing notifications for testing")
                 return
             }
 
-            AppLogger.app.info("UI Tests: Creating test notification data")
+            AppLogger.app.debug("UI Tests: Creating test notification data")
 
             // Create a sample notification for testing
             let testNotification = NotificationData(
@@ -430,7 +430,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             context.insert(testNotification)
             try context.save()
 
-            AppLogger.app.info("UI Tests: Test data created successfully")
+            AppLogger.app.debug("UI Tests: Test data created successfully")
         } catch {
             AppLogger.app.error("UI Tests: Error setting up test data: \(error)")
         }
