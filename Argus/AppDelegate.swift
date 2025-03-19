@@ -227,107 +227,114 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date())!
 
-        Task { @MainActor in // Ensure everything runs in the MainActor context
-            let context = ArgusApp.sharedModelContainer.mainContext
-
-            do {
-                // **Fetch all expired NotificationData in one query**
-                let notificationsToDelete = try context.fetch(
-                    FetchDescriptor<NotificationData>(
-                        predicate: #Predicate { notification in
-                            notification.date < cutoffDate &&
-                                !notification.isBookmarked &&
-                                !notification.isArchived
-                        }
+        // Move database operations to a background context to avoid blocking the UI
+        Task {
+            await BackgroundContextManager.shared.performBackgroundTask { context in
+                do {
+                    // Fetch all expired NotificationData in one query
+                    let notificationsToDelete = try context.fetch(
+                        FetchDescriptor<NotificationData>(
+                            predicate: #Predicate { notification in
+                                notification.date < cutoffDate &&
+                                    !notification.isBookmarked &&
+                                    !notification.isArchived
+                            }
+                        )
                     )
-                )
 
-                guard !notificationsToDelete.isEmpty else { return } // No old notifications
+                    guard !notificationsToDelete.isEmpty else { return } // No old notifications
 
-                // **Delete all fetched notifications in a batch**
-                for notification in notificationsToDelete {
-                    context.delete(notification)
+                    // Delete all fetched notifications in a batch
+                    for notification in notificationsToDelete {
+                        context.delete(notification)
+                    }
+
+                    // Save the deletions
+                    try context.save()
+
+                    // Update badge count on the main thread
+                    Task { @MainActor in
+                        NotificationUtils.updateAppBadgeCount()
+                    }
+
+                    AppLogger.app.debug("Deleted \(notificationsToDelete.count) old notifications")
+                } catch {
+                    AppLogger.app.error("Cleanup error: \(error)")
                 }
-
-                // **Save the deletions**
-                try context.save()
-
-                // **Update badge count**
-                NotificationUtils.updateAppBadgeCount()
-
-            } catch {
-                AppLogger.app.error("Cleanup error: \(error)")
             }
         }
     }
 
     func removeDuplicateNotifications() {
-        let context = ArgusApp.sharedModelContainer.mainContext
+        // Move database operations to a background context to avoid blocking the UI
+        Task {
+            await BackgroundContextManager.shared.performBackgroundTask { context in
+                do {
+                    // First, fix duplicate IDs
+                    // Fetch all notifications:
+                    let allNotes = try context.fetch(FetchDescriptor<NotificationData>())
 
-        do {
-            // First, fix duplicate IDs
-            // Fetch all notifications:
-            let allNotes = try context.fetch(FetchDescriptor<NotificationData>())
+                    // Group by ID to find duplicates
+                    let groupedById = Dictionary(grouping: allNotes, by: { $0.id })
 
-            // Group by ID to find duplicates
-            let groupedById = Dictionary(grouping: allNotes, by: { $0.id })
+                    // Track if we've fixed any IDs
+                    var anyDuplicateIdsFixed = false
 
-            // Track if we've fixed any IDs
-            var anyDuplicateIdsFixed = false
+                    for (id, group) in groupedById {
+                        // If group has more than 1 item, we have duplicate IDs
+                        guard group.count > 1 else { continue }
 
-            for (id, group) in groupedById {
-                // If group has more than 1 item, we have duplicate IDs
-                guard group.count > 1 else { continue }
-
-                // Keep the first one with original ID, assign new IDs to others
-                for (index, dupe) in group.enumerated() {
-                    if index > 0 { // Skip the first one
-                        // Generate a new UUID for this duplicate
-                        dupe.id = UUID()
-                        anyDuplicateIdsFixed = true
-                        AppLogger.app.debug("Fixed duplicate ID \(id) by assigning new ID \(dupe.id)")
+                        // Keep the first one with original ID, assign new IDs to others
+                        for (index, dupe) in group.enumerated() {
+                            if index > 0 { // Skip the first one
+                                // Generate a new UUID for this duplicate
+                                dupe.id = UUID()
+                                anyDuplicateIdsFixed = true
+                                AppLogger.app.debug("Fixed duplicate ID \(id) by assigning new ID \(dupe.id)")
+                            }
+                        }
                     }
+
+                    // Save the model if we made any changes to fix duplicate IDs
+                    if anyDuplicateIdsFixed {
+                        try context.save()
+                        AppLogger.app.debug("Fixed \(anyDuplicateIdsFixed) duplicate IDs")
+                    }
+
+                    // Now handle duplicate json_urls in a separate transaction
+                    // Re-fetch to get updated state
+                    let updatedNotes = try context.fetch(FetchDescriptor<NotificationData>())
+                    let groupedByUrl = Dictionary(grouping: updatedNotes, by: { $0.json_url })
+
+                    var duplicatesRemoved = 0
+
+                    for (_, group) in groupedByUrl {
+                        // If group has 1 or 0, no duplicates
+                        guard group.count > 1 else { continue }
+
+                        // Sort them, e.g. keep the earliest one (or keep the latest)
+                        let sorted = group.sorted { a, b in
+                            (a.pub_date ?? a.date) < (b.pub_date ?? b.date)
+                        }
+                        let toKeep = sorted.first!
+                        let toDelete = sorted.dropFirst() // everything after the first
+                        AppLogger.app.debug("Keeping \(toKeep.json_url), removing \(toDelete.count) duplicates...")
+
+                        for dupe in toDelete {
+                            context.delete(dupe)
+                            duplicatesRemoved += 1
+                        }
+                    }
+
+                    // If we removed any duplicates, save the changes
+                    if duplicatesRemoved > 0 {
+                        try context.save()
+                        AppLogger.app.debug("Removed \(duplicatesRemoved) duplicate notifications by json_url")
+                    }
+                } catch {
+                    AppLogger.app.error("Error removing duplicates: \(error)")
                 }
             }
-
-            // Save the model if we made any changes to fix duplicate IDs
-            if anyDuplicateIdsFixed {
-                try context.save()
-                AppLogger.app.debug("Fixed \(anyDuplicateIdsFixed) duplicate IDs")
-            }
-
-            // Now handle duplicate json_urls in a separate transaction
-            // Re-fetch to get updated state
-            let updatedNotes = try context.fetch(FetchDescriptor<NotificationData>())
-            let groupedByUrl = Dictionary(grouping: updatedNotes, by: { $0.json_url })
-
-            var duplicatesRemoved = 0
-
-            for (_, group) in groupedByUrl {
-                // If group has 1 or 0, no duplicates
-                guard group.count > 1 else { continue }
-
-                // Sort them, e.g. keep the earliest one (or keep the latest)
-                let sorted = group.sorted { a, b in
-                    (a.pub_date ?? a.date) < (b.pub_date ?? b.date)
-                }
-                let toKeep = sorted.first!
-                let toDelete = sorted.dropFirst() // everything after the first
-                AppLogger.app.debug("Keeping \(toKeep.json_url), removing \(toDelete.count) duplicates...")
-
-                for dupe in toDelete {
-                    context.delete(dupe)
-                    duplicatesRemoved += 1
-                }
-            }
-
-            // If we removed any duplicates, save the changes
-            if duplicatesRemoved > 0 {
-                try context.save()
-                AppLogger.app.debug("Removed \(duplicatesRemoved) duplicate notifications by json_url")
-            }
-        } catch {
-            AppLogger.app.error("Error removing duplicates: \(error)")
         }
     }
 
