@@ -1151,7 +1151,7 @@ struct NewsView: View {
     @MainActor
     private func updateFilteredNotifications(isBackgroundUpdate: Bool = false, force: Bool = false) {
         // Track the current filter state for reference and future optimizations
-        lastFilterState = (
+        let lastFilterState = (
             selectedTopic,
             showUnreadOnly,
             showBookmarkedOnly,
@@ -1176,6 +1176,7 @@ struct NewsView: View {
         }
 
         Task {
+            // Set updating flag
             isUpdating = true
             defer {
                 isUpdating = false
@@ -1195,33 +1196,222 @@ struct NewsView: View {
                 notificationsCache.keys.contains("All")
             {
                 if let cachedData = notificationsCache["All"] {
+                    // IMPORTANT: Create a local copy of the filtered data before updating UI
+                    let filtered: [NotificationData]
+                    if selectedTopic == "All" {
+                        filtered = filterNotificationsWithCurrentSettings(cachedData)
+                    } else {
+                        let topicFiltered = cachedData.filter { $0.topic == selectedTopic }
+                        filtered = filterNotificationsWithCurrentSettings(topicFiltered)
+                    }
+
+                    // Update grouping first with the filtered data before updating the UI
+                    let updatedGrouping = await createGroupedNotifications(filtered)
+
+                    // Now update the UI in one step to prevent flickering
                     await MainActor.run {
-                        if selectedTopic == "All" {
-                            self.filteredNotifications = filterNotificationsWithCurrentSettings(cachedData)
-                        } else {
-                            let topicFiltered = cachedData.filter { $0.topic == selectedTopic }
-                            self.filteredNotifications = filterNotificationsWithCurrentSettings(topicFiltered)
-                        }
-                        self.updateGrouping()
+                        self.sortedAndGroupedNotifications = updatedGrouping
+                        self.filteredNotifications = filtered
                     }
                     return
                 }
             }
 
-            // Reset pagination state
+            // Reset pagination state but keep current data visible until new data is ready
             await MainActor.run {
                 self.lastLoadedDate = nil
                 self.hasMoreContent = true
-                self.totalNotifications = []
-                self.filteredNotifications = []
+                // Don't clear existing data yet
+                // self.totalNotifications = []
+                // self.filteredNotifications = []
             }
 
             // Load the first page in the background
-            await loadPage(isInitialLoad: true)
+            let (newNotifications, groups) = await loadPageAndPrepareGroups()
+
+            // Only update UI when we have the new data ready
+            await MainActor.run {
+                // Update all state at once to minimize flickering
+                self.totalNotifications = newNotifications
+                self.filteredNotifications = newNotifications
+                self.sortedAndGroupedNotifications = groups
+            }
 
             // Cache the results
             await updateNotificationsCache()
         }
+    }
+
+    // Add this new helper function to prepare groups without updating UI
+    private func loadPageAndPrepareGroups() async -> ([NotificationData], [(key: String, notifications: [NotificationData])]) {
+        guard !isLoadingMorePages else { return ([], []) }
+
+        await MainActor.run {
+            isLoadingMorePages = true
+        }
+
+        defer {
+            Task { @MainActor in
+                isLoadingMorePages = false
+            }
+        }
+
+        // Capture values needed for background processing
+        let currentTopic = selectedTopic
+        let currentShowUnreadOnly = showUnreadOnly
+        let currentShowBookmarkedOnly = showBookmarkedOnly
+        let currentShowArchivedContent = showArchivedContent
+        let currentSortOrder = sortOrder
+        let currentGroupingStyle = groupingStyle
+        let currentPageSize = pageSize
+
+        // Perform the fetch in a background context
+        let result = await BackgroundContextManager.shared.performBackgroundTask { backgroundContext in
+            do {
+                // [Same predicate building code as loadPage function]
+                // ...
+
+                var basePredicate: Predicate<NotificationData>?
+
+                if currentTopic != "All" {
+                    basePredicate = #Predicate<NotificationData> { $0.topic == currentTopic }
+                }
+
+                if !currentShowArchivedContent {
+                    let archivePredicate = #Predicate<NotificationData> { !$0.isArchived }
+                    if let existing = basePredicate {
+                        basePredicate = #Predicate<NotificationData> {
+                            existing.evaluate($0) && archivePredicate.evaluate($0)
+                        }
+                    } else {
+                        basePredicate = archivePredicate
+                    }
+                }
+
+                if currentShowUnreadOnly {
+                    let unreadPredicate = #Predicate<NotificationData> { !$0.isViewed }
+                    if let existing = basePredicate {
+                        basePredicate = #Predicate<NotificationData> {
+                            existing.evaluate($0) && unreadPredicate.evaluate($0)
+                        }
+                    } else {
+                        basePredicate = unreadPredicate
+                    }
+                }
+
+                if currentShowBookmarkedOnly {
+                    let bookmarkPredicate = #Predicate<NotificationData> { $0.isBookmarked }
+                    if let existing = basePredicate {
+                        basePredicate = #Predicate<NotificationData> {
+                            existing.evaluate($0) && bookmarkPredicate.evaluate($0)
+                        }
+                    } else {
+                        basePredicate = bookmarkPredicate
+                    }
+                }
+
+                var descriptor = FetchDescriptor<NotificationData>(
+                    predicate: basePredicate
+                )
+
+                // Sort by date
+                if currentSortOrder == "oldest" {
+                    descriptor.sortBy = [
+                        SortDescriptor(\.pub_date, order: .forward),
+                        SortDescriptor(\.date, order: .forward),
+                    ]
+                } else {
+                    descriptor.sortBy = [
+                        SortDescriptor(\.pub_date, order: .reverse),
+                        SortDescriptor(\.date, order: .reverse),
+                    ]
+                }
+
+                descriptor.fetchLimit = currentPageSize
+
+                // Fetch the notifications
+                let fetchedNotifications = try backgroundContext.fetch(descriptor)
+
+                // Directly prepare the grouping data
+                let groupedData: [(key: String, notifications: [NotificationData])]
+
+                switch currentGroupingStyle {
+                case "date":
+                    let groupedByDay = Dictionary(grouping: fetchedNotifications) {
+                        Calendar.current.startOfDay(for: $0.pub_date ?? $0.date)
+                    }
+                    let sortedDayKeys = groupedByDay.keys.sorted { $0 > $1 }
+                    groupedData = sortedDayKeys.map { day in
+                        let displayKey = day.formatted(date: .abbreviated, time: .omitted)
+                        let notifications = groupedByDay[day] ?? []
+                        return (key: displayKey, notifications: notifications)
+                    }
+                case "topic":
+                    let groupedByTopic = Dictionary(grouping: fetchedNotifications) { $0.topic ?? "Uncategorized" }
+                    groupedData = groupedByTopic.map {
+                        (key: $0.key, notifications: $0.value)
+                    }.sorted { $0.key < $1.key }
+                default:
+                    groupedData = [("", fetchedNotifications)]
+                }
+
+                return (fetchedNotifications, groupedData)
+            } catch {
+                AppLogger.sync.error("Error fetching notifications: \(error)")
+                return ([], [])
+            }
+        }
+
+        return result
+    }
+
+    private func createGroupedNotifications(_ notifications: [NotificationData]) async -> [(key: String, notifications: [NotificationData])] {
+        let currentGroupingStyle = groupingStyle
+        let currentSortOrder = sortOrder
+
+        return await Task.detached(priority: .userInitiated) {
+            // Sort notifications in background
+            let sorted = notifications.sorted { n1, n2 in
+                switch currentSortOrder {
+                case "oldest":
+                    let date1 = n1.pub_date ?? n1.date
+                    let date2 = n2.pub_date ?? n2.date
+                    return date1 < date2
+                case "bookmarked":
+                    if n1.isBookmarked != n2.isBookmarked {
+                        return n1.isBookmarked
+                    }
+                    let date1 = n1.pub_date ?? n1.date
+                    let date2 = n2.pub_date ?? n2.date
+                    return date1 > date2
+                default: // "newest"
+                    let date1 = n1.pub_date ?? n1.date
+                    let date2 = n2.pub_date ?? n2.date
+                    return date1 > date2
+                }
+            }
+
+            // Group notifications
+            switch currentGroupingStyle {
+            case "date":
+                let groupedByDay = Dictionary(grouping: sorted) {
+                    Calendar.current.startOfDay(for: $0.pub_date ?? $0.date)
+                }
+                let sortedDayKeys = groupedByDay.keys.sorted { $0 > $1 }
+                return sortedDayKeys.map { day in
+                    let displayKey = day.formatted(date: .abbreviated, time: .omitted)
+                    let notifications = groupedByDay[day] ?? []
+                    return (key: displayKey, notifications: notifications)
+                }
+            case "topic":
+                let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
+                return groupedByTopic.map {
+                    (key: $0.key, notifications: $0.value)
+                }.sorted { $0.key < $1.key }
+            default:
+                return [("", sorted)]
+            }
+        }.value
     }
 
     // Helper function to filter notifications with current settings
@@ -1738,61 +1928,13 @@ struct NewsView: View {
     // 4. Only dispatching back to main thread for the final UI update
     // This prevents UI hitches when changing grouping styles or when data updates
     private func updateGrouping() {
-        // Capture the current state for processing in the background
-        let currentFilteredNotifications = filteredNotifications
-        let currentSortOrder = sortOrder
-        let currentGroupingStyle = groupingStyle
+        Task {
+            // Prepare the grouping in the background
+            let updatedGrouping = await createGroupedNotifications(filteredNotifications)
 
-        Task.detached(priority: .userInitiated) {
-            // Sort notifications in background
-            let sorted = currentFilteredNotifications.sorted { n1, n2 in
-                switch currentSortOrder {
-                case "oldest":
-                    let date1 = n1.pub_date ?? n1.date
-                    let date2 = n2.pub_date ?? n2.date
-                    return date1 < date2
-                case "bookmarked":
-                    if n1.isBookmarked != n2.isBookmarked {
-                        return n1.isBookmarked
-                    }
-                    let date1 = n1.pub_date ?? n1.date
-                    let date2 = n2.pub_date ?? n2.date
-                    return date1 > date2
-                default: // "newest"
-                    let date1 = n1.pub_date ?? n1.date
-                    let date2 = n2.pub_date ?? n2.date
-                    return date1 > date2
-                }
-            }
-
-            // Group notifications
-            let newGroupingData: [(key: String, displayKey: String, notifications: [NotificationData])]
-
-            switch currentGroupingStyle {
-            case "date":
-                let groupedByDay = Dictionary(grouping: sorted) {
-                    Calendar.current.startOfDay(for: $0.pub_date ?? $0.date)
-                }
-                let sortedDayKeys = groupedByDay.keys.sorted { $0 < $1 }
-                newGroupingData = sortedDayKeys.map { day in
-                    let displayKey = day.formatted(date: .abbreviated, time: .omitted)
-                    let notifications = groupedByDay[day] ?? []
-                    return (key: displayKey, displayKey: displayKey, notifications: notifications)
-                }
-            case "topic":
-                let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
-                newGroupingData = groupedByTopic.map {
-                    (key: $0.key, displayKey: $0.key, notifications: $0.value)
-                }.sorted { $0.key < $1.key }
-            default:
-                newGroupingData = [("", "", sorted)]
-            }
-
-            let finalResult = newGroupingData.map { ($0.displayKey, $0.notifications) }
-
-            // Update the UI on the main thread
-            Task { @MainActor in
-                self.sortedAndGroupedNotifications = finalResult
+            // Update UI in one step
+            await MainActor.run {
+                self.sortedAndGroupedNotifications = updatedGrouping
             }
         }
     }
