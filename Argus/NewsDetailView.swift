@@ -410,8 +410,12 @@ struct NewsDetailView: View {
 
     // Make sure we clean up properly when navigating between articles
     private func navigateToArticle(direction: NavigationDirection) {
-        // Cancel any ongoing tasks immediately
+        // Cancel any ongoing tasks
         tabChangeTask?.cancel()
+        for (_, task) in sectionLoadingTasks {
+            task.cancel()
+        }
+        sectionLoadingTasks = [:]
 
         // Get the next valid index
         guard let nextIndex = getNextValidIndex(direction: direction),
@@ -420,9 +424,31 @@ struct NewsDetailView: View {
             return
         }
 
-        // Immediately clear ALL cached content before anything else
-        titleAttributedString = nil
-        bodyAttributedString = nil
+        // Store the notification we're navigating to
+        let nextNotification = notifications[nextIndex]
+
+        // Extract title and body blobs synchronously
+        var extractedTitle: NSAttributedString? = nil
+        var extractedBody: NSAttributedString? = nil
+
+        if let titleBlob = nextNotification.title_blob {
+            extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self, from: titleBlob
+            )
+        }
+
+        if let bodyBlob = nextNotification.body_blob {
+            extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self, from: bodyBlob
+            )
+        }
+
+        // Update state with the pre-loaded content
+        currentIndex = nextIndex
+        titleAttributedString = extractedTitle
+        bodyAttributedString = extractedBody
+
+        // Reset other content
         summaryAttributedString = nil
         criticalAnalysisAttributedString = nil
         logicalFallaciesAttributedString = nil
@@ -430,39 +456,45 @@ struct NewsDetailView: View {
         cachedContentBySection = [:]
         preloadedNotification = nil
 
-        // Update to the next notification and reset expanded sections
-        currentIndex = nextIndex
+        // Reset expanded sections
         expandedSections = Self.getDefaultExpandedSections()
 
-        // Generate a new transition ID to force view refresh
+        // Force refresh
         contentTransitionID = UUID()
-
-        // Request scroll to top immediately
         scrollToTopTrigger = UUID()
 
-        // Mark as viewed immediately
-        if let notification = currentNotification, !notification.isViewed {
-            notification.isViewed = true
+        // Mark as viewed
+        if !nextNotification.isViewed {
+            nextNotification.isViewed = true
             Task(priority: .background) {
                 try? modelContext.save()
                 NotificationUtils.updateAppBadgeCount()
             }
         }
 
-        // Now schedule background loading of rich text content with a simpler approach
-        tabChangeTask = Task { @MainActor in
-            // Since we're on the MainActor, we can safely access currentNotification
-            guard let notification = currentNotification else { return }
-
-            // Small delay to ensure UI has updated with plain text first
-            try? await Task.sleep(for: .milliseconds(50))
-            if Task.isCancelled { return }
-
-            // Process content on a background thread but keep data access on MainActor
-            // This is safer and avoids Sendable issues
-            Task.detached(priority: .userInitiated) {
-                // Run heavy processing in background
-                await processRichText(for: notification)
+        // Load the Summary in a completely separate process
+        if expandedSections["Summary"] == true {
+            // Using DispatchQueue to fully decouple from navigation
+            DispatchQueue.main.async {
+                // Use a delay to ensure navigation completes first
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    // Check if summary blob exists
+                    if let summaryBlob = nextNotification.summary_blob,
+                       let storedSummary = try? NSKeyedUnarchiver.unarchivedObject(
+                           ofClass: NSAttributedString.self, from: summaryBlob
+                       )
+                    {
+                        // Use existing formatted summary
+                        self.summaryAttributedString = storedSummary
+                    } else {
+                        // Need to generate summary - use global function
+                        self.summaryAttributedString = getAttributedString(
+                            for: .summary,
+                            from: nextNotification,
+                            createIfMissing: true
+                        )
+                    }
+                }
             }
         }
     }
