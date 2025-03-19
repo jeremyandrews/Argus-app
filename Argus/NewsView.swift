@@ -1268,15 +1268,15 @@ struct NewsView: View {
         // Perform the fetch in a background context
         let result = await BackgroundContextManager.shared.performBackgroundTask { backgroundContext in
             do {
-                // [Same predicate building code as loadPage function]
-                // ...
-
+                // Build the predicate efficiently to match database indexes
                 var basePredicate: Predicate<NotificationData>?
 
+                // Topic filter (most selective)
                 if currentTopic != "All" {
                     basePredicate = #Predicate<NotificationData> { $0.topic == currentTopic }
                 }
 
+                // Archive filter
                 if !currentShowArchivedContent {
                     let archivePredicate = #Predicate<NotificationData> { !$0.isArchived }
                     if let existing = basePredicate {
@@ -1288,6 +1288,7 @@ struct NewsView: View {
                     }
                 }
 
+                // Unread filter
                 if currentShowUnreadOnly {
                     let unreadPredicate = #Predicate<NotificationData> { !$0.isViewed }
                     if let existing = basePredicate {
@@ -1299,6 +1300,7 @@ struct NewsView: View {
                     }
                 }
 
+                // Bookmark filter
                 if currentShowBookmarkedOnly {
                     let bookmarkPredicate = #Predicate<NotificationData> { $0.isBookmarked }
                     if let existing = basePredicate {
@@ -1314,23 +1316,40 @@ struct NewsView: View {
                     predicate: basePredicate
                 )
 
-                // Sort by date
-                if currentSortOrder == "oldest" {
+                // Set up database sorting - use only indexed fields here
+                // For complex sorting, we'll do a second pass in memory
+                if currentSortOrder == "bookmarked" {
+                    // For bookmarked sort, just fetch by date first and we'll sort later
                     descriptor.sortBy = [
-                        SortDescriptor(\.pub_date, order: .forward),
-                        SortDescriptor(\.date, order: .forward),
+                        SortDescriptor(\NotificationData.pub_date, order: .reverse),
                     ]
-                } else {
+                } else if currentSortOrder == "oldest" {
                     descriptor.sortBy = [
-                        SortDescriptor(\.pub_date, order: .reverse),
-                        SortDescriptor(\.date, order: .reverse),
+                        SortDescriptor(\NotificationData.pub_date, order: .forward),
+                    ]
+                } else { // "newest"
+                    descriptor.sortBy = [
+                        SortDescriptor(\NotificationData.pub_date, order: .reverse),
                     ]
                 }
 
                 descriptor.fetchLimit = currentPageSize
 
                 // Fetch the notifications
-                let fetchedNotifications = try backgroundContext.fetch(descriptor)
+                var fetchedNotifications = try backgroundContext.fetch(descriptor)
+
+                // Apply any complex sorting in memory after fetching
+                if currentSortOrder == "bookmarked" {
+                    // Sort bookmarked items first, then by date
+                    fetchedNotifications.sort { n1, n2 in
+                        if n1.isBookmarked != n2.isBookmarked {
+                            return n1.isBookmarked
+                        }
+                        let date1 = n1.pub_date ?? n1.date
+                        let date2 = n2.pub_date ?? n2.date
+                        return date1 > date2
+                    }
+                }
 
                 // Directly prepare the grouping data
                 let groupedData: [(key: String, notifications: [NotificationData])]
@@ -1744,29 +1763,93 @@ struct NewsView: View {
     // Combines multiple filter conditions efficiently to minimize database load
     @MainActor
     private func buildPredicate() -> Predicate<NotificationData>? {
-        // Always create a fresh predicate based on current filter settings
-        let topicPredicate = selectedTopic == "All" ? nil :
-            #Predicate<NotificationData> { $0.topic == selectedTopic }
-        let archivedPredicate = showArchivedContent ? nil :
-            #Predicate<NotificationData> { !$0.isArchived }
-        let unreadPredicate = showUnreadOnly ?
-            #Predicate<NotificationData> { !$0.isViewed } : nil
-        let bookmarkedPredicate = showBookmarkedOnly ?
-            #Predicate<NotificationData> { $0.isBookmarked } : nil
+        // Handle common filter combinations that match our indexes
 
-        // Combine predicates
-        var combinedPredicate: Predicate<NotificationData>? = nil
-        for predicate in [topicPredicate, archivedPredicate, unreadPredicate, bookmarkedPredicate].compactMap({ $0 }) {
-            if let existing = combinedPredicate {
-                combinedPredicate = #Predicate<NotificationData> {
-                    existing.evaluate($0) && predicate.evaluate($0)
+        // Case 1: Topic filter is present (most selective)
+        if selectedTopic != "All" {
+            // Topic + other filters (matching our composite indexes)
+            if showBookmarkedOnly && showUnreadOnly && !showArchivedContent {
+                // Topic + bookmarked + unread + not archived
+                return #Predicate<NotificationData> { note in
+                    note.topic == selectedTopic &&
+                        note.isBookmarked &&
+                        !note.isViewed &&
+                        !note.isArchived
+                }
+            } else if showBookmarkedOnly && !showArchivedContent {
+                // Topic + bookmarked + not archived
+                return #Predicate<NotificationData> { note in
+                    note.topic == selectedTopic &&
+                        note.isBookmarked &&
+                        !note.isArchived
+                }
+            } else if showUnreadOnly && !showArchivedContent {
+                // Topic + unread + not archived
+                return #Predicate<NotificationData> { note in
+                    note.topic == selectedTopic &&
+                        !note.isViewed &&
+                        !note.isArchived
+                }
+            } else if showBookmarkedOnly {
+                // Topic + bookmarked
+                return #Predicate<NotificationData> { note in
+                    note.topic == selectedTopic && note.isBookmarked
+                }
+            } else if showUnreadOnly {
+                // Topic + unread
+                return #Predicate<NotificationData> { note in
+                    note.topic == selectedTopic && !note.isViewed
+                }
+            } else if !showArchivedContent {
+                // Topic + not archived
+                return #Predicate<NotificationData> { note in
+                    note.topic == selectedTopic && !note.isArchived
                 }
             } else {
-                combinedPredicate = predicate
+                // Just topic
+                return #Predicate<NotificationData> { note in
+                    note.topic == selectedTopic
+                }
             }
         }
 
-        return combinedPredicate
+        // Case 2: No topic filter, but other filters are present
+        if showBookmarkedOnly && showUnreadOnly && !showArchivedContent {
+            // Bookmarked + unread + not archived
+            return #Predicate<NotificationData> { note in
+                note.isBookmarked &&
+                    !note.isViewed &&
+                    !note.isArchived
+            }
+        } else if showBookmarkedOnly && !showArchivedContent {
+            // Bookmarked + not archived
+            return #Predicate<NotificationData> { note in
+                note.isBookmarked && !note.isArchived
+            }
+        } else if showUnreadOnly && !showArchivedContent {
+            // Unread + not archived
+            return #Predicate<NotificationData> { note in
+                !note.isViewed && !note.isArchived
+            }
+        } else if showBookmarkedOnly {
+            // Just bookmarked
+            return #Predicate<NotificationData> { note in
+                note.isBookmarked
+            }
+        } else if showUnreadOnly {
+            // Just unread
+            return #Predicate<NotificationData> { note in
+                !note.isViewed
+            }
+        } else if !showArchivedContent {
+            // Just not archived
+            return #Predicate<NotificationData> { note in
+                !note.isArchived
+            }
+        }
+
+        // No filters active
+        return nil
     }
 
     private func startBackgroundRefresh() {
