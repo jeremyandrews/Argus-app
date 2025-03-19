@@ -975,6 +975,8 @@ struct NewsDetailView: View {
             NotificationUtils.updateAppBadgeCount()
             AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
         }
+        // Post notification when article is viewed
+        NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
     }
 
     private func hasRequiredContent(_ notification: NotificationData) -> Bool {

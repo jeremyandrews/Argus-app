@@ -205,6 +205,10 @@ struct NewsView: View {
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleArchived"))) { _ in
                     updateFilteredNotifications()
                 }
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleViewed"))) { _ in
+                    // Update filtered notifications when an article is marked as viewed
+                    handleFilterChange(isDataChange: true)
+                }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DetailViewClosed"))) { _ in
                     // Update filtered notifications when returning from detail view
                     updateFilteredNotifications()
