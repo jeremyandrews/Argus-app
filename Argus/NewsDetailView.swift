@@ -420,81 +420,91 @@ struct NewsDetailView: View {
             return
         }
 
-        // Set some flags for UI updates
-        isLoadingNextArticle = true
-
-        // Immediately update the current index and notification reference
-        let nextNotification = notifications[nextIndex]
-        currentIndex = nextIndex
-
-        // Reset content for smoother transitions
+        // Immediately clear ALL cached content before anything else
         titleAttributedString = nil
         bodyAttributedString = nil
-        clearSectionContent()
+        summaryAttributedString = nil
+        criticalAnalysisAttributedString = nil
+        logicalFallaciesAttributedString = nil
+        sourceAnalysisAttributedString = nil
+        cachedContentBySection = [:]
+        preloadedNotification = nil
 
-        // Reset expanded sections
+        // Update to the next notification and reset expanded sections
+        currentIndex = nextIndex
         expandedSections = Self.getDefaultExpandedSections()
 
-        // Force a layout refresh
+        // Generate a new transition ID to force view refresh
         contentTransitionID = UUID()
+
+        // Request scroll to top immediately
         scrollToTopTrigger = UUID()
 
-        // Mark as viewed (but don't wait for the save)
-        if !nextNotification.isViewed {
-            nextNotification.isViewed = true
+        // Mark as viewed immediately
+        if let notification = currentNotification, !notification.isViewed {
+            notification.isViewed = true
             Task(priority: .background) {
                 try? modelContext.save()
                 NotificationUtils.updateAppBadgeCount()
             }
         }
 
-        // Clear loading flag immediately to allow UI to update
-        isLoadingNextArticle = false
+        // Now schedule background loading of rich text content with a simpler approach
+        tabChangeTask = Task { @MainActor in
+            // Since we're on the MainActor, we can safely access currentNotification
+            guard let notification = currentNotification else { return }
 
-        // Schedule background loading of rich text with a delay
-        tabChangeTask = Task {
-            // Give the UI a moment to update with plain text first
-            try? await Task.sleep(for: .milliseconds(100))
-
+            // Small delay to ensure UI has updated with plain text first
+            try? await Task.sleep(for: .milliseconds(50))
             if Task.isCancelled { return }
 
-            // Load title in background
-            Task(priority: .userInitiated) {
-                let newTitle = getAttributedString(for: .title, from: nextNotification)
-
-                await MainActor.run {
-                    if !Task.isCancelled {
-                        titleAttributedString = newTitle
-                    }
-                }
+            // Process content on a background thread but keep data access on MainActor
+            // This is safer and avoids Sendable issues
+            Task.detached(priority: .userInitiated) {
+                // Run heavy processing in background
+                await processRichText(for: notification)
             }
+        }
+    }
 
-            // Load body in background
-            Task(priority: .userInitiated) {
-                let newBody = getAttributedString(for: .body, from: nextNotification)
+    // This function handles the processing of rich text on a background thread
+    // while keeping data access on the MainActor
+    private func processRichText(for notification: NotificationData) async {
+        // Title processing - all UI updates on MainActor
+        await MainActor.run {
+            // Stay on MainActor for this potentially expensive operation
+            // to avoid Sendable issues with NSAttributedString and NotificationData
+            let titleResult = getAttributedString(for: .title, from: notification)
 
-                await MainActor.run {
-                    if !Task.isCancelled {
-                        bodyAttributedString = newBody
-                    }
-                }
+            // Check if task is cancelled before updating UI
+            if !Task.isCancelled {
+                titleAttributedString = titleResult
             }
+        }
 
-            // Wait before loading other content to prioritize UI responsiveness
-            try? await Task.sleep(for: .milliseconds(300))
+        // Body processing - all UI updates on MainActor
+        await MainActor.run {
+            let bodyResult = getAttributedString(for: .body, from: notification)
 
-            if Task.isCancelled { return }
+            if !Task.isCancelled {
+                bodyAttributedString = bodyResult
+            }
+        }
 
-            // Only if Summary is expanded, load it with background priority
-            if expandedSections["Summary"] == true {
-                Task(priority: .background) {
-                    let newSummary = getAttributedString(for: .summary, from: nextNotification, createIfMissing: true)
+        // Check if Summary section is expanded before processing it
+        let isSummaryExpanded = await MainActor.run { expandedSections["Summary"] == true }
 
-                    await MainActor.run {
-                        if !Task.isCancelled {
-                            summaryAttributedString = newSummary
-                        }
-                    }
+        if isSummaryExpanded {
+            await MainActor.run {
+                // Process summary (which might be more expensive)
+                let summaryResult = getAttributedString(
+                    for: .summary,
+                    from: notification,
+                    createIfMissing: true
+                )
+
+                if !Task.isCancelled {
+                    summaryAttributedString = summaryResult
                 }
             }
         }
@@ -1246,17 +1256,24 @@ struct NewsDetailView: View {
     // Reset loading state and content when navigating to a new article
     private func resetContentState() {
         // Cancel all loading tasks
+        tabChangeTask?.cancel()
         for (_, task) in sectionLoadingTasks {
             task.cancel()
         }
         sectionLoadingTasks = [:]
 
-        // Clear cached content
+        // Clear all cached content
+        titleAttributedString = nil
+        bodyAttributedString = nil
         summaryAttributedString = nil
         criticalAnalysisAttributedString = nil
         logicalFallaciesAttributedString = nil
         sourceAnalysisAttributedString = nil
         cachedContentBySection = [:]
+        preloadedNotification = nil
+
+        // Generate a new transition ID
+        contentTransitionID = UUID()
     }
 
     @ViewBuilder
