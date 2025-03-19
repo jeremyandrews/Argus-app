@@ -474,27 +474,9 @@ struct NewsDetailView: View {
 
         // Load the Summary in a completely separate process
         if expandedSections["Summary"] == true {
-            // Using DispatchQueue to fully decouple from navigation
-            DispatchQueue.main.async {
-                // Use a delay to ensure navigation completes first
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    // Check if summary blob exists
-                    if let summaryBlob = nextNotification.summary_blob,
-                       let storedSummary = try? NSKeyedUnarchiver.unarchivedObject(
-                           ofClass: NSAttributedString.self, from: summaryBlob
-                       )
-                    {
-                        // Use existing formatted summary
-                        self.summaryAttributedString = storedSummary
-                    } else {
-                        // Need to generate summary - use global function
-                        self.summaryAttributedString = getAttributedString(
-                            for: .summary,
-                            from: nextNotification,
-                            createIfMissing: true
-                        )
-                    }
-                }
+            // This is decoupled to ensure navigation remains responsive
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                self.loadContentForSection("Summary")
             }
         }
     }
@@ -542,7 +524,7 @@ struct NewsDetailView: View {
         }
     }
 
-    // Modified to handle section loading with better task management
+    // Fix the loadContentForSection function to properly handle section loading
     private func loadContentForSection(_ section: String) {
         guard currentNotification != nil else { return }
 
@@ -556,49 +538,91 @@ struct NewsDetailView: View {
 
         let field = getRichTextFieldForSection(section)
 
-        // Create and store the new task with lower priority to prevent UI blocking
-        let loadingTask = Task(priority: .utility) { @MainActor in
-            // Get attributed string in background
-            let attributedString = await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .utility).async {
-                    let result = getAttributedString(
-                        for: field,
-                        from: currentNotification!,
-                        createIfMissing: true
+        // Create a new task to load this section's content
+        let task = Task { @MainActor in
+            guard let notification = currentNotification else { return }
+
+            // First check if we have a pre-formatted blob for this section
+            var attributedString: NSAttributedString? = nil
+
+            // Try to get content from blob first
+            switch field {
+            case .summary:
+                if let blob = notification.summary_blob {
+                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self, from: blob
                     )
-                    continuation.resume(returning: result)
                 }
+            case .criticalAnalysis:
+                if let blob = notification.critical_analysis_blob {
+                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self, from: blob
+                    )
+                }
+            case .logicalFallacies:
+                if let blob = notification.logical_fallacies_blob {
+                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self, from: blob
+                    )
+                }
+            case .sourceAnalysis:
+                if let blob = notification.source_analysis_blob {
+                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self, from: blob
+                    )
+                }
+            case .relationToTopic:
+                if let blob = notification.relation_to_topic_blob {
+                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self, from: blob
+                    )
+                }
+            case .additionalInsights:
+                if let blob = notification.additional_insights_blob {
+                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self, from: blob
+                    )
+                }
+            default:
+                break
+            }
+
+            // If no blob or couldn't unarchive, generate new content
+            if attributedString == nil && !Task.isCancelled {
+                attributedString = getAttributedString(
+                    for: field,
+                    from: notification,
+                    createIfMissing: true
+                )
             }
 
             // If task wasn't cancelled, update UI state
-            if !Task.isCancelled {
+            if !Task.isCancelled, let attributedString = attributedString {
+                // Store the result in the appropriate property
+                switch field {
+                case .summary:
+                    summaryAttributedString = attributedString
+                case .criticalAnalysis:
+                    criticalAnalysisAttributedString = attributedString
+                case .logicalFallacies:
+                    logicalFallaciesAttributedString = attributedString
+                case .sourceAnalysis:
+                    sourceAnalysisAttributedString = attributedString
+                case .relationToTopic:
+                    cachedContentBySection["Relevance"] = attributedString
+                case .additionalInsights:
+                    cachedContentBySection["Context & Perspective"] = attributedString
+                default:
+                    break
+                }
+
                 // Clear loading state
                 sectionLoadingTasks[section] = nil
-
-                // Store the result in the appropriate property
-                if let attributedString = attributedString {
-                    switch field {
-                    case .summary:
-                        summaryAttributedString = attributedString
-                    case .criticalAnalysis:
-                        criticalAnalysisAttributedString = attributedString
-                    case .logicalFallacies:
-                        logicalFallaciesAttributedString = attributedString
-                    case .sourceAnalysis:
-                        sourceAnalysisAttributedString = attributedString
-                    case .relationToTopic:
-                        cachedContentBySection["Relevance"] = attributedString
-                    case .additionalInsights:
-                        cachedContentBySection["Context & Perspective"] = attributedString
-                    default:
-                        break
-                    }
-                }
             }
         }
 
-        // Store the task immediately
-        sectionLoadingTasks[section] = loadingTask
+        // Store the task so we can cancel it if needed
+        sectionLoadingTasks[section] = task
     }
 
     private func clearSectionContent() {
