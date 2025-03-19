@@ -410,65 +410,92 @@ struct NewsDetailView: View {
 
     // Make sure we clean up properly when navigating between articles
     private func navigateToArticle(direction: NavigationDirection) {
-        // Set loading flag
-        isLoadingNextArticle = true
-
-        // Cancel any pending load from a previous rapid-tap
+        // Cancel any ongoing tasks immediately
         tabChangeTask?.cancel()
-
-        // Reset content state before navigating
-        resetContentState()
 
         // Get the next valid index
         guard let nextIndex = getNextValidIndex(direction: direction),
               nextIndex >= 0 && nextIndex < notifications.count
         else {
-            isLoadingNextArticle = false
             return
         }
 
+        // Set some flags for UI updates
+        isLoadingNextArticle = true
+
+        // Immediately update the current index and notification reference
         let nextNotification = notifications[nextIndex]
+        currentIndex = nextIndex
 
-        // Pre-calculate all content before making any view updates
-        let preloadedTitle = getAttributedString(for: .title, from: nextNotification)
-        let preloadedBody = getAttributedString(for: .body, from: nextNotification)
+        // Reset content for smoother transitions
+        titleAttributedString = nil
+        bodyAttributedString = nil
+        clearSectionContent()
 
-        // Use a more direct update approach to avoid layout conflicts
+        // Reset expanded sections
+        expandedSections = Self.getDefaultExpandedSections()
+
+        // Force a layout refresh
+        contentTransitionID = UUID()
+        scrollToTopTrigger = UUID()
+
+        // Mark as viewed (but don't wait for the save)
+        if !nextNotification.isViewed {
+            nextNotification.isViewed = true
+            Task(priority: .background) {
+                try? modelContext.save()
+                NotificationUtils.updateAppBadgeCount()
+            }
+        }
+
+        // Clear loading flag immediately to allow UI to update
+        isLoadingNextArticle = false
+
+        // Schedule background loading of rich text with a delay
         tabChangeTask = Task {
-            // Brief pause to let any ongoing rendering finish
-            try? await Task.sleep(for: .milliseconds(10))
+            // Give the UI a moment to update with plain text first
+            try? await Task.sleep(for: .milliseconds(100))
 
-            await MainActor.run {
-                // Reset expanded sections BEFORE updating content
-                expandedSections = Self.getDefaultExpandedSections()
+            if Task.isCancelled { return }
 
-                // Clear all content
-                clearSectionContent()
+            // Load title in background
+            Task(priority: .userInitiated) {
+                let newTitle = getAttributedString(for: .title, from: nextNotification)
 
-                // Update index and notification
-                currentIndex = nextIndex
-                preloadedNotification = nil
-
-                // Update header content in a single step
-                titleAttributedString = preloadedTitle
-                bodyAttributedString = preloadedBody
-
-                // Force complete layout recalculation
-                contentTransitionID = UUID()
-
-                // Scroll to top
-                scrollToTopTrigger = UUID()
-
-                // Pre-load summary content if it's expanded by default
-                if expandedSections["Summary"] == true {
-                    loadContentForSection("Summary")
+                await MainActor.run {
+                    if !Task.isCancelled {
+                        titleAttributedString = newTitle
+                    }
                 }
+            }
 
-                // Mark as viewed
-                markAsViewed()
+            // Load body in background
+            Task(priority: .userInitiated) {
+                let newBody = getAttributedString(for: .body, from: nextNotification)
 
-                // Complete transition
-                isLoadingNextArticle = false
+                await MainActor.run {
+                    if !Task.isCancelled {
+                        bodyAttributedString = newBody
+                    }
+                }
+            }
+
+            // Wait before loading other content to prioritize UI responsiveness
+            try? await Task.sleep(for: .milliseconds(300))
+
+            if Task.isCancelled { return }
+
+            // Only if Summary is expanded, load it with background priority
+            if expandedSections["Summary"] == true {
+                Task(priority: .background) {
+                    let newSummary = getAttributedString(for: .summary, from: nextNotification, createIfMissing: true)
+
+                    await MainActor.run {
+                        if !Task.isCancelled {
+                            summaryAttributedString = newSummary
+                        }
+                    }
+                }
             }
         }
     }
@@ -487,14 +514,19 @@ struct NewsDetailView: View {
 
         let field = getRichTextFieldForSection(section)
 
-        // Create and store the new task
-        let loadingTask = Task { @MainActor in
-            // We're already on the main actor, so we can safely work with non-Sendable types
-            let attributedString = getAttributedString(
-                for: field,
-                from: currentNotification!, // Safe because we checked above
-                createIfMissing: true
-            )
+        // Create and store the new task with lower priority to prevent UI blocking
+        let loadingTask = Task(priority: .utility) { @MainActor in
+            // Get attributed string in background
+            let attributedString = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    let result = getAttributedString(
+                        for: field,
+                        from: currentNotification!,
+                        createIfMissing: true
+                    )
+                    continuation.resume(returning: result)
+                }
+            }
 
             // If task wasn't cancelled, update UI state
             if !Task.isCancelled {
@@ -540,7 +572,12 @@ struct NewsDetailView: View {
     }
 
     private func getNextValidIndex(direction: NavigationDirection) -> Int? {
+        // In the notifications array, lower indices are newer articles (when sorted by "newest")
+        // So for "next" we actually want to go to older articles (increase index)
+        // And for "previous" we want to go to newer articles (decrease index)
         var newIndex = direction == .next ? currentIndex + 1 : currentIndex - 1
+
+        // Check if the index is valid and not deleted
         while newIndex >= 0 && newIndex < notifications.count {
             let candidate = notifications[newIndex]
             if !deletedIDs.contains(candidate.id) {
@@ -548,6 +585,7 @@ struct NewsDetailView: View {
             }
             newIndex += (direction == .next ? 1 : -1)
         }
+
         return nil
     }
 
@@ -604,17 +642,19 @@ struct NewsDetailView: View {
             }
 
             if let n = currentNotification {
-                // Title
-                if let titleAttrString = titleAttributedString {
-                    NonSelectableRichTextView(attributedString: titleAttrString)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(n.title)
-                        .font(.headline)
-                        .fontWeight(n.isViewed ? .regular : .bold)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                // Title - use rich text if available, otherwise fall back to plain text
+                Group {
+                    if let titleAttrString = titleAttributedString {
+                        NonSelectableRichTextView(attributedString: titleAttrString)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(n.title)
+                            .font(.headline)
+                            .fontWeight(n.isViewed ? .regular : .bold)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 // Publication Date
@@ -625,19 +665,21 @@ struct NewsDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // Body
-                if let bodyAttrString = bodyAttributedString {
-                    NonSelectableRichTextView(attributedString: bodyAttrString)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(n.body)
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                // Body - use rich text if available, otherwise fall back to plain text
+                Group {
+                    if let bodyAttrString = bodyAttributedString {
+                        NonSelectableRichTextView(attributedString: bodyAttrString)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(n.body)
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 // Affected
