@@ -966,6 +966,7 @@ struct NewsDetailView: View {
         return content
     }
 
+    // In NewsDetailView.swift, add after marking an article as viewed:
     private func markAsViewed() {
         guard let notification = currentNotification else { return }
         if !notification.isViewed {
@@ -1632,6 +1633,8 @@ struct NewsDetailView: View {
                     }
                     .onDisappear {
                         loadTask?.cancel()
+                        // Notify that the detail view was closed, which might require a list refresh
+                        NotificationCenter.default.post(name: Notification.Name("DetailViewClosed"), object: nil)
                     }
                 } else {
                     // Fallback if loading fails

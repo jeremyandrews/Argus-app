@@ -205,6 +205,10 @@ struct NewsView: View {
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleArchived"))) { _ in
                     updateFilteredNotifications()
                 }
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DetailViewClosed"))) { _ in
+                    // Update filtered notifications when returning from detail view
+                    updateFilteredNotifications()
+                }
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 10)
                         .onChanged { _ in
