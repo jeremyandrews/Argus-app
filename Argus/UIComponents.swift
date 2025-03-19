@@ -245,6 +245,12 @@ struct LazyLoadingQualityBadges: View {
                 Color.clear.frame(height: 20)
             }
         }
+        .onChange(of: scrollToSection) { _, newSection in
+            if let section = newSection, let onBadgeTap = onBadgeTap {
+                onBadgeTap(section)
+                scrollToSection = nil
+            }
+        }
     }
 }
 

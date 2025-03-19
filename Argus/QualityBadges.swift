@@ -35,9 +35,9 @@ struct QualityBadges: View {
                 )
                 .onTapGesture {
                     if let onBadgeTap = onBadgeTap {
-                        onBadgeTap("Source Analysis")
+                        onBadgeTap("Critical Analysis")
                     } else {
-                        scrollToSection = "Source Analysis"
+                        scrollToSection = "Critical Analysis"
                     }
                 }
             }
@@ -54,6 +54,22 @@ struct QualityBadges: View {
                         onBadgeTap("Logical Fallacies")
                     } else {
                         scrollToSection = "Logical Fallacies"
+                    }
+                }
+            }
+
+            // 4. Optional context badge (only if we have room)
+            if let sourceType = sourceType, sourcesQuality == nil || argumentQuality == nil {
+                QualityBadge(
+                    label: "Context",
+                    color: .purple,
+                    iconName: "questionmark.circle.fill"
+                )
+                .onTapGesture {
+                    if let onBadgeTap = onBadgeTap {
+                        onBadgeTap("Context & Perspective")
+                    } else {
+                        scrollToSection = "Context & Perspective"
                     }
                 }
             }

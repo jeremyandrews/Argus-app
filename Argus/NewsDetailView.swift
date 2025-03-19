@@ -657,7 +657,20 @@ struct NewsDetailView: View {
                         LazyLoadingQualityBadges(
                             notification: n,
                             onBadgeTap: { section in
-                                scrollToSection = section
+                                // First ensure the section is expanded
+                                expandedSections[section] = true
+
+                                // Immediately scroll to the section without waiting for content
+                                DispatchQueue.main.async {
+                                    withAnimation {
+                                        scrollViewProxy?.scrollTo(section, anchor: .top)
+                                    }
+                                }
+
+                                // Then start loading the content if needed
+                                if needsConversion(section) {
+                                    loadContentForSection(section)
+                                }
                             }
                         )
                     }

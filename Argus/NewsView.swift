@@ -1558,12 +1558,11 @@ struct NewsView: View {
                 // Date boundary predicate for pagination
                 var datePredicateWrapper: Predicate<NotificationData>? = nil
                 if let oldestSoFar = currentLastLoadedDate, !isInitialLoad {
+                    // Subtract 1 second so we skip everything at or after oldestSoFar
+                    // This ensures no overlap with prior page
+                    let cutoff = oldestSoFar.addingTimeInterval(-1)
                     datePredicateWrapper = #Predicate<NotificationData> {
-                        if let pubDate = $0.pub_date {
-                            return pubDate < oldestSoFar
-                        } else {
-                            return $0.date < oldestSoFar
-                        }
+                        ($0.pub_date ?? $0.date) < cutoff // Single expression
                     }
                 }
 
@@ -1633,9 +1632,21 @@ struct NewsView: View {
                 self.totalNotifications = notificationsToProcess
                 self.filteredNotifications = notificationsToProcess
             } else {
-                // For pagination, add the newly fetched items
-                self.totalNotifications.append(contentsOf: notificationsToProcess)
-                self.filteredNotifications.append(contentsOf: notificationsToProcess)
+                // For pagination, deduplicate before adding new items
+                // First ensure new items don't have duplicates within themselves
+                let uniqueNewItems = notificationsToProcess.uniqued(by: \.id)
+
+                // Then filter out any items already in our collections
+                let existingIDs = Set(self.totalNotifications.map { $0.id })
+                let uniqueNewItemsNotInTotal = uniqueNewItems.filter { !existingIDs.contains($0.id) }
+
+                // Now it's safe to append
+                self.totalNotifications.append(contentsOf: uniqueNewItemsNotInTotal)
+
+                // Do the same for filteredNotifications
+                let existingFilteredIDs = Set(self.filteredNotifications.map { $0.id })
+                let uniqueNewItemsNotInFiltered = uniqueNewItems.filter { !existingFilteredIDs.contains($0.id) }
+                self.filteredNotifications.append(contentsOf: uniqueNewItemsNotInFiltered)
             }
 
             // Update grouping
@@ -2149,5 +2160,22 @@ struct FilterView: View {
         .background(Color(UIColor.systemBackground))
         .cornerRadius(15, corners: [.topLeft, .topRight])
         .shadow(radius: 10)
+    }
+}
+
+extension Collection {
+    /// Returns a new array containing the first occurrence of each unique key,
+    /// in the order they appear in self.
+    func uniqued<Key: Hashable>(by keyPath: KeyPath<Element, Key>) -> [Element] {
+        var seen = Set<Key>()
+        var result = [Element]()
+        result.reserveCapacity(underestimatedCount)
+        for element in self {
+            let key = element[keyPath: keyPath]
+            if seen.insert(key).inserted {
+                result.append(element)
+            }
+        }
+        return result
     }
 }
