@@ -1926,19 +1926,3 @@ struct FilterView: View {
         .shadow(radius: 10)
     }
 }
-
-// MARK: - Background context
-
-// BackgroundContextManager provides thread-safe access to background contexts.
-// This centralizes the creation of background ModelContexts, ensuring we don't
-// accidentally perform database operations on the main thread.
-class BackgroundContextManager {
-    static let shared = BackgroundContextManager()
-
-    func performBackgroundTask<T>(_ task: @escaping (ModelContext) -> T) async -> T {
-        return await Task.detached {
-            let context = await ModelContext(ArgusApp.sharedModelContainer)
-            return task(context)
-        }.value
-    }
-}
