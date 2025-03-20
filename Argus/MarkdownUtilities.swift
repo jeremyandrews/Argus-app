@@ -88,6 +88,9 @@ func markdownToAttributedString(
 ) -> NSAttributedString? {
     guard let markdown = markdown, !markdown.isEmpty else { return nil }
 
+    // Check for cancellation if called from a Task
+    if Task.isCancelled { return nil }
+
     let swiftyMarkdown = SwiftyMarkdown(string: markdown)
 
     // Get the preferred font for the text style (supports Dynamic Type)
@@ -101,6 +104,9 @@ func markdownToAttributedString(
         // Apply a slight size boost (10%) to improve readability
         swiftyMarkdown.body.fontSize = bodyFont.pointSize * 1.1
     }
+
+    // Check for cancellation before styling
+    if Task.isCancelled { return nil }
 
     // Style headings with appropriate Dynamic Type text styles
     let h1Font = UIFont.preferredFont(forTextStyle: .title1)
@@ -136,6 +142,9 @@ func markdownToAttributedString(
         swiftyMarkdown.italic.fontName = ".SFUI-Italic"
         swiftyMarkdown.italic.fontSize = customFontSize ?? (bodyFont.pointSize * 1.1)
     }
+
+    // Check for cancellation before generating attribute string
+    if Task.isCancelled { return nil }
 
     // Generate the attributed string from SwiftyMarkdown
     let attributedString = swiftyMarkdown.attributedString()
@@ -195,46 +204,108 @@ func getAttributedString(
 
     // If no blob or failed to load, create fresh if requested
     if createIfMissing {
-        if Thread.isMainThread {
-            // Already on main thread, process synchronously
+        // KEY INSIGHT: We need to determine context - is this for navigation (async) or section expansion (sync)?
+        // Use a static property to track whether we're in navigation mode
+        let isNavigating = Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false
+
+        // During navigation, we want to be async except for tiny fields (title/body)
+        // During section expansion, we want to be synchronous
+        let isSmallField = field == .title || field == .body
+        let shouldProcessSynchronously = !isNavigating || isSmallField
+
+        if shouldProcessSynchronously, Thread.isMainThread {
+            // Synchronous processing - this is what section expansion expects
             let attributedString = markdownToAttributedString(
                 unwrappedText,
                 textStyle: field.textStyle,
                 customFontSize: customFontSize
             )
+
             if let attributedString = attributedString {
-                do {
-                    try notification.setRichText(attributedString, for: field, saveContext: true)
-                } catch {
-                    print("Error saving rich text for \(field): \(error)")
+                // Save the blob in the background to avoid blocking
+                Task {
+                    if let blobData = try? NSKeyedArchiver.archivedData(
+                        withRootObject: attributedString,
+                        requiringSecureCoding: false
+                    ) {
+                        await MainActor.run {
+                            // Only save if we're not already navigating away
+                            let stillNavigating = Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false
+                            if !stillNavigating {
+                                field.setBlob(blobData, on: notification)
+
+                                // Save the context
+                                if let modelContext = notification.modelContext {
+                                    do {
+                                        try modelContext.save()
+                                    } catch {
+                                        print("Error saving context: \(error)")
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
+
                 completion?(attributedString)
                 return attributedString
             }
         } else {
-            // When on background thread, we need to be careful about sync operations
-            // Dispatch asynchronously to avoid potential deadlocks
-            DispatchQueue.main.async {
+            // Asynchronous processing - critical for responsive navigation
+            DispatchQueue.global(qos: .userInitiated).async {
+                // Check if we should abort due to navigation
+                guard !(Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false) else {
+                    return
+                }
+
                 let attributedString = markdownToAttributedString(
                     unwrappedText,
                     textStyle: field.textStyle,
                     customFontSize: customFontSize
                 )
-                if let attributedString = attributedString {
-                    do {
-                        try notification.setRichText(attributedString, for: field, saveContext: true)
-                    } catch {
-                        print("Error saving rich text for \(field): \(error)")
+
+                guard let attributedString = attributedString else {
+                    DispatchQueue.main.async {
+                        completion?(nil)
+                    }
+                    return
+                }
+
+                // Save in the background
+                if let blobData = try? NSKeyedArchiver.archivedData(
+                    withRootObject: attributedString,
+                    requiringSecureCoding: false
+                ) {
+                    Task {
+                        let dataToSave = blobData
+
+                        await MainActor.run {
+                            // Double-check we haven't navigated away
+                            let stillNavigating = Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false
+                            if !stillNavigating {
+                                field.setBlob(dataToSave, on: notification)
+
+                                if let modelContext = notification.modelContext {
+                                    do {
+                                        try modelContext.save()
+                                    } catch {
+                                        print("Error saving context: \(error)")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Deliver the result on main thread
+                DispatchQueue.main.async {
+                    // Double-check we haven't navigated away
+                    guard !(Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false) else {
+                        return
                     }
                     completion?(attributedString)
-                } else {
-                    completion?(nil)
                 }
             }
-
-            // Document this limitation clearly for callers
-            NSLog("Warning: getAttributedString called from background thread. Result will be delivered via completion handler.")
-            return nil
         }
     }
 
@@ -248,24 +319,30 @@ func saveAttributedString(
     for field: RichTextField,
     in notification: NotificationData
 ) -> Bool {
-    // Use the model's built-in method
+    // Since NSAttributedString is not Sendable, we need to archive it first
     do {
-        // Ensure we're on the main thread
-        if Thread.isMainThread {
-            try notification.setRichText(attributedString, for: field, saveContext: true)
-        } else {
-            // Dispatch to main thread
-            DispatchQueue.main.async {
+        let data = try NSKeyedArchiver.archivedData(withRootObject: attributedString, requiringSecureCoding: false)
+
+        // Create a task to handle the operation with the blob data
+        Task {
+            let blobData = data
+            await MainActor.run {
+                field.setBlob(blobData, on: notification)
+                // Save the context if we can
                 do {
-                    try notification.setRichText(attributedString, for: field, saveContext: true)
+                    if let modelContext = notification.modelContext {
+                        try modelContext.save()
+                    }
                 } catch {
-                    AppLogger.database.error("Error saving rich text on background thread: \(error)")
+                    AppLogger.database.error("Error saving rich text: \(error)")
                 }
             }
         }
+
+        // Return true as we've initiated the save process
         return true
     } catch {
-        AppLogger.database.error("Error saving rich text: \(error)")
+        AppLogger.database.error("Error archiving attributed string: \(error)")
         return false
     }
 }
