@@ -408,11 +408,7 @@ struct NewsDetailView: View {
         }
     }
 
-    // Make sure we clean up properly when navigating between articles
     private func navigateToArticle(direction: NavigationDirection) {
-        // Set a thread dictionary value to signal we're in navigation mode
-        Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] = true
-
         // Cancel any ongoing tasks
         tabChangeTask?.cancel()
         for (_, task) in sectionLoadingTasks {
@@ -424,81 +420,35 @@ struct NewsDetailView: View {
         guard let nextIndex = getNextValidIndex(direction: direction),
               nextIndex >= 0 && nextIndex < notifications.count
         else {
-            Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] = false
             return
         }
 
-        // Store the notification we're navigating to
-        let nextNotification = notifications[nextIndex]
-
-        // Update state with minimal content immediately for responsiveness
+        // Update current index and create a transition
         currentIndex = nextIndex
-        titleAttributedString = nil
-        bodyAttributedString = nil
-        summaryAttributedString = nil
-        criticalAnalysisAttributedString = nil
-        logicalFallaciesAttributedString = nil
-        sourceAnalysisAttributedString = nil
-        cachedContentBySection = [:]
-        preloadedNotification = nil
+        let nextNotification = notifications[nextIndex]
+        contentTransitionID = UUID()
+        scrollToTopTrigger = UUID()
+
+        // Clear existing content
+        clearSectionContent()
+
+        // Immediately load essential content
+        titleAttributedString = getAttributedString(for: .title, from: nextNotification)
+        bodyAttributedString = getAttributedString(for: .body, from: nextNotification)
 
         // Reset expanded sections
         expandedSections = Self.getDefaultExpandedSections()
 
-        // Force refresh and scroll
-        contentTransitionID = UUID()
-        scrollToTopTrigger = UUID()
+        // Mark as viewed
+        if !nextNotification.isViewed {
+            nextNotification.isViewed = true
+            try? modelContext.save()
+            NotificationUtils.updateAppBadgeCount()
+        }
 
-        // Now that UI has been updated, load the essential content
-        // This happens in a background task but with high priority
-        tabChangeTask = Task {
-            // Extract title and body blobs synchronously - these are small and fast
-            var titleAttrString: NSAttributedString? = nil
-            var bodyAttrString: NSAttributedString? = nil
-
-            if let titleBlob = nextNotification.title_blob {
-                titleAttrString = try? NSKeyedUnarchiver.unarchivedObject(
-                    ofClass: NSAttributedString.self, from: titleBlob
-                )
-            }
-
-            if let bodyBlob = nextNotification.body_blob {
-                bodyAttrString = try? NSKeyedUnarchiver.unarchivedObject(
-                    ofClass: NSAttributedString.self, from: bodyBlob
-                )
-            }
-
-            // If blobs aren't available, generate them quickly
-            if titleAttrString == nil {
-                titleAttrString = getAttributedString(for: .title, from: nextNotification)
-            }
-
-            if bodyAttrString == nil {
-                bodyAttrString = getAttributedString(for: .body, from: nextNotification)
-            }
-
-            // Update UI with the results
-            await MainActor.run {
-                if !Task.isCancelled {
-                    titleAttributedString = titleAttrString
-                    bodyAttributedString = bodyAttrString
-
-                    // Mark as viewed
-                    if !nextNotification.isViewed {
-                        nextNotification.isViewed = true
-                        try? modelContext.save()
-                        NotificationUtils.updateAppBadgeCount()
-                    }
-
-                    // Signal that navigation is complete
-                    Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] = false
-
-                    // Load the Summary if needed (more likely to be expanded)
-                    if expandedSections["Summary"] == true {
-                        loadContentForSection("Summary")
-                    }
-                }
-            }
+        // Load summary in the background if expanded by default
+        if expandedSections["Summary"] == true {
+            loadContentForSection("Summary")
         }
     }
 
@@ -545,7 +495,6 @@ struct NewsDetailView: View {
         }
     }
 
-    // Add to loadContentForSection method in NewsDetailView
     private func loadContentForSection(_ section: String) {
         guard currentNotification != nil else { return }
 
@@ -559,38 +508,46 @@ struct NewsDetailView: View {
 
         let field = getRichTextFieldForSection(section)
 
-        // Signal that we're not navigating - this ensures synchronous processing
-        Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] = false
-
         // Create a new task to load this section's content
-        let task = Task { @MainActor in
+        let task = Task {
             guard let notification = currentNotification else { return }
 
-            // Get attribute string synchronously as user explicitly requested this section
-            let attributedString = getAttributedString(for: field, from: notification)
+            // Get the blob data across actor boundaries (Data is Sendable)
+            if let blobData = await getAttributedStringDataAsync(for: field, from: notification) {
+                // Unarchive on the main actor
+                await MainActor.run {
+                    if !Task.isCancelled {
+                        do {
+                            if let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+                                ofClass: NSAttributedString.self,
+                                from: blobData
+                            ) {
+                                // Store in the appropriate property
+                                switch field {
+                                case .summary:
+                                    summaryAttributedString = attributedString
+                                case .criticalAnalysis:
+                                    criticalAnalysisAttributedString = attributedString
+                                case .logicalFallacies:
+                                    logicalFallaciesAttributedString = attributedString
+                                case .sourceAnalysis:
+                                    sourceAnalysisAttributedString = attributedString
+                                case .relationToTopic:
+                                    cachedContentBySection["Relevance"] = attributedString
+                                case .additionalInsights:
+                                    cachedContentBySection["Context & Perspective"] = attributedString
+                                default:
+                                    break
+                                }
 
-            // If successful and task wasn't cancelled, update UI
-            if !Task.isCancelled, let attributedString = attributedString {
-                // Store the result in the appropriate property
-                switch field {
-                case .summary:
-                    summaryAttributedString = attributedString
-                case .criticalAnalysis:
-                    criticalAnalysisAttributedString = attributedString
-                case .logicalFallacies:
-                    logicalFallaciesAttributedString = attributedString
-                case .sourceAnalysis:
-                    sourceAnalysisAttributedString = attributedString
-                case .relationToTopic:
-                    cachedContentBySection["Relevance"] = attributedString
-                case .additionalInsights:
-                    cachedContentBySection["Context & Perspective"] = attributedString
-                default:
-                    break
+                                // Clear loading state
+                                sectionLoadingTasks[section] = nil
+                            }
+                        } catch {
+                            print("Error unarchiving attributed string: \(error)")
+                        }
+                    }
                 }
-
-                // Clear loading state
-                sectionLoadingTasks[section] = nil
             }
         }
 
@@ -800,24 +757,20 @@ struct NewsDetailView: View {
                         .buttonStyle(PlainButtonStyle())
 
                         if expandedSections[section.header] ?? false {
-                            // Remove ANY animation wrapper
                             if needsConversion(section.header) && getAttributedStringForSection(section.header) == nil {
-                                // Only show spinner for sections that need rich text conversion
+                                // Show spinner while converting
                                 HStack {
                                     Spacer()
-                                    VStack(spacing: 8) {
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle())
-                                        Text("Converting text...")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
+                                    ProgressView()
+                                    Text("Converting text...").font(.caption)
                                     Spacer()
                                 }
                                 .padding()
+                                .onAppear {
+                                    loadContentForSection(section.header)
+                                }
                             } else {
-                                // Use existing content display for everything else
-                                // Remove any animations that might cause fuzzy appearance
+                                // Show the content once it's ready
                                 sectionContent(for: section)
                             }
                         }
@@ -1545,31 +1498,37 @@ struct NewsDetailView: View {
     }
 
     private func loadInitialMinimalContent() {
-        // Load just the basics for the current notification (if it’s valid)
         guard let n = currentNotification else { return }
-        Task {
-            // Only load title/body if they weren't preloaded
-            if titleAttributedString == nil {
-                let newTitle = getAttributedString(for: .title, from: n)
-                await MainActor.run {
-                    titleAttributedString = newTitle
-                }
-            }
 
-            if bodyAttributedString == nil {
-                let newBody = getAttributedString(for: .body, from: n)
-                await MainActor.run {
-                    bodyAttributedString = newBody
-                }
-            }
+        // Immediately load title and body since they're essential for UI
+        if titleAttributedString == nil {
+            titleAttributedString = getAttributedString(for: .title, from: n)
+        }
 
-            // If “Summary” is open by default, do that in background:
-            if expandedSections["Summary"] == true {
-                let newSummary = getAttributedString(for: .summary, from: n, createIfMissing: true)
+        if bodyAttributedString == nil {
+            bodyAttributedString = getAttributedString(for: .body, from: n)
+        }
 
-                // Update the UI on the main actor:
-                await MainActor.run {
-                    summaryAttributedString = newSummary
+        // Pre-load summary in the background if it's expanded by default
+        if expandedSections["Summary"] == true {
+            Task {
+                // This is safe because Data is Sendable
+                if let blobData = await getAttributedStringDataAsync(for: .summary, from: n) {
+                    // Now safely unarchive on the main actor
+                    await MainActor.run {
+                        if !Task.isCancelled {
+                            do {
+                                if let attrString = try NSKeyedUnarchiver.unarchivedObject(
+                                    ofClass: NSAttributedString.self,
+                                    from: blobData
+                                ) {
+                                    summaryAttributedString = attrString
+                                }
+                            } catch {
+                                print("Error unarchiving attributed string: \(error)")
+                            }
+                        }
+                    }
                 }
             }
         }

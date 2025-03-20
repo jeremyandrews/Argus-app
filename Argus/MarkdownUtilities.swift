@@ -163,7 +163,6 @@ func markdownToAttributedString(
 }
 
 /// Primary function to get an attributed string for any field
-/// This is the main function you should use everywhere in the app
 func getAttributedString(
     for field: RichTextField,
     from notification: NotificationData,
@@ -202,115 +201,107 @@ func getAttributedString(
         return attributedString
     }
 
-    // If no blob or failed to load, create fresh if requested
-    if createIfMissing {
-        // KEY INSIGHT: We need to determine context - is this for navigation (async) or section expansion (sync)?
-        // Use a static property to track whether we're in navigation mode
-        let isNavigating = Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false
+    // If we shouldn't create a new attributed string, return nil
+    if !createIfMissing {
+        completion?(nil)
+        return nil
+    }
 
-        // During navigation, we want to be async except for tiny fields (title/body)
-        // During section expansion, we want to be synchronous
-        let isSmallField = field == .title || field == .body
-        let shouldProcessSynchronously = !isNavigating || isSmallField
+    // Handle critical UI elements (title and body) differently than other fields
+    let isCriticalField = (field == .title || field == .body)
 
-        if shouldProcessSynchronously, Thread.isMainThread {
-            // Synchronous processing - this is what section expansion expects
+    if isCriticalField {
+        // For title and body, we process synchronously regardless of thread
+        let attributedString = markdownToAttributedString(
+            unwrappedText,
+            textStyle: field.textStyle,
+            customFontSize: customFontSize
+        )
+
+        // Save the blob in the background
+        if let attributedString = attributedString {
+            Task {
+                if let blobData = try? NSKeyedArchiver.archivedData(
+                    withRootObject: attributedString,
+                    requiringSecureCoding: false
+                ) {
+                    await MainActor.run {
+                        field.setBlob(blobData, on: notification)
+                        try? notification.modelContext?.save()
+                    }
+                }
+            }
+        }
+
+        completion?(attributedString)
+        return attributedString
+    } else {
+        // For non-critical fields (summary, critical analysis, etc.), always process asynchronously
+        DispatchQueue.global(qos: .userInitiated).async {
             let attributedString = markdownToAttributedString(
                 unwrappedText,
                 textStyle: field.textStyle,
                 customFontSize: customFontSize
             )
 
-            if let attributedString = attributedString {
-                // Save the blob in the background to avoid blocking
-                Task {
-                    if let blobData = try? NSKeyedArchiver.archivedData(
-                        withRootObject: attributedString,
-                        requiringSecureCoding: false
-                    ) {
-                        await MainActor.run {
-                            // Only save if we're not already navigating away
-                            let stillNavigating = Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false
-                            if !stillNavigating {
-                                field.setBlob(blobData, on: notification)
-
-                                // Save the context
-                                if let modelContext = notification.modelContext {
-                                    do {
-                                        try modelContext.save()
-                                    } catch {
-                                        print("Error saving context: \(error)")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                completion?(attributedString)
-                return attributedString
-            }
-        } else {
-            // Asynchronous processing - critical for responsive navigation
-            DispatchQueue.global(qos: .userInitiated).async {
-                // Check if we should abort due to navigation
-                guard !(Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false) else {
-                    return
-                }
-
-                let attributedString = markdownToAttributedString(
-                    unwrappedText,
-                    textStyle: field.textStyle,
-                    customFontSize: customFontSize
-                )
-
-                guard let attributedString = attributedString else {
-                    DispatchQueue.main.async {
-                        completion?(nil)
-                    }
-                    return
-                }
-
-                // Save in the background
-                if let blobData = try? NSKeyedArchiver.archivedData(
-                    withRootObject: attributedString,
-                    requiringSecureCoding: false
-                ) {
-                    Task {
-                        let dataToSave = blobData
-
-                        await MainActor.run {
-                            // Double-check we haven't navigated away
-                            let stillNavigating = Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false
-                            if !stillNavigating {
-                                field.setBlob(dataToSave, on: notification)
-
-                                if let modelContext = notification.modelContext {
-                                    do {
-                                        try modelContext.save()
-                                    } catch {
-                                        print("Error saving context: \(error)")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Deliver the result on main thread
+            guard let attributedString = attributedString else {
                 DispatchQueue.main.async {
-                    // Double-check we haven't navigated away
-                    guard !(Thread.current.threadDictionary["IS_ARTICLE_NAVIGATING"] as? Bool ?? false) else {
-                        return
-                    }
-                    completion?(attributedString)
+                    completion?(nil)
                 }
+                return
+            }
+
+            // Save the blob
+            if let blobData = try? NSKeyedArchiver.archivedData(
+                withRootObject: attributedString,
+                requiringSecureCoding: false
+            ) {
+                Task {
+                    await MainActor.run {
+                        field.setBlob(blobData, on: notification)
+                        try? notification.modelContext?.save()
+                    }
+                }
+            }
+
+            // Deliver the result on main thread
+            DispatchQueue.main.async {
+                completion?(attributedString)
+            }
+        }
+
+        // Since we're processing asynchronously, return nil immediately
+        return nil
+    }
+}
+
+/// Gets attributed string asynchronously using Data as an intermediary for actor safety
+func getAttributedStringDataAsync(
+    for field: RichTextField,
+    from notification: NotificationData,
+    createIfMissing: Bool = true,
+    customFontSize: CGFloat? = nil
+) async -> Data? {
+    return await withCheckedContinuation { continuation in
+        // Use our existing function with completion handler
+        _ = getAttributedString(
+            for: field,
+            from: notification,
+            createIfMissing: createIfMissing,
+            customFontSize: customFontSize
+        ) { result in
+            if let attributedString = result,
+               let data = try? NSKeyedArchiver.archivedData(
+                   withRootObject: attributedString,
+                   requiringSecureCoding: false
+               )
+            {
+                continuation.resume(returning: data)
+            } else {
+                continuation.resume(returning: nil)
             }
         }
     }
-
-    completion?(nil)
-    return nil
 }
 
 /// Save an attributed string as a blob
