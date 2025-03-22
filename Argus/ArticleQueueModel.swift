@@ -19,6 +19,27 @@ class ArticleQueueItem {
         self.createdAt = createdAt
         self.notificationID = notificationID
     }
+
+    // Check if a notification exists with this ID
+    func checkForExistingNotification(id: UUID, context: ModelContext) async -> Bool {
+        let descriptor = FetchDescriptor<NotificationData>(
+            predicate: #Predicate<NotificationData> { notification in
+                notification.id == id
+            }
+        )
+
+        let count = (try? context.fetchCount(descriptor)) ?? 0
+        return count > 0
+    }
+
+    // Get notification ID if it exists from a queue item
+    func getNotificationID(forURL jsonURL: String, context: ModelContext) async throws -> UUID? {
+        let descriptor = FetchDescriptor<ArticleQueueItem>(
+            predicate: #Predicate { $0.jsonURL == jsonURL }
+        )
+
+        return try context.fetch(descriptor).first?.notificationID
+    }
 }
 
 // Queue helper for managing ArticleQueueItems

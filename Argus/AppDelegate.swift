@@ -152,33 +152,34 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // 2. Add to queue without blocking
+        // 2. Process using our queue system
         Task.detached {
             do {
-                // Add to queue
+                // Add to queue with notification ID for later reference
                 let context = await ModelContext(ArgusApp.sharedModelContainer)
                 let queueManager = context.queueManager()
 
                 // Generate a notification ID for reference
                 let notificationID = UUID()
 
+                // Try to add to queue - this will handle deduplication
                 let added = try await queueManager.addArticleWithNotification(
                     jsonURL: jsonURL,
                     notificationID: notificationID
                 )
 
                 if added {
-                    // Start processing in the background using our improved method
+                    // Start processing in a background task
                     Task.detached(priority: .utility) {
-                        // Remove the await here since startQueueProcessing() isn't async
-                        SyncManager.shared.startQueueProcessing()
+                        // Process the queue with high priority but in the background
+                        _ = await SyncManager.shared.processQueueBackground(timeLimit: 15) // 15 second limit
+                        await finish(.newData)
                     }
-                    await finish(.newData)
                 } else {
-                    await finish(.noData)
+                    await finish(.noData) // Already in the system
                 }
             } catch {
-                AppLogger.app.error("Failed to add article to queue: \(error)")
+                AppLogger.app.error("Failed to process push notification: \(error)")
                 await finish(.failed)
             }
         }

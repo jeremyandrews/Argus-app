@@ -600,6 +600,133 @@ class SyncManager {
         }
     }
 
+    // Process queue items within a specific time limit (for push notifications)
+    func processQueueBackground(timeLimit: TimeInterval) async -> Bool {
+        // Get the model container on the main actor
+        let container = await MainActor.run {
+            ArgusApp.sharedModelContainer
+        }
+
+        AppLogger.sync.debug("Starting background queue processing (time limit: \(timeLimit)s)")
+
+        return await Task.detached {
+            // Set start time for time limit enforcement
+            let startTime = Date()
+            let timeoutDate = startTime.addingTimeInterval(timeLimit)
+
+            let backgroundContext = ModelContext(container)
+            let queueManager = backgroundContext.queueManager()
+
+            do {
+                // Get total queue count
+                let totalQueueCount = try await queueManager.queueCount()
+                if totalQueueCount == 0 {
+                    return false // No items to process
+                }
+
+                AppLogger.sync.debug("Found \(totalQueueCount) items in queue (background)")
+
+                // Process in smaller batches for push notification
+                let batchSize = 5
+                var processedCount = 0
+
+                // While we have time, process batches
+                while Date() < timeoutDate {
+                    // Get a small batch
+                    let itemsToProcess = try await queueManager.getItemsToProcess(limit: batchSize)
+                    if itemsToProcess.isEmpty {
+                        return false // Queue is empty now
+                    }
+
+                    // Track processed URLs to avoid duplicates within this batch
+                    var processedURLsInBatch = Set<String>()
+                    var successfullyProcessedItems = [ArticleQueueItem]()
+                    var failedItems = [ArticleQueueItem]()
+
+                    // Batch duplicate checking
+                    var urlsToProcess = [String]()
+                    for item in itemsToProcess {
+                        urlsToProcess.append(item.jsonURL)
+                    }
+
+                    let existingArticlesSet = try await self.getExistingArticles(
+                        jsonURLs: urlsToProcess,
+                        context: backgroundContext
+                    )
+
+                    // Process each unique item in the batch
+                    for item in itemsToProcess {
+                        // Check if we're out of time
+                        if Date() >= timeoutDate {
+                            AppLogger.sync.debug("Background processing time limit reached")
+                            break
+                        }
+
+                        // Skip if this URL is already in the database
+                        if existingArticlesSet.contains(item.jsonURL) {
+                            successfullyProcessedItems.append(item) // Remove from queue
+                            continue
+                        }
+
+                        // Skip if already processed in this batch
+                        if processedURLsInBatch.contains(item.jsonURL) {
+                            successfullyProcessedItems.append(item)
+                            continue
+                        }
+
+                        do {
+                            try await self.processQueueItem(item, context: backgroundContext)
+                            successfullyProcessedItems.append(item)
+                            processedURLsInBatch.insert(item.jsonURL)
+                            processedCount += 1
+                        } catch {
+                            AppLogger.sync.error("Error processing queue item: \(error)")
+                            failedItems.append(item)
+                        }
+                    }
+
+                    // Remove processed items from queue
+                    if !successfullyProcessedItems.isEmpty {
+                        try backgroundContext.save()
+
+                        for item in successfullyProcessedItems {
+                            try queueManager.removeItem(item)
+                        }
+                    }
+
+                    // Check if we've run out of time
+                    if Date() >= timeoutDate {
+                        break
+                    }
+                }
+
+                // Update badge count on main thread if needed
+                if processedCount > 0 {
+                    await MainActor.run {
+                        NotificationUtils.updateAppBadgeCount()
+                    }
+                }
+
+                // Report how much time we used
+                let timeUsed = Date().timeIntervalSince(startTime)
+                AppLogger.sync.debug("Background processing completed in \(String(format: "%.2f", timeUsed))s, processed \(processedCount) items")
+
+                // Check if there are more items
+                let remainingCount = try await queueManager.queueCount()
+                let hasMoreItems = remainingCount > 0
+
+                // Update metrics
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastQueueProcessingTime")
+
+                return hasMoreItems
+
+            } catch {
+                AppLogger.sync.error("Error during background queue processing: \(error)")
+                return false
+            }
+        }.value
+    }
+
     // Public method to explicitly process the article queue, typically from UI actions.
     // Provides feedback about whether processing was completed and if more items remain.
     // Simply delegates to the main queue processing function.
