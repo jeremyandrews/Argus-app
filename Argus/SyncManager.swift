@@ -170,25 +170,23 @@ class SyncManager {
         let appActive = await MainActor.run {
             UIApplication.shared.applicationState == .active
         }
-
         // Use shorter time limit if user is active to avoid UI lag
         let timeLimit = appActive ? 3.0 : 10.0
-
         let startTime = Date()
         var processedCount = 0
         var hasMoreItems = false
-
         AppLogger.sync.debug("Processing queue items (max \(timeLimit) seconds, app \(appActive ? "active" : "inactive"))")
-
         // Get the model container on the main actor
         let container = await MainActor.run {
             ArgusApp.sharedModelContainer
         }
-
         // Use Task.detached to ensure we're off the main thread
         return await Task.detached {
             let backgroundContext = ModelContext(container)
             let queueManager = backgroundContext.queueManager()
+
+            // Create a set to track processed URLs within this batch
+            var processedURLsInBatch = Set<String>()
 
             do {
                 // Process items until we hit the time limit or run out of items
@@ -198,27 +196,46 @@ class SyncManager {
                         AppLogger.sync.debug("Queue processing cancelled")
                         break
                     }
-
                     // Get a batch of items to process - smaller batch in active mode
                     let batchSize = appActive ? 2 : 5
                     let itemsToProcess = try await queueManager.getItemsToProcess(limit: batchSize)
-
                     if itemsToProcess.isEmpty {
                         break // No more items to process
                     }
-
                     AppLogger.sync.debug("Processing batch of \(itemsToProcess.count) queue items")
                     var processedItems = [ArticleQueueItem]()
-
                     // Use a cooperative approach to check time more frequently when app is active
                     let timeCheckInterval = appActive ? 1 : 3
                     var itemsProcessedSinceTimeCheck = 0
 
+                    // First, pre-check the entire batch for duplicates to avoid race conditions
+                    var uniqueItemsToProcess = [ArticleQueueItem]()
                     for item in itemsToProcess {
+                        // Skip if we already processed this URL in the current batch
+                        if processedURLsInBatch.contains(item.jsonURL) {
+                            AppLogger.sync.debug("Skipping duplicate in current batch: \(item.jsonURL)")
+                            processedItems.append(item)
+                            continue
+                        }
+
+                        // Check if this article is already in the database
+                        // This is a critical check to prevent duplicates
+                        if await self.isArticleAlreadyProcessed(jsonURL: item.jsonURL, context: backgroundContext) {
+                            AppLogger.sync.debug("Skipping already processed article: \(item.jsonURL)")
+                            processedItems.append(item) // Mark as processed so it gets removed
+                            continue
+                        }
+
+                        // This item is unique so far, add it to our batch
+                        uniqueItemsToProcess.append(item)
+                        processedURLsInBatch.insert(item.jsonURL)
+                    }
+
+                    // Now process the unique items
+                    for item in uniqueItemsToProcess {
                         if Task.isCancelled {
                             break
                         }
-
                         // More frequent time checks when app is active
                         itemsProcessedSinceTimeCheck += 1
                         if appActive && itemsProcessedSinceTimeCheck >= timeCheckInterval {
@@ -228,10 +245,9 @@ class SyncManager {
                             }
                         }
 
-                        // Check if this article is already in the database
-                        // This is a critical check to prevent duplicates
+                        // Double-check once more right before processing to catch any race conditions
                         if await self.isArticleAlreadyProcessed(jsonURL: item.jsonURL, context: backgroundContext) {
-                            AppLogger.sync.debug("Skipping already processed article: \(item.jsonURL)")
+                            AppLogger.sync.debug("Caught duplicate at last check: \(item.jsonURL)")
                             processedItems.append(item) // Mark as processed so it gets removed
                             continue
                         }
@@ -244,7 +260,6 @@ class SyncManager {
                         } catch {
                             AppLogger.sync.error("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
                         }
-
                         // If app is active, yield to main thread more frequently
                         if appActive && processedCount % 2 == 0 {
                             try await Task.sleep(nanoseconds: 10_000_000) // 10ms pause
@@ -257,7 +272,6 @@ class SyncManager {
                             try queueManager.removeItem(item)
                         }
                         AppLogger.sync.debug("Successfully processed and saved batch of \(processedItems.count) items")
-
                         // Update badge count if we processed any items
                         if processedCount > 0 {
                             await MainActor.run {
@@ -265,7 +279,6 @@ class SyncManager {
                             }
                         }
                     }
-
                     // If app is active, yield after each batch
                     if appActive {
                         try await Task.sleep(nanoseconds: 20_000_000) // 20ms pause
@@ -274,16 +287,13 @@ class SyncManager {
 
                 let timeElapsed = Date().timeIntervalSince(startTime)
                 AppLogger.sync.debug("Queue processing completed: \(processedCount) items in \(String(format: "%.2f", timeElapsed)) seconds")
-
                 // Check if there are more items to process
                 let remainingCount = try await queueManager.queueCount()
                 hasMoreItems = remainingCount > 0
-
                 // Update metrics for future scheduling decisions
                 UserDefaults.standard.set(remainingCount, forKey: "currentQueueSize")
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "queueSizeLastUpdate")
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastQueueProcessingTime")
-
                 if hasMoreItems {
                     await MainActor.run {
                         // Signal the system that we'd like to process more items
@@ -291,7 +301,6 @@ class SyncManager {
                     }
                     AppLogger.sync.debug("More items remaining (\(remainingCount)). Background task scheduled.")
                 }
-
                 return hasMoreItems
             } catch {
                 AppLogger.sync.error("Error during queue processing: \(error)")
@@ -305,26 +314,28 @@ class SyncManager {
     // Prevents duplicate processing of the same article content.
     // Returns true if article exists in either table, false otherwise.
     func isArticleAlreadyProcessed(jsonURL: String, context: ModelContext) async -> Bool {
-        // Check in NotificationData
-        let notificationFetchRequest = FetchDescriptor<NotificationData>(
+        // Use a single combined query with fetchCount for better performance
+        let notificationFetchDescriptor = FetchDescriptor<NotificationData>(
             predicate: #Predicate<NotificationData> { notification in
                 notification.json_url == jsonURL
             }
         )
 
-        // Check in SeenArticle
-        let seenFetchRequest = FetchDescriptor<SeenArticle>(
+        // First check NotificationData - most direct and common case
+        let notificationCount = (try? context.fetchCount(notificationFetchDescriptor)) ?? 0
+        if notificationCount > 0 {
+            return true
+        }
+
+        // Only if not found in NotificationData, check SeenArticle
+        let seenFetchDescriptor = FetchDescriptor<SeenArticle>(
             predicate: #Predicate<SeenArticle> { seen in
                 seen.json_url == jsonURL
             }
         )
 
-        // Execute both fetch requests directly - no need for async let and tasks
-        let isNotificationPresent = (try? context.fetch(notificationFetchRequest).first) != nil
-        let isSeenPresent = (try? context.fetch(seenFetchRequest).first) != nil
-
-        // Return true if the article exists in either table
-        return isNotificationPresent || isSeenPresent
+        let seenCount = (try? context.fetchCount(seenFetchDescriptor)) ?? 0
+        return seenCount > 0
     }
 
     // Registers the app's background tasks with the system for queue processing and server sync.
