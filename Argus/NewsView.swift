@@ -211,7 +211,11 @@ struct NewsView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DetailViewClosed"))) { _ in
                     // Update filtered notifications when returning from detail view
-                    updateFilteredNotifications()
+                    updateFilteredNotifications(force: true)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleReadStatusChanged"))) { _ in
+                    // This will ensure changes to read status are reflected
+                    updateFilteredNotifications(force: true)
                 }
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 10)
@@ -1103,6 +1107,8 @@ struct NewsView: View {
             NotificationUtils.updateAppBadgeCount()
             // Also clean up related notification, if any.
             AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
+            // Post notification when read status changes
+            NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
         } catch {
             AppLogger.database.error("Failed to toggle read status: \(error)")
         }

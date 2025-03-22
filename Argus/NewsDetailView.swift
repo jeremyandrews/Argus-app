@@ -176,7 +176,11 @@ struct NewsDetailView: View {
 
     private var topBar: some View {
         HStack {
-            Button(action: { dismiss() }) {
+            Button(action: {
+                // Only post a notification so the list will refresh, but don't change the read status
+                NotificationCenter.default.post(name: Notification.Name("DetailViewClosed"), object: nil)
+                dismiss()
+            }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 20))
                     .frame(width: 44, height: 44)
@@ -877,6 +881,13 @@ struct NewsDetailView: View {
         notification.isViewed.toggle()
         saveModel()
         NotificationUtils.updateAppBadgeCount()
+
+        // Post notification that read status changed with additional info
+        NotificationCenter.default.post(
+            name: Notification.Name("ArticleReadStatusChanged"),
+            object: nil,
+            userInfo: ["articleID": notification.id, "isViewed": notification.isViewed]
+        )
     }
 
     private func toggleBookmark() {
