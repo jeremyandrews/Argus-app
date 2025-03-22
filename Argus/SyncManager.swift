@@ -99,13 +99,22 @@ class SyncManager {
     // Schedules further background processing if more items remain in the queue.
     // May request expedited processing for pending items.
     func startQueueProcessing() {
-        // Process queue with lowest priority, ensuring UI stays responsive
-        Task.detached(priority: .background) {
+        // Queue the entire operation on a background thread
+        Task.detached(priority: .utility) {
+            // First check if the current network state meets requirements
+            let networkAllowed = await self.shouldAllowSync()
+
+            if !networkAllowed {
+                AppLogger.sync.debug("Queue processing skipped - network conditions not suitable")
+                return
+            }
+
+            AppLogger.sync.debug("Beginning queue processing in background")
             let hasMoreItems = await self.processQueueItems()
-            // Schedule background fetch - let the system determine the best time
+
+            // Schedule follow-up tasks appropriately
             await MainActor.run {
                 self.scheduleBackgroundFetch()
-                // Only if we know there are pending items, we can request expedited processing
                 if hasMoreItems {
                     self.requestExpediteBackgroundProcessing()
                 }
@@ -170,143 +179,146 @@ class SyncManager {
         let appActive = await MainActor.run {
             UIApplication.shared.applicationState == .active
         }
-        // Use shorter time limit if user is active to avoid UI lag
-        let timeLimit = appActive ? 3.0 : 10.0
-        let startTime = Date()
-        var processedCount = 0
-        var hasMoreItems = false
-        AppLogger.sync.debug("Processing queue items (max \(timeLimit) seconds, app \(appActive ? "active" : "inactive"))")
+
         // Get the model container on the main actor
         let container = await MainActor.run {
             ArgusApp.sharedModelContainer
         }
-        // Use Task.detached to ensure we're off the main thread
+
+        AppLogger.sync.debug("Starting queue processing (app \(appActive ? "active" : "inactive"))")
+
         return await Task.detached {
             let backgroundContext = ModelContext(container)
             let queueManager = backgroundContext.queueManager()
 
-            // Create a set to track processed URLs within this batch
-            var processedURLsInBatch = Set<String>()
-
             do {
-                // Process items until we hit the time limit or run out of items
-                while Date().timeIntervalSince(startTime) < timeLimit {
-                    // Check if task was cancelled
-                    if Task.isCancelled {
-                        AppLogger.sync.debug("Queue processing cancelled")
-                        break
+                // Get total queue count for progress tracking
+                let totalQueueCount = try await queueManager.queueCount()
+                if totalQueueCount == 0 {
+                    return false // No items to process
+                }
+
+                AppLogger.sync.debug("Found \(totalQueueCount) items in queue")
+
+                // Process in batches of 25 (or fewer if active)
+                let batchSize = appActive ? 15 : 25
+                var processedCount = 0
+
+                // First fetch all items we'll process in this batch
+                let itemsToProcess = try await queueManager.getItemsToProcess(limit: batchSize)
+                if itemsToProcess.isEmpty {
+                    return false
+                }
+
+                // Track processed URLs to avoid duplicates within this batch
+                var processedURLsInBatch = Set<String>()
+                var successfullyProcessedItems = [ArticleQueueItem]()
+                var failedItems = [ArticleQueueItem]()
+
+                // PRE-CHECK: First identify duplicates in database (do this in batch for better performance)
+                var urlsToProcess = [String]()
+                for item in itemsToProcess {
+                    urlsToProcess.append(item.jsonURL)
+                }
+
+                // Do batch duplicate checking - get all existing articles in one query
+                let existingArticlesSet = try await self.getExistingArticles(jsonURLs: urlsToProcess, context: backgroundContext)
+
+                // Process each unique item in the batch
+                for item in itemsToProcess {
+                    // Skip if this URL is already in the database
+                    if existingArticlesSet.contains(item.jsonURL) {
+                        AppLogger.sync.debug("Skipping duplicate article: \(item.jsonURL)")
+                        successfullyProcessedItems.append(item) // Mark as processed so we remove it
+                        continue
                     }
-                    // Get a batch of items to process - smaller batch in active mode
-                    let batchSize = appActive ? 2 : 5
-                    let itemsToProcess = try await queueManager.getItemsToProcess(limit: batchSize)
-                    if itemsToProcess.isEmpty {
-                        break // No more items to process
+
+                    // Skip if we've already processed this URL in the current batch
+                    if processedURLsInBatch.contains(item.jsonURL) {
+                        AppLogger.sync.debug("Skipping duplicate in current batch: \(item.jsonURL)")
+                        successfullyProcessedItems.append(item)
+                        continue
                     }
-                    AppLogger.sync.debug("Processing batch of \(itemsToProcess.count) queue items")
-                    var processedItems = [ArticleQueueItem]()
-                    // Use a cooperative approach to check time more frequently when app is active
-                    let timeCheckInterval = appActive ? 1 : 3
-                    var itemsProcessedSinceTimeCheck = 0
 
-                    // First, pre-check the entire batch for duplicates to avoid race conditions
-                    var uniqueItemsToProcess = [ArticleQueueItem]()
-                    for item in itemsToProcess {
-                        // Skip if we already processed this URL in the current batch
-                        if processedURLsInBatch.contains(item.jsonURL) {
-                            AppLogger.sync.debug("Skipping duplicate in current batch: \(item.jsonURL)")
-                            processedItems.append(item)
-                            continue
-                        }
-
-                        // Check if this article is already in the database
-                        // This is a critical check to prevent duplicates
-                        if await self.isArticleAlreadyProcessed(jsonURL: item.jsonURL, context: backgroundContext) {
-                            AppLogger.sync.debug("Skipping already processed article: \(item.jsonURL)")
-                            processedItems.append(item) // Mark as processed so it gets removed
-                            continue
-                        }
-
-                        // This item is unique so far, add it to our batch
-                        uniqueItemsToProcess.append(item)
+                    do {
+                        try await self.processQueueItem(item, context: backgroundContext)
+                        successfullyProcessedItems.append(item)
                         processedURLsInBatch.insert(item.jsonURL)
-                    }
-
-                    // Now process the unique items
-                    for item in uniqueItemsToProcess {
-                        if Task.isCancelled {
-                            break
-                        }
-                        // More frequent time checks when app is active
-                        itemsProcessedSinceTimeCheck += 1
-                        if appActive && itemsProcessedSinceTimeCheck >= timeCheckInterval {
-                            itemsProcessedSinceTimeCheck = 0
-                            if Date().timeIntervalSince(startTime) >= timeLimit {
-                                break
-                            }
-                        }
-
-                        // Double-check once more right before processing to catch any race conditions
-                        if await self.isArticleAlreadyProcessed(jsonURL: item.jsonURL, context: backgroundContext) {
-                            AppLogger.sync.debug("Caught duplicate at last check: \(item.jsonURL)")
-                            processedItems.append(item) // Mark as processed so it gets removed
-                            continue
-                        }
-
-                        do {
-                            // Use a lower timeout when app is active
-                            try await self.processQueueItem(item, context: backgroundContext)
-                            processedItems.append(item)
-                            processedCount += 1
-                        } catch {
-                            AppLogger.sync.error("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
-                        }
-                        // If app is active, yield to main thread more frequently
-                        if appActive && processedCount % 2 == 0 {
-                            try await Task.sleep(nanoseconds: 10_000_000) // 10ms pause
-                        }
-                    }
-
-                    if !processedItems.isEmpty {
-                        try backgroundContext.save()
-                        for item in processedItems {
-                            try queueManager.removeItem(item)
-                        }
-                        AppLogger.sync.debug("Successfully processed and saved batch of \(processedItems.count) items")
-                        // Update badge count if we processed any items
-                        if processedCount > 0 {
-                            await MainActor.run {
-                                NotificationUtils.updateAppBadgeCount()
-                            }
-                        }
-                    }
-                    // If app is active, yield after each batch
-                    if appActive {
-                        try await Task.sleep(nanoseconds: 20_000_000) // 20ms pause
+                        processedCount += 1
+                    } catch {
+                        AppLogger.sync.error("Error processing queue item \(item.jsonURL): \(error.localizedDescription)")
+                        failedItems.append(item)
                     }
                 }
 
-                let timeElapsed = Date().timeIntervalSince(startTime)
-                AppLogger.sync.debug("Queue processing completed: \(processedCount) items in \(String(format: "%.2f", timeElapsed)) seconds")
-                // Check if there are more items to process
+                // Batch save successful items (by removing them from the queue)
+                if !successfullyProcessedItems.isEmpty {
+                    try backgroundContext.save()
+
+                    for item in successfullyProcessedItems {
+                        try queueManager.removeItem(item)
+                    }
+
+                    AppLogger.sync.debug("Successfully processed \(processedCount) articles")
+                }
+
+                // Update badge count on main thread if needed
+                if processedCount > 0 {
+                    await MainActor.run {
+                        NotificationUtils.updateAppBadgeCount()
+                    }
+                }
+
+                // Check if there are more items
                 let remainingCount = try await queueManager.queueCount()
-                hasMoreItems = remainingCount > 0
-                // Update metrics for future scheduling decisions
+                let hasMoreItems = remainingCount > 0
+
+                // Update metrics
                 UserDefaults.standard.set(remainingCount, forKey: "currentQueueSize")
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "queueSizeLastUpdate")
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastQueueProcessingTime")
+
                 if hasMoreItems {
-                    await MainActor.run {
-                        // Signal the system that we'd like to process more items
-                        self.scheduleBackgroundFetch()
-                    }
-                    AppLogger.sync.debug("More items remaining (\(remainingCount)). Background task scheduled.")
+                    AppLogger.sync.debug("More items remaining (\(remainingCount))")
                 }
+
                 return hasMoreItems
             } catch {
                 AppLogger.sync.error("Error during queue processing: \(error)")
                 return false
             }
         }.value
+    }
+
+    // New helper method to check existing articles in batch
+    private func getExistingArticles(jsonURLs: [String], context: ModelContext) async throws -> Set<String> {
+        var result = Set<String>()
+
+        // Check for already processed articles in one query
+        let notificationDescriptor = FetchDescriptor<NotificationData>(
+            predicate: #Predicate<NotificationData> { notification in
+                jsonURLs.contains(notification.json_url)
+            }
+        )
+
+        let seenDescriptor = FetchDescriptor<SeenArticle>(
+            predicate: #Predicate<SeenArticle> { seen in
+                jsonURLs.contains(seen.json_url)
+            }
+        )
+
+        // Execute both queries and combine results
+        let existingNotifications = try context.fetch(notificationDescriptor)
+        for notification in existingNotifications {
+            result.insert(notification.json_url)
+        }
+
+        let existingSeenArticles = try context.fetch(seenDescriptor)
+        for seen in existingSeenArticles {
+            result.insert(seen.json_url)
+        }
+
+        return result
     }
 
     // Checks if an article has already been processed by looking for its URL in both
@@ -604,39 +616,18 @@ class SyncManager {
     // 6. Generating and storing attributed strings for title and body
     // Uses transaction for atomicity and immediately saves to prevent race conditions.
     private func processQueueItem(_ item: ArticleQueueItem, context: ModelContext) async throws {
-        let itemJsonURL = item.jsonURL
-
-        // Double-check that we're not creating duplicates by using a fresh fetch
-        // This is more reliable than using the cached check from earlier
-        var notificationDescriptor = FetchDescriptor<NotificationData>(
-            predicate: #Predicate<NotificationData> { $0.json_url == itemJsonURL }
-        )
-        notificationDescriptor.fetchLimit = 1
-
-        var seenDescriptor = FetchDescriptor<SeenArticle>(
-            predicate: #Predicate<SeenArticle> { $0.json_url == itemJsonURL }
-        )
-        seenDescriptor.fetchLimit = 1
-
-        // Check BEFORE trying to insert - critical for avoiding duplicates
-        if (try? context.fetch(notificationDescriptor).first) != nil ||
-            (try? context.fetch(seenDescriptor).first) != nil
-        {
-            AppLogger.sync.debug("[Warning] Skipping already processed article: \(itemJsonURL)")
-            return
-        }
-
         guard let url = URL(string: item.jsonURL) else {
             throw NSError(domain: "com.arguspulse", code: 400, userInfo: [
                 NSLocalizedDescriptionKey: "Invalid JSON URL: \(item.jsonURL)",
             ])
         }
 
-        // Fetch with timeout
+        // Fetch with optimized timeout settings
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 10
-        config.timeoutIntervalForResource = 10
+        config.timeoutIntervalForResource = 15
         let session = URLSession(configuration: config)
+
         let (data, _) = try await session.data(from: url)
 
         guard let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -656,59 +647,21 @@ class SyncManager {
             ])
         }
 
-        // Create engine stats JSON string if the required fields are present in the raw JSON
-        var engineStatsJSON: String?
-        var engineStatsDict: [String: Any] = [:]
-
-        if let model = enrichedJson["model"] as? String {
-            engineStatsDict["model"] = model
-        }
-
-        if let elapsedTime = enrichedJson["elapsed_time"] as? Double {
-            engineStatsDict["elapsed_time"] = elapsedTime
-        }
-
-        if let stats = enrichedJson["stats"] as? String {
-            engineStatsDict["stats"] = stats
-        }
-
-        if let systemInfo = enrichedJson["system_info"] as? [String: Any] {
-            engineStatsDict["system_info"] = systemInfo
-        }
-
-        // Only create the JSON if we have some data to include
-        if !engineStatsDict.isEmpty {
-            if let jsonData = try? JSONSerialization.data(withJSONObject: engineStatsDict),
-               let jsonString = String(data: jsonData, encoding: .utf8)
-            {
-                engineStatsJSON = jsonString
-            }
-        }
-
-        // Create similar articles JSON string if available in the raw JSON
-        var similarArticlesJSON: String?
-        if let similarArticles = enrichedJson["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty {
-            if let jsonData = try? JSONSerialization.data(withJSONObject: similarArticles),
-               let jsonString = String(data: jsonData, encoding: .utf8)
-            {
-                similarArticlesJSON = jsonString
-            }
-        }
+        // Extract engine stats and similar articles JSON
+        let engineStatsJSON = extractEngineStats(from: enrichedJson)
+        let similarArticlesJSON = extractSimilarArticles(from: enrichedJson)
 
         let date = Date()
         let notificationID = item.notificationID ?? UUID()
-        if item.notificationID == nil {
-            item.notificationID = notificationID
-        }
 
-        // Create NotificationData instance with article_url
+        // Create NotificationData and SeenArticle in a single transaction
         let notification = NotificationData(
             id: notificationID,
             date: date,
             title: articleJSON.title,
             body: articleJSON.body,
             json_url: articleJSON.jsonURL,
-            article_url: articleJSON.url, // Use the URL field from articleJSON
+            article_url: articleJSON.url,
             topic: articleJSON.topic,
             article_title: articleJSON.articleTitle,
             affected: articleJSON.affected,
@@ -731,23 +684,55 @@ class SyncManager {
             similar_articles: similarArticlesJSON
         )
 
-        // Create SeenArticle record
         let seenArticle = SeenArticle(
             id: notificationID,
             json_url: articleJSON.jsonURL,
             date: date
         )
 
-        // Insert both the notification and SeenArticle in a transaction to ensure atomicity
+        // Insert both records in a single transaction
         try context.transaction {
             context.insert(notification)
             context.insert(seenArticle)
+
+            // Pre-generate and store rich text (only for the most critical fields)
             _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
             _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
         }
+    }
 
-        // Save immediately to prevent race conditions
-        try context.save()
+    private func extractEngineStats(from json: [String: Any]) -> String? {
+        var engineStatsDict: [String: Any] = [:]
+
+        if let model = json["model"] as? String {
+            engineStatsDict["model"] = model
+        }
+
+        if let elapsedTime = json["elapsed_time"] as? Double {
+            engineStatsDict["elapsed_time"] = elapsedTime
+        }
+
+        if let stats = json["stats"] as? String {
+            engineStatsDict["stats"] = stats
+        }
+
+        if let systemInfo = json["system_info"] as? [String: Any] {
+            engineStatsDict["system_info"] = systemInfo
+        }
+
+        if engineStatsDict.isEmpty {
+            return nil
+        }
+
+        return try? String(data: JSONSerialization.data(withJSONObject: engineStatsDict), encoding: .utf8)
+    }
+
+    private func extractSimilarArticles(from json: [String: Any]) -> String? {
+        guard let similarArticles = json["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty else {
+            return nil
+        }
+
+        return try? String(data: JSONSerialization.data(withJSONObject: similarArticles), encoding: .utf8)
     }
 
     // Retrieves article records from the last 24 hours.

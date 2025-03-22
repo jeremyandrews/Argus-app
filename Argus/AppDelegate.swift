@@ -152,11 +152,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // 2. Simply add to queue without additional processing
-        Task {
+        // 2. Add to queue without blocking
+        Task.detached {
             do {
                 // Add to queue
-                let context = ArgusApp.sharedModelContainer.mainContext
+                let context = await ModelContext(ArgusApp.sharedModelContainer)
                 let queueManager = context.queueManager()
 
                 // Generate a notification ID for reference
@@ -168,16 +168,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 )
 
                 if added {
-                    AppLogger.app.debug("Added article to processing queue: \(jsonURL)")
-                    try context.save()
-                    finish(.newData)
+                    // Start processing in the background using our improved method
+                    Task.detached(priority: .utility) {
+                        // Remove the await here since startQueueProcessing() isn't async
+                        SyncManager.shared.startQueueProcessing()
+                    }
+                    await finish(.newData)
                 } else {
-                    AppLogger.app.debug("Article already in queue: \(jsonURL)")
-                    finish(.noData)
+                    await finish(.noData)
                 }
             } catch {
                 AppLogger.app.error("Failed to add article to queue: \(error)")
-                finish(.failed)
+                await finish(.failed)
             }
         }
     }
