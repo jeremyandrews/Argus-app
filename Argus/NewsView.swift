@@ -115,7 +115,7 @@ struct NewsView: View {
                         ForEach(sortedAndGroupedNotifications, id: \.key) { group in
                             if !group.key.isEmpty {
                                 Section(header: Text(group.key)) {
-                                    ForEach(group.notifications, id: \.id) { notification in
+                                    ForEach(group.notifications.uniqued(), id: \.id) { notification in
                                         NotificationRow(
                                             notification: notification,
                                             editMode: editMode,
@@ -128,7 +128,7 @@ struct NewsView: View {
                                 }
                             } else {
                                 // Single group with no header
-                                ForEach(group.notifications, id: \.id) { notification in
+                                ForEach(group.notifications.uniqued(), id: \.id) { notification in
                                     NotificationRow(
                                         notification: notification,
                                         editMode: editMode,
@@ -1245,9 +1245,10 @@ struct NewsView: View {
 
             // Only update UI when we have the new data ready
             await MainActor.run {
-                // Update all state at once to minimize flickering
-                self.totalNotifications = newNotifications
-                self.filteredNotifications = newNotifications
+                // Update all state at once to minimize flickering - apply uniqueness before updating UI
+                let uniqueNotifications = newNotifications.uniqued()
+                self.totalNotifications = uniqueNotifications
+                self.filteredNotifications = uniqueNotifications
                 self.sortedAndGroupedNotifications = groups
             }
 
@@ -2177,19 +2178,4 @@ struct FilterView: View {
     }
 }
 
-extension Collection {
-    /// Returns a new array containing the first occurrence of each unique key,
-    /// in the order they appear in self.
-    func uniqued<Key: Hashable>(by keyPath: KeyPath<Element, Key>) -> [Element] {
-        var seen = Set<Key>()
-        var result = [Element]()
-        result.reserveCapacity(underestimatedCount)
-        for element in self {
-            let key = element[keyPath: keyPath]
-            if seen.insert(key).inserted {
-                result.append(element)
-            }
-        }
-        return result
-    }
-}
+// Note: uniqued(by:) is defined in ArrayExtensions.swift

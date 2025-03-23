@@ -80,7 +80,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
                     DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 2.0) {
                         Task(priority: .background) {
-                            _ = await SyncManager.shared.processQueue()
+                            // Use the maintenance function instead of the old queue processing
+                            await SyncManager.shared.performScheduledMaintenance()
                         }
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -155,32 +156,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // 2. Process using our memory‑based queue system
+        // 2. Process the article directly - use the SyncManager which handles context creation safely
         Task.detached {
-            do {
-                // Generate a notification ID for reference
-                let notificationID = UUID()
+            // Let SyncManager handle the existence check and processing
+            // It manages its own context creation safely
+            let success = await SyncManager.shared.directProcessArticle(jsonURL: jsonURL)
 
-                // Add to memory queue with notification ID for later reference
-                let added = try await MemoryArticleQueueManager.shared.addArticleWithNotification(
-                    jsonURL: jsonURL,
-                    notificationID: notificationID
-                )
-
-                if added {
-                    // Start processing in a background task
-                    Task.detached(priority: .utility) {
-                        // Process the queue with high priority but in the background
-                        _ = await SyncManager.shared.processQueueBackground(timeLimit: 15) // 15 second limit
-                        await finish(.newData)
-                    }
-                } else {
-                    await finish(.noData) // Already in the system
-                }
-            } catch {
-                AppLogger.app.error("Failed to process push notification: \(error)")
-                await finish(.failed)
-            }
+            // Complete based on the result
+            await finish(success ? .newData : .noData)
         }
     }
 

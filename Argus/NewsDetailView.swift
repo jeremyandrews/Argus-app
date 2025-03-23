@@ -82,9 +82,13 @@ struct NewsDetailView: View {
         currentIndex: Int,
         initiallyExpandedSection: String? = nil
     ) {
-        _notifications = State(initialValue: notifications)
-        _allNotifications = State(initialValue: allNotifications)
-        _currentIndex = State(initialValue: currentIndex)
+        // Apply uniqueness to prevent duplicate IDs in collections
+        let uniqueNotifications = notifications.uniqued()
+        let uniqueAllNotifications = allNotifications.uniqued()
+
+        _notifications = State(initialValue: uniqueNotifications)
+        _allNotifications = State(initialValue: uniqueAllNotifications)
+        _currentIndex = State(initialValue: min(currentIndex, uniqueNotifications.count - 1))
         // If we have a direct notification, initialize our state with it
         _preloadedNotification = State(initialValue: notification)
         _titleAttributedString = State(initialValue: preloadedTitle)
