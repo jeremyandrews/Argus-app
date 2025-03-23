@@ -15,4 +15,11 @@ class BackgroundContextManager {
             return task(context)
         }.value
     }
+
+    func performAsyncBackgroundTask<T>(_ task: @escaping (ModelContext) async -> T) async -> T {
+        return await Task.detached {
+            let context = await ModelContext(ArgusApp.sharedModelContainer)
+            return await task(context)
+        }.value
+    }
 }

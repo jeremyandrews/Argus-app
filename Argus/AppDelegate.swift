@@ -125,7 +125,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         var backgroundTask: UIBackgroundTaskIdentifier = .invalid
 
         // Helper function to ensure we only complete once
-        func finish(_ result: UIBackgroundFetchResult) {
+        func finish(_ result: UIBackgroundFetchResult) async {
             guard let c = completion else { return }
             completion = nil
             c(result)
@@ -136,8 +136,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         backgroundTask = UIApplication.shared.beginBackgroundTask {
-            // If we're about to hit the system timeout, clean up and complete
-            finish(.failed)
+            Task { @MainActor in
+                await finish(.failed)
+            }
         }
 
         // 1. Validate push data
@@ -148,22 +149,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             let data = userInfo["data"] as? [String: AnyObject],
             let jsonURL = data["json_url"] as? String, !jsonURL.isEmpty
         else {
-            finish(.noData)
+            Task { @MainActor in
+                await finish(.noData)
+            }
             return
         }
 
-        // 2. Process using our queue system
+        // 2. Process using our memory‑based queue system
         Task.detached {
             do {
-                // Add to queue with notification ID for later reference
-                let context = await ModelContext(ArgusApp.sharedModelContainer)
-                let queueManager = context.queueManager()
-
                 // Generate a notification ID for reference
                 let notificationID = UUID()
 
-                // Try to add to queue - this will handle deduplication
-                let added = try await queueManager.addArticleWithNotification(
+                // Add to memory queue with notification ID for later reference
+                let added = try await MemoryArticleQueueManager.shared.addArticleWithNotification(
                     jsonURL: jsonURL,
                     notificationID: notificationID
                 )
@@ -269,22 +268,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
-    // removeDuplicateNotifications: Comprehensively identifies and removes duplicate articles
-    // from the database to maintain data integrity and prevent UI issues.
-    //
-    // Duplication criteria:
-    // 1. Articles with the same UUID (id) are definite duplicates
-    // 2. Articles with the same json_url are content duplicates
-    // 3. Articles with the same article_url are content duplicates
-    //
-    // The function processes each type of duplication in order, using intelligent selection
-    // criteria to determine which version to keep:
-    // - Prioritizes bookmarked and archived articles
-    // - Prefers articles with additional metadata/analysis
-    // - Falls back to keeping the newest version when other factors are equal
-    //
-    // This prevents ForEach UUID collision errors in the UI while ensuring
-    // that the most valuable version of each article is preserved.
     func removeDuplicateNotifications() {
         guard !isDuplicateRemovalRunning else {
             AppLogger.app.debug("Duplicate removal already in progress, skipping")
@@ -494,7 +477,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                     }
                 }
 
-                // Update badge count
                 let totalRemoved = duplicatesToRemove.count + jsonUrlDuplicatesToRemove.count +
                     articleUrlDuplicatesToRemove.count
 
@@ -517,26 +499,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
-    // Helper function that implements the article selection logic consistently across all deduplication phases
     private func selectBestArticle(from articles: [NotificationData]) -> NotificationData {
-        // Sort the articles by multiple criteria to determine which one to keep
         return articles.sorted { a, b in
-            // 1. Bookmarked status (highest priority)
             if a.isBookmarked != b.isBookmarked {
                 return a.isBookmarked
             }
-
-            // 2. Archive status
             if a.isArchived != b.isArchived {
                 return a.isArchived
             }
-
-            // 3. Read status (prefer unread for better user experience)
             if a.isViewed != b.isViewed {
                 return !a.isViewed
             }
-
-            // 4. Metadata completeness
             let aHasAnalysis = a.sources_quality != nil || a.argument_quality != nil ||
                 a.source_type != nil || a.quality != nil
             let bHasAnalysis = b.sources_quality != nil || b.argument_quality != nil ||
@@ -545,24 +518,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             if aHasAnalysis != bHasAnalysis {
                 return aHasAnalysis
             }
-
-            // 5. Rich text content
             let aHasRichText = a.title_blob != nil || a.body_blob != nil
             let bHasRichText = b.title_blob != nil || b.body_blob != nil
 
             if aHasRichText != bHasRichText {
                 return aHasRichText
             }
-
-            // 6. Content length (prefer more detailed content if available)
             let aContentLength = a.title.count + a.body.count
             let bContentLength = b.title.count + b.body.count
 
             if aContentLength != bContentLength {
                 return aContentLength > bContentLength
             }
-
-            // 7. Finally, publication date (prefer newer content)
             return (a.pub_date ?? a.date) > (b.pub_date ?? b.date)
         }.first!
     }
@@ -570,7 +537,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     @MainActor
     func removeNotificationIfExists(jsonURL: String) {
         UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
-            // Filter the delivered notifications to find matches
             let matchingIDs = notifications
                 .compactMap { delivered -> String? in
                     guard
@@ -581,8 +547,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                     }
                     return deliveredURL == jsonURL ? delivered.request.identifier : nil
                 }
-
-            // Remove by request identifier
             if !matchingIDs.isEmpty {
                 UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: matchingIDs)
             }
@@ -602,7 +566,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func setupTestDataIfNeeded() {
-        // Only proceed if the environment variable is set (adds extra safety)
         guard
             isRunningUITests,
             ProcessInfo.processInfo.environment["SETUP_TEST_DATA"] == "1"
@@ -612,21 +575,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         let context = ArgusApp.sharedModelContainer.mainContext
 
-        // Check if we already have test data
         do {
             let existingCount = try context.fetchCount(FetchDescriptor<NotificationData>())
             if existingCount > 0 {
-                // We already have data, no need to create more
                 AppLogger.app.debug("UI Tests: Using \(existingCount) existing notifications for testing")
                 return
             }
 
             AppLogger.app.debug("UI Tests: Creating test notification data")
 
-            // Create a sample notification for testing
             let testNotification = NotificationData(
                 id: UUID(),
-                date: Date(), // Now in correct order
+                date: Date(),
                 title: "Test Article Title for UI Tests",
                 body: "This is a test article body with enough content to display properly in our UI tests.",
                 json_url: "https://example.com/test.json",
@@ -651,7 +611,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 additional_insights: "Here are some additional contextual insights."
             )
 
-            // Add the analysis fields needed for the test
             testNotification.summary = "This is a summary of the test article."
             testNotification.critical_analysis = "This is a critical analysis of the article."
             testNotification.logical_fallacies = "The article contains some logical fallacies."
@@ -662,7 +621,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             testNotification.sources_quality = 3
             testNotification.argument_quality = 4
 
-            // Save to the container
             context.insert(testNotification)
             try context.save()
 
@@ -697,14 +655,11 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     ) {
         let userInfo = response.notification.request.content.userInfo
 
-        // If the user actually tapped on a push, parse out the relevant data.
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            // Get json_url, check if priority is "high"
             if
                 let data = userInfo["data"] as? [String: AnyObject],
                 let jsonURL = data["json_url"] as? String
             {
-                // Dispatch onto the main queue to update the UI
                 DispatchQueue.main.async {
                     self.presentArticle(jsonURL: jsonURL)
                 }
@@ -715,7 +670,6 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     }
 
     private func presentArticle(jsonURL: String) {
-        // 1) Look up the NotificationData:
         let context = ArgusApp.sharedModelContainer.mainContext
         guard let notification = try? context.fetch(
             FetchDescriptor<NotificationData>(predicate: #Predicate { $0.json_url == jsonURL })
@@ -724,7 +678,6 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             return
         }
 
-        // 2) Dismiss any existing models
         guard
             let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
             let window = windowScene.windows.first,
@@ -734,11 +687,9 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         }
 
         if let presented = rootVC.presentedViewController {
-            // If something is already presented (e.g. a NewsDetailView), dismiss it
             presented.dismiss(animated: false)
         }
 
-        // 3) Create and present the NewsDetailView for this article
         let detailView = NewsDetailView(
             notifications: [notification],
             allNotifications: [notification],

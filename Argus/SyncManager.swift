@@ -99,20 +99,14 @@ class SyncManager {
     // Schedules further background processing if more items remain in the queue.
     // May request expedited processing for pending items.
     func startQueueProcessing() {
-        // Queue the entire operation on a background thread
         Task.detached(priority: .utility) {
-            // First check if the current network state meets requirements
             let networkAllowed = await self.shouldAllowSync()
-
             if !networkAllowed {
                 AppLogger.sync.debug("Queue processing skipped - network conditions not suitable")
                 return
             }
-
             AppLogger.sync.debug("Beginning queue processing in background")
             let hasMoreItems = await self.processQueueItems()
-
-            // Schedule follow-up tasks appropriately
             await MainActor.run {
                 self.scheduleBackgroundFetch()
                 if hasMoreItems {
@@ -175,71 +169,43 @@ class SyncManager {
     // Updates metrics and schedules follow-up tasks if needed.
     // Returns whether more items remain in the queue.
     private func processQueueItems() async -> Bool {
-        // Check if app is in foreground - if so, use shorter time limit
         let appActive = await MainActor.run {
             UIApplication.shared.applicationState == .active
         }
-
-        // Get the model container on the main actor
         let container = await MainActor.run {
             ArgusApp.sharedModelContainer
         }
-
         AppLogger.sync.debug("Starting queue processing (app \(appActive ? "active" : "inactive"))")
-
         return await Task.detached {
             let backgroundContext = ModelContext(container)
-            let queueManager = backgroundContext.queueManager()
-
+            let queueManager = MemoryArticleQueueManager.shared
             do {
-                // Get total queue count for progress tracking
                 let totalQueueCount = try await queueManager.queueCount()
-                if totalQueueCount == 0 {
-                    return false // No items to process
-                }
-
+                if totalQueueCount == 0 { return false }
                 AppLogger.sync.debug("Found \(totalQueueCount) items in queue")
-
-                // Process in batches of 25 (or fewer if active)
                 let batchSize = appActive ? 15 : 25
                 var processedCount = 0
-
-                // First fetch all items we'll process in this batch
                 let itemsToProcess = try await queueManager.getItemsToProcess(limit: batchSize)
-                if itemsToProcess.isEmpty {
-                    return false
-                }
-
-                // Track processed URLs to avoid duplicates within this batch
+                if itemsToProcess.isEmpty { return false }
                 var processedURLsInBatch = Set<String>()
                 var successfullyProcessedItems = [ArticleQueueItem]()
                 var failedItems = [ArticleQueueItem]()
-
-                // PRE-CHECK: First identify duplicates in database (do this in batch for better performance)
                 var urlsToProcess = [String]()
                 for item in itemsToProcess {
                     urlsToProcess.append(item.jsonURL)
                 }
-
-                // Do batch duplicate checking - get all existing articles in one query
                 let existingArticlesSet = try await self.getExistingArticles(jsonURLs: urlsToProcess, context: backgroundContext)
-
-                // Process each unique item in the batch
                 for item in itemsToProcess {
-                    // Skip if this URL is already in the database
                     if existingArticlesSet.contains(item.jsonURL) {
                         AppLogger.sync.debug("Skipping duplicate article: \(item.jsonURL)")
-                        successfullyProcessedItems.append(item) // Mark as processed so we remove it
+                        successfullyProcessedItems.append(item)
                         continue
                     }
-
-                    // Skip if we've already processed this URL in the current batch
                     if processedURLsInBatch.contains(item.jsonURL) {
                         AppLogger.sync.debug("Skipping duplicate in current batch: \(item.jsonURL)")
                         successfullyProcessedItems.append(item)
                         continue
                     }
-
                     do {
                         try await self.processQueueItem(item, context: backgroundContext)
                         successfullyProcessedItems.append(item)
@@ -250,38 +216,26 @@ class SyncManager {
                         failedItems.append(item)
                     }
                 }
-
-                // Batch save successful items (by removing them from the queue)
                 if !successfullyProcessedItems.isEmpty {
                     try backgroundContext.save()
-
                     for item in successfullyProcessedItems {
-                        try queueManager.removeItem(item)
+                        await queueManager.removeItem(item)
                     }
-
                     AppLogger.sync.debug("Successfully processed \(processedCount) articles")
                 }
-
-                // Update badge count on main thread if needed
                 if processedCount > 0 {
                     await MainActor.run {
                         NotificationUtils.updateAppBadgeCount()
                     }
                 }
-
-                // Check if there are more items
                 let remainingCount = try await queueManager.queueCount()
                 let hasMoreItems = remainingCount > 0
-
-                // Update metrics
                 UserDefaults.standard.set(remainingCount, forKey: "currentQueueSize")
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "queueSizeLastUpdate")
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastQueueProcessingTime")
-
                 if hasMoreItems {
                     AppLogger.sync.debug("More items remaining (\(remainingCount))")
                 }
-
                 return hasMoreItems
             } catch {
                 AppLogger.sync.error("Error during queue processing: \(error)")
@@ -602,78 +556,45 @@ class SyncManager {
 
     // Process queue items within a specific time limit (for push notifications)
     func processQueueBackground(timeLimit: TimeInterval) async -> Bool {
-        // Get the model container on the main actor
         let container = await MainActor.run {
             ArgusApp.sharedModelContainer
         }
-
         AppLogger.sync.debug("Starting background queue processing (time limit: \(timeLimit)s)")
-
         return await Task.detached {
-            // Set start time for time limit enforcement
             let startTime = Date()
             let timeoutDate = startTime.addingTimeInterval(timeLimit)
-
             let backgroundContext = ModelContext(container)
-            let queueManager = backgroundContext.queueManager()
-
+            let queueManager = MemoryArticleQueueManager.shared
             do {
-                // Get total queue count
                 let totalQueueCount = try await queueManager.queueCount()
-                if totalQueueCount == 0 {
-                    return false // No items to process
-                }
-
+                if totalQueueCount == 0 { return false }
                 AppLogger.sync.debug("Found \(totalQueueCount) items in queue (background)")
-
-                // Process in smaller batches for push notification
                 let batchSize = 5
                 var processedCount = 0
-
-                // While we have time, process batches
                 while Date() < timeoutDate {
-                    // Get a small batch
                     let itemsToProcess = try await queueManager.getItemsToProcess(limit: batchSize)
-                    if itemsToProcess.isEmpty {
-                        return false // Queue is empty now
-                    }
-
-                    // Track processed URLs to avoid duplicates within this batch
+                    if itemsToProcess.isEmpty { return false }
                     var processedURLsInBatch = Set<String>()
                     var successfullyProcessedItems = [ArticleQueueItem]()
                     var failedItems = [ArticleQueueItem]()
-
-                    // Batch duplicate checking
                     var urlsToProcess = [String]()
                     for item in itemsToProcess {
                         urlsToProcess.append(item.jsonURL)
                     }
-
-                    let existingArticlesSet = try await self.getExistingArticles(
-                        jsonURLs: urlsToProcess,
-                        context: backgroundContext
-                    )
-
-                    // Process each unique item in the batch
+                    let existingArticlesSet = try await self.getExistingArticles(jsonURLs: urlsToProcess, context: backgroundContext)
                     for item in itemsToProcess {
-                        // Check if we're out of time
                         if Date() >= timeoutDate {
                             AppLogger.sync.debug("Background processing time limit reached")
                             break
                         }
-
-                        // Skip if this URL is already in the database
                         if existingArticlesSet.contains(item.jsonURL) {
-                            successfullyProcessedItems.append(item) // Remove from queue
+                            successfullyProcessedItems.append(item)
                             continue
                         }
-
-                        // Skip if already processed in this batch
                         if processedURLsInBatch.contains(item.jsonURL) {
                             successfullyProcessedItems.append(item)
                             continue
                         }
-
                         do {
                             try await self.processQueueItem(item, context: backgroundContext)
                             successfullyProcessedItems.append(item)
@@ -684,42 +605,27 @@ class SyncManager {
                             failedItems.append(item)
                         }
                     }
-
-                    // Remove processed items from queue
                     if !successfullyProcessedItems.isEmpty {
                         try backgroundContext.save()
-
                         for item in successfullyProcessedItems {
-                            try queueManager.removeItem(item)
+                            await queueManager.removeItem(item)
                         }
                     }
-
-                    // Check if we've run out of time
                     if Date() >= timeoutDate {
                         break
                     }
                 }
-
-                // Update badge count on main thread if needed
                 if processedCount > 0 {
                     await MainActor.run {
                         NotificationUtils.updateAppBadgeCount()
                     }
                 }
-
-                // Report how much time we used
                 let timeUsed = Date().timeIntervalSince(startTime)
                 AppLogger.sync.debug("Background processing completed in \(String(format: "%.2f", timeUsed))s, processed \(processedCount) items")
-
-                // Check if there are more items
                 let remainingCount = try await queueManager.queueCount()
                 let hasMoreItems = remainingCount > 0
-
-                // Update metrics
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastQueueProcessingTime")
-
                 return hasMoreItems
-
             } catch {
                 AppLogger.sync.error("Error during background queue processing: \(error)")
                 return false
@@ -875,25 +781,16 @@ class SyncManager {
         }
     }
 
-    // Adds articles to the processing queue that aren't already in the system.
-    // Performs duplicate checking to avoid queuing already processed articles.
-    // Takes an array of article JSON URLs and adds each to the queue if new.
-    // Reports progress via logs.
+    // In SyncManager.swift, update the function that queues articles.
+    // This version calls the new MemoryArticleQueueManager methods that internally
+    // check whether an article already exists and avoids adding duplicates.
     func queueArticlesForProcessing(urls: [String]) async {
-        // Get the model container on the main actor
-        let container = await MainActor.run {
-            ArgusApp.sharedModelContainer
-        }
-
-        // Use Task.detached to ensure we're off the main thread
-        await Task.detached {
+        let container = await MainActor.run { ArgusApp.sharedModelContainer }
+        // Launch the processing on a detached task.
+        _ = await Task.detached {
             let backgroundContext = ModelContext(container)
-            let queueManager = backgroundContext.queueManager()
-
-            // Prepare for batch checking
+            let queueManager = MemoryArticleQueueManager.shared
             var newUrls = [String]()
-
-            // First check which articles need to be queued (not already in system)
             for jsonURL in urls {
                 if !(await self.isArticleAlreadyProcessed(jsonURL: jsonURL, context: backgroundContext)) {
                     newUrls.append(jsonURL)
@@ -901,14 +798,10 @@ class SyncManager {
                     AppLogger.sync.debug("Skipping already processed article: \(jsonURL)")
                 }
             }
-
-            // Only queue articles that aren't already processed
             if newUrls.isEmpty {
                 AppLogger.sync.debug("No new articles to queue - all are already processed")
                 return
             }
-
-            // Process each new URL
             for jsonURL in newUrls {
                 do {
                     let added = try await queueManager.addArticle(jsonURL: jsonURL)
@@ -921,7 +814,6 @@ class SyncManager {
                     AppLogger.sync.error("Failed to queue article \(jsonURL): \(error)")
                 }
             }
-
             AppLogger.sync.debug("Added \(newUrls.count) new articles to processing queue")
         }.value
     }
