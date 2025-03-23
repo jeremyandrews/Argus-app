@@ -160,10 +160,9 @@ class SyncManager {
 
     // MARK: - Standardized Article Existence Checking
 
-    // Standard method for checking if an article exists in the database
-    // Checks by jsonURL, ID, and article_url for comprehensive duplicate detection
-    // This is the single source of truth for article existence checking
-    func standardizedArticleExistsCheck(jsonURL: String, articleID: UUID? = nil, articleURL: String? = nil, context: ModelContext) async -> Bool {
+    // Enhanced method that returns the existing article if found
+    // This allows updating articles instead of just checking existence
+    func findExistingArticle(jsonURL: String, articleID: UUID? = nil, articleURL: String? = nil, context: ModelContext) async -> NotificationData? {
         // Create a debug identifier for tracing this specific check
         let checkID = UUID().uuidString.prefix(8)
         AppLogger.sync.debug("🔎 [\(checkID)] EXISTENCE CHECK START for \(jsonURL.suffix(40))")
@@ -177,41 +176,33 @@ class SyncManager {
         // If a fresh context was provided, refresh it to see latest changes
         try? context.save()
 
-        // TRY AGAIN WITH ALL DIRECT QUERIES - with detailed logging
-
         // Skip empty URL checks
         if !jsonURL.isEmpty {
             // First - most direct and efficient check by jsonURL
-            var notificationFetchDescriptor = FetchDescriptor<NotificationData>(
+            let notificationFetchDescriptor = FetchDescriptor<NotificationData>(
                 predicate: #Predicate<NotificationData> { notification in
                     notification.json_url == jsonURL
                 }
             )
-            notificationFetchDescriptor.fetchLimit = 1
 
-            let notificationCount = (try? context.fetchCount(notificationFetchDescriptor)) ?? 0
-            if notificationCount > 0 {
+            if let existingNotification = try? context.fetch(notificationFetchDescriptor).first {
                 AppLogger.sync.debug("🔎 [\(checkID)] Article exists in NotificationData by jsonURL: \(jsonURL)")
-                return true
+                return existingNotification
             }
-
-            // Case-insensitive matching removed as server provides consistent URL format
         }
 
         // If we have an ID, check for that specifically (ID collisions would be critical duplicates)
         if let articleID = articleID {
             // Try exact match first
-            var idFetchDescriptor = FetchDescriptor<NotificationData>(
+            let idFetchDescriptor = FetchDescriptor<NotificationData>(
                 predicate: #Predicate<NotificationData> { notification in
                     notification.id == articleID
                 }
             )
-            idFetchDescriptor.fetchLimit = 1
 
-            let idCount = (try? context.fetchCount(idFetchDescriptor)) ?? 0
-            if idCount > 0 {
+            if let existingNotification = try? context.fetch(idFetchDescriptor).first {
                 AppLogger.sync.debug("🔎 [\(checkID)] Article exists in NotificationData by ID exact match: \(articleID)")
-                return true
+                return existingNotification
             }
 
             // VERY THOROUGH: Get ALL IDs and compare manually to ensure no UUID comparison bugs
@@ -222,7 +213,7 @@ class SyncManager {
                 for notification in allNotifications {
                     if notification.id == articleID {
                         AppLogger.sync.debug("🔎 [\(checkID)] MANUAL ID MATCH FOUND: \(notification.id) == \(articleID)")
-                        return true
+                        return notification
                     }
                 }
             }
@@ -230,67 +221,27 @@ class SyncManager {
 
         // If we have an article URL, check for that too
         if let articleURL = articleURL, !articleURL.isEmpty {
-            var urlFetchDescriptor = FetchDescriptor<NotificationData>(
+            let urlFetchDescriptor = FetchDescriptor<NotificationData>(
                 predicate: #Predicate<NotificationData> { notification in
                     notification.article_url == articleURL
                 }
             )
-            urlFetchDescriptor.fetchLimit = 1
 
-            let urlCount = (try? context.fetchCount(urlFetchDescriptor)) ?? 0
-            if urlCount > 0 {
+            if let existingNotification = try? context.fetch(urlFetchDescriptor).first {
                 AppLogger.sync.debug("🔎 [\(checkID)] Article exists in NotificationData by article_url: \(articleURL)")
-                return true
-            }
-        }
-
-        // Finally, check SeenArticle as a fallback (only if we have a non-empty URL)
-        if !jsonURL.isEmpty {
-            var seenFetchDescriptor = FetchDescriptor<SeenArticle>(
-                predicate: #Predicate<SeenArticle> { seen in
-                    seen.json_url == jsonURL
-                }
-            )
-            seenFetchDescriptor.fetchLimit = 1
-
-            let seenCount = (try? context.fetchCount(seenFetchDescriptor)) ?? 0
-            if seenCount > 0 {
-                AppLogger.sync.debug("🔎 [\(checkID)] Article exists in SeenArticle by jsonURL: \(jsonURL)")
-                return true
-            }
-
-            // Case-insensitive matching removed as server provides consistent URL format
-        }
-
-        // Check for matching UUID in SeenArticle if we have one
-        if let articleID = articleID {
-            var idSeenFetchDescriptor = FetchDescriptor<SeenArticle>(
-                predicate: #Predicate<SeenArticle> { seen in
-                    seen.id == articleID
-                }
-            )
-            idSeenFetchDescriptor.fetchLimit = 1
-
-            let idSeenCount = (try? context.fetchCount(idSeenFetchDescriptor)) ?? 0
-            if idSeenCount > 0 {
-                AppLogger.sync.debug("🔎 [\(checkID)] Article exists in SeenArticle by ID: \(articleID)")
-                return true
-            }
-
-            // Manual check of all SeenArticle entries for thoroughness
-            let allSeenDescriptor = FetchDescriptor<SeenArticle>()
-            if let allSeen = try? context.fetch(allSeenDescriptor) {
-                for seen in allSeen {
-                    if seen.id == articleID {
-                        AppLogger.sync.debug("🔎 [\(checkID)] MANUAL ID MATCH FOUND IN SEEN: \(seen.id) == \(articleID)")
-                        return true
-                    }
-                }
+                return existingNotification
             }
         }
 
         AppLogger.sync.debug("🔎 [\(checkID)] NO MATCHES FOUND - article does not exist")
-        return false
+        return nil
+    }
+
+    // Standard method for checking if an article exists in the database
+    // Now uses findExistingArticle to maintain compatibility with existing code
+    func standardizedArticleExistsCheck(jsonURL: String, articleID: UUID? = nil, articleURL: String? = nil, context: ModelContext) async -> Bool {
+        let existingArticle = await findExistingArticle(jsonURL: jsonURL, articleID: articleID, articleURL: articleURL, context: context)
+        return existingArticle != nil
     }
 
     // Batch check for article existence - more efficient for multiple articles
@@ -440,6 +391,7 @@ class SyncManager {
 
     // DIRECT SERVER TO DATABASE PIPELINE
     // Processes articles directly without intermediate steps
+    // Now with update capability for existing articles
     func directProcessArticle(jsonURL: String) async -> Bool {
         // Global lock to ensure only one process can handle articles at a time
         guard Self.acquireProcessingLock() else {
@@ -459,21 +411,16 @@ class SyncManager {
         let context = ModelContext(container)
 
         // ENHANCED DEBUG: Add transaction isolation to existence check
-        // First lock to prevent other processes from checking same article
         context.autosaveEnabled = false
 
-        // Check if this article already exists - with additional logging
-        let alreadyExists = await standardizedArticleExistsCheck(
+        // Check if this article already exists - now returns the existing article if found
+        let existingArticle = await findExistingArticle(
             jsonURL: jsonURL,
             context: context
         )
 
-        AppLogger.sync.debug("🔍 Existence check result for \(jsonURL): \(alreadyExists ? "EXISTS" : "NEW")")
-
-        if alreadyExists {
-            AppLogger.sync.debug("🚨 Article already exists in database, skipping: \(jsonURL)")
-            return false
-        }
+        let articleExists = existingArticle != nil
+        AppLogger.sync.debug("🔍 Existence check result for \(jsonURL): \(articleExists ? "EXISTS" : "NEW")")
 
         // CRITICAL: Add SEP entry to race-free tracking
         // This registers this article as "being processed" before we continue
@@ -508,11 +455,13 @@ class SyncManager {
             return false
         }
 
-        // Verify this ID doesn't already exist
-        let idExists = await isIDAlreadyUsed(notificationID, context: context)
-        if idExists {
-            AppLogger.sync.debug("🚨 ID already exists in database, skipping: \(notificationID)")
-            return false
+        // If existing article has a different ID, we need to verify this ID doesn't already exist
+        if articleExists && existingArticle!.id != notificationID {
+            let idExists = await isIDAlreadyUsed(notificationID, context: context)
+            if idExists {
+                AppLogger.sync.debug("🚨 ID already exists in database, skipping: \(notificationID)")
+                return false
+            }
         }
 
         // Process the article directly
@@ -552,55 +501,99 @@ class SyncManager {
             let engineStatsJSON = extractEngineStats(from: enrichedJson)
             let similarArticlesJSON = extractSimilarArticles(from: enrichedJson)
 
-            // Create the article
+            // Create or update the article
             let date = Date()
-
-            AppLogger.sync.debug("📝 Creating article with ID: \(notificationID)")
 
             // Run in a transaction to ensure atomicity
             try context.transaction {
-                let notification = NotificationData(
-                    id: notificationID,
-                    date: date,
-                    title: articleJSON.title,
-                    body: articleJSON.body,
-                    json_url: articleJSON.jsonURL,
-                    article_url: articleJSON.url,
-                    topic: articleJSON.topic,
-                    article_title: articleJSON.articleTitle,
-                    affected: articleJSON.affected,
-                    domain: articleJSON.domain,
-                    pub_date: articleJSON.pubDate ?? date,
-                    isViewed: false,
-                    isBookmarked: false,
-                    isArchived: false,
-                    sources_quality: articleJSON.sourcesQuality,
-                    argument_quality: articleJSON.argumentQuality,
-                    source_type: articleJSON.sourceType,
-                    source_analysis: articleJSON.sourceAnalysis,
-                    quality: articleJSON.quality,
-                    summary: articleJSON.summary,
-                    critical_analysis: articleJSON.criticalAnalysis,
-                    logical_fallacies: articleJSON.logicalFallacies,
-                    relation_to_topic: articleJSON.relationToTopic,
-                    additional_insights: articleJSON.additionalInsights,
-                    engine_stats: engineStatsJSON,
-                    similar_articles: similarArticlesJSON
-                )
+                if let existingArticle = existingArticle {
+                    // UPDATE CASE: Update existing article with new data
+                    AppLogger.sync.debug("📝 Updating existing article with ID: \(existingArticle.id)")
 
-                let seenArticle = SeenArticle(
-                    id: notificationID,
-                    json_url: articleJSON.jsonURL,
-                    date: date
-                )
+                    // Update notification fields
+                    existingArticle.title = articleJSON.title
+                    existingArticle.body = articleJSON.body
+                    existingArticle.json_url = articleJSON.jsonURL
+                    existingArticle.article_url = articleJSON.url
+                    existingArticle.topic = articleJSON.topic
+                    existingArticle.article_title = articleJSON.articleTitle
+                    existingArticle.affected = articleJSON.affected
+                    existingArticle.domain = articleJSON.domain
+                    existingArticle.pub_date = articleJSON.pubDate ?? existingArticle.pub_date
 
-                // Insert into database
-                context.insert(notification)
-                context.insert(seenArticle)
+                    // Don't override user-specific flags
+                    // existingArticle.isViewed remains unchanged
+                    // existingArticle.isBookmarked remains unchanged
+                    // existingArticle.isArchived remains unchanged
 
-                // Pre-generate text attributes
-                _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
-                _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+                    // Update quality indicators
+                    existingArticle.sources_quality = articleJSON.sourcesQuality
+                    existingArticle.argument_quality = articleJSON.argumentQuality
+                    existingArticle.source_type = articleJSON.sourceType
+                    existingArticle.source_analysis = articleJSON.sourceAnalysis
+                    existingArticle.quality = articleJSON.quality
+
+                    // Update content analysis
+                    existingArticle.summary = articleJSON.summary
+                    existingArticle.critical_analysis = articleJSON.criticalAnalysis
+                    existingArticle.logical_fallacies = articleJSON.logicalFallacies
+                    existingArticle.relation_to_topic = articleJSON.relationToTopic
+                    existingArticle.additional_insights = articleJSON.additionalInsights
+
+                    // Update metadata
+                    existingArticle.engine_stats = engineStatsJSON
+                    existingArticle.similar_articles = similarArticlesJSON
+
+                    // Pre-generate text attributes (force refresh)
+                    _ = getAttributedString(for: .title, from: existingArticle, createIfMissing: true)
+                    _ = getAttributedString(for: .body, from: existingArticle, createIfMissing: true)
+                } else {
+                    // INSERT CASE: Create new article (existing behavior)
+                    AppLogger.sync.debug("📝 Creating new article with ID: \(notificationID)")
+
+                    let notification = NotificationData(
+                        id: notificationID,
+                        date: date,
+                        title: articleJSON.title,
+                        body: articleJSON.body,
+                        json_url: articleJSON.jsonURL,
+                        article_url: articleJSON.url,
+                        topic: articleJSON.topic,
+                        article_title: articleJSON.articleTitle,
+                        affected: articleJSON.affected,
+                        domain: articleJSON.domain,
+                        pub_date: articleJSON.pubDate ?? date,
+                        isViewed: false,
+                        isBookmarked: false,
+                        isArchived: false,
+                        sources_quality: articleJSON.sourcesQuality,
+                        argument_quality: articleJSON.argumentQuality,
+                        source_type: articleJSON.sourceType,
+                        source_analysis: articleJSON.sourceAnalysis,
+                        quality: articleJSON.quality,
+                        summary: articleJSON.summary,
+                        critical_analysis: articleJSON.criticalAnalysis,
+                        logical_fallacies: articleJSON.logicalFallacies,
+                        relation_to_topic: articleJSON.relationToTopic,
+                        additional_insights: articleJSON.additionalInsights,
+                        engine_stats: engineStatsJSON,
+                        similar_articles: similarArticlesJSON
+                    )
+
+                    let seenArticle = SeenArticle(
+                        id: notificationID,
+                        json_url: articleJSON.jsonURL,
+                        date: date
+                    )
+
+                    // Insert into database
+                    context.insert(notification)
+                    context.insert(seenArticle)
+
+                    // Pre-generate text attributes
+                    _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
+                    _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+                }
             }
 
             // Save changes
@@ -611,7 +604,7 @@ class SyncManager {
                 NotificationUtils.updateAppBadgeCount()
             }
 
-            AppLogger.sync.debug("✅ Article successfully saved with ID: \(notificationID)")
+            AppLogger.sync.debug("✅ Article successfully \(articleExists ? "updated" : "saved") with ID: \(notificationID)")
             return true
         } catch {
             AppLogger.sync.error("❌ Error processing article: \(error.localizedDescription)")
@@ -1186,6 +1179,7 @@ class SyncManager {
 
     // Process articles directly, bypassing the queue entirely
     // This is the single source of truth for article processing
+    // Now supports updating existing articles instead of skipping them
     func processArticlesDirectly(urls: [String]) async {
         AppLogger.sync.debug("🔄 Processing \(urls.count) articles directly (bypassing queue)")
 
@@ -1226,53 +1220,26 @@ class SyncManager {
 
         let container = await MainActor.run { ArgusApp.sharedModelContainer }
 
-        // Create our own context for thread safety
-        let backgroundContext = ModelContext(container)
-        backgroundContext.autosaveEnabled = false
-
-        // Run an existence check with explicit logging for debugging
-        AppLogger.sync.debug("🔍 BATCH EXISTENCE CHECK: Running check for \(urlsToProcess.count) URLs")
-        let (existingURLs, existingIDs) = await standardizedBatchArticleExistsCheck(
-            jsonURLs: urlsToProcess,
-            context: backgroundContext
-        )
-
-        if !existingURLs.isEmpty {
-            AppLogger.sync.debug("🔍 BATCH EXISTENCE CHECK: Found \(existingURLs.count) existing URLs")
-            for url in existingURLs {
-                AppLogger.sync.debug("🔍 BATCH EXISTENCE CHECK: Existing URL: \(url)")
-            }
-        }
-
-        if !existingIDs.isEmpty {
-            AppLogger.sync.debug("🔍 BATCH EXISTENCE CHECK: Found \(existingIDs.count) existing IDs")
-            for id in existingIDs {
-                AppLogger.sync.debug("🔍 BATCH EXISTENCE CHECK: Existing ID: \(id)")
-            }
-        }
-
-        // Filter out any URLs that already exist in the database
-        let newUrls = urlsToProcess.filter { !existingURLs.contains($0) }
-
-        if newUrls.isEmpty {
-            AppLogger.sync.debug("🚫 No new articles to process - all URLs already in database")
-            return
-        }
-
         // Process one article at a time to avoid transaction conflicts
-        var successCount = 0
+        var createCount = 0
+        var updateCount = 0
         var failureCount = 0
 
-        AppLogger.sync.debug("🔄 Direct processing \(newUrls.count) new articles")
+        AppLogger.sync.debug("🔄 Direct processing \(urlsToProcess.count) articles")
 
-        for jsonURL in newUrls {
-            // CRITICAL POINT: We're already holding the global lock,
-            // so DON'T call directProcessArticle which would try to acquire the same lock again
-            // Instead, do direct processing here with a different context
-
+        for jsonURL in urlsToProcess {
             // Create a fresh context for this article
             let articleContext = ModelContext(container)
             articleContext.autosaveEnabled = false
+
+            // NEW: Check if article exists and get the existing record if it does
+            let existingArticle = await findExistingArticle(
+                jsonURL: jsonURL,
+                context: articleContext
+            )
+
+            let articleExists = existingArticle != nil
+            AppLogger.sync.debug("🔍 Existence check result for \(jsonURL): \(articleExists ? "EXISTS" : "NEW")")
 
             // Extract UUID from the URL filename for additional debugging
             let fileName = jsonURL.split(separator: "/").last ?? ""
@@ -1292,14 +1259,14 @@ class SyncManager {
                 continue
             }
 
-            // Double-check this ID and URL don't already exist
-            let idExists = await isIDAlreadyUsed(notificationID!, context: articleContext)
-            let urlExists = await standardizedArticleExistsCheck(jsonURL: jsonURL, context: articleContext)
-
-            if idExists || urlExists {
-                AppLogger.sync.debug("🚨 Article ID or URL already exists, skipping: \(jsonURL)")
-                failureCount += 1
-                continue
+            // If existing article has a different ID, we need to verify this ID doesn't already exist
+            if articleExists, existingArticle!.id != notificationID {
+                let idExists = await isIDAlreadyUsed(notificationID!, context: articleContext)
+                if idExists {
+                    AppLogger.sync.debug("🚨 ID conflict - can't update article ID: \(jsonURL)")
+                    failureCount += 1
+                    continue
+                }
             }
 
             // Process the article
@@ -1342,55 +1309,103 @@ class SyncManager {
                 let engineStatsJSON = extractEngineStats(from: enrichedJson)
                 let similarArticlesJSON = extractSimilarArticles(from: enrichedJson)
 
-                // Create the article
+                // Create or update the article
                 let date = Date()
-
-                AppLogger.sync.debug("📝 Creating article with ID: \(notificationID!)")
 
                 // Run in a transaction to ensure atomicity
                 try articleContext.transaction {
-                    let notification = NotificationData(
-                        id: notificationID!,
-                        date: date,
-                        title: articleJSON.title,
-                        body: articleJSON.body,
-                        json_url: articleJSON.jsonURL,
-                        article_url: articleJSON.url,
-                        topic: articleJSON.topic,
-                        article_title: articleJSON.articleTitle,
-                        affected: articleJSON.affected,
-                        domain: articleJSON.domain,
-                        pub_date: articleJSON.pubDate ?? date,
-                        isViewed: false,
-                        isBookmarked: false,
-                        isArchived: false,
-                        sources_quality: articleJSON.sourcesQuality,
-                        argument_quality: articleJSON.argumentQuality,
-                        source_type: articleJSON.sourceType,
-                        source_analysis: articleJSON.sourceAnalysis,
-                        quality: articleJSON.quality,
-                        summary: articleJSON.summary,
-                        critical_analysis: articleJSON.criticalAnalysis,
-                        logical_fallacies: articleJSON.logicalFallacies,
-                        relation_to_topic: articleJSON.relationToTopic,
-                        additional_insights: articleJSON.additionalInsights,
-                        engine_stats: engineStatsJSON,
-                        similar_articles: similarArticlesJSON
-                    )
+                    if let existingArticle = existingArticle {
+                        // UPDATE CASE: Update existing article with new data
+                        AppLogger.sync.debug("📝 Updating existing article with ID: \(existingArticle.id)")
 
-                    let seenArticle = SeenArticle(
-                        id: notificationID!,
-                        json_url: articleJSON.jsonURL,
-                        date: date
-                    )
+                        // Update notification fields
+                        existingArticle.title = articleJSON.title
+                        existingArticle.body = articleJSON.body
+                        existingArticle.json_url = articleJSON.jsonURL
+                        existingArticle.article_url = articleJSON.url
+                        existingArticle.topic = articleJSON.topic
+                        existingArticle.article_title = articleJSON.articleTitle
+                        existingArticle.affected = articleJSON.affected
+                        existingArticle.domain = articleJSON.domain
+                        existingArticle.pub_date = articleJSON.pubDate ?? existingArticle.pub_date
 
-                    // Insert into database
-                    articleContext.insert(notification)
-                    articleContext.insert(seenArticle)
+                        // Don't override user-specific flags
+                        // existingArticle.isViewed remains unchanged
+                        // existingArticle.isBookmarked remains unchanged
+                        // existingArticle.isArchived remains unchanged
 
-                    // Pre-generate text attributes
-                    _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
-                    _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+                        // Update quality indicators
+                        existingArticle.sources_quality = articleJSON.sourcesQuality
+                        existingArticle.argument_quality = articleJSON.argumentQuality
+                        existingArticle.source_type = articleJSON.sourceType
+                        existingArticle.source_analysis = articleJSON.sourceAnalysis
+                        existingArticle.quality = articleJSON.quality
+
+                        // Update content analysis
+                        existingArticle.summary = articleJSON.summary
+                        existingArticle.critical_analysis = articleJSON.criticalAnalysis
+                        existingArticle.logical_fallacies = articleJSON.logicalFallacies
+                        existingArticle.relation_to_topic = articleJSON.relationToTopic
+                        existingArticle.additional_insights = articleJSON.additionalInsights
+
+                        // Update metadata
+                        existingArticle.engine_stats = engineStatsJSON
+                        existingArticle.similar_articles = similarArticlesJSON
+
+                        // Pre-generate text attributes (force refresh)
+                        _ = getAttributedString(for: .title, from: existingArticle, createIfMissing: true)
+                        _ = getAttributedString(for: .body, from: existingArticle, createIfMissing: true)
+
+                        updateCount += 1
+                    } else {
+                        // INSERT CASE: Create new article
+                        AppLogger.sync.debug("📝 Creating new article with ID: \(notificationID!)")
+
+                        let notification = NotificationData(
+                            id: notificationID!,
+                            date: date,
+                            title: articleJSON.title,
+                            body: articleJSON.body,
+                            json_url: articleJSON.jsonURL,
+                            article_url: articleJSON.url,
+                            topic: articleJSON.topic,
+                            article_title: articleJSON.articleTitle,
+                            affected: articleJSON.affected,
+                            domain: articleJSON.domain,
+                            pub_date: articleJSON.pubDate ?? date,
+                            isViewed: false,
+                            isBookmarked: false,
+                            isArchived: false,
+                            sources_quality: articleJSON.sourcesQuality,
+                            argument_quality: articleJSON.argumentQuality,
+                            source_type: articleJSON.sourceType,
+                            source_analysis: articleJSON.sourceAnalysis,
+                            quality: articleJSON.quality,
+                            summary: articleJSON.summary,
+                            critical_analysis: articleJSON.criticalAnalysis,
+                            logical_fallacies: articleJSON.logicalFallacies,
+                            relation_to_topic: articleJSON.relationToTopic,
+                            additional_insights: articleJSON.additionalInsights,
+                            engine_stats: engineStatsJSON,
+                            similar_articles: similarArticlesJSON
+                        )
+
+                        let seenArticle = SeenArticle(
+                            id: notificationID!,
+                            json_url: articleJSON.jsonURL,
+                            date: date
+                        )
+
+                        // Insert into database
+                        articleContext.insert(notification)
+                        articleContext.insert(seenArticle)
+
+                        // Pre-generate text attributes
+                        _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
+                        _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+
+                        createCount += 1
+                    }
                 }
 
                 // Save changes
@@ -1401,16 +1416,14 @@ class SyncManager {
                     NotificationUtils.updateAppBadgeCount()
                 }
 
-                AppLogger.sync.debug("✅ Article successfully saved with ID: \(notificationID!)")
-                successCount += 1
+                AppLogger.sync.debug("✅ Article successfully \(articleExists ? "updated" : "saved") with ID: \(notificationID!)")
             } catch {
                 AppLogger.sync.error("❌ Error processing article: \(error.localizedDescription)")
                 failureCount += 1
             }
-            // Note: Success or failure is already handled in the try/catch block above
         }
 
         // Log summary
-        AppLogger.sync.debug("🔄 Direct processing completed: added \(successCount), failed \(failureCount), skipped \(existingURLs.count)")
+        AppLogger.sync.debug("🔄 Direct processing completed: added \(createCount), updated \(updateCount), failed \(failureCount)")
     }
 }
