@@ -382,7 +382,7 @@ class SyncManager {
     func findExistingArticle(jsonURL: String, articleID: UUID? = nil, articleURL: String? = nil, context: ModelContext) async -> NotificationData? {
         // Create a debug identifier for tracing this specific check
         let checkID = UUID().uuidString.prefix(8)
-        AppLogger.sync.debug("🔎 [\(checkID)] EXISTENCE CHECK START for \(jsonURL.suffix(40))")
+        AppLogger.sync.debug("🔎 [\(checkID)] EXISTENCE CHECK START for \(String(jsonURL.suffix(40)))")
 
         // CRITICAL DEBUGGING: Log IDs
         if let articleID = articleID {
@@ -393,22 +393,8 @@ class SyncManager {
         // If a fresh context was provided, refresh it to see latest changes
         try? context.save()
 
-        // Skip empty URL checks
-        if !jsonURL.isEmpty {
-            // First - most direct and efficient check by jsonURL
-            let notificationFetchDescriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { notification in
-                    notification.json_url == jsonURL
-                }
-            )
-
-            if let existingNotification = try? context.fetch(notificationFetchDescriptor).first {
-                AppLogger.sync.debug("🔎 [\(checkID)] Article exists in NotificationData by jsonURL: \(jsonURL)")
-                return existingNotification
-            }
-        }
-
-        // If we have an ID, check for that specifically (ID collisions would be critical duplicates)
+        // CRITICAL: First priority - check by ID if we have one
+        // This is the most reliable way to find duplicates
         if let articleID = articleID {
             // Try exact match first
             let idFetchDescriptor = FetchDescriptor<NotificationData>(
@@ -429,14 +415,34 @@ class SyncManager {
 
                 for notification in allNotifications {
                     if notification.id == articleID {
-                        AppLogger.sync.debug("🔎 [\(checkID)] MANUAL ID MATCH FOUND: \(notification.id) == \(articleID)")
+                        AppLogger.sync.debug("🔎 [\(checkID)] MANUAL ID MATCH FOUND: \(notification.id.uuidString) == \(articleID.uuidString)")
+                        return notification
+                    }
+                    // String comparison as an extra safeguard
+                    if notification.id.uuidString.lowercased() == articleID.uuidString.lowercased() {
+                        AppLogger.sync.debug("🔎 [\(checkID)] STRING ID MATCH FOUND: \(notification.id.uuidString) == \(articleID.uuidString)")
                         return notification
                     }
                 }
             }
         }
 
-        // If we have an article URL, check for that too
+        // Second priority - check by jsonURL
+        if !jsonURL.isEmpty {
+            // Direct check by jsonURL
+            let notificationFetchDescriptor = FetchDescriptor<NotificationData>(
+                predicate: #Predicate<NotificationData> { notification in
+                    notification.json_url == jsonURL
+                }
+            )
+
+            if let existingNotification = try? context.fetch(notificationFetchDescriptor).first {
+                AppLogger.sync.debug("🔎 [\(checkID)] Article exists in NotificationData by jsonURL: \(jsonURL)")
+                return existingNotification
+            }
+        }
+
+        // Last priority - check by article URL
         if let articleURL = articleURL, !articleURL.isEmpty {
             let urlFetchDescriptor = FetchDescriptor<NotificationData>(
                 predicate: #Predicate<NotificationData> { notification in
@@ -542,7 +548,16 @@ class SyncManager {
     // Compatibility method for existing code
     // Uses the standardized implementation to ensure consistent behavior
     func isArticleAlreadyProcessed(jsonURL: String, context: ModelContext) async -> Bool {
-        return await standardizedArticleExistsCheck(jsonURL: jsonURL, context: context)
+        // Extract UUID from the URL filename if possible for more robust checking
+        let fileName = jsonURL.split(separator: "/").last ?? ""
+        var extractedID: UUID? = nil
+
+        if let uuidRange = fileName.range(of: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", options: .regularExpression) {
+            let uuidString = String(fileName[uuidRange])
+            extractedID = UUID(uuidString: uuidString)
+        }
+
+        return await standardizedArticleExistsCheck(jsonURL: jsonURL, articleID: extractedID, context: context)
     }
 
     // Compatibility method for existing code
@@ -631,9 +646,28 @@ class SyncManager {
         // ENHANCED DEBUG: Add transaction isolation to existence check
         context.autosaveEnabled = false
 
-        // Check if this article already exists - now returns the existing article if found
+        // First extract UUID from the URL filename - critical for correct existence checking
+        let fileName = jsonURL.split(separator: "/").last ?? ""
+        var notificationID: UUID?
+
+        if let uuidRange = fileName.range(of: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", options: .regularExpression) {
+            let uuidString = String(fileName[uuidRange])
+            if let uuid = UUID(uuidString: uuidString) {
+                notificationID = uuid
+                AppLogger.sync.debug("🔑 Extracted UUID \(uuid) from filename")
+            }
+        }
+
+        // Fail early if we don't have a UUID - critical for preventing duplicates
+        guard let extractedID = notificationID else {
+            AppLogger.sync.debug("⚠️ No UUID in filename, cannot safely process: \(jsonURL)")
+            return false
+        }
+
+        // Check if this article already exists using ID-first strategy
         let existingArticle = await findExistingArticle(
             jsonURL: jsonURL,
+            articleID: extractedID,
             context: context
         )
 
@@ -653,31 +687,11 @@ class SyncManager {
             Self.unregisterItemAsProcessed(jsonURL)
         }
 
-        // Extract UUID from the URL filename
-        let notificationID: UUID
-
-        // Extract from filename if possible
-        let fileName = jsonURL.split(separator: "/").last ?? ""
-
-        if let uuidRange = fileName.range(of: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", options: .regularExpression) {
-            let uuidString = String(fileName[uuidRange])
-            if let uuid = UUID(uuidString: uuidString) {
-                notificationID = uuid
-                AppLogger.sync.debug("🔑 Using filename UUID: \(uuid)")
-            } else {
-                AppLogger.sync.debug("⚠️ Could not parse UUID from filename, skipping article")
-                return false
-            }
-        } else {
-            AppLogger.sync.debug("⚠️ No UUID found in filename, skipping article")
-            return false
-        }
-
         // If existing article has a different ID, we need to verify this ID doesn't already exist
-        if articleExists && existingArticle!.id != notificationID {
-            let idExists = await isIDAlreadyUsed(notificationID, context: context)
+        if articleExists && existingArticle!.id != extractedID {
+            let idExists = await isIDAlreadyUsed(extractedID, context: context)
             if idExists {
-                AppLogger.sync.debug("🚨 ID already exists in database, skipping: \(notificationID)")
+                AppLogger.sync.debug("🚨 ID already exists in database - ID conflict detected: \(extractedID)")
                 return false
             }
         }
@@ -767,10 +781,10 @@ class SyncManager {
                     _ = getAttributedString(for: .body, from: existingArticle, createIfMissing: true)
                 } else {
                     // INSERT CASE: Create new article (existing behavior)
-                    AppLogger.sync.debug("📝 Creating new article with ID: \(notificationID)")
+                    AppLogger.sync.debug("📝 Creating new article with ID: \(notificationID!.uuidString)")
 
                     let notification = NotificationData(
-                        id: notificationID,
+                        id: notificationID!,
                         date: date,
                         title: articleJSON.title,
                         body: articleJSON.body,
@@ -799,14 +813,35 @@ class SyncManager {
                     )
 
                     let seenArticle = SeenArticle(
-                        id: notificationID,
+                        id: notificationID!,
                         json_url: articleJSON.jsonURL,
                         date: date
                     )
 
-                    // Insert into database
-                    context.insert(notification)
-                    context.insert(seenArticle)
+                    // Double-check for existing article with same ID one last time before inserting
+                    let finalIDCheck = FetchDescriptor<NotificationData>(
+                        predicate: #Predicate<NotificationData> { existing in
+                            existing.id == notificationID!
+                        }
+                    )
+
+                    if let existingDuplicate = try? context.fetch(finalIDCheck).first {
+                        // UPDATE instead of INSERT if we found a duplicate at the last moment
+                        AppLogger.sync.debug("⚠️ Last-minute duplicate detection - updating instead of inserting: \(notificationID!)")
+
+                        // Update the existing record instead
+                        existingDuplicate.title = articleJSON.title
+                        existingDuplicate.body = articleJSON.body
+                        existingDuplicate.json_url = articleJSON.jsonURL
+                        // Update all the other fields as in the update case above
+
+                        // Only insert the SeenArticle as that may be missing
+                        context.insert(seenArticle)
+                    } else {
+                        // Normal case - insert both records
+                        context.insert(notification)
+                        context.insert(seenArticle)
+                    }
 
                     // Pre-generate text attributes
                     _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
@@ -822,7 +857,7 @@ class SyncManager {
                 NotificationUtils.updateAppBadgeCount()
             }
 
-            AppLogger.sync.debug("✅ Article successfully \(articleExists ? "updated" : "saved") with ID: \(notificationID)")
+            AppLogger.sync.debug("✅ Article successfully \(articleExists ? "updated" : "saved") with ID: \(notificationID!.uuidString)")
             return true
         } catch {
             AppLogger.sync.error("❌ Error processing article: \(error.localizedDescription)")
@@ -1535,16 +1570,7 @@ class SyncManager {
         let articleContext = ModelContext(container)
         articleContext.autosaveEnabled = false
 
-        // Check if article exists and get the existing record if it does
-        let existingArticle = await findExistingArticle(
-            jsonURL: jsonURL,
-            context: articleContext
-        )
-
-        let articleExists = existingArticle != nil
-        AppLogger.sync.debug("🔍 Existence check for \(jsonURL): \(articleExists ? "EXISTS" : "NEW")")
-
-        // Extract UUID from the URL filename for additional debugging
+        // First extract UUID from the URL filename - we need this for proper existence checking
         let fileName = jsonURL.split(separator: "/").last ?? ""
         var notificationID: UUID?
 
@@ -1552,11 +1578,36 @@ class SyncManager {
             let uuidString = String(fileName[uuidRange])
             if let uuid = UUID(uuidString: uuidString) {
                 notificationID = uuid
+                AppLogger.sync.debug("🔑 Extracted UUID \(uuid) from filename")
             }
         }
 
+        // Check if article exists by ID first (for best matching), then by URL
+        let existingArticle: NotificationData?
+        if let extractedID = notificationID {
+            existingArticle = await findExistingArticle(
+                jsonURL: jsonURL,
+                articleID: extractedID,
+                context: articleContext
+            )
+        } else {
+            existingArticle = await findExistingArticle(
+                jsonURL: jsonURL,
+                context: articleContext
+            )
+        }
+
+        let articleExists = existingArticle != nil
+        AppLogger.sync.debug("🔍 Existence check for \(jsonURL): \(articleExists ? "EXISTS" : "NEW")")
+
         if notificationID == nil {
             AppLogger.sync.debug("⚠️ No UUID in filename, skipping: \(jsonURL)")
+            return (0, 0, 1)
+        }
+
+        // Fail early if we don't have a UUID - critical for preventing duplicates
+        if notificationID == nil {
+            AppLogger.sync.debug("⚠️ No UUID in filename, cannot safely process: \(jsonURL)")
             return (0, 0, 1)
         }
 
@@ -1564,7 +1615,7 @@ class SyncManager {
         if articleExists, existingArticle!.id != notificationID {
             let idExists = await isIDAlreadyUsed(notificationID!, context: articleContext)
             if idExists {
-                AppLogger.sync.debug("🚨 ID conflict - can't update: \(jsonURL)")
+                AppLogger.sync.debug("🚨 ID conflict - found article with same ID but different content: \(jsonURL)")
                 return (0, 0, 1)
             }
         }
@@ -1660,6 +1711,14 @@ class SyncManager {
                             // INSERT CASE: Create new article
                             AppLogger.sync.debug("📝 Creating new article with ID: \(notificationID!)")
 
+                            // Double-check for existing article with same ID one final time before inserting
+                            let finalIDCheck = FetchDescriptor<NotificationData>(
+                                predicate: #Predicate<NotificationData> { existing in
+                                    existing.id == notificationID!
+                                }
+                            )
+
+                            // Create the new notification and seenArticle objects
                             let notification = NotificationData(
                                 id: notificationID!,
                                 date: date,
@@ -1695,9 +1754,47 @@ class SyncManager {
                                 date: date
                             )
 
-                            // Insert into database
-                            articleContext.insert(notification)
-                            articleContext.insert(seenArticle)
+                            // Last-minute duplicate check
+                            if let existingDuplicate = try? articleContext.fetch(finalIDCheck).first {
+                                // UPDATE instead of INSERT if we found a duplicate at the last moment
+                                AppLogger.sync.debug("⚠️ Last-minute duplicate detection - updating instead of inserting: \(notificationID!)")
+
+                                // Update the existing record with all the fields
+                                existingDuplicate.title = articleJSON.title
+                                existingDuplicate.body = articleJSON.body
+                                existingDuplicate.json_url = articleJSON.jsonURL
+                                existingDuplicate.article_url = articleJSON.url
+                                existingDuplicate.topic = articleJSON.topic
+                                existingDuplicate.article_title = articleJSON.articleTitle
+                                existingDuplicate.affected = articleJSON.affected
+                                existingDuplicate.domain = articleJSON.domain
+                                existingDuplicate.pub_date = articleJSON.pubDate ?? existingDuplicate.pub_date
+
+                                // Update quality indicators
+                                existingDuplicate.sources_quality = articleJSON.sourcesQuality
+                                existingDuplicate.argument_quality = articleJSON.argumentQuality
+                                existingDuplicate.source_type = articleJSON.sourceType
+                                existingDuplicate.source_analysis = articleJSON.sourceAnalysis
+                                existingDuplicate.quality = articleJSON.quality
+
+                                // Update content analysis
+                                existingDuplicate.summary = articleJSON.summary
+                                existingDuplicate.critical_analysis = articleJSON.criticalAnalysis
+                                existingDuplicate.logical_fallacies = articleJSON.logicalFallacies
+                                existingDuplicate.relation_to_topic = articleJSON.relationToTopic
+                                existingDuplicate.additional_insights = articleJSON.additionalInsights
+
+                                // Update metadata
+                                existingDuplicate.engine_stats = engineStatsJSON
+                                existingDuplicate.similar_articles = similarArticlesJSON
+
+                                // Only insert the SeenArticle if needed
+                                articleContext.insert(seenArticle)
+                            } else {
+                                // Normal case - insert both records
+                                articleContext.insert(notification)
+                                articleContext.insert(seenArticle)
+                            }
 
                             // Schedule text attribute generation for later
                             Task.detached(priority: .background) {
