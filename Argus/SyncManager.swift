@@ -49,12 +49,9 @@ extension SyncManager {
             }
         }
 
-        // Convert quality values to integers
-        let sourcesQualityStr = json["sources_quality"] as? String
-        let argumentQualityStr = json["argument_quality"] as? String
-
-        let sourcesQuality: Int? = sourcesQualityStr == nil || (sourcesQualityStr?.components(separatedBy: CharacterSet.decimalDigits.inverted).joined().isEmpty ?? true) ? nil : Int(sourcesQualityStr ?? "0")
-        let argumentQuality: Int? = argumentQualityStr == nil || (argumentQualityStr?.components(separatedBy: CharacterSet.decimalDigits.inverted).joined().isEmpty ?? true) ? nil : Int(argumentQualityStr ?? "0")
+        // Directly cast quality values from the JSON
+        let sourcesQuality = json["sources_quality"] as? Int
+        let argumentQuality = json["argument_quality"] as? Int
         let quality: Int? = (json["quality"] as? Double).map { Int($0) }
 
         // Create the article JSON object
