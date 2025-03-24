@@ -275,15 +275,15 @@ struct NewsView: View {
     //   - topicChanged: Whether the selected topic has changed (requires immediate update)
     //   - newTopic: The new topic if topic has changed
     //   - isDataChange: Whether this is a data change rather than a filter settings change
-    private func handleFilterChange(topicChanged: Bool = false, newTopic: String? = nil, isDataChange: Bool = false) {
+    private func handleFilterChange(topicChanged: Bool = false, newTopic _: String? = nil, isDataChange: Bool = false) {
         // Cancel any pending debounced update
         filterChangeDebouncer?.cancel()
 
         // Handle topic change - these need immediate attention
-        if topicChanged, let newTopic = newTopic {
+        if topicChanged {
             needsScrollReset = true
-            lastSelectedTopic = newTopic
-            // Topic changes should force an update without debouncing
+            // We don't need to update lastSelectedTopic here as that's handled in the button action
+            // This function is the fallback path if cache-based topic switching doesn't cover the case
             updateFilteredNotifications(force: true)
             return
         }
@@ -363,11 +363,17 @@ struct NewsView: View {
             HStack(spacing: 16) {
                 ForEach(visibleTopics, id: \.self) { topic in
                     Button {
-                        // Update the selected topic immediately
+                        // First, update the selected topic visually (immediate feedback)
                         withAnimation {
+                            // Store previous topic for transition
+                            let previousTopic = selectedTopic
                             selectedTopic = topic
-                            // Force an immediate update when user taps a topic
-                            updateFilteredNotifications(force: true)
+
+                            // Update lastSelectedTopic to enable proper change detection
+                            lastSelectedTopic = previousTopic
+
+                            // Try to use cache first for instant response
+                            updateTopicFromCache(newTopic: topic, previousTopic: previousTopic)
                         }
                     } label: {
                         Text(topic)
@@ -1052,6 +1058,53 @@ struct NewsView: View {
     }
 
     // MARK: - Logic / Helpers
+
+    // Fast path for topic switching using cache
+    @MainActor
+    private func updateTopicFromCache(newTopic: String, previousTopic _: String) {
+        // Check if we have this topic in the cache already
+        if isCacheValid && notificationsCache.keys.contains(newTopic) {
+            // Get the cached data for this topic
+            let cachedTopicData = notificationsCache[newTopic] ?? []
+
+            // Apply filters to the cached data
+            let filtered = filterNotificationsWithCurrentSettings(cachedTopicData)
+
+            // Show an immediate UI update from cache
+            Task(priority: .userInitiated) {
+                // Create groups in the background to not block UI
+                let updatedGrouping = await createGroupedNotifications(filtered)
+
+                // Update UI with minimal delay
+                await MainActor.run {
+                    self.filteredNotifications = filtered
+                    self.sortedAndGroupedNotifications = updatedGrouping
+                }
+            }
+
+            // Then trigger a background refresh to ensure data is fresh
+            // but with lower priority to not impact UI responsiveness
+            Task(priority: .background) {
+                // Allow UI to update first before doing any heavy work
+                try? await Task.sleep(for: .seconds(0.1))
+
+                // Check for any new content in the background
+                let hasNewContent = await checkForNewContent()
+                if hasNewContent {
+                    // Only do a full data refresh if there's actually new content
+                    await MainActor.run {
+                        updateFilteredNotifications(force: true)
+                    }
+                }
+            }
+        } else {
+            // No cache available, fall back to normal path
+            // But reduce the initial hit by doing immediate visual feedback
+            Task(priority: .userInitiated) {
+                updateFilteredNotifications(force: true)
+            }
+        }
+    }
 
     private func handleTapGesture(for notification: NotificationData) {
         // If in Edit mode, toggle selection
