@@ -1,0 +1,49 @@
+# Argus iOS App - Project Intelligence
+
+This file captures important patterns, preferences, and project intelligence that helps Cline work more effectively with the Argus iOS app project. It will be updated as new patterns and insights are discovered.
+
+## Code Style Preferences
+
+### Swift Conventions
+- Use Swift's native error handling with `do-catch` blocks
+- Prefer Swift's strong typing and avoid force unwrapping when possible
+- Use Swift's property wrappers (@Published, @State, etc.) for SwiftUI state management
+- Follow Apple's Swift API Design Guidelines for naming conventions
+
+### SwiftUI Patterns
+- Use the MVVM pattern with ObservableObject for complex views
+- Extract reusable components into separate views
+- Use preview providers for all UI components
+- Avoid excessive view modifiers that can impact performance
+
+## Project-Specific Patterns
+
+### File Organization
+- Swift files are organized by functionality within the main Argus directory
+- UI components are separated from data processing logic
+- Utilities and helpers are in dedicated files (MarkdownUtilities, NotificationUtils, etc.)
+
+### Data Flow
+- The SyncManager handles all data synchronization with the backend
+- The ArticleQueueModel manages the queue of articles to be processed
+- View models observe data changes and update the UI accordingly
+
+### Known Implementation Paths
+- Push notifications are set up using the Apple Push Notification Service and the AuthKey_KKR79MB4FW.p8 file
+- Markdown conversion happens in MarkdownUtilities.swift
+- Background sync operations are managed in BackgroundContextManager.swift
+
+## Known Challenges
+- Database layer is difficult to modify - requires careful planning for changes
+- UI becomes jittery during sync operations - likely due to operations on the main thread
+- Duplicate content issues occur during synchronization - need to implement better validation
+
+## User Workflow Preferences
+- Focus on fixing critical bugs before adding new features
+- Prioritize performance improvements in the sync process
+- Document important decisions and their rationale
+
+## Testing Approach
+- UI tests are located in ArgusUITests directory
+- Use TestHelpers.swift for common test utilities
+- Critical user flows should have dedicated UI tests
