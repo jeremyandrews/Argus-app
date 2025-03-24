@@ -4,7 +4,227 @@ import Network
 import SwiftData
 import UIKit
 
+// Custom notification names
+extension Notification.Name {
+    static let articleProcessingCompleted = Notification.Name("ArticleProcessingCompleted")
+    static let syncStatusChanged = Notification.Name("SyncStatusChanged")
+}
+
+// Error type for timeout operations
+struct TimeoutError: Error, LocalizedError {
+    var errorDescription: String? {
+        return "Operation timed out"
+    }
+}
+
+// Array chunking is already defined in AppDelegate.swift
+
+// Extension to process ArticleJSON from ArticleModels.swift
+extension SyncManager {
+    // Helper method that adapts the API JSON format to our ArticleJSON model
+    func syncProcessArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
+        guard let title = json["tiny_title"] as? String,
+              let body = json["tiny_summary"] as? String
+        else {
+            AppLogger.sync.error("Missing required fields in article JSON")
+            return nil
+        }
+
+        let jsonURL = json["json_url"] as? String ?? ""
+        let url = json["url"] as? String ?? json["article_url"] as? String ?? ""
+        let domain = extractDomain(from: url)
+
+        // Extract date if available
+        var pubDate: Date?
+        if let pubDateString = json["pub_date"] as? String {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            pubDate = formatter.date(from: pubDateString)
+
+            if pubDate == nil {
+                // Try alternative date formats
+                let fallbackFormatter = DateFormatter()
+                fallbackFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+                pubDate = fallbackFormatter.date(from: pubDateString)
+            }
+        }
+
+        // Convert quality values to integers
+        let sourcesQualityStr = json["sources_quality"] as? String
+        let argumentQualityStr = json["argument_quality"] as? String
+
+        let sourcesQuality: Int? = sourcesQualityStr == nil || (sourcesQualityStr?.components(separatedBy: CharacterSet.decimalDigits.inverted).joined().isEmpty ?? true) ? nil : Int(sourcesQualityStr ?? "0")
+        let argumentQuality: Int? = argumentQualityStr == nil || (argumentQualityStr?.components(separatedBy: CharacterSet.decimalDigits.inverted).joined().isEmpty ?? true) ? nil : Int(argumentQualityStr ?? "0")
+        let quality: Int? = (json["quality"] as? Double).map { Int($0) }
+
+        // Create the article JSON object
+        return ArticleJSON(
+            title: title,
+            body: body,
+            jsonURL: jsonURL,
+            url: url,
+            topic: json["topic"] as? String,
+            articleTitle: json["article_title"] as? String ?? "",
+            affected: json["affected"] as? String ?? "",
+            domain: domain,
+            pubDate: pubDate,
+            sourcesQuality: sourcesQuality,
+            argumentQuality: argumentQuality,
+            sourceType: json["source_type"] as? String,
+            sourceAnalysis: json["source_analysis"] as? String,
+            quality: quality,
+            summary: json["summary"] as? String,
+            criticalAnalysis: json["critical_analysis"] as? String,
+            logicalFallacies: json["logical_fallacies"] as? String,
+            relationToTopic: json["relation_to_topic"] as? String,
+            additionalInsights: json["additional_insights"] as? String,
+            engineStats: extractEngineStats(from: json),
+            similarArticles: extractSimilarArticles(from: json)
+        )
+    }
+
+    // Helper method to extract the domain from a URL
+    private func extractDomain(from urlString: String) -> String? {
+        guard let url = URL(string: urlString) else {
+            return nil
+        }
+
+        return url.host?.replacingOccurrences(of: "www.", with: "")
+    }
+}
+
 class SyncManager {
+    // Thread-safe lock for sync operations using an actor
+    private actor SyncLockManager {
+        private var isSyncing = false
+
+        func tryLock() -> Bool {
+            guard !isSyncing else { return false }
+            isSyncing = true
+            return true
+        }
+
+        func releaseLock() {
+            isSyncing = false
+        }
+    }
+
+    private let syncLockManager = SyncLockManager()
+
+    // Try to acquire the sync lock in a thread-safe way
+    private func trySyncLock() async -> Bool {
+        return await syncLockManager.tryLock()
+    }
+
+    // Release the sync lock in a thread-safe way
+    private func releaseSyncLock() async {
+        await syncLockManager.releaseLock()
+    }
+
+    // Notify the UI about sync status changes
+    private func notifySyncStatusChanged(_ isSyncing: Bool, error: Error? = nil) async {
+        await MainActor.run {
+            var userInfo: [String: Any] = ["isSyncing": isSyncing]
+            if let error = error {
+                userInfo["error"] = error
+            }
+
+            NotificationCenter.default.post(
+                name: .syncStatusChanged,
+                object: nil,
+                userInfo: userInfo
+            )
+        }
+    }
+
+    // Async-safe versions of the processing lock methods
+    private actor ProcessingLockActor {
+        private var isProcessing = false
+        private var itemsBeingProcessed = Set<String>()
+
+        func acquireLock() -> Bool {
+            guard !isProcessing else { return false }
+            isProcessing = true
+            return true
+        }
+
+        func releaseLock() {
+            isProcessing = false
+        }
+
+        func registerItem(_ url: String) -> Bool {
+            guard !itemsBeingProcessed.contains(url) else {
+                return false
+            }
+
+            itemsBeingProcessed.insert(url)
+            return true
+        }
+
+        func unregisterItem(_ url: String) {
+            itemsBeingProcessed.remove(url)
+        }
+    }
+
+    private static let processingLockActor = ProcessingLockActor()
+
+    // Async-safe version of acquireProcessingLock
+    private static func acquireProcessingLockAsync() async -> Bool {
+        return await processingLockActor.acquireLock()
+    }
+
+    // Async-safe version of releaseProcessingLock
+    private static func releaseProcessingLockAsync() async {
+        await processingLockActor.releaseLock()
+    }
+
+    // Async-safe version of registerItemAsBeingProcessed
+    private static func registerItemAsBeingProcessedAsync(_ url: String) async -> Bool {
+        return await processingLockActor.registerItem(url)
+    }
+
+    // Async-safe version of unregisterItemAsProcessed
+    private static func unregisterItemAsProcessedAsync(_ url: String) async {
+        await processingLockActor.unregisterItem(url)
+    }
+
+    // Generic timeout function for async operations
+    func withTimeout<T>(of seconds: Double, operation: @escaping () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: Result<T, Error>.self) { group in
+            // Add the actual work
+            group.addTask {
+                do {
+                    return try .success(await operation())
+                } catch {
+                    return .failure(error)
+                }
+            }
+
+            // Add a timeout task
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return .failure(TimeoutError())
+            }
+
+            // Return the first task to complete, cancelling the other
+            guard let result = try await group.next() else {
+                group.cancelAll()
+                throw CancellationError()
+            }
+
+            // Cancel any remaining tasks
+            group.cancelAll()
+
+            // Process the result
+            switch result {
+            case let .success(value):
+                return value
+            case let .failure(error):
+                throw error
+            }
+        }
+    }
+
     static let shared = SyncManager()
 
     // Background task identifier
@@ -362,6 +582,7 @@ class SyncManager {
 
     // Global registry of items currently being processed to prevent simultaneous processing
     private static var itemsBeingProcessed = Set<String>()
+    private static let processingLock = NSLock()
 
     // Register an item as being processed - returns true if successful, false if already being processed
     private static func registerItemAsBeingProcessed(_ url: String) -> Bool {
@@ -492,7 +713,7 @@ class SyncManager {
             }
 
             // Process into article format
-            guard let articleJSON = processArticleJSON(enrichedJson) else {
+            guard let articleJSON = syncProcessArticleJSON(enrichedJson) else {
                 AppLogger.sync.error("❌ Failed to process article JSON")
                 return false
             }
@@ -910,7 +1131,6 @@ class SyncManager {
     private static var transactedURLs = Set<String>()
     private static var processingURLs = Set<String>()
     private static var processingIDs = Set<String>()
-    private static var processingLock = NSLock()
 
     // Acquire transaction lock before doing critical database operations
     // Returns true if lock was acquired, false if this URL is already being processed
@@ -1035,59 +1255,107 @@ class SyncManager {
     // Sends recently seen article URLs to the server and processes any unseen articles returned.
     // Schedules the next background sync regardless of operation outcome.
     func sendRecentArticlesToServer() async {
-        // Simple guard against concurrent execution
-        guard !syncInProgress else {
-            AppLogger.sync.debug("Sync already in progress, skipping")
-            return
-        }
+        // Use a background task to prevent UI blocking
+        Task.detached(priority: .utility) {
+            // Try to acquire the sync lock, skip if already syncing
+            if await !self.trySyncLock() {
+                AppLogger.sync.debug("Sync already in progress, skipping")
+                return
+            }
 
-        // Check network conditions before proceeding
-        guard await shouldAllowSync() else {
-            AppLogger.sync.debug("Sync skipped due to network conditions and user preferences")
-            return
-        }
+            // Store sync start time for throttling
+            let syncStartTime = Date()
 
-        // Set flag to prevent concurrent execution
-        syncInProgress = true
-        defer {
-            syncInProgress = false
-            // Update last sync time only for throttling manual actions
-            lastManualSyncTime = Date()
-        }
+            // Notify UI that sync has started
+            await self.notifySyncStatusChanged(true)
 
-        AppLogger.sync.debug("Starting server sync...")
+            // Check if we should sync based on network conditions
+            if await !self.shouldAllowSync() {
+                AppLogger.sync.debug("Sync skipped due to network conditions")
+                await self.notifySyncStatusChanged(false)
 
-        do {
-            let recentArticles = await fetchRecentArticles()
-            let jsonUrls = recentArticles.map { $0.json_url }
+                // Clean up and return
+                await self.releaseSyncLock()
+                await MainActor.run {
+                    self.lastManualSyncTime = syncStartTime
+                }
+                return
+            }
 
-            // APIClient handles timeouts internally
-            let url = URL(string: "https://api.arguspulse.com/articles/sync")!
-            let payload = ["seen_articles": jsonUrls]
+            AppLogger.sync.debug("Starting server sync...")
 
             do {
-                let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
-                let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
+                // Fetch recent article history
+                let recentArticles = await self.fetchRecentArticles()
+                let jsonUrls = recentArticles.map { $0.json_url }
 
-                if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
-                    AppLogger.sync.debug("Server returned \(unseenUrls.count) unseen articles - processing directly")
-                    await processArticlesDirectly(urls: unseenUrls)
+                // Prepare the API request
+                let url = URL(string: "https://api.arguspulse.com/articles/sync")!
+                let payload = ["seen_articles": jsonUrls]
 
-                    // Start maintenance after processing
-                    startMaintenance()
-                } else {
-                    AppLogger.sync.debug("Server says there are no unseen articles.")
+                // Create a task for the actual network request
+                let syncTask = Task {
+                    do {
+                        // Perform the authenticated request
+                        let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
+
+                        // Make sure we weren't cancelled during the request
+                        try Task.checkCancellation()
+
+                        // Parse the response
+                        let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
+
+                        // Process any unseen articles the server returned
+                        if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
+                            AppLogger.sync.debug("Server returned \(unseenUrls.count) unseen articles")
+
+                            // Process articles in background
+                            await self.processArticlesDetached(urls: unseenUrls)
+
+                            // Schedule maintenance but don't wait for it
+                            self.startMaintenance()
+                        } else {
+                            AppLogger.sync.debug("No unseen articles to process")
+                        }
+
+                        // Sync completed successfully
+                        await self.notifySyncStatusChanged(false)
+
+                    } catch let error as URLError where error.code == .timedOut {
+                        AppLogger.sync.error("Sync request timed out: \(error)")
+                        await self.notifySyncStatusChanged(false, error: error)
+                    } catch {
+                        AppLogger.sync.error("Sync request failed: \(error)")
+                        await self.notifySyncStatusChanged(false, error: error)
+                    }
                 }
-            } catch let error as URLError where error.code == .timedOut {
-                AppLogger.sync.error("Sync operation timed out")
-            }
-        } catch {
-            AppLogger.sync.error("Failed to sync articles: \(error)")
-        }
 
-        // Always schedule next background sync
-        await MainActor.run {
-            self.scheduleBackgroundSync()
+                // Add a timeout to ensure we can recover from hangs
+                try await self.withTimeout(of: 60) {
+                    await syncTask.value
+                }
+
+            } catch is CancellationError {
+                AppLogger.sync.debug("Sync operation was cancelled")
+                await self.notifySyncStatusChanged(false)
+            } catch is TimeoutError {
+                AppLogger.sync.error("Sync operation timed out")
+                await self.notifySyncStatusChanged(false, error: TimeoutError())
+            } catch {
+                AppLogger.sync.error("Sync operation failed: \(error)")
+                await self.notifySyncStatusChanged(false, error: error)
+            }
+
+            // Always schedule next background sync before releasing lock
+            await MainActor.run {
+                self.scheduleBackgroundSync()
+            }
+
+            // Always release the lock and update last sync time
+            await self.releaseSyncLock()
+            await MainActor.run {
+                self.lastManualSyncTime = syncStartTime
+            }
         }
     }
 
@@ -1177,253 +1445,296 @@ class SyncManager {
         }
     }
 
-    // Process articles directly, bypassing the queue entirely
-    // This is the single source of truth for article processing
-    // Now supports updating existing articles instead of skipping them
+    // Process articles directly in a detached task to prevent UI blocking
     func processArticlesDirectly(urls: [String]) async {
-        AppLogger.sync.debug("🔄 Processing \(urls.count) articles directly (bypassing queue)")
+        // Start a detached background task for article processing
+        await processArticlesDetached(urls: urls)
+    }
 
-        // Global lock to ensure we're not processing during other ops
-        guard Self.acquireProcessingLock() else {
-            AppLogger.sync.debug("⚠️ Global processing already in progress, delaying batch processing")
-            return
-        }
+    // This is a detached variant of processArticlesDirectly that runs completely in the background
+    private func processArticlesDetached(urls: [String]) async {
+        Task.detached(priority: .background) {
+            AppLogger.sync.debug("🔄 Processing \(urls.count) articles directly in background task")
 
-        // Always release the global lock when done
-        defer {
-            Self.releaseProcessingLock()
-        }
-
-        // CRITICAL: Register all URLs as being processed right at the start
-        // to prevent any race conditions with other processes
-        var urlsToProcess = [String]()
-        for url in urls {
-            if Self.registerItemAsBeingProcessed(url) {
-                urlsToProcess.append(url)
-            } else {
-                AppLogger.sync.debug("🔒 URL already being processed elsewhere, skipping: \(url)")
+            // Global lock to ensure we're not processing during other ops
+            guard await Self.acquireProcessingLockAsync() else {
+                AppLogger.sync.debug("⚠️ Global processing already in progress, delaying batch processing")
+                return
             }
-        }
 
-        // If we couldn't register any URLs, exit early
-        if urlsToProcess.isEmpty {
-            AppLogger.sync.debug("No URLs available to process - all are being processed elsewhere")
-            return
-        }
-
-        // Make sure we unregister all URLs when done
-        defer {
-            for url in urlsToProcess {
-                Self.unregisterItemAsProcessed(url)
+            // Always release the global lock when done
+            defer {
+                Task { await Self.releaseProcessingLockAsync() }
             }
-        }
 
-        let container = await MainActor.run { ArgusApp.sharedModelContainer }
-
-        // Process one article at a time to avoid transaction conflicts
-        var createCount = 0
-        var updateCount = 0
-        var failureCount = 0
-
-        AppLogger.sync.debug("🔄 Direct processing \(urlsToProcess.count) articles")
-
-        for jsonURL in urlsToProcess {
-            // Create a fresh context for this article
-            let articleContext = ModelContext(container)
-            articleContext.autosaveEnabled = false
-
-            // NEW: Check if article exists and get the existing record if it does
-            let existingArticle = await findExistingArticle(
-                jsonURL: jsonURL,
-                context: articleContext
-            )
-
-            let articleExists = existingArticle != nil
-            AppLogger.sync.debug("🔍 Existence check result for \(jsonURL): \(articleExists ? "EXISTS" : "NEW")")
-
-            // Extract UUID from the URL filename for additional debugging
-            let fileName = jsonURL.split(separator: "/").last ?? ""
-            var notificationID: UUID?
-
-            if let uuidRange = fileName.range(of: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", options: .regularExpression) {
-                let uuidString = String(fileName[uuidRange])
-                if let uuid = UUID(uuidString: uuidString) {
-                    notificationID = uuid
-                    AppLogger.sync.debug("🔍 Processing article with UUID from filename: \(uuid)")
+            // Register URLs as being processed using async-safe methods
+            var urlsToProcess = [String]()
+            for url in urls {
+                if await Self.registerItemAsBeingProcessedAsync(url) {
+                    urlsToProcess.append(url)
+                } else {
+                    AppLogger.sync.debug("🔒 URL already being processed elsewhere, skipping: \(url)")
                 }
             }
 
-            if notificationID == nil {
-                AppLogger.sync.debug("⚠️ No UUID found in filename, skipping article: \(jsonURL)")
-                failureCount += 1
-                continue
+            // If we couldn't register any URLs, exit early
+            if urlsToProcess.isEmpty {
+                AppLogger.sync.debug("No URLs available to process - all are being processed elsewhere")
+                return
             }
 
-            // If existing article has a different ID, we need to verify this ID doesn't already exist
-            if articleExists, existingArticle!.id != notificationID {
-                let idExists = await isIDAlreadyUsed(notificationID!, context: articleContext)
-                if idExists {
-                    AppLogger.sync.debug("🚨 ID conflict - can't update article ID: \(jsonURL)")
-                    failureCount += 1
-                    continue
-                }
-            }
-
-            // Process the article
-            do {
-                // Fetch the article JSON
-                guard let url = URL(string: jsonURL) else {
-                    AppLogger.sync.error("❌ Invalid URL: \(jsonURL)")
-                    failureCount += 1
-                    continue
-                }
-
-                let config = URLSessionConfiguration.ephemeral
-                config.timeoutIntervalForRequest = 15
-                config.timeoutIntervalForResource = 30
-                let session = URLSession(configuration: config)
-
-                let (data, _) = try await session.data(from: url)
-
-                // Parse the JSON
-                guard let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    AppLogger.sync.error("❌ Invalid JSON data in response")
-                    failureCount += 1
-                    continue
-                }
-
-                // Ensure the json_url is set
-                var enrichedJson = rawJson
-                if enrichedJson["json_url"] == nil {
-                    enrichedJson["json_url"] = jsonURL
-                }
-
-                // Process into article format
-                guard let articleJSON = processArticleJSON(enrichedJson) else {
-                    AppLogger.sync.error("❌ Failed to process article JSON")
-                    failureCount += 1
-                    continue
-                }
-
-                // Extract metadata
-                let engineStatsJSON = extractEngineStats(from: enrichedJson)
-                let similarArticlesJSON = extractSimilarArticles(from: enrichedJson)
-
-                // Create or update the article
-                let date = Date()
-
-                // Run in a transaction to ensure atomicity
-                try articleContext.transaction {
-                    if let existingArticle = existingArticle {
-                        // UPDATE CASE: Update existing article with new data
-                        AppLogger.sync.debug("📝 Updating existing article with ID: \(existingArticle.id)")
-
-                        // Update notification fields
-                        existingArticle.title = articleJSON.title
-                        existingArticle.body = articleJSON.body
-                        existingArticle.json_url = articleJSON.jsonURL
-                        existingArticle.article_url = articleJSON.url
-                        existingArticle.topic = articleJSON.topic
-                        existingArticle.article_title = articleJSON.articleTitle
-                        existingArticle.affected = articleJSON.affected
-                        existingArticle.domain = articleJSON.domain
-                        existingArticle.pub_date = articleJSON.pubDate ?? existingArticle.pub_date
-
-                        // Don't override user-specific flags
-                        // existingArticle.isViewed remains unchanged
-                        // existingArticle.isBookmarked remains unchanged
-                        // existingArticle.isArchived remains unchanged
-
-                        // Update quality indicators
-                        existingArticle.sources_quality = articleJSON.sourcesQuality
-                        existingArticle.argument_quality = articleJSON.argumentQuality
-                        existingArticle.source_type = articleJSON.sourceType
-                        existingArticle.source_analysis = articleJSON.sourceAnalysis
-                        existingArticle.quality = articleJSON.quality
-
-                        // Update content analysis
-                        existingArticle.summary = articleJSON.summary
-                        existingArticle.critical_analysis = articleJSON.criticalAnalysis
-                        existingArticle.logical_fallacies = articleJSON.logicalFallacies
-                        existingArticle.relation_to_topic = articleJSON.relationToTopic
-                        existingArticle.additional_insights = articleJSON.additionalInsights
-
-                        // Update metadata
-                        existingArticle.engine_stats = engineStatsJSON
-                        existingArticle.similar_articles = similarArticlesJSON
-
-                        // Pre-generate text attributes (force refresh)
-                        _ = getAttributedString(for: .title, from: existingArticle, createIfMissing: true)
-                        _ = getAttributedString(for: .body, from: existingArticle, createIfMissing: true)
-
-                        updateCount += 1
-                    } else {
-                        // INSERT CASE: Create new article
-                        AppLogger.sync.debug("📝 Creating new article with ID: \(notificationID!)")
-
-                        let notification = NotificationData(
-                            id: notificationID!,
-                            date: date,
-                            title: articleJSON.title,
-                            body: articleJSON.body,
-                            json_url: articleJSON.jsonURL,
-                            article_url: articleJSON.url,
-                            topic: articleJSON.topic,
-                            article_title: articleJSON.articleTitle,
-                            affected: articleJSON.affected,
-                            domain: articleJSON.domain,
-                            pub_date: articleJSON.pubDate ?? date,
-                            isViewed: false,
-                            isBookmarked: false,
-                            isArchived: false,
-                            sources_quality: articleJSON.sourcesQuality,
-                            argument_quality: articleJSON.argumentQuality,
-                            source_type: articleJSON.sourceType,
-                            source_analysis: articleJSON.sourceAnalysis,
-                            quality: articleJSON.quality,
-                            summary: articleJSON.summary,
-                            critical_analysis: articleJSON.criticalAnalysis,
-                            logical_fallacies: articleJSON.logicalFallacies,
-                            relation_to_topic: articleJSON.relationToTopic,
-                            additional_insights: articleJSON.additionalInsights,
-                            engine_stats: engineStatsJSON,
-                            similar_articles: similarArticlesJSON
-                        )
-
-                        let seenArticle = SeenArticle(
-                            id: notificationID!,
-                            json_url: articleJSON.jsonURL,
-                            date: date
-                        )
-
-                        // Insert into database
-                        articleContext.insert(notification)
-                        articleContext.insert(seenArticle)
-
-                        // Pre-generate text attributes
-                        _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
-                        _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
-
-                        createCount += 1
+            // Make sure we unregister all URLs when done
+            defer {
+                Task {
+                    for url in urlsToProcess {
+                        await Self.unregisterItemAsProcessedAsync(url)
                     }
                 }
+            }
 
-                // Save changes
-                try articleContext.save()
+            let container = await MainActor.run { ArgusApp.sharedModelContainer }
 
-                // Update the badge count
-                await MainActor.run {
-                    NotificationUtils.updateAppBadgeCount()
+            // Use a TaskGroup to process articles concurrently with controlled parallelism
+            var createCount = 0
+            var updateCount = 0
+            var failureCount = 0
+
+            AppLogger.sync.debug("🔄 Direct processing \(urlsToProcess.count) articles in background")
+
+            // Process articles in chunks to control memory usage and DB contention
+            let chunkSize = 5
+            for chunk in urlsToProcess.chunked(into: chunkSize) {
+                // Process each chunk in parallel
+                await withTaskGroup(of: (created: Int, updated: Int, failed: Int).self) { group in
+                    for jsonURL in chunk {
+                        group.addTask {
+                            // Process each article in an isolated context
+                            await self.processArticleIsolated(jsonURL: jsonURL, container: container)
+                        }
+                    }
+
+                    // Collect results as they complete
+                    for await result in group {
+                        createCount += result.created
+                        updateCount += result.updated
+                        failureCount += result.failed
+                    }
                 }
+            }
 
-                AppLogger.sync.debug("✅ Article successfully \(articleExists ? "updated" : "saved") with ID: \(notificationID!)")
-            } catch {
-                AppLogger.sync.error("❌ Error processing article: \(error.localizedDescription)")
-                failureCount += 1
+            // Log summary
+            AppLogger.sync.debug("🔄 Direct processing completed: added \(createCount), updated \(updateCount), failed \(failureCount)")
+
+            // Notify that all processing is complete
+            await MainActor.run {
+                NotificationCenter.default.post(name: .articleProcessingCompleted, object: nil)
+            }
+        }
+    }
+
+    // Process a single article in isolation to prevent UI blocking and conflicts
+    private func processArticleIsolated(jsonURL: String, container: ModelContainer) async -> (created: Int, updated: Int, failed: Int) {
+        // Create a fresh context for this article
+        let articleContext = ModelContext(container)
+        articleContext.autosaveEnabled = false
+
+        // Check if article exists and get the existing record if it does
+        let existingArticle = await findExistingArticle(
+            jsonURL: jsonURL,
+            context: articleContext
+        )
+
+        let articleExists = existingArticle != nil
+        AppLogger.sync.debug("🔍 Existence check for \(jsonURL): \(articleExists ? "EXISTS" : "NEW")")
+
+        // Extract UUID from the URL filename for additional debugging
+        let fileName = jsonURL.split(separator: "/").last ?? ""
+        var notificationID: UUID?
+
+        if let uuidRange = fileName.range(of: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", options: .regularExpression) {
+            let uuidString = String(fileName[uuidRange])
+            if let uuid = UUID(uuidString: uuidString) {
+                notificationID = uuid
             }
         }
 
-        // Log summary
-        AppLogger.sync.debug("🔄 Direct processing completed: added \(createCount), updated \(updateCount), failed \(failureCount)")
+        if notificationID == nil {
+            AppLogger.sync.debug("⚠️ No UUID in filename, skipping: \(jsonURL)")
+            return (0, 0, 1)
+        }
+
+        // If existing article has a different ID, verify ID doesn't already exist
+        if articleExists, existingArticle!.id != notificationID {
+            let idExists = await isIDAlreadyUsed(notificationID!, context: articleContext)
+            if idExists {
+                AppLogger.sync.debug("🚨 ID conflict - can't update: \(jsonURL)")
+                return (0, 0, 1)
+            }
+        }
+
+        // Process the article in a way that can be cancelled
+        do {
+            return try await withTimeout(of: 30) {
+                do {
+                    // Fetch the article JSON with better timeout handling
+                    guard let url = URL(string: jsonURL) else {
+                        AppLogger.sync.error("❌ Invalid URL: \(jsonURL)")
+                        return (0, 0, 1)
+                    }
+
+                    let config = URLSessionConfiguration.ephemeral
+                    config.timeoutIntervalForRequest = 10 // Shorter timeout
+                    config.timeoutIntervalForResource = 15
+                    let session = URLSession(configuration: config)
+
+                    let (data, _) = try await session.data(from: url)
+
+                    // Parse the JSON
+                    guard let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        AppLogger.sync.error("❌ Invalid JSON data in response")
+                        return (0, 0, 1)
+                    }
+
+                    // Ensure the json_url is set
+                    var enrichedJson = rawJson
+                    if enrichedJson["json_url"] == nil {
+                        enrichedJson["json_url"] = jsonURL
+                    }
+
+                    // Process into article format
+                    guard let articleJSON = self.syncProcessArticleJSON(enrichedJson) else {
+                        AppLogger.sync.error("❌ Failed to process article JSON")
+                        return (0, 0, 1)
+                    }
+
+                    // Extract metadata
+                    let engineStatsJSON = self.extractEngineStats(from: enrichedJson)
+                    let similarArticlesJSON = self.extractSimilarArticles(from: enrichedJson)
+
+                    // Create or update the article
+                    let date = Date()
+
+                    // Run in a transaction to ensure atomicity
+                    try articleContext.transaction {
+                        if let existingArticle = existingArticle {
+                            // UPDATE CASE: Update existing article with new data
+                            AppLogger.sync.debug("📝 Updating existing article with ID: \(existingArticle.id)")
+
+                            // Update notification fields
+                            existingArticle.title = articleJSON.title
+                            existingArticle.body = articleJSON.body
+                            existingArticle.json_url = articleJSON.jsonURL
+                            existingArticle.article_url = articleJSON.url
+                            existingArticle.topic = articleJSON.topic
+                            existingArticle.article_title = articleJSON.articleTitle
+                            existingArticle.affected = articleJSON.affected
+                            existingArticle.domain = articleJSON.domain
+                            existingArticle.pub_date = articleJSON.pubDate ?? existingArticle.pub_date
+
+                            // Don't override user-specific flags
+                            // existingArticle.isViewed remains unchanged
+                            // existingArticle.isBookmarked remains unchanged
+                            // existingArticle.isArchived remains unchanged
+
+                            // Update quality indicators
+                            existingArticle.sources_quality = articleJSON.sourcesQuality
+                            existingArticle.argument_quality = articleJSON.argumentQuality
+                            existingArticle.source_type = articleJSON.sourceType
+                            existingArticle.source_analysis = articleJSON.sourceAnalysis
+                            existingArticle.quality = articleJSON.quality
+
+                            // Update content analysis
+                            existingArticle.summary = articleJSON.summary
+                            existingArticle.critical_analysis = articleJSON.criticalAnalysis
+                            existingArticle.logical_fallacies = articleJSON.logicalFallacies
+                            existingArticle.relation_to_topic = articleJSON.relationToTopic
+                            existingArticle.additional_insights = articleJSON.additionalInsights
+
+                            // Update metadata
+                            existingArticle.engine_stats = engineStatsJSON
+                            existingArticle.similar_articles = similarArticlesJSON
+
+                            // Schedule text attribute generation for later
+                            Task.detached(priority: .background) {
+                                _ = getAttributedString(for: .title, from: existingArticle, createIfMissing: true)
+                                _ = getAttributedString(for: .body, from: existingArticle, createIfMissing: true)
+                            }
+                        } else {
+                            // INSERT CASE: Create new article
+                            AppLogger.sync.debug("📝 Creating new article with ID: \(notificationID!)")
+
+                            let notification = NotificationData(
+                                id: notificationID!,
+                                date: date,
+                                title: articleJSON.title,
+                                body: articleJSON.body,
+                                json_url: articleJSON.jsonURL,
+                                article_url: articleJSON.url,
+                                topic: articleJSON.topic,
+                                article_title: articleJSON.articleTitle,
+                                affected: articleJSON.affected,
+                                domain: articleJSON.domain,
+                                pub_date: articleJSON.pubDate ?? date,
+                                isViewed: false,
+                                isBookmarked: false,
+                                isArchived: false,
+                                sources_quality: articleJSON.sourcesQuality,
+                                argument_quality: articleJSON.argumentQuality,
+                                source_type: articleJSON.sourceType,
+                                source_analysis: articleJSON.sourceAnalysis,
+                                quality: articleJSON.quality,
+                                summary: articleJSON.summary,
+                                critical_analysis: articleJSON.criticalAnalysis,
+                                logical_fallacies: articleJSON.logicalFallacies,
+                                relation_to_topic: articleJSON.relationToTopic,
+                                additional_insights: articleJSON.additionalInsights,
+                                engine_stats: engineStatsJSON,
+                                similar_articles: similarArticlesJSON
+                            )
+
+                            let seenArticle = SeenArticle(
+                                id: notificationID!,
+                                json_url: articleJSON.jsonURL,
+                                date: date
+                            )
+
+                            // Insert into database
+                            articleContext.insert(notification)
+                            articleContext.insert(seenArticle)
+
+                            // Schedule text attribute generation for later
+                            Task.detached(priority: .background) {
+                                _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
+                                _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+                            }
+                        }
+                    }
+
+                    // Save changes
+                    try articleContext.save()
+
+                    // Update the badge count on main thread
+                    await MainActor.run {
+                        NotificationUtils.updateAppBadgeCount()
+                    }
+
+                    // Return the counts based on whether we created or updated
+                    if articleExists {
+                        return (0, 1, 0)
+                    } else {
+                        return (1, 0, 0)
+                    }
+                } catch {
+                    AppLogger.sync.error("❌ Error processing article: \(error.localizedDescription)")
+                    return (0, 0, 1)
+                }
+            }
+        } catch is TimeoutError {
+            AppLogger.sync.error("🕒 Article processing timed out: \(jsonURL)")
+            return (0, 0, 1)
+        } catch {
+            AppLogger.sync.error("❌ Unexpected error: \(error.localizedDescription)")
+            return (0, 0, 1)
+        }
     }
 }
