@@ -521,21 +521,25 @@ struct NewsView: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 16) {
-                Text(domain)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.blue)
-                    .lineLimit(1)
-                    .onTapGesture {
+                // Use the shared DomainSourceView component
+                DomainSourceView(
+                    domain: domain,
+                    sourceType: notification.source_type,
+                    onTap: {
                         // Only load full content when user taps on the domain
-                        if notification.sources_quality == nil &&
-                            notification.argument_quality == nil &&
-                            notification.source_type == nil
+                        if notification.sources_quality == nil,
+                           notification.argument_quality == nil,
+                           notification.source_type == nil
                         {
                             loadFullContent()
                         } else {
                             navigateToDetailView(section: "Source Analysis")
                         }
+                    },
+                    onSourceTap: {
+                        navigateToDetailView(section: "Source Analysis")
                     }
+                )
 
                 if notification.sources_quality != nil ||
                     notification.argument_quality != nil ||
@@ -820,13 +824,21 @@ struct NewsView: View {
     private func domainView(_ notification: NotificationData) -> some View {
         Group {
             if let domain = notification.domain, !domain.isEmpty {
-                Text(domain)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.blue)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 3)
-                    .textSelection(.disabled)
+                DomainSourceView(
+                    domain: domain,
+                    sourceType: notification.source_type,
+                    onTap: {
+                        // We'll just use the default tap behavior here like before
+                        openArticle(notification)
+                    },
+                    onSourceTap: {
+                        // Also open the article when source type is tapped
+                        openArticle(notification)
+                    }
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 3)
+                .textSelection(.disabled)
             }
         }
     }

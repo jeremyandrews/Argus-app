@@ -6,27 +6,12 @@ struct QualityBadges: View {
     let sourceType: String?
     @Binding var scrollToSection: String?
     var onBadgeTap: ((String) -> Void)?
+    var isDetailView: Bool = false
 
     var body: some View {
-        // Use a fixed order: source type, sources quality, argument quality
+        // Source type has been moved up to be with the domain, so just show Proof, Logic, and Context
         HStack(spacing: 8) {
-            // 1. Source Type (e.g., "Press", "Blog")
-            if let sourceType = sourceType {
-                QualityBadge(
-                    label: sourceType,
-                    color: getSourceTypeColor(sourceType),
-                    iconName: "newspaper.fill"
-                )
-                .onTapGesture {
-                    if let onBadgeTap = onBadgeTap {
-                        onBadgeTap("Source Analysis")
-                    } else {
-                        scrollToSection = "Source Analysis"
-                    }
-                }
-            }
-
-            // 2. Sources Quality (e.g., "Proof: Strong")
+            // 1. Sources Quality (e.g., "Proof: Strong")
             if let sourcesQuality = sourcesQuality {
                 QualityBadge(
                     label: "Proof: \(getQualityLabel(sourcesQuality))",
@@ -42,7 +27,7 @@ struct QualityBadges: View {
                 }
             }
 
-            // 3. Argument Quality (e.g., "Logic: Fair")
+            // 2. Argument Quality (e.g., "Logic: Fair")
             if let argumentQuality = argumentQuality {
                 QualityBadge(
                     label: "Logic: \(getQualityLabel(argumentQuality))",
@@ -58,8 +43,8 @@ struct QualityBadges: View {
                 }
             }
 
-            // 4. Optional context badge (only if we have room)
-            if let _ = sourceType, sourcesQuality == nil || argumentQuality == nil {
+            // 3. Context badge - always show in detail view, conditionally in list view
+            if isDetailView || (sourcesQuality == nil || argumentQuality == nil) {
                 QualityBadge(
                     label: "Context",
                     color: .purple,

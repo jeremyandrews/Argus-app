@@ -763,13 +763,37 @@ struct NewsDetailView: View {
                         .foregroundColor(.secondary)
                 }
 
-                // Domain + Lazy Quality Badges
+                // Domain with Source Type (source type first)
                 if let domain = n.domain, !domain.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(domain)
-                            .font(.headline)
-                            .foregroundColor(.blue)
-                            .lineLimit(1)
+                        DomainSourceView(
+                            domain: domain,
+                            sourceType: n.source_type,
+                            onTap: {
+                                // Default tap behavior for domain
+                                if let url = URL(string: "https://\(domain)") {
+                                    UIApplication.shared.open(url)
+                                }
+                            },
+                            onSourceTap: {
+                                // Expand the Source Analysis section when source type tapped
+                                expandedSections["Source Analysis"] = true
+
+                                // Scroll to the section
+                                DispatchQueue.main.async {
+                                    withAnimation {
+                                        scrollViewProxy?.scrollTo("Source Analysis", anchor: .top)
+                                    }
+                                }
+
+                                // Load content if needed
+                                if needsConversion("Source Analysis") {
+                                    loadContentForSection("Source Analysis")
+                                }
+                            }
+                        )
+
+                        // Remaining quality badges (Proof, Logic, Context)
                         LazyLoadingQualityBadges(
                             notification: n,
                             onBadgeTap: { section in
@@ -787,7 +811,8 @@ struct NewsDetailView: View {
                                 if needsConversion(section) {
                                     loadContentForSection(section)
                                 }
-                            }
+                            },
+                            isDetailView: true
                         )
                     }
                 }
@@ -1755,6 +1780,23 @@ struct NewsDetailView: View {
             return "person.2"
         default:
             return "doc.text"
+        }
+    }
+
+    private func getSourceTypeColor(_ sourceType: String) -> Color {
+        switch sourceType.lowercased() {
+        case "press", "news":
+            return .blue
+        case "blog":
+            return .orange
+        case "academic", "research":
+            return .purple
+        case "gov", "government":
+            return .green
+        case "opinion":
+            return .red
+        default:
+            return .gray
         }
     }
 

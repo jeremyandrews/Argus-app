@@ -211,6 +211,7 @@ struct TopicPill: View {
 struct LazyLoadingQualityBadges: View {
     let notification: NotificationData
     var onBadgeTap: ((String) -> Void)?
+    var isDetailView: Bool = false
     @State private var scrollToSection: String? = nil
     @Environment(\.modelContext) private var modelContext
     @State private var isLoading = false
@@ -228,7 +229,8 @@ struct LazyLoadingQualityBadges: View {
                     argumentQuality: notification.argument_quality,
                     sourceType: notification.source_type,
                     scrollToSection: $scrollToSection,
-                    onBadgeTap: onBadgeTap
+                    onBadgeTap: onBadgeTap,
+                    isDetailView: isDetailView
                 )
             } else if isLoading {
                 // Show loading indicator
@@ -285,5 +287,81 @@ extension String {
 extension Date {
     var dayOnly: Date {
         Calendar.current.startOfDay(for: self)
+    }
+}
+
+// MARK: - Domain Source Component
+
+struct DomainSourceView: View {
+    let domain: String
+    let sourceType: String?
+    var onTap: (() -> Void)? = nil
+    var onSourceTap: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Source type icon first
+            if let sourceType = sourceType, !sourceType.isEmpty {
+                Button(action: {
+                    onSourceTap?()
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: sourceTypeIcon(for: sourceType))
+                            .font(.footnote)
+                        Text(sourceType.capitalized)
+                            .font(.footnote)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(getSourceTypeColor(sourceType).opacity(0.2))
+                    .foregroundColor(getSourceTypeColor(sourceType))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            // Domain after source type
+            Text(domain)
+                .font(.headline)
+                .foregroundColor(.blue)
+                .lineLimit(1)
+                .onTapGesture {
+                    onTap?()
+                }
+        }
+    }
+
+    private func sourceTypeIcon(for sourceType: String) -> String {
+        switch sourceType.lowercased() {
+        case "press", "news":
+            return "newspaper"
+        case "blog":
+            return "text.bubble"
+        case "academic":
+            return "book"
+        case "government":
+            return "building.columns"
+        case "social media":
+            return "person.2"
+        default:
+            return "doc.text"
+        }
+    }
+
+    private func getSourceTypeColor(_ sourceType: String) -> Color {
+        switch sourceType.lowercased() {
+        case "press", "news":
+            return .blue
+        case "blog":
+            return .orange
+        case "academic", "research":
+            return .purple
+        case "gov", "government":
+            return .green
+        case "opinion":
+            return .red
+        default:
+            return .gray
+        }
     }
 }
