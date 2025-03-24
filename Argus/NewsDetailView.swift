@@ -1391,26 +1391,9 @@ struct NewsDetailView: View {
 
         case "Source Analysis":
             VStack(alignment: .leading, spacing: 10) {
-                // Domain info at the top with source type badge
+                // Domain info with source type badge - source type first, then domain
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
-                           !domain.isEmpty
-                        {
-                            Text(domain)
-                                .font(.subheadline)
-                                .foregroundColor(.blue)
-                                .onTapGesture {
-                                    if let url = URL(string: "https://\(domain)") {
-                                        UIApplication.shared.open(url)
-                                    }
-                                }
-                        }
-                    }
-
-                    Spacer()
-
-                    // Source type badge moved here
+                    // Source type badge first (to match DomainSourceView)
                     if let sourceData = section.content as? [String: Any],
                        let sourceType = sourceData["sourceType"] as? String,
                        !sourceType.isEmpty
@@ -1423,7 +1406,28 @@ struct NewsDetailView: View {
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                         }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(getSourceTypeColor(sourceType).opacity(0.2))
+                        .foregroundColor(getSourceTypeColor(sourceType))
+                        .cornerRadius(8)
                     }
+
+                    // Domain after source type
+                    if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
+                       !domain.isEmpty
+                    {
+                        Text(domain)
+                            .font(.subheadline)
+                            .foregroundColor(.blue)
+                            .onTapGesture {
+                                if let url = URL(string: "https://\(domain)") {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                    }
+
+                    Spacer()
                 }
                 .padding(.horizontal, 4) // Match other sections' padding
 
