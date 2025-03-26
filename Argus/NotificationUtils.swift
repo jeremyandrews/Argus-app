@@ -27,16 +27,28 @@ class NotificationUtils {
         }
     }
 
+    // Debounce timer for badge updates
+    private static var badgeUpdateWorkItem: DispatchWorkItem?
+    private static let debounceInterval: TimeInterval = 0.5 // Half second debounce
+
     @MainActor
     static func updateAppBadgeCount() {
+        // Cancel any pending update
+        badgeUpdateWorkItem?.cancel()
+
         // Simply mark that an update is needed
         updateScheduled = true
 
-        // For immediate visual feedback in settings, also perform update
-        // when explicitly called (this handles the settings toggle case)
-        Task {
-            await performBadgeUpdate()
+        // Create a new debounced update
+        let workItem = DispatchWorkItem {
+            Task { @MainActor in
+                await performBadgeUpdate()
+            }
         }
+        badgeUpdateWorkItem = workItem
+
+        // Schedule after a short delay for debouncing
+        DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
     }
 
     @MainActor

@@ -155,6 +155,7 @@ func markdownToAttributedString(
 
 /// Primary function to get an attributed string for any field
 /// This is the main function you should use everywhere in the app
+@MainActor
 func getAttributedString(
     for field: RichTextField,
     from notification: NotificationData,
@@ -195,46 +196,20 @@ func getAttributedString(
 
     // If no blob or failed to load, create fresh if requested
     if createIfMissing {
-        if Thread.isMainThread {
-            // Already on main thread, process synchronously
-            let attributedString = markdownToAttributedString(
-                unwrappedText,
-                textStyle: field.textStyle,
-                customFontSize: customFontSize
-            )
-            if let attributedString = attributedString {
-                do {
-                    try notification.setRichText(attributedString, for: field, saveContext: true)
-                } catch {
-                    print("Error saving rich text for \(field): \(error)")
-                }
-                completion?(attributedString)
-                return attributedString
+        // Now always on main thread thanks to @MainActor
+        let attributedString = markdownToAttributedString(
+            unwrappedText,
+            textStyle: field.textStyle,
+            customFontSize: customFontSize
+        )
+        if let attributedString = attributedString {
+            do {
+                try notification.setRichText(attributedString, for: field, saveContext: true)
+            } catch {
+                print("Error saving rich text for \(field): \(error)")
             }
-        } else {
-            // When on background thread, we need to be careful about sync operations
-            // Dispatch asynchronously to avoid potential deadlocks
-            DispatchQueue.main.async {
-                let attributedString = markdownToAttributedString(
-                    unwrappedText,
-                    textStyle: field.textStyle,
-                    customFontSize: customFontSize
-                )
-                if let attributedString = attributedString {
-                    do {
-                        try notification.setRichText(attributedString, for: field, saveContext: true)
-                    } catch {
-                        print("Error saving rich text for \(field): \(error)")
-                    }
-                    completion?(attributedString)
-                } else {
-                    completion?(nil)
-                }
-            }
-
-            // Document this limitation clearly for callers
-            NSLog("Warning: getAttributedString called from background thread. Result will be delivered via completion handler.")
-            return nil
+            completion?(attributedString)
+            return attributedString
         }
     }
 

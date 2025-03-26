@@ -1703,31 +1703,25 @@ struct NewsDetailView: View {
                 return
             }
 
-            loadTask = Task {
-                // Load the attributed string in the background
-                let attributedString = await withCheckedContinuation { continuation in
-                    // Using DispatchQueue for NSAttributedString which isn't Sendable
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        let result = getAttributedString(
-                            for: field,
-                            from: notification,
-                            createIfMissing: true,
-                            customFontSize: fontSize
-                        )
-                        continuation.resume(returning: result)
-                    }
-                }
+            // Use a MainActor-constrained task to handle NSAttributedString
+            loadTask = Task { @MainActor in
+                // Since we're now on the MainActor, we can directly call getAttributedString
+                // without needing to await MainActor.run
+                let attributedString = getAttributedString(
+                    for: field,
+                    from: notification,
+                    createIfMissing: true,
+                    customFontSize: fontSize
+                )
 
-                // Update UI on main thread
-                await MainActor.run {
-                    // Check if the task was cancelled
-                    if Task.isCancelled { return }
+                // We're already on the MainActor, so no need for another MainActor.run
+                // Check if the task was cancelled
+                if Task.isCancelled { return }
 
-                    self.loadedAttributedString = attributedString
-                    self.isLoading = false
-                    if let attributedString = attributedString {
-                        onLoad?(attributedString)
-                    }
+                self.loadedAttributedString = attributedString
+                self.isLoading = false
+                if let attributedString = attributedString {
+                    onLoad?(attributedString)
                 }
             }
         }

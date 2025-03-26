@@ -36,6 +36,22 @@ This file captures important patterns, preferences, and project intelligence tha
 
 ## Swift 6 Concurrency Patterns
 
+### NSAttributedString and Sendable Constraints
+- NSAttributedString is not Sendable and requires special handling in async contexts
+- Always use @MainActor for functions that generate or manipulate NSAttributedString for UI
+- For LazyLoadingContentView and similar components, use Task { @MainActor in ... } to constrain the entire task
+- Avoid passing NSAttributedString across actor boundaries without proper isolation:
+  ```swift
+  // Wrong: Crossing actor boundaries with non-Sendable type
+  let attributedString = await backgroundActor.getAttributedString()
+  
+  // Correct: Keep operations isolated to MainActor
+  await MainActor.run {
+      let attributedString = getAttributedString()
+      // Use attributedString here, within MainActor context
+  }
+  ```
+
 ### Actor Model Implementation
 - The DatabaseCoordinator is implemented as a Swift actor to provide thread-safe access to SwiftData
 - All database operations should go through the DatabaseCoordinator to ensure isolation
@@ -79,6 +95,7 @@ This file captures important patterns, preferences, and project intelligence tha
 ## Known Challenges
 - UI becomes jittery during sync operations - likely due to operations on the main thread
 - Duplicate content issues occur during synchronization - may be improved by DatabaseCoordinator's batch detection
+- Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - fixed in most places but worth monitoring
 
 ## SyncManager and DatabaseCoordinator Integration
 - SyncManager delegates all database operations to DatabaseCoordinator

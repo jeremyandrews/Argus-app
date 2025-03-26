@@ -1140,66 +1140,40 @@ class SyncManager {
 
     // Process multiple articles in the background using DatabaseCoordinator's batch processing
     private func processArticlesDetached(urls: [String]) async {
+        // Create a single task instead of multiple nested ones for clarity
         Task.detached(priority: .background) {
             AppLogger.sync.debug("🔄 Processing \(urls.count) articles directly in background task")
 
-            // Global lock to ensure we're not processing during other operations
-            guard await Self.acquireProcessingLockAsync() else {
-                AppLogger.sync.debug("⚠️ Global processing already in progress, delaying batch processing")
+            // No need for our own lock - let DatabaseCoordinator handle all concurrency
+            // This avoids the duplicate lock registries that were causing problems
+
+            // De-duplicate the URLs first to avoid redundant processing attempts
+            let uniqueUrls = Array(Set(urls))
+            if uniqueUrls.count < urls.count {
+                AppLogger.sync.debug("🔍 Removed \(urls.count - uniqueUrls.count) duplicate URLs from processing batch")
+            }
+
+            // Log batch information for debugging
+            if !uniqueUrls.isEmpty {
+                let firstThree = uniqueUrls.prefix(3).map { String($0.suffix(40)) }.joined(separator: ", ")
+                AppLogger.sync.debug("📦 Processing batch: \(uniqueUrls.count) articles - sample: \(firstThree)...")
+            } else {
+                AppLogger.sync.debug("📦 Empty batch, nothing to process")
                 return
             }
 
-            // Always release the global lock when done
-            defer {
-                Task { await Self.releaseProcessingLockAsync() }
-            }
-
-            // Register all URLs as being processed - this handles duplicate detection
-            let registeredUrls = await withTaskGroup(of: (String, Bool).self, returning: [String].self) { group in
-                for url in urls {
-                    group.addTask {
-                        let success = await Self.registerItemAsBeingProcessedAsync(url)
-                        return (url, success)
-                    }
-                }
-
-                var registeredUrls = [String]()
-                for await (url, success) in group {
-                    if success {
-                        registeredUrls.append(url)
-                    } else {
-                        AppLogger.sync.debug("🔒 URL already being processed elsewhere, skipping: \(url)")
-                    }
-                }
-                return registeredUrls
-            }
-
-            // Make sure we unregister all URLs when done
-            defer {
-                Task {
-                    for url in registeredUrls {
-                        await Self.unregisterItemAsProcessedAsync(url)
-                    }
-                }
-            }
-
-            // If we couldn't register any URLs, exit early
-            if registeredUrls.isEmpty {
-                AppLogger.sync.debug("No URLs available to process - all are being processed elsewhere")
-                return
-            }
-
-            AppLogger.sync.debug("🔄 Direct batch processing \(registeredUrls.count) articles using DatabaseCoordinator")
-
-            // Delegate the entire batch to DatabaseCoordinator - this significantly reduces
-            // the number of database operations and badge count updates
-            let result = await DatabaseCoordinator.shared.processArticles(jsonURLs: registeredUrls)
+            // Delegate all processing to DatabaseCoordinator in a single transaction
+            // This centralization avoids race conditions and duplication
+            let result = await DatabaseCoordinator.shared.processArticles(jsonURLs: uniqueUrls)
 
             // Log summary
             AppLogger.sync.debug("🔄 Batch processing completed: added \(result.success), failed \(result.failure), skipped \(result.skipped)")
 
-            // Notify that all processing is complete (DatabaseCoordinator has already updated the badge count)
+            // Only update badge count once after all processing is complete
             await MainActor.run {
+                NotificationUtils.updateAppBadgeCount()
+
+                // Notify that all processing is complete
                 NotificationCenter.default.post(name: .articleProcessingCompleted, object: nil)
             }
         }

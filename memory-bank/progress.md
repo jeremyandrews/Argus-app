@@ -44,15 +44,22 @@
 
 ## Recently Completed
 
+- ✅ **Swift 6 Concurrency Compliance**
+  - Fixed critical issues with NSAttributedString crossing actor boundaries
+  - Added @MainActor constraints to LazyLoadingContentView in NewsDetailView
+  - Eliminated "getAttributedString called from background thread" warnings
+  - Ensured proper handling of non-Sendable types in async contexts
+
+- ✅ **Error Handling Improvements**
+  - Enhanced article fetching with better HTTP status code detection
+  - Added more comprehensive error messages for failed article retrievals
+  - Fixed duplicate notification ID errors in logs
+
 - ✅ **DatabaseCoordinator Implementation**
   - Completed full implementation with Swift 6 concurrency safety
   - Fixed all actor-isolation and variable capture warnings
   - Eliminated redundant code to avoid conflicts with existing utilities
   - Added proper handling of concurrent database operations
-
-- ✅ **SyncManager Improvements**
-  - Removed unused variables and improved code quality
-  - Enhanced integration with DatabaseCoordinator for article processing
 
 - ✅ **Thread Safety Enhancements**
   - Improved handling of shared state in background tasks
@@ -76,12 +83,12 @@
 
 1. **UI Performance**
    - Interface becomes jittery during synchronization
-   - Status: Under investigation
+   - Status: May be partially improved by recent NSAttributedString handling fixes
    - Priority: High
    
 2. **Duplicate Content**
    - Some articles appear twice in article lists
-   - Status: May be affected by recent DatabaseCoordinator improvements; needs verification
+   - Status: Fixed duplicate notification ID errors; verification needed
    - Priority: High
    
 3. **Database Limitations**
@@ -119,6 +126,6 @@
 ## Progress Metrics
 
 - **Features Completed**: 6/9 core features fully implemented
-- **Swift 6 Compatibility**: Significant progress with DatabaseCoordinator fixes
-- **Known Bugs**: 3 high-priority issues, 1 potentially addressed by recent changes
+- **Swift 6 Compatibility**: Major milestone reached with latest NSAttributedString fixes
+- **Known Bugs**: 3 high-priority issues, 2 potentially addressed by recent changes
 - **Test Coverage**: ~70% of non-UI code

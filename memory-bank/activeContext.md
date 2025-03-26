@@ -2,58 +2,60 @@
 
 ## Current Work Focus
 - **Active Development Phase**: Stabilization and bug fixing
-- **Primary Focus Areas**: Sync process optimization, UI performance, and duplicate content resolution
-- **User Experience Improvements**: Addressing UI jitter during sync operations
+- **Primary Focus Areas**: Swift 6 concurrency compliance, UI performance, and duplicate content resolution
+- **User Experience Improvements**: Addressing UI jitter during sync operations and fixing attributed string rendering issues
 
 ## Recent Changes
-- Completed DatabaseCoordinator implementation with Swift 6 concurrency safety
-  - Fixed all actor-isolation and concurrency warnings
-  - Eliminated redundant array extension to avoid conflicts
-  - Refactored code to properly handle variable capture in closures
-- Removed unused variable in SyncManager's processArticlesDetached method
+- Fixed critical Swift 6 concurrency issues across multiple components:
+  - Added @MainActor constraints to LazyLoadingContentView in NewsDetailView.swift
+  - Fixed issue with NSAttributedString (non-Sendable) crossing actor boundaries
+  - Eliminated "called from background thread" warnings in attributed string processing
+  - Ensured proper main thread handling for UI-related operations
+- Enhanced error handling for article fetching with better HTTP status code detection
 - Fixed memory management in database access patterns to prevent leaks
 - Improved thread safety in synchronization code using actor isolation
 
 ## Next Steps
-1. **Fix UI Jitter During Sync**:
-   - Now that the DatabaseCoordinator is complete with proper concurrency, investigate UI performance issues
+1. **Verify Fixed Logs**:
+   - Confirm that the Swift 6 concurrency fixes have eliminated all warning messages
+   - Monitor app performance to ensure the actor-isolation changes haven't impacted responsiveness
+   - Perform systematic testing of attributed string rendering in various UI components
+
+2. **Fix UI Jitter During Sync**:
+   - Now that rich text rendering is better handled, investigate remaining UI performance issues
    - Implement smoother UI transitions during background processing
    - Profile the app to identify any remaining performance bottlenecks
 
-2. **Resolve Duplicate Content Issue**:
-   - Verify if the DatabaseCoordinator changes have affected duplicate content issues
+3. **Resolve Duplicate Content Issue**:
+   - Address the duplicate notification ID errors fixed in our recent changes
+   - Verify if the Swift 6 compliance changes have affected duplicate content issues
    - If still present, further analyze content synchronization logic
-   - Implement additional deduplication mechanisms if needed
-
-3. **Test Database Operations Under Load**:
-   - Create stress tests to verify DatabaseCoordinator stability
-   - Benchmark performance of batch operations
-   - Identify any remaining optimization opportunities
 
 ## Active Decisions and Considerations
-- **Sync Process Optimization**: 
-  - Now using DatabaseCoordinator consistently for all database operations
-  - Need to evaluate the impact of these changes on sync performance
+- **Swift 6 Concurrency Compliance**: 
+  - All NSAttributedString handling now properly respects actor isolation boundaries
+  - Using @MainActor for UI-related operations that must run on the main thread
+  - Avoiding background thread warnings with proper task contexts
 
-- **Database Refactoring**: 
-  - DatabaseCoordinator now provides a centralized, thread-safe interface
-  - Consider if further refinements to the coordinator pattern would be beneficial
+- **Rich Text Performance**: 
+  - The LazyLoadingContentView now uses a MainActor-constrained task for better efficiency
+  - Consider if additional optimizations could further improve rich text rendering performance
 
 - **Error Handling Strategy**: 
-  - Evaluate if the current error handling in DatabaseCoordinator is sufficient
-  - Consider adding more detailed diagnostics for database operations
+  - Enhanced handling of article fetching errors with proper HTTP status code detection
+  - Consider adding more detailed diagnostics for article loading failures
 
 ## Current Challenges
-- Verifying that Swift 6 concurrency fixes don't introduce new issues
-- Ensuring consistency across all code using the DatabaseCoordinator
-- Balancing between fixing existing issues and adding new features
+- Ensuring that all attributed string operations properly respect actor isolation
+- Preventing any NSAttributedString from crossing actor boundaries without proper handling
+- Balancing between fixing concurrency issues and maintaining app performance
 
 ## Recent Feedback
-- Users have reported UI performance issues during sync operations
-- Duplicate content appears in some scenarios, affecting user experience
-- Database layer flexibility has improved with the coordinator pattern
+- Users have reported log errors related to article not found and getAttributedString warnings
+- Duplicate notification IDs causing unwanted error messages in logs
+- UI performance during rich text rendering could use further optimization
 
 ## Immediate Priorities
-1. Verify that all database operations now use DatabaseCoordinator consistently
-2. Test synchronization with large datasets to ensure performance
-3. Address any remaining UI performance issues during sync operations
+1. Verify that all Swift 6 concurrency warning logs have been eliminated
+2. Perform thorough testing of the rich text rendering functionality
+3. Ensure that the fixes for duplicate notification IDs are working correctly

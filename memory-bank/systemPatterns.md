@@ -96,11 +96,18 @@ Uses Swift's background task framework to perform sync operations when the app i
 - Ensures thread safety for database operations
 - Prevents race conditions and data corruption
 - Compliant with Swift 6's stricter concurrency rules
+- Handles non-Sendable types like NSAttributedString with proper boundaries
+
+### Main Actor Constraints
+- UI-related operations are explicitly tagged with @MainActor
+- LazyLoadingContentView uses MainActor-constrained tasks for safe UI updates
+- Prevents "called from background thread" warnings with proper context switching
 
 ### Task Management
 - Uses structured concurrency with Task groups
 - Properly handles task cancellation
 - Leverages async/await for cleaner asynchronous code
+- Ensures proper actor isolation when passing data between tasks
 
 ### Transaction Management
 - Database operations are wrapped in transactions

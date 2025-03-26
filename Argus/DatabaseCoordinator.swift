@@ -699,9 +699,10 @@ actor DatabaseCoordinator {
                 context.insert(notification)
                 context.insert(seenArticle)
 
-                // Generate rich text attributes in the background
-                Task.detached {
-                    // Assuming getAttributedString might be async in the future, but currently isn't
+                // Generate rich text attributes on the main actor after transaction completes
+                // Use a fire-and-forget approach to avoid crossing actor boundaries
+                Task { @MainActor in
+                    // Explicitly discard the return value with _ to avoid warnings
                     _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
                     _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
                 }
@@ -754,9 +755,10 @@ actor DatabaseCoordinator {
                 context.insert(seenArticle)
             }
 
-            // Generate rich text attributes in the background
-            Task.detached {
-                // Assuming getAttributedString might be async in the future, but currently isn't
+            // Generate rich text attributes on the main actor after transaction completes
+            // Use a fire-and-forget approach to avoid crossing actor boundaries
+            Task { @MainActor in
+                // Explicitly discard the return value with _ to avoid warnings
                 _ = getAttributedString(for: .title, from: freshArticle, createIfMissing: true)
                 _ = getAttributedString(for: .body, from: freshArticle, createIfMissing: true)
             }
@@ -1085,9 +1087,23 @@ extension DatabaseCoordinator {
     /// - Parameter jsonURL: The URL of the article JSON
     /// - Returns: Success or failure
     func processArticle(jsonURL: String) async -> Bool {
+        // First - check if the article already exists in our database
+        // This prevents unnecessary network requests for known articles
+        if await articleExists(jsonURL: jsonURL) {
+            // Article already exists, this is a successful outcome
+            logger.debug("Article already exists, skipping fetch: \(jsonURL)")
+            return true
+        }
+
+        // Extract article ID from URL if possible, for better logging
+        let articleId = extractArticleIDFromURL(jsonURL)
+        let articleIdString = articleId?.uuidString ?? "unknown"
+
+        // Attempt to fetch and process the article
         do {
             // Fetch article data from the URL
             guard let url = URL(string: jsonURL) else {
+                logger.error("Invalid URL format: \(jsonURL)")
                 throw URLError(.badURL)
             }
 
@@ -1096,10 +1112,23 @@ extension DatabaseCoordinator {
             config.timeoutIntervalForResource = 30
             let session = URLSession(configuration: config)
 
-            let (data, _) = try await session.data(from: url)
+            // Get both data and response so we can check HTTP status
+            let (data, response) = try await session.data(from: url)
+
+            // Check for HTTP response codes
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 404 {
+                    logger.error("Article not found (404): \(jsonURL)")
+                    return false
+                } else if httpResponse.statusCode != 200 {
+                    logger.error("HTTP error \(httpResponse.statusCode) fetching article: \(jsonURL)")
+                    return false
+                }
+            }
 
             // Parse the JSON
             guard let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                logger.error("Invalid JSON format for article: \(articleIdString)")
                 throw DatabaseError.transactionError("Invalid JSON data in response")
             }
 
@@ -1111,13 +1140,20 @@ extension DatabaseCoordinator {
 
             // Convert to ArticleJSON model
             guard let articleJSON = syncProcessArticleJSON(enrichedJson) else {
+                logger.error("Failed to process article JSON: \(articleIdString)")
                 throw DatabaseError.transactionError("Failed to process article JSON")
+            }
+
+            // Double-check for duplicates after parsing
+            if let articleId = articleId, await articleExists(id: articleId) {
+                logger.debug("Article already exists (checked after parsing): \(articleIdString)")
+                return true
             }
 
             // Save the article
             let _ = try await saveArticle(articleJSON)
 
-            // Update badge count
+            // Update badge count (debounced in NotificationUtils)
             await MainActor.run {
                 NotificationUtils.updateAppBadgeCount()
             }
@@ -1125,11 +1161,37 @@ extension DatabaseCoordinator {
             return true
         } catch let error as DatabaseError where error == .duplicateArticle {
             // This is not a failure, the article already exists
+            logger.debug("Skipped duplicate article: \(articleIdString)")
             return true
+        } catch let urlError as URLError {
+            // Handle network errors specifically
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                logger.error("Network connectivity issue fetching article: \(articleIdString)")
+            case .timedOut:
+                logger.error("Request timed out fetching article: \(articleIdString)")
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                logger.error("Host connection error fetching article: \(articleIdString)")
+            default:
+                logger.error("URL error fetching article \(articleIdString): \(urlError.localizedDescription)")
+            }
+            return false
         } catch {
-            logger.error("Error processing article: \(error.localizedDescription)")
+            logger.error("Error processing article \(articleIdString): \(error.localizedDescription)")
             return false
         }
+    }
+
+    /// Extract article ID from a JSON URL
+    /// - Parameter jsonURL: The JSON URL
+    /// - Returns: UUID if extractable, nil otherwise
+    private func extractArticleIDFromURL(_ jsonURL: String) -> UUID? {
+        let fileName = jsonURL.split(separator: "/").last ?? ""
+        if let uuidRange = fileName.range(of: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", options: .regularExpression) {
+            let uuidString = String(fileName[uuidRange])
+            return UUID(uuidString: uuidString)
+        }
+        return nil
     }
 
     /// Process multiple articles in parallel
