@@ -20,7 +20,8 @@
 - **Data Format**: JSON for API communication, Markdown for article content
 
 ### Persistence
-- **Local Storage**: Likely CoreData or SQLite
+- **Local Storage**: SwiftData for database management
+- **Database Coordinator**: Actor-based centralized database operations
 - **Caching**: In-memory and disk caching for articles and images
 - **User Preferences**: UserDefaults for app settings
 

@@ -6,7 +6,9 @@
 - **User Experience Improvements**: Addressing UI jitter during sync operations
 
 ## Recent Changes
-- Currently working on stabilizing the application's core functionality
+- Implemented DatabaseCoordinator as a centralized actor-based interface for all database operations
+- Fixed Swift 6 concurrency issues in database operations
+- Improved thread safety in synchronization code
 - Addressing known technical debt items identified in the tech context
 
 ## Next Steps

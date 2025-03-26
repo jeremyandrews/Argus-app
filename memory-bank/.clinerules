@@ -25,6 +25,7 @@ This file captures important patterns, preferences, and project intelligence tha
 
 ### Data Flow
 - The SyncManager handles all data synchronization with the backend
+- The DatabaseCoordinator centralizes all database operations using the actor model
 - The ArticleQueueModel manages the queue of articles to be processed
 - View models observe data changes and update the UI accordingly
 
@@ -34,9 +35,14 @@ This file captures important patterns, preferences, and project intelligence tha
 - Background sync operations are managed in BackgroundContextManager.swift
 
 ## Known Challenges
-- Database layer is difficult to modify - requires careful planning for changes
 - UI becomes jittery during sync operations - likely due to operations on the main thread
 - Duplicate content issues occur during synchronization - need to implement better validation
+
+## Swift 6 Concurrency Patterns
+- Use @Sendable closures for any code that runs across isolation boundaries
+- Create local copies of variables captured in concurrent closures to avoid Swift 6 errors
+- Use the actor model for thread safety in shared resources (like DatabaseCoordinator)
+- Avoid directly capturing ModelContext in closures - pass it as a parameter instead
 
 ## User Workflow Preferences
 - Focus on fixing critical bugs before adding new features

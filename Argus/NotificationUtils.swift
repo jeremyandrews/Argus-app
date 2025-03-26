@@ -52,21 +52,18 @@ class NotificationUtils {
             return
         }
 
-        do {
-            let context = ArgusApp.sharedModelContainer.mainContext
-            let unviewedCount = try context.fetch(
-                FetchDescriptor<NotificationData>(
-                    predicate: #Predicate { !$0.isViewed && !$0.isArchived }
-                )
-            ).count
-
-            // Only update if the count actually changed
-            if unviewedCount != cachedUnviewedCount {
-                await setBadgeCount(unviewedCount)
-                cachedUnviewedCount = unviewedCount
+        // Use DatabaseCoordinator for thread-safe database access
+        let unviewedCount = await DatabaseCoordinator.shared.countArticles(
+            matching: #Predicate<NotificationData> { article in
+                !article.isViewed && !article.isArchived
             }
-        } catch {
-            AppLogger.database.error("Failed to fetch unviewed notifications: \(error)")
+        )
+
+        // Only update if the count actually changed
+        if unviewedCount != cachedUnviewedCount {
+            await setBadgeCount(unviewedCount)
+            cachedUnviewedCount = unviewedCount
+            AppLogger.database.debug("Badge count updated to \(unviewedCount)")
         }
     }
 

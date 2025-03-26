@@ -11,12 +11,14 @@ Argus implements a client-side architecture that focuses on:
 flowchart TD
     Backend["Backend Server"]
     SyncManager["SyncManager"]
+    DbCoord["DatabaseCoordinator"]
     LocalStorage["Local Storage"]
     NotificationSystem["Notification System"]
     UI["SwiftUI Views"]
     
     Backend <--> SyncManager
-    SyncManager --> LocalStorage
+    SyncManager --> DbCoord
+    DbCoord <--> LocalStorage
     LocalStorage --> UI
     Backend --> NotificationSystem
     NotificationSystem --> UI
@@ -27,6 +29,7 @@ flowchart TD
 ### Data Flow
 - **APIClient**: Handles all communication with the backend server
 - **SyncManager**: Orchestrates data synchronization between local storage and backend
+- **DatabaseCoordinator**: Centralizes all database operations using Swift actor model
 - **BackgroundContextManager**: Manages background tasks and sync operations
 - **ArticleQueueModel**: Manages the queue of articles to be processed and displayed
 

@@ -3,8 +3,11 @@ import Network
 import SQLite3
 import SwiftData
 import SwiftUI
-import UIKit
 import UserNotifications
+
+#if canImport(UIKit)
+    import UIKit
+#endif
 
 class AppDelegate: UIResponder, UIApplicationDelegate {
     private var isRunningUITests: Bool {
@@ -156,11 +159,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // 2. Process the article directly - use the SyncManager which handles context creation safely
+        // 2. Process the article directly using DatabaseCoordinator
         Task.detached {
-            // Let SyncManager handle the existence check and processing
-            // It manages its own context creation safely
-            let success = await SyncManager.shared.directProcessArticle(jsonURL: jsonURL)
+            // Use the DatabaseCoordinator for processing the article
+            let success = await DatabaseCoordinator.shared.processArticle(jsonURL: jsonURL)
 
             // Complete based on the result
             await finish(success ? .newData : .noData)
@@ -213,10 +215,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date())!
 
-        // Move database operations to a background context to avoid blocking the UI
+        // Use the DatabaseCoordinator for more efficient cleanup
         Task {
-            await BackgroundContextManager.shared.performBackgroundTask { context in
-                do {
+            do {
+                try await DatabaseCoordinator.shared.performTransaction { _, context in
                     // Fetch all expired NotificationData in one query
                     let notificationsToDelete = try context.fetch(
                         FetchDescriptor<NotificationData>(
@@ -235,18 +237,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                         context.delete(notification)
                     }
 
-                    // Save the deletions
-                    try context.save()
-
-                    // Update badge count on the main thread
-                    Task { @MainActor in
-                        NotificationUtils.updateAppBadgeCount()
-                    }
-
                     AppLogger.app.debug("Deleted \(notificationsToDelete.count) old notifications")
-                } catch {
-                    AppLogger.app.error("Cleanup error: \(error)")
                 }
+
+                // Update badge count on the main thread
+                await MainActor.run {
+                    NotificationUtils.updateAppBadgeCount()
+                }
+            } catch {
+                AppLogger.app.error("Cleanup error: \(error)")
             }
         }
     }
@@ -259,218 +258,217 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         isDuplicateRemovalRunning = true
 
-        // Move to background task
+        // Move to background task using DatabaseCoordinator for improved concurrency
         Task {
+            // This operation will be delegated to the DatabaseCoordinator in future updates
+            // For now we'll maintain the current implementation but run it through a transaction
+
             do {
-                // Create a fresh context
-                let context = ModelContext(ArgusApp.sharedModelContainer)
+                try await DatabaseCoordinator.shared.performTransaction { _, context in
+                    // Fetch all notifications
+                    let fetchAllDescriptor = FetchDescriptor<NotificationData>()
+                    let allNotifications = try context.fetch(fetchAllDescriptor)
 
-                // Fetch all notifications
-                let fetchAllDescriptor = FetchDescriptor<NotificationData>()
-                let allNotifications = try context.fetch(fetchAllDescriptor)
+                    AppLogger.app.debug("Starting duplicate scan on \(allNotifications.count) total notifications")
 
-                AppLogger.app.debug("Starting duplicate scan on \(allNotifications.count) total notifications")
+                    // DIFFERENT APPROACH: Use direct comparison of raw UUIDs
+                    // Create a dictionary to track seen IDs
+                    var seenIds = [String: NotificationData]()
+                    var duplicatesToRemove = [NotificationData]()
 
-                // DIFFERENT APPROACH: Use direct comparison of raw UUIDs
-                // Create a dictionary to track seen IDs
-                var seenIds = [String: NotificationData]()
-                var duplicatesToRemove = [NotificationData]()
+                    // First pass: Identify duplicate IDs
+                    for notification in allNotifications {
+                        let idString = notification.id.uuidString
 
-                // First pass: Identify duplicate IDs
-                for notification in allNotifications {
-                    let idString = notification.id.uuidString
+                        if let existing = seenIds[idString] {
+                            // Decide which one to keep
+                            let keepThis = await self.selectBestArticle(from: [existing, notification])
+                            let toRemove = keepThis === notification ? existing : notification
 
-                    if let existing = seenIds[idString] {
-                        // Decide which one to keep
-                        let keepThis = selectBestArticle(from: [existing, notification])
-                        let toRemove = keepThis === notification ? existing : notification
+                            // Replace in our tracking dictionary if needed
+                            if keepThis === notification {
+                                seenIds[idString] = notification
+                            }
 
-                        // Replace in our tracking dictionary if needed
-                        if keepThis === notification {
+                            // Mark for removal
+                            duplicatesToRemove.append(toRemove)
+                            AppLogger.app.debug("Found duplicate with ID \(idString), will keep the better version")
+                        } else {
+                            // First time seeing this ID
                             seenIds[idString] = notification
                         }
-
-                        // Mark for removal
-                        duplicatesToRemove.append(toRemove)
-                        AppLogger.app.debug("Found duplicate with ID \(idString), will keep the better version")
-                    } else {
-                        // First time seeing this ID
-                        seenIds[idString] = notification
                     }
-                }
 
-                // Remove duplicates found by ID
-                var removedCount = 0
-                for dupe in duplicatesToRemove {
-                    context.delete(dupe)
-                    removedCount += 1
-                }
+                    // Remove duplicates found by ID
+                    var removedCount = 0
+                    for dupe in duplicatesToRemove {
+                        context.delete(dupe)
+                        removedCount += 1
+                    }
 
-                if removedCount > 0 {
-                    try context.save()
-                    AppLogger.app.debug("Removed \(removedCount) duplicate notifications by ID")
-                }
+                    if removedCount > 0 {
+                        AppLogger.app.debug("Removed \(removedCount) duplicate notifications by ID")
+                    }
 
-                // Clear tracking variables to free memory
-                seenIds.removeAll()
-                duplicatesToRemove.removeAll()
+                    // Clear tracking variables to free memory
+                    seenIds.removeAll()
+                    duplicatesToRemove.removeAll()
 
-                // SECOND PHASE: Handle json_url duplicates
-                // Re-fetch to ensure we have a clean state
-                let afterIdDedup = try context.fetch(fetchAllDescriptor)
-                AppLogger.app.debug("Starting json_url duplicate scan on \(afterIdDedup.count) notifications")
+                    // SECOND PHASE: Handle json_url duplicates
+                    // Re-fetch to ensure we have a clean state
+                    let afterIdDedup = try context.fetch(fetchAllDescriptor)
+                    AppLogger.app.debug("Starting json_url duplicate scan on \(afterIdDedup.count) notifications")
 
-                // Track seen json_urls
-                var seenJsonUrls = [String: NotificationData]()
+                    // Track seen json_urls
+                    var seenJsonUrls = [String: NotificationData]()
 
-                // Need to use a new array for the second batch of removals
-                var jsonUrlDuplicatesToRemove = [NotificationData]()
+                    // Need to use a new array for the second batch of removals
+                    var jsonUrlDuplicatesToRemove = [NotificationData]()
 
-                // Filter out empty URLs
-                for notification in afterIdDedup where !notification.json_url.isEmpty {
-                    let url = notification.json_url
+                    // Filter out empty URLs
+                    for notification in afterIdDedup where !notification.json_url.isEmpty {
+                        let url = notification.json_url
 
-                    if let existing = seenJsonUrls[url] {
-                        // Same approach as ID deduplication
-                        let keepThis = selectBestArticle(from: [existing, notification])
-                        let toRemove = keepThis === notification ? existing : notification
+                        if let existing = seenJsonUrls[url] {
+                            // Same approach as ID deduplication
+                            let keepThis = await self.selectBestArticle(from: [existing, notification])
+                            let toRemove = keepThis === notification ? existing : notification
 
-                        // Replace in tracking if needed
-                        if keepThis === notification {
+                            // Replace in tracking if needed
+                            if keepThis === notification {
+                                seenJsonUrls[url] = notification
+                            }
+
+                            // Mark for removal
+                            jsonUrlDuplicatesToRemove.append(toRemove)
+                            AppLogger.app.debug("Found duplicate with json_url \(url), will keep the better version")
+                        } else {
                             seenJsonUrls[url] = notification
                         }
-
-                        // Mark for removal
-                        jsonUrlDuplicatesToRemove.append(toRemove)
-                        AppLogger.app.debug("Found duplicate with json_url \(url), will keep the better version")
-                    } else {
-                        seenJsonUrls[url] = notification
-                    }
-                }
-
-                // Remove json_url duplicates
-                removedCount = 0
-                for dupe in jsonUrlDuplicatesToRemove {
-                    context.delete(dupe)
-                    removedCount += 1
-                }
-
-                if removedCount > 0 {
-                    try context.save()
-                    AppLogger.app.debug("Removed \(removedCount) duplicate notifications by json_url")
-                }
-
-                // Clear tracking variables again
-                seenJsonUrls.removeAll()
-                jsonUrlDuplicatesToRemove.removeAll()
-
-                // THIRD PHASE: Handle article_url duplicates
-                // Re-fetch again
-                let afterJsonUrlDedup = try context.fetch(fetchAllDescriptor)
-                AppLogger.app.debug("Starting article_url duplicate scan on \(afterJsonUrlDedup.count) notifications")
-
-                // Track seen article_urls
-                var seenArticleUrls = [String: NotificationData]()
-                var articleUrlDuplicatesToRemove = [NotificationData]()
-
-                // Filter out empty or nil article_urls
-                for notification in afterJsonUrlDedup {
-                    guard let url = notification.article_url, !url.isEmpty else {
-                        continue
                     }
 
-                    if let existing = seenArticleUrls[url] {
-                        let keepThis = selectBestArticle(from: [existing, notification])
-                        let toRemove = keepThis === notification ? existing : notification
+                    // Remove json_url duplicates
+                    removedCount = 0
+                    for dupe in jsonUrlDuplicatesToRemove {
+                        context.delete(dupe)
+                        removedCount += 1
+                    }
 
-                        if keepThis === notification {
+                    if removedCount > 0 {
+                        AppLogger.app.debug("Removed \(removedCount) duplicate notifications by json_url")
+                    }
+
+                    // Clear tracking variables again
+                    seenJsonUrls.removeAll()
+                    jsonUrlDuplicatesToRemove.removeAll()
+
+                    // THIRD PHASE: Handle article_url duplicates
+                    // Re-fetch again
+                    let afterJsonUrlDedup = try context.fetch(fetchAllDescriptor)
+                    AppLogger.app.debug("Starting article_url duplicate scan on \(afterJsonUrlDedup.count) notifications")
+
+                    // Track seen article_urls
+                    var seenArticleUrls = [String: NotificationData]()
+                    var articleUrlDuplicatesToRemove = [NotificationData]()
+
+                    // Filter out empty or nil article_urls
+                    for notification in afterJsonUrlDedup {
+                        guard let url = notification.article_url, !url.isEmpty else {
+                            continue
+                        }
+
+                        if let existing = seenArticleUrls[url] {
+                            let keepThis = await self.selectBestArticle(from: [existing, notification])
+                            let toRemove = keepThis === notification ? existing : notification
+
+                            if keepThis === notification {
+                                seenArticleUrls[url] = notification
+                            }
+
+                            articleUrlDuplicatesToRemove.append(toRemove)
+                            AppLogger.app.debug("Found duplicate with article_url \(url), will keep the better version")
+                        } else {
                             seenArticleUrls[url] = notification
                         }
-
-                        articleUrlDuplicatesToRemove.append(toRemove)
-                        AppLogger.app.debug("Found duplicate with article_url \(url), will keep the better version")
-                    } else {
-                        seenArticleUrls[url] = notification
                     }
-                }
 
-                // Remove article_url duplicates
-                removedCount = 0
-                for dupe in articleUrlDuplicatesToRemove {
-                    context.delete(dupe)
-                    removedCount += 1
-                }
-
-                if removedCount > 0 {
-                    try context.save()
-                    AppLogger.app.debug("Removed \(removedCount) duplicate notifications by article_url")
-                }
-
-                // Final verification
-                let finalCheck = try context.fetch(fetchAllDescriptor)
-
-                // DIRECT CHECK: Hard scan for any remaining duplicates
-                var seenIdsInFinalCheck = Set<String>()
-                var remainingDuplicates = 0
-                var duplicatedIds = [String]()
-
-                for notification in finalCheck {
-                    let idString = notification.id.uuidString
-                    if seenIdsInFinalCheck.contains(idString) {
-                        remainingDuplicates += 1
-                        duplicatedIds.append(idString)
-                    } else {
-                        seenIdsInFinalCheck.insert(idString)
+                    // Remove article_url duplicates
+                    removedCount = 0
+                    for dupe in articleUrlDuplicatesToRemove {
+                        context.delete(dupe)
+                        removedCount += 1
                     }
-                }
 
-                if remainingDuplicates > 0 {
-                    // Log the first few duplicate IDs found
-                    let uniqueDuplicatedIds = Array(Set(duplicatedIds))
-                    let truncatedList = uniqueDuplicatedIds.prefix(5).joined(separator: ", ")
+                    if removedCount > 0 {
+                        AppLogger.app.debug("Removed \(removedCount) duplicate notifications by article_url")
+                    }
 
-                    AppLogger.app.warning("WARNING: \(remainingDuplicates) duplicate IDs still remain after cleanup.")
-                    AppLogger.app.warning("Sample duplicated IDs: \(truncatedList)")
+                    // Final verification
+                    let finalCheck = try context.fetch(fetchAllDescriptor)
 
-                    // EMERGENCY FALLBACK: Try one more time with direct ID-based removal
-                    if uniqueDuplicatedIds.count > 0 {
-                        AppLogger.app.debug("Attempting emergency cleanup of remaining duplicates")
-                        var emergencyRemovalCount = 0
+                    // DIRECT CHECK: Hard scan for any remaining duplicates
+                    var seenIdsInFinalCheck = Set<String>()
+                    var remainingDuplicates = 0
+                    var duplicatedIds = [String]()
 
-                        // Group notifications by ID for final cleanup
-                        let groupedById = Dictionary(grouping: finalCheck) { $0.id.uuidString }
+                    for notification in finalCheck {
+                        let idString = notification.id.uuidString
+                        if seenIdsInFinalCheck.contains(idString) {
+                            remainingDuplicates += 1
+                            duplicatedIds.append(idString)
+                        } else {
+                            seenIdsInFinalCheck.insert(idString)
+                        }
+                    }
 
-                        // Process each group of duplicates
-                        for (_, group) in groupedById where group.count > 1 {
-                            // Keep only the best one
-                            let best = selectBestArticle(from: group)
-                            let toRemove = group.filter { $0 !== best }
+                    if remainingDuplicates > 0 {
+                        // Log the first few duplicate IDs found
+                        let uniqueDuplicatedIds = Array(Set(duplicatedIds))
+                        let truncatedList = uniqueDuplicatedIds.prefix(5).joined(separator: ", ")
 
-                            // Remove the duplicates
-                            for dupe in toRemove {
-                                context.delete(dupe)
-                                emergencyRemovalCount += 1
+                        AppLogger.app.warning("WARNING: \(remainingDuplicates) duplicate IDs still remain after cleanup.")
+                        AppLogger.app.warning("Sample duplicated IDs: \(truncatedList)")
+
+                        // EMERGENCY FALLBACK: Try one more time with direct ID-based removal
+                        if uniqueDuplicatedIds.count > 0 {
+                            AppLogger.app.debug("Attempting emergency cleanup of remaining duplicates")
+                            var emergencyRemovalCount = 0
+
+                            // Group notifications by ID for final cleanup
+                            let groupedById = Dictionary(grouping: finalCheck) { $0.id.uuidString }
+
+                            // Process each group of duplicates
+                            for (_, group) in groupedById where group.count > 1 {
+                                // Keep only the best one
+                                let best = await self.selectBestArticle(from: group)
+                                let toRemove = group.filter { $0 !== best }
+
+                                // Remove the duplicates
+                                for dupe in toRemove {
+                                    context.delete(dupe)
+                                    emergencyRemovalCount += 1
+                                }
+                            }
+
+                            if emergencyRemovalCount > 0 {
+                                AppLogger.app.debug("Emergency cleanup: removed \(emergencyRemovalCount) remaining duplicates")
                             }
                         }
+                    }
 
-                        if emergencyRemovalCount > 0 {
-                            try context.save()
-                            AppLogger.app.debug("Emergency cleanup: removed \(emergencyRemovalCount) remaining duplicates")
-                        }
+                    let totalRemoved = duplicatesToRemove.count + jsonUrlDuplicatesToRemove.count +
+                        articleUrlDuplicatesToRemove.count
+
+                    if totalRemoved > 0 {
+                        AppLogger.app.info("✅ Removing \(totalRemoved) total duplicates")
+                    } else {
+                        AppLogger.app.info("No duplicates found to remove.")
                     }
                 }
 
-                let totalRemoved = duplicatesToRemove.count + jsonUrlDuplicatesToRemove.count +
-                    articleUrlDuplicatesToRemove.count
-
-                if totalRemoved > 0 {
-                    AppLogger.app.info("✅ Removed \(totalRemoved) total duplicates")
-
-                    Task { @MainActor in
-                        NotificationUtils.updateAppBadgeCount()
-                    }
-                } else {
-                    AppLogger.app.info("No duplicates found to remove.")
+                // Update badge count after transaction completes
+                await MainActor.run {
+                    NotificationUtils.updateAppBadgeCount()
                 }
 
             } catch {
