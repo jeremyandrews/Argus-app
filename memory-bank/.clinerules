@@ -26,23 +26,65 @@ This file captures important patterns, preferences, and project intelligence tha
 ### Data Flow
 - The SyncManager handles all data synchronization with the backend
 - The DatabaseCoordinator centralizes all database operations using the actor model
-- The ArticleQueueModel manages the queue of articles to be processed
 - View models observe data changes and update the UI accordingly
 
 ### Known Implementation Paths
 - Push notifications are set up using the Apple Push Notification Service and the AuthKey_KKR79MB4FW.p8 file
 - Markdown conversion happens in MarkdownUtilities.swift
 - Background sync operations are managed in BackgroundContextManager.swift
+- Array chunking utilities are in ArrayExtensions.swift
+
+## Swift 6 Concurrency Patterns
+
+### Actor Model Implementation
+- The DatabaseCoordinator is implemented as a Swift actor to provide thread-safe access to SwiftData
+- All database operations should go through the DatabaseCoordinator to ensure isolation
+- Use the pattern: `await DatabaseCoordinator.shared.methodName()` for all database operations
+
+### Variable Capture in Closures
+- Create local copies of captured variables before using them in closures:
+  ```swift
+  let localCopy = capturedVariable
+  // Use localCopy in closure instead of directly using capturedVariable
+  ```
+- When dealing with collections within actors, prefer collecting results in local collections first, then update actor-isolated state in a single step
+
+### Transaction Patterns
+- Use the performTransaction pattern for all database operations:
+  ```swift
+  try await performTransaction { coordinator, context in
+      // Use context for database operations
+      // Return result that will be returned from performTransaction
+  }
+  ```
+- Add fallback paths for transaction errors, e.g.:
+  ```swift
+  return (try? await performTransaction { ... }) ?? defaultValue
+  ```
+
+### Batch Processing
+- When processing batches of items, use ArrayExtensions.chunked(into:) to create smaller batches:
+  ```swift
+  for batch in items.chunked(into: 100) {
+      // Process batch
+  }
+  ```
+- Use Swift's TaskGroup for concurrent processing while controlling maximum concurrency
+
+### NSCache Usage
+- NSCache is not Sendable - avoid directly accessing actor-isolated NSCache properties from closures
+- Instead, read values from caches at the beginning of functions, then use locals in closures
+- Update caches after transaction completion, not within transaction blocks
 
 ## Known Challenges
 - UI becomes jittery during sync operations - likely due to operations on the main thread
-- Duplicate content issues occur during synchronization - need to implement better validation
+- Duplicate content issues occur during synchronization - may be improved by DatabaseCoordinator's batch detection
 
-## Swift 6 Concurrency Patterns
-- Use @Sendable closures for any code that runs across isolation boundaries
-- Create local copies of variables captured in concurrent closures to avoid Swift 6 errors
-- Use the actor model for thread safety in shared resources (like DatabaseCoordinator)
-- Avoid directly capturing ModelContext in closures - pass it as a parameter instead
+## SyncManager and DatabaseCoordinator Integration
+- SyncManager delegates all database operations to DatabaseCoordinator
+- SyncManager.processArticlesDetached handles batch processing
+- SyncManager handles network operations, but DatabaseCoordinator performs all database interactions
+- Duplication prevention uses both SyncManager's registry and DatabaseCoordinator's existence checks
 
 ## User Workflow Preferences
 - Focus on fixing critical bugs before adding new features
@@ -53,3 +95,4 @@ This file captures important patterns, preferences, and project intelligence tha
 - UI tests are located in ArgusUITests directory
 - Use TestHelpers.swift for common test utilities
 - Critical user flows should have dedicated UI tests
+- Add stress tests for DatabaseCoordinator to verify concurrency safety

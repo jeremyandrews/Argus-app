@@ -52,4 +52,31 @@ extension Collection {
     }
 }
 
+// MARK: - Array Batch Processing Extensions
+
+extension Array {
+    /// Split an array into chunks of specified size
+    /// - Parameter size: The maximum size for each chunk
+    /// - Returns: An array of arrays, where each inner array has at most `size` elements
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0, !isEmpty else { return [self] }
+
+        // Calculate the number of chunks needed
+        let numChunks = (count + size - 1) / size
+
+        // Initialize the result array with the right capacity
+        var result = [[Element]]()
+        result.reserveCapacity(numChunks)
+
+        // Split the array into chunks
+        for chunkIndex in 0 ..< numChunks {
+            let start = chunkIndex * size
+            let end = Swift.min(start + size, count)
+            result.append(Array(self[start ..< end]))
+        }
+
+        return result
+    }
+}
+
 // Note: The effectiveDate property is defined in MarkdownUtilities.swift

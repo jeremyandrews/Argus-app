@@ -612,13 +612,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 }
 
-extension Array {
-    func chunked(into size: Int) -> [[Element]] {
-        stride(from: 0, to: count, by: size).map {
-            Array(self[$0 ..< Swift.min($0 + size, count)])
-        }
-    }
-}
+// Array chunking is now defined in ArrayExtensions.swift
 
 extension Notification.Name {
     static let willDeleteArticle = Notification.Name("willDeleteArticle")
