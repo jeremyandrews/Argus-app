@@ -51,6 +51,19 @@ This file captures important patterns, preferences, and project intelligence tha
       // Use attributedString here, within MainActor context
   }
   ```
+- Generate rich text synchronously during database operations:
+  ```swift
+  // Wrong: Asynchronous fire-and-forget approach causes race conditions
+  Task { @MainActor in
+      _ = getAttributedString(for: .title, from: article)
+  }
+  
+  // Correct: Synchronous generation ensures rich text exists before transaction completes
+  await MainActor.run {
+      _ = getAttributedString(for: .title, from: article)
+      _ = getAttributedString(for: .body, from: article)
+  }
+  ```
 
 ### Actor Model Implementation
 - The DatabaseCoordinator is implemented as a Swift actor to provide thread-safe access to SwiftData

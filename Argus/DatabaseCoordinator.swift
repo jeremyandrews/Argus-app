@@ -692,6 +692,12 @@ actor DatabaseCoordinator {
                 if (try? context.fetch(existingSeenCheck).first) == nil {
                     context.insert(seenArticle)
                 }
+                
+                // Generate rich text synchronously for the duplicate
+                await MainActor.run {
+                    _ = getAttributedString(for: .title, from: existingDuplicate, createIfMissing: true)
+                    _ = getAttributedString(for: .body, from: existingDuplicate, createIfMissing: true)
+                }
 
                 return existingDuplicate
             } else {
@@ -699,10 +705,9 @@ actor DatabaseCoordinator {
                 context.insert(notification)
                 context.insert(seenArticle)
 
-                // Generate rich text attributes on the main actor after transaction completes
-                // Use a fire-and-forget approach to avoid crossing actor boundaries
-                Task { @MainActor in
-                    // Explicitly discard the return value with _ to avoid warnings
+                // Generate rich text attributes synchronously on the main actor
+                // This ensures rich text is created before the article is saved
+                await MainActor.run {
                     _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
                     _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
                 }
@@ -755,10 +760,9 @@ actor DatabaseCoordinator {
                 context.insert(seenArticle)
             }
 
-            // Generate rich text attributes on the main actor after transaction completes
-            // Use a fire-and-forget approach to avoid crossing actor boundaries
-            Task { @MainActor in
-                // Explicitly discard the return value with _ to avoid warnings
+            // Generate rich text attributes synchronously on the main actor 
+            // This ensures rich text is created before the transaction completes
+            await MainActor.run {
                 _ = getAttributedString(for: .title, from: freshArticle, createIfMissing: true)
                 _ = getAttributedString(for: .body, from: freshArticle, createIfMissing: true)
             }
@@ -1087,8 +1091,8 @@ extension DatabaseCoordinator {
     /// - Parameter jsonURL: The URL of the article JSON
     /// - Returns: Success or failure
     func processArticle(jsonURL: String) async -> Bool {
-        // First - check if the article already exists in our database
-        // This prevents unnecessary network requests for known articles
+        // First - perform a thorough check if the article already exists in our database
+        // This prevents unnecessary network requests and duplicate articles
         if await articleExists(jsonURL: jsonURL) {
             // Article already exists, this is a successful outcome
             logger.debug("Article already exists, skipping fetch: \(jsonURL)")

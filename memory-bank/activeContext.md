@@ -6,6 +6,10 @@
 - **User Experience Improvements**: Addressing UI jitter during sync operations and fixing attributed string rendering issues
 
 ## Recent Changes
+- Fixed duplicate article issue by making rich text generation synchronous:
+  - Modified the `saveArticle` and `updateArticle` methods in DatabaseCoordinator to use synchronous rich text generation
+  - Changed from fire-and-forget tasks (`Task { @MainActor in ... }`) to awaited calls (`await MainActor.run { ... }`)
+  - Ensured rich text is generated before database transactions complete
 - Fixed critical Swift 6 concurrency issues across multiple components:
   - Added @MainActor constraints to LazyLoadingContentView in NewsDetailView.swift
   - Fixed issue with NSAttributedString (non-Sendable) crossing actor boundaries

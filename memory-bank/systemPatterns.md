@@ -40,7 +40,7 @@ flowchart TD
 - **SettingsView**: Handles user preferences
 
 ### Data Processing
-- **MarkdownUtilities**: Converts Markdown content to rich text
+- **MarkdownUtilities**: Converts Markdown content to rich text with synchronized generation
 - **QualityBadges**: Visual indicators for article quality metrics
 - **ArticleModels**: Data models for articles and related entities
 - **ArrayExtensions**: Provides utility extensions like chunking for batch processing
@@ -113,6 +113,12 @@ Uses Swift's background task framework to perform sync operations when the app i
 - Database operations are wrapped in transactions
 - Proper error handling and rollback mechanisms
 - Optimistic locking to prevent conflicts
+
+### Synchronous Rich Text Generation
+- Rich text generation for articles is performed synchronously during database transactions
+- Uses `await MainActor.run { ... }` to ensure all rich text blobs are generated before completion
+- Prevents duplicate articles with inconsistent rich text state
+- Ensures UI always has access to pre-rendered rich text content
 
 ## Data Persistence
 - SwiftData for local storage of articles and user preferences

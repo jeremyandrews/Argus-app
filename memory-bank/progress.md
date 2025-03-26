@@ -39,10 +39,16 @@
   - UI jitter during sync still needs to be addressed
 
 - 🔶 **Data Consistency**
-  - Fixing duplicate content display issue
   - Improving validation of synchronized content
+  - Testing fixes for data integrity issues
 
 ## Recently Completed
+
+- ✅ **Duplicate Content Resolution**
+  - Fixed issue where articles appeared twice in lists (with and without rich text)
+  - Made rich text generation synchronous during article save/update
+  - Ensured all articles are stored with rich text already processed
+  - Eliminated race conditions in content processing pipeline
 
 - ✅ **Swift 6 Concurrency Compliance**
   - Fixed critical issues with NSAttributedString crossing actor boundaries
@@ -86,12 +92,7 @@
    - Status: May be partially improved by recent NSAttributedString handling fixes
    - Priority: High
    
-2. **Duplicate Content**
-   - Some articles appear twice in article lists
-   - Status: Fixed duplicate notification ID errors; verification needed
-   - Priority: High
-   
-3. **Database Limitations**
+2. **Database Limitations**
    - Current database design is difficult to modify
    - Status: Improved by DatabaseCoordinator implementation; assessment ongoing
    - Priority: Medium
@@ -127,5 +128,5 @@
 
 - **Features Completed**: 6/9 core features fully implemented
 - **Swift 6 Compatibility**: Major milestone reached with latest NSAttributedString fixes
-- **Known Bugs**: 3 high-priority issues, 2 potentially addressed by recent changes
+- **Known Bugs**: 2 high-priority issues, both potentially affected by recent changes
 - **Test Coverage**: ~70% of non-UI code
