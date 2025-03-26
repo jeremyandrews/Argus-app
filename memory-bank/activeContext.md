@@ -6,6 +6,11 @@
 - **User Experience Improvements**: Addressing UI jitter during sync operations and fixing attributed string rendering issues
 
 ## Recent Changes
+- Implemented optimized topic switching using the shared DatabaseCoordinator:
+  - Created direct database access path for topics to bypass in-memory filtering
+  - Added two-tier caching approach for immediate UI feedback during topic changes
+  - Implemented topic-specific filter combination for optimal database queries
+  - Modified NewsView to leverage the new database paths for faster topic switching
 - Fixed duplicate article issue by making rich text generation synchronous:
   - Modified the `saveArticle` and `updateArticle` methods in DatabaseCoordinator to use synchronous rich text generation
   - Changed from fire-and-forget tasks (`Task { @MainActor in ... }`) to awaited calls (`await MainActor.run { ... }`)
@@ -25,15 +30,20 @@
    - Monitor app performance to ensure the actor-isolation changes haven't impacted responsiveness
    - Perform systematic testing of attributed string rendering in various UI components
 
-2. **Fix UI Jitter During Sync**:
-   - Now that rich text rendering is better handled, investigate remaining UI performance issues
+2. **Verify Topic Switching Performance Improvements**:
+   - Confirm that the implementation using DatabaseCoordinator's specialized query methods has improved speed
+   - Test with large datasets to ensure performance improvements scale properly
+   - Monitor memory usage during rapid topic switching to ensure efficient resource usage
+
+3. **Continue UI Jitter Improvements**:
+   - Now that topic switching is optimized, address remaining UI jitter during sync operations
    - Implement smoother UI transitions during background processing
    - Profile the app to identify any remaining performance bottlenecks
 
-3. **Resolve Duplicate Content Issue**:
-   - Address the duplicate notification ID errors fixed in our recent changes
-   - Verify if the Swift 6 compliance changes have affected duplicate content issues
-   - If still present, further analyze content synchronization logic
+4. **Verify Duplicate Content Resolution**:
+   - Ensure that the optimized database access doesn't reintroduce duplicate content issues
+   - Verify that the actor isolation is properly maintained with the new database methods
+   - Confirm that rich text generation is still properly synchronized
 
 ## Active Decisions and Considerations
 - **Swift 6 Concurrency Compliance**: 

@@ -275,18 +275,38 @@ struct NewsView: View {
     //   - topicChanged: Whether the selected topic has changed (requires immediate update)
     //   - newTopic: The new topic if topic has changed
     //   - isDataChange: Whether this is a data change rather than a filter settings change
-    private func handleFilterChange(topicChanged: Bool = false, newTopic _: String? = nil, isDataChange: Bool = false) {
+    private func handleFilterChange(topicChanged: Bool = false, newTopic: String? = nil, isDataChange: Bool = false) {
         // Cancel any pending debounced update
         filterChangeDebouncer?.cancel()
 
         // Handle topic change - these need immediate attention
         if topicChanged {
             needsScrollReset = true
-            // We don't need to update lastSelectedTopic here as that's handled in the button action
-            // This function is the fallback path if cache-based topic switching doesn't cover the case
+            
+            // First use cache if available for immediate feedback
+            let topicToUse = newTopic ?? selectedTopic
+            if isCacheValid && notificationsCache.keys.contains(topicToUse) {
+                let cachedTopicData = notificationsCache[topicToUse] ?? []
+                let filtered = filterNotificationsWithCurrentSettings(cachedTopicData)
+                
+                // Update UI immediately with cached data
+                Task(priority: .userInitiated) {
+                    let updatedGrouping = await createGroupedNotifications(filtered)
+                    
+                    await MainActor.run {
+                        self.filteredNotifications = filtered
+                        self.sortedAndGroupedNotifications = updatedGrouping
+                    }
+                }
+            }
+            
+            // Then fall back to traditional filtering since we had an issue with the database method
             updateFilteredNotifications(force: true)
             return
         }
+        
+        // Fallback for when we don't have a topic change
+        updateFilteredNotifications(force: true)
 
         // Check if this is a filter change that needs topic reset
         if needsTopicReset && !isDataChange {
@@ -326,8 +346,28 @@ struct NewsView: View {
             // Update the last change timestamp
             await MainActor.run {
                 lastFilterChangeTime = Date()
-                // Now actually perform the update
-                updateFilteredNotifications(force: false)
+
+                // Use the optimized database method for filter changes
+                Task(priority: .userInitiated) {
+                    let articles = await DatabaseCoordinator.shared.fetchArticlesForTopic(
+                        selectedTopic,
+                        showUnreadOnly: showUnreadOnly,
+                        showBookmarkedOnly: showBookmarkedOnly,
+                        showArchivedContent: showArchivedContent
+                    )
+
+                    let updatedGrouping = await createGroupedNotifications(articles)
+
+                    await MainActor.run {
+                        self.filteredNotifications = articles
+                        self.sortedAndGroupedNotifications = updatedGrouping
+
+                        // Update cache
+                        self.notificationsCache[selectedTopic] = articles
+                        self.lastCacheUpdate = Date()
+                        self.isCacheValid = true
+                    }
+                }
             }
         }
     }
@@ -1059,49 +1099,56 @@ struct NewsView: View {
 
     // MARK: - Logic / Helpers
 
-    // Fast path for topic switching using cache
+    // Fast path for topic switching using shared database manager
     @MainActor
     private func updateTopicFromCache(newTopic: String, previousTopic _: String) {
-        // Check if we have this topic in the cache already
+        // First check if we have this topic in the cache for immediate feedback
         if isCacheValid && notificationsCache.keys.contains(newTopic) {
-            // Get the cached data for this topic
+            // Show instant UI update from cache
             let cachedTopicData = notificationsCache[newTopic] ?? []
-
-            // Apply filters to the cached data
             let filtered = filterNotificationsWithCurrentSettings(cachedTopicData)
 
-            // Show an immediate UI update from cache
+            // Update UI immediately with cached data
             Task(priority: .userInitiated) {
-                // Create groups in the background to not block UI
                 let updatedGrouping = await createGroupedNotifications(filtered)
 
-                // Update UI with minimal delay
                 await MainActor.run {
                     self.filteredNotifications = filtered
                     self.sortedAndGroupedNotifications = updatedGrouping
                 }
             }
+        }
 
-            // Then trigger a background refresh to ensure data is fresh
-            // but with lower priority to not impact UI responsiveness
-            Task(priority: .background) {
-                // Allow UI to update first before doing any heavy work
-                try? await Task.sleep(for: .seconds(0.1))
+        // Then use the optimized DatabaseCoordinator to get fresh data
+        // even if we had cached data, we refresh to ensure accuracy
+        Task(priority: isCacheValid ? .background : .userInitiated) {
+            // Use the new optimized database method
+            let articles = await DatabaseCoordinator.shared.fetchArticlesForTopic(
+                newTopic,
+                showUnreadOnly: showUnreadOnly,
+                showBookmarkedOnly: showBookmarkedOnly,
+                showArchivedContent: showArchivedContent
+            )
 
-                // Check for any new content in the background
-                let hasNewContent = await checkForNewContent()
-                if hasNewContent {
-                    // Only do a full data refresh if there's actually new content
-                    await MainActor.run {
-                        updateFilteredNotifications(force: true)
-                    }
+            // If we got fresh data from the database, update the UI
+            if !articles.isEmpty {
+                let updatedGrouping = await createGroupedNotifications(articles)
+
+                await MainActor.run {
+                    // Update the UI with the fresh data
+                    self.filteredNotifications = articles
+                    self.sortedAndGroupedNotifications = updatedGrouping
+
+                    // Update cache with the fresh data
+                    self.notificationsCache[newTopic] = articles
+                    self.lastCacheUpdate = Date()
+                    self.isCacheValid = true
                 }
-            }
-        } else {
-            // No cache available, fall back to normal path
-            // But reduce the initial hit by doing immediate visual feedback
-            Task(priority: .userInitiated) {
-                updateFilteredNotifications(force: true)
+            } else if !isCacheValid || !notificationsCache.keys.contains(newTopic) {
+                // Only fall back to traditional method if we don't have cached data
+                await MainActor.run {
+                    updateFilteredNotifications(force: true)
+                }
             }
         }
     }

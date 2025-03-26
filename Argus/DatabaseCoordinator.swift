@@ -692,7 +692,7 @@ actor DatabaseCoordinator {
                 if (try? context.fetch(existingSeenCheck).first) == nil {
                     context.insert(seenArticle)
                 }
-                
+
                 // Generate rich text synchronously for the duplicate
                 await MainActor.run {
                     _ = getAttributedString(for: .title, from: existingDuplicate, createIfMissing: true)
@@ -760,7 +760,7 @@ actor DatabaseCoordinator {
                 context.insert(seenArticle)
             }
 
-            // Generate rich text attributes synchronously on the main actor 
+            // Generate rich text attributes synchronously on the main actor
             // This ensures rich text is created before the transaction completes
             await MainActor.run {
                 _ = getAttributedString(for: .title, from: freshArticle, createIfMissing: true)
@@ -816,6 +816,89 @@ actor DatabaseCoordinator {
     }
 
     // MARK: - Query Operations
+
+    /// Fetch articles for a specific topic with optimized performance
+    /// - Parameters:
+    ///   - topic: The topic to filter by, or "All" for all topics
+    ///   - showUnreadOnly: Whether to show only unread articles
+    ///   - showBookmarkedOnly: Whether to show only bookmarked articles
+    ///   - showArchivedContent: Whether to show archived content
+    /// - Returns: Array of filtered notifications
+    func fetchArticlesForTopic(
+        _ topic: String,
+        showUnreadOnly: Bool,
+        showBookmarkedOnly: Bool,
+        showArchivedContent: Bool
+    ) async -> [NotificationData] {
+        // Use a transaction that returns the result array directly
+        let results = try? await performTransaction { _, context in
+            // Build an optimized predicate based on filter combination
+            var predicate: Predicate<NotificationData>?
+
+            // 1. Apply topic filter if not "All"
+            if topic != "All" {
+                predicate = #Predicate<NotificationData> { article in
+                    article.topic == topic
+                }
+            }
+
+            // 2. Apply unread filter if needed
+            if showUnreadOnly {
+                let unreadPredicate = #Predicate<NotificationData> { article in
+                    !article.isViewed
+                }
+
+                if let existingPredicate = predicate {
+                    predicate = #Predicate<NotificationData> { article in
+                        existingPredicate.evaluate(article) && unreadPredicate.evaluate(article)
+                    }
+                } else {
+                    predicate = unreadPredicate
+                }
+            }
+
+            // 3. Apply bookmarked filter if needed
+            if showBookmarkedOnly {
+                let bookmarkedPredicate = #Predicate<NotificationData> { article in
+                    article.isBookmarked
+                }
+
+                if let existingPredicate = predicate {
+                    predicate = #Predicate<NotificationData> { article in
+                        existingPredicate.evaluate(article) && bookmarkedPredicate.evaluate(article)
+                    }
+                } else {
+                    predicate = bookmarkedPredicate
+                }
+            }
+
+            // 4. Apply archived filter if needed
+            if !showArchivedContent {
+                let notArchivedPredicate = #Predicate<NotificationData> { article in
+                    !article.isArchived
+                }
+
+                if let existingPredicate = predicate {
+                    predicate = #Predicate<NotificationData> { article in
+                        existingPredicate.evaluate(article) && notArchivedPredicate.evaluate(article)
+                    }
+                } else {
+                    predicate = notArchivedPredicate
+                }
+            }
+
+            // Create the fetch descriptor with our optimized predicate
+            let descriptor = FetchDescriptor<NotificationData>(
+                predicate: predicate,
+                sortBy: [SortDescriptor(\.pub_date, order: .reverse)]
+            )
+
+            // Fetch and return in a single transaction for better performance
+            return try context.fetch(descriptor)
+        }
+
+        return results ?? []
+    }
 
     /// Fetch recent articles since a specified date
     /// - Parameter date: The date to fetch articles from

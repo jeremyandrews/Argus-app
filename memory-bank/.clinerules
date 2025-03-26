@@ -105,10 +105,40 @@ This file captures important patterns, preferences, and project intelligence tha
 - Instead, read values from caches at the beginning of functions, then use locals in closures
 - Update caches after transaction completion, not within transaction blocks
 
+### SwiftData Context Safety Patterns
+- Always implement a fallback mechanism when using direct DatabaseCoordinator methods
+- For topic switching, use a two-tier approach:
+  ```swift
+  // First tier: Immediate UI update from cache
+  if isCacheValid && notificationsCache.keys.contains(topicToUse) {
+      let cachedTopicData = notificationsCache[topicToUse] ?? []
+      let filtered = filterNotificationsWithCurrentSettings(cachedTopicData)
+      
+      // Update UI immediately with cached data
+      Task(priority: .userInitiated) {
+          let updatedGrouping = await createGroupedNotifications(filtered)
+          
+          await MainActor.run {
+              self.filteredNotifications = filtered
+              self.sortedAndGroupedNotifications = updatedGrouping
+          }
+      }
+  }
+  
+  // Second tier: Fall back to traditional filtering if DatabaseCoordinator methods fail
+  updateFilteredNotifications(force: true)
+  ```
+- Avoid context.save() inside complex asynchronous operations that might cause EXC_BAD_ACCESS
+- When DatabaseCoordinator methods fail with context issues, catch the error and use established filtering methods
+
 ## Known Challenges
 - UI becomes jittery during sync operations - likely due to operations on the main thread
 - Duplicate content issues occur during synchronization - may be improved by DatabaseCoordinator's batch detection
 - Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - fixed in most places but worth monitoring
+- SwiftData context access issues can cause EXC_BAD_ACCESS crashes during context.save() operations, especially when:
+  - Multiple tasks attempt to use the same context
+  - Contexts are accessed across actor boundaries
+  - Long-running operations hold references to contexts
 
 ## SyncManager and DatabaseCoordinator Integration
 - SyncManager delegates all database operations to DatabaseCoordinator

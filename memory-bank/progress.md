@@ -35,14 +35,21 @@
 ## What's In Progress
 
 - 🔶 **Sync Process Optimization**
-  - Background sync process improvements underway using DatabaseCoordinator
-  - UI jitter during sync still needs to be addressed
+  - Background sync process improvements underway using DatabaseCoordinator 
+  - UI jitter during sync operations still needs to be addressed
 
 - 🔶 **Data Consistency**
   - Improving validation of synchronized content
   - Testing fixes for data integrity issues
 
 ## Recently Completed
+
+- ✅ **Topic Switching Optimization**
+  - Implemented direct database access path for topics using DatabaseCoordinator
+  - Added two-tier caching approach for immediate visual feedback during topic changes
+  - Created specialized database query that combines all filter criteria in a single operation
+  - Eliminated redundant in-memory filtering by moving filter logic to database level
+  - Significantly reduced topic switching time especially with large datasets
 
 - ✅ **Duplicate Content Resolution**
   - Fixed issue where articles appeared twice in lists (with and without rich text)

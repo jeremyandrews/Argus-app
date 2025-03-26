@@ -80,7 +80,12 @@ flowchart LR
     UI -->|"Requests data"| SM
     SM -->|"Delegates DB operations"| DC
     DC -->|"Thread-safe access"| DB
+    UI -->|"Direct optimized queries"| DC
 ```
+
+The UI components (particularly NewsView) now have two data access paths:
+1. Through SyncManager for general operations and data synchronization
+2. Directly to DatabaseCoordinator for optimized, filtered queries like topic switching
 
 ### MVVM (Model-View-ViewModel)
 - **Models**: ArticleModels, representing the core data
@@ -97,6 +102,13 @@ Uses Swift's background task framework to perform sync operations when the app i
 - Prevents race conditions and data corruption
 - Compliant with Swift 6's stricter concurrency rules
 - Handles non-Sendable types like NSAttributedString with proper boundaries
+- Implements defensive design patterns to avoid SwiftData context access issues
+
+### Two-Tier Cache for Topic Switching
+- Uses in-memory caching for immediate UI feedback during topic changes
+- Falls back to traditional filtering when direct database methods encounter issues
+- Prevents EXC_BAD_ACCESS crashes during context.save() operations in SwiftData
+- Gracefully handles context isolation failures with defensive programming
 
 ### Main Actor Constraints
 - UI-related operations are explicitly tagged with @MainActor
@@ -113,6 +125,8 @@ Uses Swift's background task framework to perform sync operations when the app i
 - Database operations are wrapped in transactions
 - Proper error handling and rollback mechanisms
 - Optimistic locking to prevent conflicts
+- Safe fallback mechanisms for when transactions fail unexpectedly
+- Context corruption detection and remediation strategies
 
 ### Synchronous Rich Text Generation
 - Rich text generation for articles is performed synchronously during database transactions
@@ -137,6 +151,10 @@ Uses Swift's background task framework to perform sync operations when the app i
 - User-friendly error messages
 - Comprehensive logging for debugging purposes
 - Structured error types with localized descriptions
+- SwiftData context error recovery with multi-layer fallback mechanisms:
+  1. First try optimized database method
+  2. Fall back to cache if database operation fails
+  3. Final fallback to traditional filtering for guaranteed results
 
 ## Testing Approach
 - Unit tests for core business logic
