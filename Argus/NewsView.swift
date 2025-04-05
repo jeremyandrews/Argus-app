@@ -3,12 +3,13 @@ import SwiftUI
 import UIKit
 
 struct NewsView: View {
-    @Environment(\.modelContext) private var modelContext
+    @Environment(\.modelContext) var modelContext
     @Environment(\.editMode) private var editMode
 
     @Query private var allNotifications: [NotificationData]
 
-    @State private var filteredNotifications: [NotificationData] = []
+    // Made internal for extensions
+    @State var filteredNotifications: [NotificationData] = []
     @State private var selectedNotificationIDs: Set<NotificationData.ID> = []
     @State private var sortedAndGroupedNotifications: [(key: String, notifications: [NotificationData])] = []
     @State private var isFilterViewPresented: Bool = false
@@ -20,7 +21,7 @@ struct NewsView: View {
     @State private var needsScrollReset: Bool = false
     @State private var showDeleteConfirmation = false
     @State private var articleToDelete: NotificationData?
-    @State private var totalNotifications: [NotificationData] = []
+    @State var totalNotifications: [NotificationData] = []
     @State private var batchSize: Int = 30
     @State private var lastUpdateTime: Date = .distantPast
     @State private var isUpdating: Bool = false
@@ -704,31 +705,6 @@ struct NewsView: View {
         }
     }
 
-    @MainActor
-    fileprivate func generateBodyBlob(notificationID: UUID) async {
-        // 1) Grab the main-context
-        let mainContext = ArgusApp.sharedModelContainer.mainContext
-
-        // 2) Re-fetch that same NotificationData in the main context
-        let descriptor = FetchDescriptor<NotificationData>(
-            predicate: #Predicate { $0.id == notificationID }
-        )
-        guard
-            let mainThreadNotification = try? mainContext.fetch(descriptor).first
-        else {
-            return
-        }
-
-        // 3) Build the attributed .body and persist it
-        _ = getAttributedString(for: .body, from: mainThreadNotification, createIfMissing: true)
-
-        do {
-            try mainContext.save()
-        } catch {
-            AppLogger.database.error("Failed to save body_blob in main context: \(error)")
-        }
-    }
-
     private func NotificationRow(
         notification: NotificationData,
         editMode: Binding<EditMode>?,
@@ -789,7 +765,7 @@ struct NewsView: View {
             // If the blob doesn't exist yet, generate and save it on the main thread
             if notification.body_blob == nil {
                 Task {
-                    await generateBodyBlob(notificationID: notification.id)
+                    generateBodyBlob(notificationID: notification.id)
                 }
             }
         }
@@ -835,37 +811,9 @@ struct NewsView: View {
         }
     }
 
-    private func summaryContent(_ notification: NotificationData) -> some View {
-        Group {
-            if let bodyBlob = notification.body_blob,
-               let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
-            {
-                NonSelectableRichTextView(attributedString: attributedBody, lineLimit: 3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text(notification.body.isEmpty ? "(Error: missing data)" : notification.body)
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(3)
-                    .textSelection(.disabled)
-            }
-        }
-    }
+    // Function moved to NewsView+Extensions.swift
 
-    private func affectedFieldView(_ notification: NotificationData) -> some View {
-        Group {
-            if !notification.affected.isEmpty {
-                Text(notification.affected)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 3)
-                    .textSelection(.disabled)
-            }
-        }
-    }
+    // Function moved to NewsView+Extensions.swift
 
     private func domainView(_ notification: NotificationData) -> some View {
         Group {
@@ -919,65 +867,9 @@ struct NewsView: View {
         }
     }
 
-    private func openArticle(_ notification: NotificationData) {
-        guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
-            return
-        }
+    // Function moved to NewsView+Extensions.swift
 
-        // Pre-load the rich text content synchronously before creating the detail view
-        // This ensures formatted content is shown immediately
-        let titleAttrString = getAttributedString(for: .title, from: notification, createIfMissing: true)
-        let bodyAttrString = getAttributedString(for: .body, from: notification, createIfMissing: true)
-
-        let detailView = NewsDetailView(
-            notification: notification,
-            preloadedTitle: titleAttrString,
-            preloadedBody: bodyAttrString,
-            notifications: filteredNotifications,
-            allNotifications: totalNotifications,
-            currentIndex: index
-        )
-        .environment(\.modelContext, modelContext)
-
-        let hostingController = UIHostingController(rootView: detailView)
-        hostingController.modalPresentationStyle = .fullScreen
-
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController
-        {
-            rootViewController.present(hostingController, animated: true)
-        }
-
-        // After presenting the view, start a background task to prepare the next few articles
-        // This makes swiping through articles smoother
-        Task(priority: .userInitiated) {
-            // Find the next few articles (up to 3) that might be viewed next
-            let nextIndices = [index + 1, index + 2, index + 3].filter { $0 < filteredNotifications.count }
-
-            // Pre-load their rich text content (but with less priority than the current article)
-            for nextIndex in nextIndices {
-                let nextNotification = filteredNotifications[nextIndex]
-                // This will cache the blobs if they don't exist yet
-                Task(priority: .background) {
-                    await generateBodyBlob(notificationID: nextNotification.id)
-                }
-            }
-        }
-    }
-
-    private func determineSection(_ content: [String: Any]) -> String? {
-        if content["sources_quality"] != nil {
-            return "Source Analysis"
-        }
-        if content["argument_quality"] != nil {
-            return "Logical Fallacies"
-        }
-        if content["source_type"] != nil {
-            return "Source Analysis"
-        }
-        return nil
-    }
+    // Method moved to NewsView+Extensions.swift
 
     // Simplified bookmark icon on the trailing side
     private func BookmarkButton(notification: NotificationData) -> some View {
@@ -2126,20 +2018,7 @@ struct NewsView: View {
         }.value
     }
 
-    private func loadMoreNotificationsIfNeeded(currentItem: NotificationData) {
-        guard let currentIndex = filteredNotifications.firstIndex(where: { $0.id == currentItem.id }) else {
-            return
-        }
-
-        // When we're within 5 items of the end, load more content
-        let thresholdIndex = filteredNotifications.count - 5
-
-        if currentIndex >= thresholdIndex && hasMoreContent && !isLoadingMorePages {
-            Task {
-                await loadPage(isInitialLoad: false)
-            }
-        }
-    }
+    // Function moved to NewsView+Extensions.swift
 
     // Performs expensive sorting and grouping operations on a background thread.
     // Benefits include:
