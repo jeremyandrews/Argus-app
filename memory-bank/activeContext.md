@@ -1,75 +1,101 @@
 # Active Context: Argus iOS App
 
 ## Current Work Focus
-- **Active Development Phase**: Stabilization and bug fixing
-- **Primary Focus Areas**: Swift 6 concurrency compliance, UI performance, and duplicate content resolution
-- **User Experience Improvements**: Addressing UI jitter during sync operations and fixing attributed string rendering issues
+- **Active Development Phase**: Modernization planning and implementation
+- **Primary Focus Areas**: MVVM architecture adoption, SwiftData migration, async/await implementation
+- **User Experience Improvements**: Improving UI responsiveness, eliminating sync jitter, and enhancing offline capabilities
 
 ## Recent Changes
-- Implemented optimized topic switching using the shared DatabaseCoordinator:
-  - Created direct database access path for topics to bypass in-memory filtering
-  - Added two-tier caching approach for immediate UI feedback during topic changes
-  - Implemented topic-specific filter combination for optimal database queries
-  - Modified NewsView to leverage the new database paths for faster topic switching
-- Fixed duplicate article issue by making rich text generation synchronous:
-  - Modified the `saveArticle` and `updateArticle` methods in DatabaseCoordinator to use synchronous rich text generation
-  - Changed from fire-and-forget tasks (`Task { @MainActor in ... }`) to awaited calls (`await MainActor.run { ... }`)
-  - Ensured rich text is generated before database transactions complete
-- Fixed critical Swift 6 concurrency issues across multiple components:
-  - Added @MainActor constraints to LazyLoadingContentView in NewsDetailView.swift
-  - Fixed issue with NSAttributedString (non-Sendable) crossing actor boundaries
-  - Eliminated "called from background thread" warnings in attributed string processing
-  - Ensured proper main thread handling for UI-related operations
-- Enhanced error handling for article fetching with better HTTP status code detection
-- Fixed memory management in database access patterns to prevent leaks
-- Improved thread safety in synchronization code using actor isolation
+- Defined comprehensive modernization plan with phased implementation approach:
+  - Created detailed task breakdown for model migration, networking refactor, MVVM implementation, and background processing
+  - Planned transition from current architecture to SwiftData and MVVM
+  - Defined clear migration path that addresses existing pain points
+- Prepared for implementation of Swift concurrency with async/await:
+  - Mapped out API client refactoring strategy
+  - Planned replacement of completion handler-based code with modern Swift concurrency
+  - Identified components requiring async/await upgrades (SyncManager, DatabaseCoordinator, API Client)
+- Planned SwiftData migration approach:
+  - Defined model structure compatible with backend API
+  - Mapped current data storage to SwiftData models
+  - Created plan for container initialization and dependency injection
+- Designed new ViewModels to separate business logic from Views:
+  - Outlined NewsViewModel for article list management
+  - Planned ArticleDetailViewModel for article rendering logic
+  - Structured SubscriptionsViewModel and SettingsViewModel for preference management
 
 ## Next Steps
-1. **Verify Fixed Logs**:
-   - Confirm that the Swift 6 concurrency fixes have eliminated all warning messages
-   - Monitor app performance to ensure the actor-isolation changes haven't impacted responsiveness
-   - Perform systematic testing of attributed string rendering in various UI components
 
-2. **Verify Topic Switching Performance Improvements**:
-   - Confirm that the implementation using DatabaseCoordinator's specialized query methods has improved speed
-   - Test with large datasets to ensure performance improvements scale properly
-   - Monitor memory usage during rapid topic switching to ensure efficient resource usage
+### Phase 1: Setup and Model Migration
+1. **Define SwiftData Models**:
+   - Create Article, SeenArticle, and Topic models with SwiftData annotations
+   - Ensure fields align with backend API structure
+   - Mark appropriate fields as unique to prevent duplicates
+   - Design model relationships that support efficient querying
 
-3. **Continue UI Jitter Improvements**:
-   - Now that topic switching is optimized, address remaining UI jitter during sync operations
-   - Implement smoother UI transitions during background processing
-   - Profile the app to identify any remaining performance bottlenecks
+2. **Initialize SwiftData Container**:
+   - Configure ModelContainer in ArgusApp
+   - Set up proper dependency injection via .modelContainer()
+   - Implement verification process for SwiftData persistence
 
-4. **Verify Duplicate Content Resolution**:
-   - Ensure that the optimized database access doesn't reintroduce duplicate content issues
-   - Verify that the actor isolation is properly maintained with the new database methods
-   - Confirm that rich text generation is still properly synchronized
+3. **Migrate Existing Data**:
+   - Create migration routine to convert existing stored data to SwiftData models
+   - Implement fallback mechanism to fetch fresh data if local data is incompatible
+   - Test migration with various data scenarios
+
+### Phase 2: Networking and API Refactor
+4. **Create Article API Client**:
+   - Refactor APIClient to use async/await for all API calls
+   - Implement key API methods for article fetching and device authentication
+   - Ensure proper error handling and response validation
+
+5. **Build ArticleService (Repository Layer)**:
+   - Create bridge between API and SwiftData
+   - Implement methods for syncing, retrieving, and updating articles
+   - Set up proper concurrency handling with async/await
+
+### Phase 3: MVVM Implementation and UI Refactor
+6. **Create ViewModels and Refactor UI Components**:
+   - Create NewsViewModel, ArticleDetailViewModel, and other required ViewModels
+   - Implement proper @Published properties and state management
+   - Refactor SwiftUI views to use ViewModels instead of direct data access
+   - Move business logic from views to corresponding ViewModels
+
+### Phase 4: Syncing and Background Tasks
+7. **Implement Robust Background Processing**:
+   - Replace current syncing with modern background tasks approach
+   - Implement push notification handling with async/await
+   - Set up periodic syncing using .backgroundTask or BGTaskScheduler
+   - Ensure proper task cancellation and expiration handling
 
 ## Active Decisions and Considerations
-- **Swift 6 Concurrency Compliance**: 
-  - All NSAttributedString handling now properly respects actor isolation boundaries
-  - Using @MainActor for UI-related operations that must run on the main thread
-  - Avoiding background thread warnings with proper task contexts
+- **Architectural Approach**: 
+  - MVVM pattern chosen for clear separation of concerns and better testability
+  - SwiftData selected for modern persistence with Swift-native syntax
+  - Swift concurrency (async/await) for improved readability and performance
 
-- **Rich Text Performance**: 
-  - The LazyLoadingContentView now uses a MainActor-constrained task for better efficiency
-  - Consider if additional optimizations could further improve rich text rendering performance
+- **Migration Strategy**: 
+  - Phased implementation to ensure continuous app functionality
+  - Testing each phase thoroughly before moving to next
+  - Keeping compatibility with existing systems during transition
 
-- **Error Handling Strategy**: 
-  - Enhanced handling of article fetching errors with proper HTTP status code detection
-  - Consider adding more detailed diagnostics for article loading failures
+- **Performance Focus**: 
+  - Implementing optimized database access patterns from the start
+  - Ensuring background processes don't impact UI responsiveness
+  - Planning for efficient memory usage with proper task management
 
 ## Current Challenges
-- Ensuring that all attributed string operations properly respect actor isolation
-- Preventing any NSAttributedString from crossing actor boundaries without proper handling
-- Balancing between fixing concurrency issues and maintaining app performance
+- Coordinating the transition from current architecture to MVVM+SwiftData
+- Ensuring data integrity during migration to SwiftData
+- Managing complexity of background task implementation
+- Maintaining offline functionality throughout the modernization process
 
 ## Recent Feedback
-- Users have reported log errors related to article not found and getAttributedString warnings
-- Duplicate notification IDs causing unwanted error messages in logs
-- UI performance during rich text rendering could use further optimization
+- Need for improved UI performance, especially during sync operations
+- Concerns about duplicate content that should be addressed in new architecture
+- Requests for more consistent error handling and recovery mechanisms
 
 ## Immediate Priorities
-1. Verify that all Swift 6 concurrency warning logs have been eliminated
-2. Perform thorough testing of the rich text rendering functionality
-3. Ensure that the fixes for duplicate notification IDs are working correctly
+1. Finalize detailed implementation plan for each modernization phase
+2. Create SwiftData models aligned with current data structures
+3. Begin refactoring APIClient to use async/await
+4. Develop and test initial ViewModel prototypes

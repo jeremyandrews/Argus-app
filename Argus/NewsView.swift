@@ -283,29 +283,29 @@ struct NewsView: View {
         // Handle topic change - these need immediate attention
         if topicChanged {
             needsScrollReset = true
-            
+
             // First use cache if available for immediate feedback
             let topicToUse = newTopic ?? selectedTopic
             if isCacheValid && notificationsCache.keys.contains(topicToUse) {
                 let cachedTopicData = notificationsCache[topicToUse] ?? []
                 let filtered = filterNotificationsWithCurrentSettings(cachedTopicData)
-                
+
                 // Update UI immediately with cached data
                 Task(priority: .userInitiated) {
                     let updatedGrouping = await createGroupedNotifications(filtered)
-                    
+
                     await MainActor.run {
                         self.filteredNotifications = filtered
                         self.sortedAndGroupedNotifications = updatedGrouping
                     }
                 }
             }
-            
+
             // Then fall back to traditional filtering since we had an issue with the database method
             updateFilteredNotifications(force: true)
             return
         }
-        
+
         // Fallback for when we don't have a topic change
         updateFilteredNotifications(force: true)
 

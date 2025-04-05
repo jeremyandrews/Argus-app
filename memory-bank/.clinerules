@@ -131,25 +131,183 @@ This file captures important patterns, preferences, and project intelligence tha
 - Avoid context.save() inside complex asynchronous operations that might cause EXC_BAD_ACCESS
 - When DatabaseCoordinator methods fail with context issues, catch the error and use established filtering methods
 
-## Known Challenges
-- UI becomes jittery during sync operations - likely due to operations on the main thread
-- Duplicate content issues occur during synchronization - may be improved by DatabaseCoordinator's batch detection
-- Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - fixed in most places but worth monitoring
-- SwiftData context access issues can cause EXC_BAD_ACCESS crashes during context.save() operations, especially when:
-  - Multiple tasks attempt to use the same context
-  - Contexts are accessed across actor boundaries
-  - Long-running operations hold references to contexts
+## Modernization Strategy
 
-## SyncManager and DatabaseCoordinator Integration
-- SyncManager delegates all database operations to DatabaseCoordinator
-- SyncManager.processArticlesDetached handles batch processing
-- SyncManager handles network operations, but DatabaseCoordinator performs all database interactions
-- Duplication prevention uses both SyncManager's registry and DatabaseCoordinator's existence checks
+### MVVM Pattern Implementation
+- Each SwiftUI view should have a corresponding ViewModel class:
+  ```swift
+  class NewsViewModel: ObservableObject {
+    @Published var articles: [Article] = []
+    @Published var isLoading: Bool = false
+    @Published var error: Error? = nil
+    
+    func refreshArticles() async {
+        await MainActor.run { isLoading = true }
+        do {
+            let articles = try await articleService.fetchArticles()
+            await MainActor.run { 
+                self.articles = articles
+                self.isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error
+                self.isLoading = false
+            }
+        }
+    }
+  }
+  ```
+- ViewModels should be injected into views using @StateObject for view-owned ViewModels or @ObservedObject for parent-provided ViewModels:
+  ```swift
+  struct NewsView: View {
+      @StateObject private var viewModel = NewsViewModel()
+      
+      var body: some View {
+          List(viewModel.articles) { article in
+              ArticleRow(article: article)
+          }
+          .refreshable {
+              await viewModel.refreshArticles()
+          }
+      }
+  }
+  ```
+- Business logic should be moved from views to ViewModels
+- UI state should be represented by @Published properties in ViewModels
+- Use a dependency injection approach for services accessed by ViewModels
+
+### SwiftData Implementation
+- Use the @Model macro for all persistent model types:
+  ```swift
+  @Model
+  class Article {
+      @Attribute(.unique) var id: String
+      var title: String
+      var body: String
+      var publishDate: Date
+      @Relationship(.cascade) var topics: [Topic]
+      
+      // Additional fields for tracking state
+      var isRead: Bool = false
+      var isBookmarked: Bool = false
+  }
+  ```
+- Mark unique identifiers with @Attribute(.unique) to prevent duplicates
+- Configure proper relationships between models
+- Define the model container at the app level:
+  ```swift
+  @main
+  struct ArgusApp: App {
+      let container = ModelContainer(for: [Article.self, Topic.self])
+      
+      var body: some Scene {
+          WindowGroup {
+              ContentView()
+          }
+          .modelContainer(container)
+      }
+  }
+  ```
+- Use @Query for simple data access in views:
+  ```swift
+  @Query(filter: #Predicate<Article> { article in
+      !article.isRead
+  }, sort: \Article.publishDate, order: .reverse)
+  private var unreadArticles: [Article]
+  ```
+- Create specialized SwiftData queries in ViewModels for more complex scenarios
+- Implement proper error handling and retry mechanisms for data persistence operations
+
+### Async/Await Implementation 
+- Refactor API calls to use async/await instead of completion handlers:
+  ```swift
+  // Old approach with completion handlers
+  func fetchArticles(completion: @escaping (Result<[Article], Error>) -> Void) {
+      // Implementation
+  }
+  
+  // New approach with async/await
+  func fetchArticles() async throws -> [Article] {
+      // Implementation
+  }
+  ```
+- Use structured concurrency with proper task management:
+  ```swift
+  Task {
+      try await articleService.updateArticlesFromServer()
+  }
+  ```
+- Handle task cancellation properly:
+  ```swift
+  let task = Task {
+      try await articleService.updateArticlesFromServer()
+  }
+  
+  // Later if needed
+  task.cancel()
+  
+  // In the operation
+  try Task.checkCancellation()
+  ```
+- Use TaskGroup for concurrent operations with controlled concurrency
+- Ensure proper actor isolation is maintained throughout the codebase
+
+### Background Task Implementation
+- Implement background tasks using .backgroundTask or BGTaskScheduler:
+  ```swift
+  // Modern implementation for iOS 18+
+  .backgroundTask(.appRefresh("com.andrews.Argus.sync")) {
+      await articleService.updateArticlesFromServer()
+  }
+  ```
+- Handle task expiration properly:
+  ```swift
+  // For BGTaskScheduler (iOS 17 and earlier)
+  task.expirationHandler = {
+      // Handle task expiration (cancel any ongoing work)
+  }
+  ```
+- Ensure background tasks are properly scheduled and managed
+- Implement proper push notification handling with async/await
+
+## Known Challenges
+- UI becomes jittery during sync operations - will be addressed with MVVM refactoring
+- Duplicate content issues occur during synchronization - will be resolved by SwiftData's unique constraints
+- Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - will be eliminated with proper async/await implementation
+- SwiftData context access issues can cause EXC_BAD_ACCESS crashes - will be addressed by using SwiftData's native context management instead of custom DatabaseCoordinator
+
+## Modernization Component Mapping
+- **SyncManager → ArticleService**:
+  - ArticleService will handle all synchronization operations using async/await
+  - Will interact directly with SwiftData rather than through DatabaseCoordinator
+  - Will implement proper error handling and retry logic
+- **DatabaseCoordinator → SwiftData ModelContext**:
+  - Direct use of SwiftData ModelContext will replace DatabaseCoordinator
+  - Transaction management will be handled by SwiftData's built-in mechanisms
+  - Complex queries will be handled by SwiftData's query DSL
+- **NotificationCenter → Observable Properties**:
+  - State updates will be communicated via @Published properties
+  - Views will observe ViewModels through ObservableObject conformance
+  - No more manual subscription/unsubscription management
+- **Background Tasks → .backgroundTask or BGTaskScheduler**:
+  - Modern background task APIs will replace custom background task handling
+  - Proper task cancellation will be implemented for all background operations
+
+## Modernization Strategy Guidelines
+- Implement features incrementally, following the phased approach
+- Maintain feature parity throughout the modernization process
+- Test each component thoroughly before moving to the next phase
+- Focus on fixing existing issues during the modernization process
+- Keep comprehensive documentation of architectural decisions
+- Use Swift's newest features where appropriate, but maintain compatibility with iOS 18
+- Prioritize user experience over implementation elegance
 
 ## User Workflow Preferences
 - Focus on fixing critical bugs before adding new features
 - Prioritize performance improvements in the sync process
 - Document important decisions and their rationale
+- Ensure smooth user experience during the transition to the new architecture
 
 ## Testing Approach
 - UI tests are located in ArgusUITests directory

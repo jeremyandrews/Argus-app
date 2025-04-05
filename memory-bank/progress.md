@@ -80,6 +80,78 @@
 
 ## What's Left To Build
 
+### Modernization Plan Implementation
+
+#### Phase 1: Setup and Model Migration
+- 🔲 **Define SwiftData Models**
+  - Create Article, SeenArticle, and Topic models with SwiftData annotations
+  - Ensure fields align with backend API structure
+  - Mark appropriate fields as unique to prevent duplicates
+
+- 🔲 **Initialize SwiftData Container**
+  - Configure ModelContainer in ArgusApp
+  - Set up dependency injection via .modelContainer()
+  - Verify SwiftData persistence with test articles
+
+- 🔲 **Migrate Existing Data (Optional)**
+  - Create migration routine for converting old data to SwiftData models
+  - Implement fallback to fetch fresh data if local data is incompatible
+
+#### Phase 2: Networking and API Refactor
+- 🔲 **Create Article API Client**
+  - Refactor APIClient to use async/await for all API calls
+  - Implement fetchArticles(), fetchArticle(by id:), and authenticateDevice(token:)
+  - Enhance error handling with proper status code detection
+
+- 🔲 **Build ArticleService**
+  - Create bridge between API and SwiftData
+  - Implement updateArticlesFromServer(), fetchArticles(), and saveArticle(_:)
+  - Set up proper concurrency handling
+
+#### Phase 3: MVVM Implementation and UI Refactor
+- 🔲 **Refactor NewsView to Use ViewModel**
+  - Create NewsViewModel with observable articles, loading state, and refresh method
+  - Update NewsView to use StateObject ViewModel pattern
+  - Replace manual fetches with ViewModel properties
+
+- 🔲 **Implement ArticleDetailViewModel**
+  - Handle article body Markdown rendering
+  - Manage read/bookmark state
+  - Refactor ArticleDetailView to use ViewModel
+
+- 🔲 **Refactor SubscriptionsView and SettingsView**
+  - Add ViewModels for topic preferences and settings
+  - Migrate UI logic out of SwiftUI views
+
+#### Phase 4: Syncing and Background Tasks
+- 🔲 **Implement Periodic Sync Using .backgroundTask**
+  - Schedule periodic sync with modern background task API
+  - Set up ArticleService integration for background updates
+  - Handle proper task expiration with cancellation
+
+- 🔲 **Handle Push Notifications for New Articles**
+  - Refactor AppDelegate for async push notification handling
+  - Set up ArticleService integration for push-triggered fetches
+  - Implement proper UI refresh on push receipt
+
+#### Phase 5: Testing and Cleanup
+- 🔲 **Test Data Migration and Persistence**
+  - Verify SwiftData migration or fallback logic
+  - Test offline behavior and article consistency
+
+- 🔲 **Validate Syncing and Push Behavior**
+  - Test background sync and push notification handling
+  - Ensure proper article updates in all scenarios
+
+- 🔲 **Performance and Battery Profiling**
+  - Use Instruments to verify optimal resource usage
+  - Ensure UI responsiveness during sync operations
+
+- 🔲 **Remove Legacy Code**
+  - Remove SyncManager, DatabaseCoordinator, and NotificationCenter-based state
+  - Ensure all functionality is handled by new architecture
+
+### Previous Planned Features
 - 🔲 **Enhanced Social Sharing**
   - More comprehensive sharing options
   - Share with comments functionality
@@ -96,13 +168,13 @@
 
 1. **UI Performance**
    - Interface becomes jittery during synchronization
-   - Status: May be partially improved by recent NSAttributedString handling fixes
+   - Status: Will be addressed by MVVM refactoring and async/await implementation
    - Priority: High
    
 2. **Database Limitations**
    - Current database design is difficult to modify
-   - Status: Improved by DatabaseCoordinator implementation; assessment ongoing
-   - Priority: Medium
+   - Status: Will be resolved by migration to SwiftData
+   - Priority: High
 
 ## Testing Status
 
@@ -120,16 +192,23 @@
 
 ## Next Milestone Goals
 
-1. **Performance Release (Target: April 2025)**
-   - Fix UI jitter during sync
-   - Resolve duplicate content issues
-   - Implement basic performance tests
-   - Verify DatabaseCoordinator under load
+1. **Architecture Modernization (Target: May 2025)**
+   - Complete Phases 1-2 of modernization plan
+   - Implement SwiftData models and container
+   - Refactor API client for async/await
+   - Build ArticleService as repository layer
 
-2. **User Feedback Release (Target: May 2025)**
-   - Add like/dislike functionality
-   - Implement feedback mechanisms for AI analysis
-   - Improve error handling and user messaging
+2. **UI Modernization (Target: June 2025)**
+   - Complete Phases 3-4 of modernization plan
+   - Implement ViewModels for all major views
+   - Refactor UI to use MVVM pattern
+   - Set up modern background task handling
+
+3. **Cleanup and Performance (Target: July 2025)**
+   - Complete Phase 5 of modernization plan
+   - Remove legacy code components
+   - Conduct performance profiling
+   - Resolve any remaining issues
 
 ## Progress Metrics
 

@@ -161,3 +161,131 @@ Uses Swift's background task framework to perform sync operations when the app i
 - UI tests for critical user flows
 - Mocked API responses for testing network-dependent features
 - Stress testing for concurrency robustness
+
+## Planned Architectural Evolution
+
+Argus is scheduled for a significant architectural modernization to address existing limitations and improve overall performance and maintainability.
+
+### From Current Architecture to MVVM + SwiftData
+
+The current architecture will evolve from its current state to a more modern implementation:
+
+```mermaid
+flowchart TD
+    subgraph "Current Architecture"
+        Backend1["Backend Server"]
+        SyncManager1["SyncManager"]
+        DbCoord1["DatabaseCoordinator (Actor)"]
+        LocalStorage1["SwiftData"]
+        UI1["SwiftUI Views with\nEmbedded Logic"]
+    end
+    
+    subgraph "Target Architecture"
+        Backend2["Backend Server"]
+        ApiClient["API Client\n(async/await)"]
+        ArticleService["ArticleService\n(Repository)"]
+        SwiftData["SwiftData"]
+        ViewModel["ViewModels"]
+        UI2["SwiftUI Views"]
+    end
+    
+    Backend1 --> SyncManager1
+    SyncManager1 --> DbCoord1
+    DbCoord1 --> LocalStorage1
+    LocalStorage1 --> UI1
+    
+    Backend2 --> ApiClient
+    ApiClient --> ArticleService
+    ArticleService --> SwiftData
+    SwiftData --> ViewModel
+    ViewModel --> UI2
+```
+
+### Key Architectural Changes
+
+#### 1. MVVM Pattern Implementation
+
+The current architecture follows a pattern closer to MVC with SwiftUI, where views contain significant amounts of business logic. This will be refactored to a proper MVVM (Model-View-ViewModel) pattern:
+
+- **Models**: SwiftData models representing core data structures
+- **Views**: SwiftUI views with minimal logic, focused on presentation
+- **ViewModels**: New layer that will manage state, business logic, and data preparation for views
+
+```mermaid
+flowchart LR
+    subgraph "MVVM Pattern"
+        Model["Model\n(SwiftData)"]
+        ViewModel["ViewModel\n(@Published properties)"]
+        View["View\n(SwiftUI)"]
+        
+        Model <--> ViewModel
+        ViewModel --> View
+        View -- "User Actions" --> ViewModel
+    end
+```
+
+#### 2. SwiftData Migration
+
+The current database implementation will be migrated to SwiftData, Apple's declarative persistence framework:
+
+- Current models will be annotated with SwiftData's `@Model` macro
+- Fetch descriptors will be replaced with SwiftData queries
+- `DatabaseCoordinator` will be phased out in favor of SwiftData's context management
+- Model relationships will be explicitly defined with SwiftData annotations
+
+#### 3. Modern Swift Concurrency
+
+The current architecture uses a mix of completion handlers, Combine, and actors. The modernization will standardize on Swift's concurrency model:
+
+- All network calls will use `async/await` instead of completion handlers
+- Background tasks will use structured concurrency with task groups
+- Proper cancellation handling for background tasks
+- Elimination of callback-based code in favor of await expressions
+
+```mermaid
+flowchart TD
+    subgraph "Current" 
+        A1[API Call] --> B1[Completion Handler]
+        B1 --> C1[Update Database]
+        C1 --> D1[Notify UI]
+    end
+    
+    subgraph "Modern"
+        A2[API Call] --> B2[await Result]
+        B2 --> C2[Update Database]
+        C2 --> D2[Return Value]
+        D2 --> E2[Update @Published Properties]
+    end
+```
+
+#### 4. Repository Pattern Enhancement
+
+The current SyncManager acts as a repository but will be replaced with a more focused ArticleService:
+
+- Clear separation between API communication and data persistence
+- Simplified interface for ViewModels to access data
+- Consistent error handling and retry policies
+- Better separation of concerns for different data types
+
+### Component Mapping
+
+| Current Component | New Architecture Equivalent |
+|-------------------|----------------------------|
+| SyncManager | ArticleService |
+| DatabaseCoordinator | SwiftData ModelContainer + ModelContext |
+| NotificationCenter-based updates | @Published properties + ObservableObject |
+| Direct UI database access | ViewModel-mediated access |
+| BackgroundContextManager | Task + UNUserNotificationCenter |
+| Push notification handling in AppDelegate | Focused async notification handlers |
+
+### Implementation Phases
+
+The modernization will follow a phased approach:
+
+1. **SwiftData Model Definition**: Create all data models using SwiftData annotations
+2. **API Client Refactoring**: Update the networking layer to use async/await
+3. **Repository Layer**: Implement ArticleService to bridge API and persistence
+4. **ViewModel Creation**: Develop ViewModels for all major views
+5. **UI Refactoring**: Update SwiftUI views to use ViewModels
+6. **Background Processing**: Modernize background tasks and push handling
+7. **Legacy Code Removal**: Remove outdated components once functionality is verified
