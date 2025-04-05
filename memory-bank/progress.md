@@ -83,11 +83,11 @@
 ### Modernization Plan Implementation
 
 #### Phase 1: Setup and Model Migration
-- 🔲 **Define SwiftData Models**
-  - Create Article, SeenArticle, and Topic models with SwiftData annotations
-  - Ensure fields align with backend API structure
-  - Mark appropriate fields as unique to prevent duplicates
-
+- ✅ **Define SwiftData Models**
+  - Created Article, SeenArticle, and Topic models with SwiftData annotations
+  - Ensured fields align with backend API structure 
+  - Applied unique constraints to prevent duplicates
+  - Designed model relationships with proper cascade rules
 - 🔲 **Initialize SwiftData Container**
   - Configure ModelContainer in ArgusApp
   - Set up dependency injection via .modelContainer()

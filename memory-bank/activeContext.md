@@ -6,6 +6,12 @@
 - **User Experience Improvements**: Improving UI responsiveness, eliminating sync jitter, and enhancing offline capabilities
 
 ## Recent Changes
+- Implemented SwiftData models to support the modernization plan:
+  - Created Article, SeenArticle, and Topic models with proper SwiftData annotations
+  - Added proper unique constraints to prevent duplicates (ID and jsonURL for articles)
+  - Set up appropriate relationships between models with cascade delete rules
+  - Ensured field alignment with backend API structure for seamless integration
+  - Designed models to support the upcoming MVVM architecture
 - Defined comprehensive modernization plan with phased implementation approach:
   - Created detailed task breakdown for model migration, networking refactor, MVVM implementation, and background processing
   - Planned transition from current architecture to SwiftData and MVVM
@@ -14,10 +20,6 @@
   - Mapped out API client refactoring strategy
   - Planned replacement of completion handler-based code with modern Swift concurrency
   - Identified components requiring async/await upgrades (SyncManager, DatabaseCoordinator, API Client)
-- Planned SwiftData migration approach:
-  - Defined model structure compatible with backend API
-  - Mapped current data storage to SwiftData models
-  - Created plan for container initialization and dependency injection
 - Designed new ViewModels to separate business logic from Views:
   - Outlined NewsViewModel for article list management
   - Planned ArticleDetailViewModel for article rendering logic
@@ -26,18 +28,12 @@
 ## Next Steps
 
 ### Phase 1: Setup and Model Migration
-1. **Define SwiftData Models**:
-   - Create Article, SeenArticle, and Topic models with SwiftData annotations
-   - Ensure fields align with backend API structure
-   - Mark appropriate fields as unique to prevent duplicates
-   - Design model relationships that support efficient querying
-
-2. **Initialize SwiftData Container**:
+1. **Initialize SwiftData Container**:
    - Configure ModelContainer in ArgusApp
    - Set up proper dependency injection via .modelContainer()
    - Implement verification process for SwiftData persistence
 
-3. **Migrate Existing Data**:
+2. **Migrate Existing Data**:
    - Create migration routine to convert existing stored data to SwiftData models
    - Implement fallback mechanism to fetch fresh data if local data is incompatible
    - Test migration with various data scenarios
