@@ -14,14 +14,11 @@ class SwiftDataContainer {
 
     // Status tracking
     private(set) var lastError: Error?
-    private(set) var isUsingInMemoryFallback = false
 
     // Initialization status
     var status: String {
         if let error = lastError {
-            return "Error: \(error.localizedDescription)" + (isUsingInMemoryFallback ? " (Using in-memory fallback)" : "")
-        } else if isUsingInMemoryFallback {
-            return "Using in-memory storage (temporary mode)"
+            return "Error: \(error.localizedDescription)"
         } else {
             return "Using persistent storage"
         }
@@ -35,41 +32,21 @@ class SwiftDataContainer {
             TopicModel.self,
         ])
 
+        // Use persistent storage with a dedicated test database name
+        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let testStorageURL = documentsDirectory.appendingPathComponent("ArgusTestDB.store")
+        
+        print("Creating persistent SwiftData container at: \(testStorageURL.path)")
+        let config = ModelConfiguration(url: testStorageURL)
+        
         do {
-            // Use persistent storage with a dedicated test database name
-            // This ensures we don't interfere with production data
-            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let testStorageURL = documentsDirectory.appendingPathComponent("ArgusTestDB.store")
-
-            print("Creating persistent SwiftData container at: \(testStorageURL.path)")
-            let config = ModelConfiguration(url: testStorageURL)
             container = try ModelContainer(for: schema, configurations: [config])
-            isUsingInMemoryFallback = false
             print("Persistent SwiftData container successfully created")
         } catch {
             print("Failed to create persistent container: \(error)")
             lastError = error
-            isUsingInMemoryFallback = true
-
-            // Fall back to in-memory storage if persistent fails
-            print("Falling back to in-memory container")
-            do {
-                let config = ModelConfiguration(isStoredInMemoryOnly: true)
-                container = try ModelContainer(for: schema, configurations: [config])
-                print("In-memory fallback SwiftData container created")
-            } catch {
-                print("Failed to create even a basic in-memory container: \(error)")
-
-                // Last resort - empty container
-                print("Creating minimal container as last resort")
-                do {
-                    let minimalSchema = Schema([])
-                    container = try ModelContainer(for: minimalSchema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
-                    print("Created empty fallback container")
-                } catch {
-                    fatalError("Cannot create ANY ModelContainer - app cannot function: \(error)")
-                }
-            }
+            // Propagate the error instead of falling back to in-memory
+            fatalError("Cannot create persistent ModelContainer - app cannot function: \(error)")
         }
     }
 
@@ -238,33 +215,22 @@ struct SwiftDataTestView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Circle()
-                                .fill(SwiftDataContainer.shared.isUsingInMemoryFallback ? Color.orange : Color.green)
+                                .fill(Color.green)
                                 .frame(width: 12, height: 12)
                             Text(SwiftDataContainer.shared.status)
                                 .font(.headline)
-                                .foregroundColor(SwiftDataContainer.shared.isUsingInMemoryFallback ? .orange : .green)
-                        }
-
-                        Text("Mode: \(SwiftDataContainer.shared.isUsingInMemoryFallback ? "In-Memory (temporary)" : "Persistent")")
-                            .font(.caption)
-                            .foregroundColor(SwiftDataContainer.shared.isUsingInMemoryFallback ? .orange : .green)
-
-                        if SwiftDataContainer.shared.isUsingInMemoryFallback {
-                            Text("⚠️ In-memory mode does not persist data between app launches and cannot be used for migration!")
-                                .font(.caption)
-                                .foregroundColor(.orange)
-                                .padding(.top, 2)
-                        } else {
-                            // Show storage location when in persistent mode
-                            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                            let dbPath = documentsDirectory.appendingPathComponent("ArgusTestDB.store").path
-                            Text("Storage location: \(dbPath)")
-                                .font(.caption)
                                 .foregroundColor(.green)
-                                .padding(.top, 2)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
                         }
+
+                        // Always show storage location since we're always in persistent mode
+                        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                        let dbPath = documentsDirectory.appendingPathComponent("ArgusTestDB.store").path
+                        Text("Storage location: \(dbPath)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 2)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
 
                     Button("Reset SwiftData Store", role: .destructive) {

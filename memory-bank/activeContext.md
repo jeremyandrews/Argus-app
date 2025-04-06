@@ -7,13 +7,26 @@
 - **Cross-Device Capabilities**: Preparing SwiftData models for future CloudKit integration to enable iPhone/iPad syncing
 
 ## Recent Changes
+- **Enhanced Database Migration System**:
+  - Implemented automatic migration that runs at app launch without manual triggering
+  - Created full-screen iOS-standard modal that blocks all app interaction during migration
+  - Developed temporary migration mode that re-runs on each app start to keep databases in sync
+  - Added state synchronization to update article attributes (read/unread, bookmarked)
+  - Implemented resilient progression tracking to handle app termination and restart
+  - Designed self-contained architecture for easy removal in a future update
+  - Optimized for 2-8 second performance target on typical article collections
 - **Implemented persistent storage for SwiftData testing**:
   - Transitioned from in-memory to persistent storage using a dedicated test database file
   - Created a specific test database ("ArgusTestDB.store") in the documents directory to avoid production data interference
   - Simplified architecture by removing dual-mode (in-memory/persistent) support and test mode toggle
   - Enhanced reset functionality to specifically target test database files for reliable cleanup
-  - Maintained a fallback to in-memory storage if persistent storage creation fails
-  - Updated UI to display storage location and mode with clear visual indicators
+  - Updated UI to display storage location with clear visual indicators
+- **Removed in-memory fallback mechanism**:
+  - Eliminated fallback to in-memory storage to simplify the codebase
+  - Removed all conditional code paths that dealt with in-memory mode
+  - Updated error handling to properly propagate failures instead of silently falling back
+  - Removed UI warnings and indicators related to in-memory storage
+  - Made persistent storage a hard requirement for the app to function
 - Implemented SwiftData models to support the modernization plan:
   - Created Article, SeenArticle, and Topic models with proper SwiftData annotations
   - Reconfigured models to be CloudKit-compatible by adding default values to all required properties
@@ -69,14 +82,14 @@
    - Updated UI to show storage location and persistent/in-memory status
    - Removed test mode toggle from MigrationService and MigrationView
 
-2. **Complete Migration Testing with Persistent Storage**:
-   - Now enabled: migration with fully persistent storage
-   - Test migration resilience across app restarts
-   - Verify reset and repeat testing capability
-   - Gather performance metrics with real persistent storage
+2. **✅ Complete Migration Testing with Persistent Storage**:
+   - Completed: Migration with fully persistent storage verified
+   - Fixed timing issue in migration summary reporting
+   - Successfully migrated 2,543 articles to SwiftData
+   - Confirmed excellent performance with persistent storage
 
 ### Phase 2: Networking and API Refactor
-4. **Create Article API Client**:
+3. **Create Article API Client**:
    - Refactor APIClient to use async/await for all API calls
    - Implement key API methods for article fetching and device authentication
    - Ensure proper error handling and response validation
@@ -123,6 +136,9 @@
 - Maintaining offline functionality throughout the modernization process
 - Implementing application-level uniqueness checks to replace schema-level constraints
 - Preparing for future cross-device syncing with CloudKit
+- Maintaining data consistency between old and new databases during the transition period
+- Ensuring seamless user experience during automatic migration at app startup
+- Preparing for future removal of migration code once all users have been migrated
 
 ## Performance Insights
 - **SwiftData Batch Processing**: Testing confirms SwiftData's ability to efficiently handle batched article creation in background contexts. Batching operations (creating 5-10 articles at once) with intermediate saves provides significant performance benefits.
@@ -137,7 +153,7 @@
 
 ## Immediate Priorities
 1. ✅ Implement persistent storage for SwiftData testing
-2. Complete migration testing with persistent storage
-3. Implement application-level uniqueness validation logic
-4. Begin refactoring APIClient to use async/await
+2. ✅ Complete migration testing with persistent storage
+3. Begin refactoring APIClient to use async/await
+4. Implement application-level uniqueness validation logic
 5. Develop and test initial ViewModel prototypes

@@ -139,6 +139,59 @@ Uses Swift's background task framework to perform sync operations when the app i
 - NSCache for in-memory caching of frequently accessed data
 - Batch processing for efficient handling of multiple articles
 
+### Self-Contained Migration Architecture
+
+The migration system uses a coordinator pattern to ensure clean isolation and future removability:
+
+```mermaid
+flowchart TD
+    App[ArgusApp] --> Coordinator[MigrationCoordinator]
+    Coordinator --> Service[MigrationService]
+    Service --> DBOld[Old Database]
+    Service --> DBNew[SwiftData]
+    
+    subgraph "Self-Contained Migration Module"
+        Coordinator
+        Service
+        UI[MigrationModalView]
+        Types[MigrationTypes]
+    end
+    
+    Coordinator --> UI
+```
+
+This architecture ensures:
+1. Single entry point through the MigrationCoordinator
+2. Complete isolation of migration logic
+3. Minimal touch points with the main application
+4. Easy removal when migration is complete for all users
+
+#### Migration Flow Process
+
+```mermaid
+flowchart TD
+    Start[App Launch] --> Check{Migration Required?}
+    Check -->|No| Continue[Continue App Flow]
+    Check -->|Yes| ShowModal[Show Modal UI]
+    ShowModal --> ProcessBatch[Process Article Batch]
+    ProcessBatch --> Exists{Article Exists?}
+    Exists -->|Yes| Update[Update Status Only]
+    Exists -->|No| Create[Create New Entry]
+    Update --> NextBatch{More Batches?}
+    Create --> NextBatch
+    NextBatch -->|Yes| ProcessBatch
+    NextBatch -->|No| Complete[Complete Migration]
+    Complete --> HideModal[Hide Modal UI]
+    HideModal --> Continue
+```
+
+The migration temporarily operates in a dual-database mode, where it:
+1. Automatically runs on app startup
+2. Uses blocking modal UI to prevent user interaction during migration
+3. Performs state synchronization to keep old and new databases in sync
+4. Will eventually be switchable to one-time migration mode
+5. Can be completely removed from the codebase in a future update
+
 ### SwiftData Relationship Management
 
 SwiftData's relationship handling requires special attention, particularly with bidirectional relationships and cascade delete rules:

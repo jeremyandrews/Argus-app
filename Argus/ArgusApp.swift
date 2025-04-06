@@ -39,18 +39,55 @@ struct ArgusApp: App {
         }
     }()
 
+    // Migration coordinator for auto-migration
+    @StateObject private var migrationCoordinator = MigrationCoordinator.shared
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .modelContainer(ArgusApp.sharedModelContainer)
-                .onChange(of: scenePhase) { _, newPhase in
-                    if newPhase == .active {
-                        Task { @MainActor in
-                            self.appDelegate.cleanupOldArticles()
-                            self.appDelegate.removeDuplicateNotifications()
+            ZStack {
+                // Main content
+                ContentView()
+                    .modelContainer(ArgusApp.sharedModelContainer)
+                    .onChange(of: scenePhase) { _, newPhase in
+                        if newPhase == .active {
+                            Task { @MainActor in
+                                self.appDelegate.cleanupOldArticles()
+                                self.appDelegate.removeDuplicateNotifications()
+                                
+                                // Check if migration is needed
+                                await checkMigration()
+                            }
+                        } else if newPhase == .background {
+                            // Mark migration as interrupted if app goes to background during migration
+                            if migrationCoordinator.isMigrationActive {
+                                migrationCoordinator.appWillTerminate()
+                            }
                         }
                     }
+                    .disabled(migrationCoordinator.isMigrationActive) // Disable all interaction during migration
+                
+                // Migration modal with highest z-index when active
+                if migrationCoordinator.isMigrationActive {
+                    FullScreenBlockingView {
+                        MigrationModalView(coordinator: migrationCoordinator)
+                    }
+                    .transition(.opacity)
+                    .zIndex(100) // Ensure it's on top
                 }
+            }
+            .task {
+                // Check migration on app launch
+                await checkMigration()
+            }
+        }
+    }
+    
+    /// Check and start migration if needed
+    private func checkMigration() async {
+        // Check if migration is needed
+        if await migrationCoordinator.checkMigrationStatus() {
+            // Start migration
+            _ = await migrationCoordinator.startMigration()
         }
     }
 

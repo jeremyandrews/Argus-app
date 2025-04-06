@@ -1,10 +1,10 @@
 import SwiftUI
+import SwiftData
 
 /// View for triggering migration from Settings
 struct MigrationView: View {
-    @State private var migrationService: MigrationService?
+    @ObservedObject private var coordinator = MigrationCoordinator.shared
     @State private var isMigrating = false
-    // Removed test mode state as we're now using persistent storage by default
     private let swiftDataContainer = SwiftDataContainer.shared
 
     var body: some View {
@@ -12,116 +12,104 @@ struct MigrationView: View {
             Text("Data Migration")
                 .font(.headline)
 
-            Text("Migrate your existing articles to the new database format. This is a one-time process.")
+            Text("Migrate your existing articles to the new database format. This process now runs automatically at app startup.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            // Warning if using in-memory storage (unlikely since we now default to persistent)
-            if swiftDataContainer.isUsingInMemoryFallback {
-                Text("⚠️ Using in-memory storage. Migration will work but data will NOT be saved permanently!")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                    .padding(.vertical, 8)
+            HStack {
+                Text("Status: ")
+                Text(coordinator.status.isEmpty ? "Not started" : coordinator.status)
+                    .foregroundColor(statusColor)
             }
 
-            if let service = migrationService {
-                HStack {
-                    Text("Status: ")
-                    Text(service.status)
-                        .foregroundColor(statusColor(for: service))
-                }
-
-                if service.progress > 0 && service.progress < 1.0 {
-                    ProgressView(value: service.progress)
-                }
-            } else {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle())
+            if coordinator.progress > 0 && coordinator.progress < 1.0 {
+                ProgressView(value: coordinator.progress)
             }
 
             Button(actionText) {
-                if migrationService == nil {
-                    // Initialize the service on first button press
-                    Task {
-                        migrationService = await MigrationService()
-
-                        // No test mode to set as we're now using persistent storage by default
-                    }
-                }
-
-                isMigrating = true
-
-                if let service = migrationService {
-                    Task {
-                        await service.migrateAllData()
+                Task {
+                    isMigrating = true
+                    // Handle the migration result
+                    let success = await coordinator.startMigration()
+                    if !success {
+                        // If migration failed, stop showing the modal
+                        isMigrating = false
                     }
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(migrationService?.progress ?? 0 > 0 && migrationService?.progress ?? 0 < 1.0)
+            .disabled(coordinator.progress > 0 && coordinator.progress < 1.0 && !coordinator.isMigrationActive)
 
-            // Add reset button when migration is completed or failed
-            if let service = migrationService, service.progress >= 1.0 || service.error != nil {
-                Button("Reset Migration State") {
-                    service.resetMigration()
+            // Add reset button for manual testing
+            if coordinator.progress >= 1.0 {
+                Button("Reset Migration State (For Testing)") {
+                    Task {
+                        let service = await MigrationService(mode: .temporary)
+                        service.resetMigration()
+                        
+                        // Refresh coordinator status
+                        _ = await coordinator.checkMigrationStatus()
+                    }
                 }
                 .buttonStyle(.bordered)
                 .foregroundColor(.orange)
                 .padding(.top, 8)
             }
 
-            if let service = migrationService, let error = service.error {
-                Text(error.localizedDescription)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .padding(.top, 8)
+            // Manual test button
+            Button("Run Migration Manually") {
+                Task {
+                    isMigrating = true
+                    // Handle the migration result
+                    let success = await coordinator.startMigration()
+                    if !success {
+                        // If migration failed, stop showing the modal
+                        isMigrating = false
+                    }
+                }
             }
+            .buttonStyle(.bordered)
+            .padding(.top, 8)
+            .foregroundColor(.blue)
+
+            // Information message
+            Text("Note: Migration now runs automatically at app startup. This view is for manual testing and troubleshooting only.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.top, 8)
+                .multilineTextAlignment(.leading)
         }
         .padding()
         .fullScreenCover(isPresented: $isMigrating) {
-            if let service = migrationService {
-                MigrationOverlay(migrationService: service) {
+            MigrationModalView(coordinator: coordinator)
+                .background(.ultraThinMaterial)
+                .onDisappear {
                     isMigrating = false
                 }
-                .background(.ultraThinMaterial)
-            }
         }
         .onAppear {
-            // Initialize the service when the view appears
+            // Check migration status when view appears
             Task {
-                let service = await MigrationService()
-                self.migrationService = service
-
-                if service.checkAndResumeIfNeeded() {
-                    isMigrating = true
-
-                    Task {
-                        await service.migrateAllData()
-                    }
-                }
+                _ = await coordinator.checkMigrationStatus()
             }
         }
     }
 
     private var actionText: String {
-        guard let service = migrationService else {
-            return "Start Migration"
-        }
-
-        if service.progress >= 1.0 {
+        if coordinator.progress >= 1.0 {
             return "Migration Complete"
-        } else if service.progress > 0 {
+        } else if coordinator.progress > 0 {
             return "Continue Migration"
         } else {
             return "Start Migration"
         }
     }
 
-    private func statusColor(for service: MigrationService) -> Color {
-        if service.error != nil {
-            return .red
-        } else if service.progress >= 1.0 {
+    private var statusColor: Color {
+        if coordinator.progress >= 1.0 {
             return .green
+        } else if coordinator.isMigrationActive {
+            return .blue
         } else {
             return .primary
         }
