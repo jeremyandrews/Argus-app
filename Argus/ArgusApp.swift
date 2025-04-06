@@ -7,8 +7,12 @@ struct ArgusApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @Environment(\.scenePhase) private var scenePhase
 
+    // Flag to show the SwiftData test interface
+    @State private var showSwiftDataTest = false
+
     static let sharedModelContainer: ModelContainer = {
         let schema = Schema([
+            // Existing models
             NotificationData.self,
             SeenArticle.self,
         ])

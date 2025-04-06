@@ -140,6 +140,28 @@ struct SettingsView: View {
                 } header: {
                     Text("About Argus")
                 }
+
+                // Development section for testing SwiftData
+                #if DEBUG
+                    Section {
+                        NavigationLink(destination: SwiftDataContainerView {
+                            SwiftDataTestView()
+                        }) {
+                            HStack {
+                                Image(systemName: "database.fill")
+                                    .foregroundColor(.blue)
+                                Text("SwiftData Test")
+                            }
+                        }
+                        .foregroundColor(.primary)
+
+                        Text("This section is for testing the new SwiftData models being implemented as part of the modernization plan.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    } header: {
+                        Text("Development")
+                    }
+                #endif
             }
             .navigationTitle("Settings")
         }

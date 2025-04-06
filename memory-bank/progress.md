@@ -88,10 +88,11 @@
   - Ensured fields align with backend API structure 
   - Applied unique constraints to prevent duplicates
   - Designed model relationships with proper cascade rules
-- 🔲 **Initialize SwiftData Container**
-  - Configure ModelContainer in ArgusApp
-  - Set up dependency injection via .modelContainer()
-  - Verify SwiftData persistence with test articles
+- ✅ **Initialize SwiftData Container**
+  - Created dedicated SwiftDataContainer class to isolate new models during transition
+  - Configured ModelContainer with proper schema and persistence options
+  - Added test interface (SwiftDataTestView) to verify SwiftData operations 
+  - Integrated with Settings view for developer testing
 
 - 🔲 **Migrate Existing Data (Optional)**
   - Create migration routine for converting old data to SwiftData models
