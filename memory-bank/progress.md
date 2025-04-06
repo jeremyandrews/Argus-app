@@ -86,13 +86,18 @@
 - ✅ **Define SwiftData Models**
   - Created Article, SeenArticle, and Topic models with SwiftData annotations
   - Ensured fields align with backend API structure 
-  - Applied unique constraints to prevent duplicates
+  - Made models CloudKit-compatible by adding default values to all required properties  
+  - Removed unique constraints for CloudKit compatibility
   - Designed model relationships with proper cascade rules
 - ✅ **Initialize SwiftData Container**
   - Created dedicated SwiftDataContainer class to isolate new models during transition
   - Configured ModelContainer with proper schema and persistence options
   - Added test interface (SwiftDataTestView) to verify SwiftData operations 
   - Integrated with Settings view for developer testing
+- 🔶 **Resolve CloudKit Compatibility Issues**
+  - Updated model definitions to be CloudKit-compatible
+  - Prepared for future cross-device syncing capability
+  - Fixed app crash in SwiftData Test view
 
 - 🔲 **Migrate Existing Data (Optional)**
   - Create migration routine for converting old data to SwiftData models
@@ -176,6 +181,11 @@
    - Current database design is difficult to modify
    - Status: Will be resolved by migration to SwiftData
    - Priority: High
+   
+3. **Uniqueness Constraints**
+   - Schema-level uniqueness constraints removed for CloudKit compatibility
+   - Status: Will be addressed by implementing application-level uniqueness validation
+   - Priority: Medium
 
 ## Testing Status
 

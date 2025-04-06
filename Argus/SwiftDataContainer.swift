@@ -12,26 +12,152 @@ class SwiftDataContainer {
     // The model container for our new models
     let container: ModelContainer
 
+    // Status tracking
+    private(set) var lastError: Error?
+    private(set) var isUsingInMemoryFallback = false
+
+    // Initialization status
+    var status: String {
+        if let error = lastError {
+            return "Error: \(error.localizedDescription)" + (isUsingInMemoryFallback ? " (Using in-memory fallback)" : "")
+        } else if isUsingInMemoryFallback {
+            return "Using in-memory storage (temporary mode)"
+        } else {
+            return "Using persistent storage"
+        }
+    }
+
     private init() {
-        // Set up the schema with our new models
+        // Force in-memory storage for now
+        // This avoids CloudKit-related errors with required fields and unique constraints
+        // When future iPad syncing is implemented, you will need to:
+        // 1. Modify ArticleDataModels.swift to make attributes optional/with defaults
+        // 2. Remove unique constraints from model definitions
+        // 3. Change this configuration to use CloudKit
+
+        print("Creating in-memory SwiftData container to avoid CloudKit integration issues")
+        isUsingInMemoryFallback = true
+
+        // Create a simple schema
         let schema = Schema([
             ArticleModel.self,
             SeenArticleModel.self,
             TopicModel.self,
         ])
 
-        // Configure the model container
         do {
-            // Create a simple configuration with default settings
-            let config = ModelConfiguration(isStoredInMemoryOnly: false)
-
-            // Pass the schema and configuration to the container
+            // Always use in-memory storage
+            let config = ModelConfiguration(isStoredInMemoryOnly: true)
             container = try ModelContainer(for: schema, configurations: [config])
-
-            print("SwiftData container initialized successfully for new models")
+            print("In-memory SwiftData container successfully created")
         } catch {
-            fatalError("Failed to create ModelContainer for new models: \(error)")
+            print("Failed to create even a basic in-memory container: \(error)")
+            lastError = error
+
+            // Last resort - empty container
+            print("Creating minimal container as last resort")
+            do {
+                let minimalSchema = Schema([])
+                container = try ModelContainer(for: minimalSchema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
+                print("Created empty fallback container")
+            } catch {
+                fatalError("Cannot create ANY ModelContainer - app cannot function: \(error)")
+            }
         }
+    }
+
+    /// Makes a best effort to delete any persistent store files
+    func resetStore() -> String {
+        var deletedFiles: [String] = []
+        var errors: [String] = []
+
+        // Try multiple locations where SwiftData might store its files
+        let possibleLocations = [
+            // Default app support directory
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+            // Document directory
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+            // Library directory
+            FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first,
+            // Caches directory
+            FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+        ].compactMap { $0 }
+
+        // Look for typical SwiftData store files with various naming patterns
+        let storeNames = [
+            "default.store",
+            "ArgusSwiftData.store",
+            "SwiftData.sqlite",
+            "ArticleModel.store",
+            "Argus.store",
+        ]
+        let extensions = ["", "-wal", "-shm", ".sqlite-wal", ".sqlite-shm"]
+
+        for location in possibleLocations {
+            print("Searching for SwiftData files in: \(location.path)")
+
+            for name in storeNames {
+                for ext in extensions {
+                    let fileURL = location.appendingPathComponent(name + ext)
+
+                    // Try to remove if exists
+                    if FileManager.default.fileExists(atPath: fileURL.path) {
+                        do {
+                            try FileManager.default.removeItem(at: fileURL)
+                            print("Removed SwiftData file: \(fileURL.path)")
+                            deletedFiles.append(fileURL.lastPathComponent)
+                        } catch {
+                            print("Failed to remove \(fileURL.lastPathComponent): \(error)")
+                            errors.append("\(fileURL.lastPathComponent): \(error.localizedDescription)")
+                        }
+                    }
+                }
+            }
+
+            // Also try to find any SwiftData directories that might exist
+            do {
+                let contents = try FileManager.default.contentsOfDirectory(at: location, includingPropertiesForKeys: nil)
+                for item in contents {
+                    if item.lastPathComponent.contains("SwiftData") ||
+                        item.lastPathComponent.contains("ModelContainer") ||
+                        item.lastPathComponent.contains("Argus.sqlite")
+                    {
+                        do {
+                            try FileManager.default.removeItem(at: item)
+                            print("Removed SwiftData directory/file: \(item.path)")
+                            deletedFiles.append(item.lastPathComponent)
+                        } catch {
+                            print("Failed to remove \(item.lastPathComponent): \(error)")
+                            errors.append("\(item.lastPathComponent): \(error.localizedDescription)")
+                        }
+                    }
+                }
+            } catch {
+                print("Failed to list directory contents at \(location.path): \(error)")
+            }
+        }
+
+        // Also clear UserDefaults related to migration
+        UserDefaults.standard.removeObject(forKey: "migrationProgress")
+
+        // Build result summary
+        var result = "Store reset attempted - please restart the app for changes to take effect\n\n"
+
+        if !deletedFiles.isEmpty {
+            result += "Deleted \(deletedFiles.count) files:\n"
+            result += deletedFiles.joined(separator: "\n")
+            result += "\n\n"
+        } else {
+            result += "No SwiftData files found to delete.\n\n"
+        }
+
+        if !errors.isEmpty {
+            result += "Encountered \(errors.count) errors:\n"
+            result += errors.joined(separator: "\n")
+        }
+
+        print(result)
+        return result
     }
 
     /// Creates a new ModelContext for use in background operations
@@ -68,10 +194,67 @@ struct SwiftDataTestView: View {
     @State private var topics: [TopicModel] = []
     @State private var testStatus: String = "Not tested"
     @State private var isLoading = false
+    @State private var showResetConfirmation = false
+    @State private var diagnosticInfo: String = ""
 
     var body: some View {
         NavigationView {
             List {
+                Section(header: Text("Container Status")) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Circle()
+                                .fill(SwiftDataContainer.shared.isUsingInMemoryFallback ? Color.orange : Color.green)
+                                .frame(width: 12, height: 12)
+                            Text(SwiftDataContainer.shared.status)
+                                .font(.headline)
+                                .foregroundColor(SwiftDataContainer.shared.isUsingInMemoryFallback ? .orange : .green)
+                        }
+
+                        Text("Mode: \(SwiftDataContainer.shared.isUsingInMemoryFallback ? "In-Memory (temporary)" : "Persistent")")
+                            .font(.caption)
+                            .foregroundColor(SwiftDataContainer.shared.isUsingInMemoryFallback ? .orange : .green)
+
+                        if SwiftDataContainer.shared.isUsingInMemoryFallback {
+                            Text("⚠️ In-memory mode does not persist data between app launches and cannot be used for migration!")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                                .padding(.top, 2)
+                        }
+                    }
+
+                    Button("Reset SwiftData Store", role: .destructive) {
+                        showResetConfirmation = true
+                    }
+                    .buttonStyle(.bordered)
+                    .foregroundColor(.white)
+                    .background(Color.red)
+                    .cornerRadius(8)
+                    .padding(.vertical, 4)
+                    .confirmationDialog(
+                        "Reset SwiftData Store?",
+                        isPresented: $showResetConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Reset & Exit App", role: .destructive) {
+                            // Reset the store and suggest an app restart
+                            let resetResult = SwiftDataContainer.shared.resetStore()
+                            testStatus = "Store reset complete - please restart app now"
+                            diagnosticInfo = resetResult
+                        }
+                    } message: {
+                        Text("This will delete all SwiftData store files. You must restart the app for changes to take effect. This action cannot be undone.")
+                    }
+                }
+
+                if !diagnosticInfo.isEmpty {
+                    Section(header: Text("Diagnostic Info")) {
+                        Text(diagnosticInfo)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
                 Section(header: Text("Test Status")) {
                     Text(testStatus)
                 }
@@ -84,6 +267,7 @@ struct SwiftDataTestView: View {
                             isLoading = false
                         }
                     }
+                    .disabled(isLoading || SwiftDataContainer.shared.isUsingInMemoryFallback)
 
                     Button("Load Data") {
                         isLoading = true
@@ -92,6 +276,7 @@ struct SwiftDataTestView: View {
                             isLoading = false
                         }
                     }
+                    .disabled(isLoading)
 
                     Button("Clear Test Data") {
                         isLoading = true
@@ -100,6 +285,7 @@ struct SwiftDataTestView: View {
                             isLoading = false
                         }
                     }
+                    .disabled(isLoading)
                 }
 
                 if isLoading {

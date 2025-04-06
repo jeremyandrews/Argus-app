@@ -32,8 +32,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // This can't be deferred as it triggered the crash
         SyncManager.shared.registerBackgroundTasks()
 
-        // Request notification permissions separately from other app startup routines
-        requestNotificationPermissions()
+        // Request notification permissions
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+            if granted {
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                    NotificationCenter.default.post(name: Notification.Name("NotificationPermissionGranted"), object: nil)
+                }
+            } else if let error = error {
+                AppLogger.app.error("Error requesting notification authorization: \(error)")
+            }
+        }
+
+        // Check for and resume any in-progress migrations
+        checkAndResumeMigration()
 
         // Check if we're running UI tests and should set up test data
         if isRunningUITests {
@@ -46,29 +58,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         return true
-    }
-
-    private func requestNotificationPermissions() {
-        // Skip requesting permissions if we're in UI Testing mode
-        if ProcessInfo.processInfo.arguments.contains("UI_TESTING_PERMISSIONS_GRANTED") {
-            AppLogger.app.debug("UI Testing: Skipping notification permission request")
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: Notification.Name("NotificationPermissionGranted"), object: nil)
-            }
-            return
-        }
-
-        // Normal permission request for real app usage
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if granted {
-                DispatchQueue.main.async {
-                    UIApplication.shared.registerForRemoteNotifications()
-                    NotificationCenter.default.post(name: Notification.Name("NotificationPermissionGranted"), object: nil)
-                }
-            } else if let error = error {
-                AppLogger.app.error("Error requesting notification authorization: \(error)")
-            }
-        }
     }
 
     private func executeDeferredStartupTasks() {
@@ -544,6 +533,33 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 AppLogger.app.error("Failed to authenticate device: \(error)")
             }
         }
+    }
+
+    private func checkAndResumeMigration() {
+        // Check if migration was in progress
+        guard let data = UserDefaults.standard.data(forKey: "migrationProgress"),
+              let progress = try? JSONDecoder().decode(MigrationProgress.self, from: data),
+              progress.state == .inProgress
+        else {
+            return
+        }
+
+        // If migration was in progress, notify the user it will resume
+        let notification = UNMutableNotificationContent()
+        notification.title = "Data Migration"
+        notification.body = "Your data migration was interrupted and will resume when you open the app."
+        notification.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "migration-resume",
+            content: notification,
+            trigger: nil
+        )
+
+        UNUserNotificationCenter.current().add(request)
+
+        // The actual resumption will happen in the MigrationView when it appears
+        AppLogger.app.info("Data migration needs to be resumed - will continue in MigrationView")
     }
 
     private func setupTestDataIfNeeded() {

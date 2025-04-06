@@ -182,19 +182,21 @@ This file captures important patterns, preferences, and project intelligence tha
   ```swift
   @Model
   class Article {
-      @Attribute(.unique) var id: String
-      var title: String
-      var body: String
-      var publishDate: Date
-      @Relationship(.cascade) var topics: [Topic]
+      // CloudKit compatibility: default values for all required properties
+      var id: String = ""
+      var title: String = ""
+      var body: String = ""
+      var publishDate: Date = Date()
+      @Relationship(.cascade) var topics: [Topic]? = []
       
       // Additional fields for tracking state
       var isRead: Bool = false
       var isBookmarked: Bool = false
   }
   ```
-- Mark unique identifiers with @Attribute(.unique) to prevent duplicates
-- Configure proper relationships between models
+- Ensure all required properties have default values for CloudKit compatibility
+- Do not use @Attribute(.unique) constraints (not supported by CloudKit)
+- Implement application-level uniqueness validation in repository layer
 - Define the model container at the app level:
   ```swift
   @main

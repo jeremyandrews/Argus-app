@@ -8,10 +8,12 @@ final class ArticleModel {
     // MARK: - Core Identifiers
 
     /// Unique identifier for the article
-    @Attribute(.unique) var id: UUID
+    // Removed @Attribute(.unique) for CloudKit compatibility
+    var id: UUID = UUID()
 
     /// URL path to the JSON file for this article
-    @Attribute(.unique) var jsonURL: String
+    // Removed @Attribute(.unique) for CloudKit compatibility
+    var jsonURL: String = ""
 
     /// Optional URL to the original article
     var url: String?
@@ -19,27 +21,27 @@ final class ArticleModel {
     // MARK: - Content Fields
 
     /// Main title of the article (from tiny_title in API)
-    var title: String
+    var title: String = ""
 
     /// Body text of the article (from tiny_summary in API)
-    var body: String
+    var body: String = ""
 
     /// Source domain for the article
     var domain: String?
 
     /// Full article title (from article_title in API)
-    var articleTitle: String
+    var articleTitle: String = ""
 
     /// Who or what is affected by this article
-    var affected: String
+    var affected: String = ""
 
     // MARK: - Metadata
 
     /// When the article was published
-    var publishDate: Date
+    var publishDate: Date = Date()
 
     /// When the article was added to the database
-    var addedDate: Date
+    var addedDate: Date = Date()
 
     /// Topic this article belongs to
     var topic: String?
@@ -167,13 +169,15 @@ final class ArticleModel {
 @Model
 final class SeenArticleModel {
     /// Unique identifier matching the article ID
-    @Attribute(.unique) var id: UUID
+    // Removed @Attribute(.unique) for CloudKit compatibility
+    var id: UUID = UUID()
 
     /// URL path to the JSON file for this article (for lookups)
-    @Attribute(.unique) var jsonURL: String
+    // Removed @Attribute(.unique) for CloudKit compatibility
+    var jsonURL: String = ""
 
     /// When this article was first seen
-    var date: Date
+    var date: Date = Date()
 
     /// Initializer
     init(id: UUID, jsonURL: String, date: Date = Date()) {
@@ -187,10 +191,12 @@ final class SeenArticleModel {
 @Model
 final class TopicModel {
     /// Unique identifier for the topic
-    @Attribute(.unique) var id: UUID = UUID()
+    // Removed @Attribute(.unique) for CloudKit compatibility
+    var id: UUID = UUID()
 
     /// Name of the topic
-    @Attribute(.unique) var name: String
+    // Removed @Attribute(.unique) for CloudKit compatibility
+    var name: String = ""
 
     /// User preference for priority level
     var priority: TopicPriority = TopicPriority.normal

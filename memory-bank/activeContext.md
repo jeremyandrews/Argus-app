@@ -2,16 +2,18 @@
 
 ## Current Work Focus
 - **Active Development Phase**: Modernization implementation in progress
-- **Primary Focus Areas**: SwiftData migration active, preparing for MVVM architecture adoption, async/await implementation
+- **Primary Focus Areas**: SwiftData migration active, preparing for MVVM architecture adoption, async/await implementation, CloudKit compatibility
 - **User Experience Improvements**: Improving UI responsiveness, eliminating sync jitter, and enhancing offline capabilities
+- **Cross-Device Capabilities**: Preparing SwiftData models for future CloudKit integration to enable iPhone/iPad syncing
 
 ## Recent Changes
 - Implemented SwiftData models to support the modernization plan:
   - Created Article, SeenArticle, and Topic models with proper SwiftData annotations
-  - Added proper unique constraints to prevent duplicates (ID and jsonURL for articles)
+  - Reconfigured models to be CloudKit-compatible by adding default values to all required properties
+  - Removed unique constraints from model definitions (for CloudKit compatibility)
   - Set up appropriate relationships between models with cascade delete rules
   - Ensured field alignment with backend API structure for seamless integration
-  - Designed models to support the upcoming MVVM architecture
+  - Designed models to support the upcoming MVVM architecture and future cross-device syncing
 - Defined comprehensive modernization plan with phased implementation approach:
   - Created detailed task breakdown for model migration, networking refactor, MVVM implementation, and background processing
   - Planned transition from current architecture to SwiftData and MVVM
@@ -84,6 +86,8 @@
 - Ensuring data integrity during migration to SwiftData
 - Managing complexity of background task implementation
 - Maintaining offline functionality throughout the modernization process
+- Implementing application-level uniqueness checks to replace schema-level constraints
+- Preparing for future cross-device syncing with CloudKit
 
 ## Recent Feedback
 - Need for improved UI performance, especially during sync operations
@@ -91,7 +95,8 @@
 - Requests for more consistent error handling and recovery mechanisms
 
 ## Immediate Priorities
-1. Finalize detailed implementation plan for each modernization phase
-2. Create SwiftData models aligned with current data structures
+1. Complete CloudKit-compatible SwiftData models for testing
+2. Implement application-level uniqueness validation logic
 3. Begin refactoring APIClient to use async/await
 4. Develop and test initial ViewModel prototypes
+5. Plan for proper conflict resolution strategies for future CloudKit syncing

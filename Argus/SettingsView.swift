@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @AppStorage("autoDeleteDays") private var autoDeleteDays: Int = UserDefaults.standard.object(forKey: "autoDeleteDays") == nil ? 3 : UserDefaults.standard.integer(forKey: "autoDeleteDays")
@@ -151,6 +152,15 @@ struct SettingsView: View {
                                 Image(systemName: "database.fill")
                                     .foregroundColor(.blue)
                                 Text("SwiftData Test")
+                            }
+                        }
+                        .foregroundColor(.primary)
+
+                        NavigationLink(destination: MigrationView()) {
+                            HStack {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .foregroundColor(.orange)
+                                Text("Data Migration")
                             }
                         }
                         .foregroundColor(.primary)
