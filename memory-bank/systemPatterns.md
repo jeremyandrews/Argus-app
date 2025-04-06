@@ -139,6 +139,84 @@ Uses Swift's background task framework to perform sync operations when the app i
 - NSCache for in-memory caching of frequently accessed data
 - Batch processing for efficient handling of multiple articles
 
+### SwiftData Relationship Management
+
+SwiftData's relationship handling requires special attention, particularly with bidirectional relationships and cascade delete rules:
+
+```mermaid
+flowchart TD
+    subgraph "Entity Deletion Pattern"
+        A[1. Nullify Relationships]
+        B[2. Use Isolation Context]
+        C[3. Process in Small Batches]
+        D[4. Save After Each Batch]
+        E[5. Delete Parent Entities Last]
+        
+        A --> B --> C --> D --> E
+    end
+```
+
+#### Deletion Best Practices
+
+1. **Break Circular References**:
+   - Nullify relationships before deletion: `entity.relationships = []`
+   - Save changes to commit relationship removal
+   - Then proceed with actual entity deletion
+   
+2. **Dedicated Isolation Context**:
+   - Create a fresh ModelContext specifically for deletion operations
+   - Prevents context interference with UI-bound contexts
+   - Avoids EXC_BAD_ACCESS crashes during complex operations
+
+3. **Batched Processing**:
+   - Process entities in small batches (5-10 items)
+   - Perform intermediate saves between batches
+   - Allows tracking progress and prevents memory buildup
+   
+4. **Deletion Order**:
+   - Delete child entities before parent entities
+   - Handle SeenArticle records first (no relationships)
+   - Then handle Topics with cascade rules
+   - Finally clean up any orphaned Articles
+   
+5. **Diagnostic Tracking**:
+   - Log timing information at each step
+   - Track relationship counts and entity states
+   - Monitor for unexpected conditions
+
+#### Example Implementation
+
+```swift
+// 1. Create isolated context
+let deletionContext = container.newContext()
+
+// 2. Break circular references
+let articles = try deletionContext.fetch(FetchDescriptor<ArticleModel>())
+for article in articles {
+    article.topics = []
+}
+try deletionContext.save()
+
+// 3. Delete in small batches with separate context
+let topics = try deletionContext.fetch(FetchDescriptor<TopicModel>())
+for batch in stride(from: 0, to: topics.count, by: 5) {
+    let end = min(batch + 5, topics.count)
+    for i in batch..<end {
+        deletionContext.delete(topics[i])
+    }
+    try deletionContext.save()
+}
+
+// 4. Cleanup any orphaned entities
+let remainingArticles = try deletionContext.fetch(FetchDescriptor<ArticleModel>())
+for article in remainingArticles {
+    deletionContext.delete(article)
+}
+try deletionContext.save()
+```
+
+This pattern avoids the EXC_BAD_ACCESS crashes and freezes that can occur when SwiftData attempts to maintain relationship integrity during deletion operations.
+
 ## Communication Patterns
 - RESTful API calls to the backend server
 - Push notifications for high-priority content

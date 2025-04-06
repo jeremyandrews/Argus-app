@@ -20,16 +20,31 @@ struct MigrationOverlay: View {
                 Text(migrationService.status)
                     .font(.subheadline)
 
+                // Display migrated article count during migration
+                if migrationService.progress > 0 && migrationService.progress < 1.0 {
+                    Text("Articles processed: \(migrationService.totalArticlesMigrated)")
+                        .font(.caption)
+                        .padding(.top, 4)
+                }
+
                 if migrationService.progress >= 1.0 {
                     Button("Done") {
                         onComplete()
                     }
                     .buttonStyle(.bordered)
                 } else if migrationService.progress < 0.95 {
+                    // Cancel button
                     Button("Cancel", role: .destructive) {
-                        migrationService.cancelMigration()
+                        Task {
+                            migrationService.cancelMigration()
+                            // Allow time for cancellation to process
+                            try? await Task.sleep(nanoseconds: 500_000_000)
+                            onComplete()
+                        }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .padding(.top, 4)
                 }
 
                 if let error = migrationService.error {
@@ -42,9 +57,31 @@ struct MigrationOverlay: View {
             .padding(30)
             .background(
                 RoundedRectangle(cornerRadius: 15)
-                    .fill(Color.white.opacity(0.95))
+                    .fill(Color(.systemBackground).opacity(0.95))
             )
-            .shadow(radius: 10)
+            .shadow(color: Color.primary.opacity(0.2), radius: 10)
         }
+    }
+
+    // Helper methods for formatting metrics
+    private func timeString(from timeInterval: TimeInterval) -> String {
+        if timeInterval.isNaN || timeInterval.isInfinite || timeInterval <= 0 {
+            return "Calculating..."
+        }
+
+        let hours = Int(timeInterval) / 3600
+        let minutes = Int(timeInterval) % 3600 / 60
+        let seconds = Int(timeInterval) % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d", minutes, seconds)
+        }
+    }
+
+    private func memoryString(bytes: UInt64) -> String {
+        let megabytes = Double(bytes) / 1_048_576
+        return String(format: "%.1f MB", megabytes)
     }
 }

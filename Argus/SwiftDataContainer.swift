@@ -28,17 +28,7 @@ class SwiftDataContainer {
     }
 
     private init() {
-        // Force in-memory storage for now
-        // This avoids CloudKit-related errors with required fields and unique constraints
-        // When future iPad syncing is implemented, you will need to:
-        // 1. Modify ArticleDataModels.swift to make attributes optional/with defaults
-        // 2. Remove unique constraints from model definitions
-        // 3. Change this configuration to use CloudKit
-
-        print("Creating in-memory SwiftData container to avoid CloudKit integration issues")
-        isUsingInMemoryFallback = true
-
-        // Create a simple schema
+        // Create a schema with our models
         let schema = Schema([
             ArticleModel.self,
             SeenArticleModel.self,
@@ -46,22 +36,39 @@ class SwiftDataContainer {
         ])
 
         do {
-            // Always use in-memory storage
-            let config = ModelConfiguration(isStoredInMemoryOnly: true)
-            container = try ModelContainer(for: schema, configurations: [config])
-            print("In-memory SwiftData container successfully created")
-        } catch {
-            print("Failed to create even a basic in-memory container: \(error)")
-            lastError = error
+            // Use persistent storage with a dedicated test database name
+            // This ensures we don't interfere with production data
+            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let testStorageURL = documentsDirectory.appendingPathComponent("ArgusTestDB.store")
 
-            // Last resort - empty container
-            print("Creating minimal container as last resort")
+            print("Creating persistent SwiftData container at: \(testStorageURL.path)")
+            let config = ModelConfiguration(url: testStorageURL)
+            container = try ModelContainer(for: schema, configurations: [config])
+            isUsingInMemoryFallback = false
+            print("Persistent SwiftData container successfully created")
+        } catch {
+            print("Failed to create persistent container: \(error)")
+            lastError = error
+            isUsingInMemoryFallback = true
+
+            // Fall back to in-memory storage if persistent fails
+            print("Falling back to in-memory container")
             do {
-                let minimalSchema = Schema([])
-                container = try ModelContainer(for: minimalSchema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
-                print("Created empty fallback container")
+                let config = ModelConfiguration(isStoredInMemoryOnly: true)
+                container = try ModelContainer(for: schema, configurations: [config])
+                print("In-memory fallback SwiftData container created")
             } catch {
-                fatalError("Cannot create ANY ModelContainer - app cannot function: \(error)")
+                print("Failed to create even a basic in-memory container: \(error)")
+
+                // Last resort - empty container
+                print("Creating minimal container as last resort")
+                do {
+                    let minimalSchema = Schema([])
+                    container = try ModelContainer(for: minimalSchema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
+                    print("Created empty fallback container")
+                } catch {
+                    fatalError("Cannot create ANY ModelContainer - app cannot function: \(error)")
+                }
             }
         }
     }
@@ -83,6 +90,25 @@ class SwiftDataContainer {
             FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
         ].compactMap { $0 }
 
+        // First specifically target our test database file
+        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let testDBURL = documentsDirectory.appendingPathComponent("ArgusTestDB.store")
+        let testDBExtensions = ["", "-wal", "-shm", ".sqlite-wal", ".sqlite-shm"]
+
+        for ext in testDBExtensions {
+            let fileURL = testDBURL.appendingPathExtension(ext)
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                do {
+                    try FileManager.default.removeItem(at: fileURL)
+                    print("Removed test database file: \(fileURL.path)")
+                    deletedFiles.append(fileURL.lastPathComponent)
+                } catch {
+                    print("Failed to remove test database file \(fileURL.lastPathComponent): \(error)")
+                    errors.append("\(fileURL.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+        }
+
         // Look for typical SwiftData store files with various naming patterns
         let storeNames = [
             "default.store",
@@ -90,6 +116,7 @@ class SwiftDataContainer {
             "SwiftData.sqlite",
             "ArticleModel.store",
             "Argus.store",
+            "ArgusTestDB.store",
         ]
         let extensions = ["", "-wal", "-shm", ".sqlite-wal", ".sqlite-shm"]
 
@@ -120,7 +147,8 @@ class SwiftDataContainer {
                 for item in contents {
                     if item.lastPathComponent.contains("SwiftData") ||
                         item.lastPathComponent.contains("ModelContainer") ||
-                        item.lastPathComponent.contains("Argus.sqlite")
+                        item.lastPathComponent.contains("Argus.sqlite") ||
+                        item.lastPathComponent.contains("ArgusTestDB")
                     {
                         do {
                             try FileManager.default.removeItem(at: item)
@@ -197,6 +225,12 @@ struct SwiftDataTestView: View {
     @State private var showResetConfirmation = false
     @State private var diagnosticInfo: String = ""
 
+    // Performance metrics
+    @State private var lastOperationDuration: TimeInterval = 0
+    @State private var lastOperationDate: Date? = nil
+    @State private var lastOperationArticleCount: Int = 0
+    @State private var showPerformanceMetrics = false
+
     var body: some View {
         NavigationView {
             List {
@@ -220,6 +254,16 @@ struct SwiftDataTestView: View {
                                 .font(.caption)
                                 .foregroundColor(.orange)
                                 .padding(.top, 2)
+                        } else {
+                            // Show storage location when in persistent mode
+                            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                            let dbPath = documentsDirectory.appendingPathComponent("ArgusTestDB.store").path
+                            Text("Storage location: \(dbPath)")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                                .padding(.top, 2)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                         }
                     }
 
@@ -259,15 +303,46 @@ struct SwiftDataTestView: View {
                     Text(testStatus)
                 }
 
+                if showPerformanceMetrics && lastOperationDate != nil {
+                    Section(header: Text("Performance Metrics")) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Last operation: \(lastOperationDate?.formatted(date: .omitted, time: .standard) ?? "N/A")")
+                            Text("Duration: \(String(format: "%.3f", lastOperationDuration))s")
+                            if lastOperationArticleCount > 0 {
+                                Text("Articles created: \(lastOperationArticleCount)")
+                                Text("Time per article: \(String(format: "%.3f", lastOperationDuration / Double(lastOperationArticleCount)))s")
+                                Text("Theoretical time for 100 articles: \(String(format: "%.1f", (lastOperationDuration / Double(lastOperationArticleCount)) * 100))s")
+                                Text("Theoretical time for 500 articles: \(String(format: "%.1f", (lastOperationDuration / Double(lastOperationArticleCount)) * 500))s")
+                            }
+                        }
+                        .font(.footnote)
+                    }
+                }
+
                 Section(header: Text("Test Actions")) {
-                    Button("Create Test Data") {
+                    Button("Create Test Article") {
                         isLoading = true
                         Task {
+                            let startTime = Date()
                             await createTestData()
+                            let duration = Date().timeIntervalSince(startTime)
+                            lastOperationDuration = duration
+                            lastOperationDate = Date()
+                            lastOperationArticleCount = 1
+                            showPerformanceMetrics = true
                             isLoading = false
                         }
                     }
-                    .disabled(isLoading || SwiftDataContainer.shared.isUsingInMemoryFallback)
+                    .disabled(isLoading)
+
+                    Button("Create Random Batch (1-10 Articles)") {
+                        isLoading = true
+                        Task {
+                            await createBatchTestData()
+                            isLoading = false
+                        }
+                    }
+                    .disabled(isLoading)
 
                     Button("Load Data") {
                         isLoading = true
@@ -357,7 +432,7 @@ struct SwiftDataTestView: View {
             modelContext.insert(seenArticle)
 
             try modelContext.save()
-            testStatus = "Created test data successfully"
+            testStatus = "Created test article successfully with ID: \(article.id)"
 
             // Refresh the data
             await loadData()
@@ -365,6 +440,154 @@ struct SwiftDataTestView: View {
         } catch {
             testStatus = "Error creating test data: \(error.localizedDescription)"
         }
+    }
+
+    @MainActor
+    private func createBatchTestData() async {
+        let startTime = Date()
+        let articlesCount = Int.random(in: 1 ... 10)
+        let topicsCount = min(3, Int.random(in: 1 ... articlesCount))
+
+        // Create a dedicated background context for database operations
+        let backgroundContext = SwiftDataContainer.shared.newContext()
+
+        testStatus = "Creating batch of \(articlesCount) articles..."
+
+        // Use Task to ensure we're not on the main thread
+        await Task.detached {
+            // Log operation start with diagnostics
+            print("📊 Starting batch creation of \(articlesCount) articles with \(topicsCount) topics")
+
+            // 1. Create random topics first
+            let topics = (0 ..< topicsCount).map { i in
+                TopicModel(
+                    name: "Test Topic \(i + 1)",
+                    priority: Bool.random() ? .high : .normal,
+                    notificationsEnabled: Bool.random()
+                )
+            }
+
+            // Insert all topics
+            for topic in topics {
+                backgroundContext.insert(topic)
+            }
+
+            // Save topics first
+            do {
+                let topicSaveStart = Date()
+                try backgroundContext.save()
+                let topicSaveDuration = Date().timeIntervalSince(topicSaveStart)
+                print("📊 Saved \(topicsCount) topics in \(String(format: "%.3f", topicSaveDuration))s")
+            } catch {
+                print("📊 Failed to save topics: \(error)")
+
+                // Update UI on main thread
+                await MainActor.run {
+                    self.testStatus = "Failed to save topics: \(error.localizedDescription)"
+                    self.lastOperationDuration = Date().timeIntervalSince(startTime)
+                    self.lastOperationDate = Date()
+                    self.lastOperationArticleCount = 0
+                    self.showPerformanceMetrics = true
+                }
+                return
+            }
+
+            // 2. Create random articles with varied content
+            var articles: [ArticleModel] = []
+
+            // Create articles in smaller batches (5 at a time) with intermediate saves
+            let batchSize = 5
+            for batchIndex in 0 ..< (articlesCount + batchSize - 1) / batchSize {
+                let startIndex = batchIndex * batchSize
+                let endIndex = min(startIndex + batchSize, articlesCount)
+                print("📊 Creating articles batch \(startIndex)-\(endIndex - 1)")
+
+                let batchStartTime = Date()
+
+                for i in startIndex ..< endIndex {
+                    // Create article with random content and varied properties
+                    let article = ArticleModel(
+                        id: UUID(),
+                        jsonURL: "https://test.example.com/articles/batch-\(UUID().uuidString).json",
+                        title: "Test Article \(i + 1)",
+                        body: "This is test article \(i + 1) with random content length: " +
+                            String(repeating: "Content ", count: Int.random(in: 5 ... 20)),
+                        articleTitle: "Full Test Article Title \(i + 1)",
+                        affected: "Test Users Group \(i % 3 + 1)",
+                        publishDate: Date().addingTimeInterval(-Double(i * 3600)), // Varied publish dates
+                        topic: topics[i % topicsCount].name
+                    )
+
+                    // Randomly assign 1-3 topics to each article
+                    let topicCount = min(topicsCount, Int.random(in: 1 ... 3))
+                    let selectedTopics = Array(topics.shuffled().prefix(topicCount))
+                    article.topics = selectedTopics
+
+                    backgroundContext.insert(article)
+                    articles.append(article)
+                }
+
+                // Create SeenArticle records for half the articles in this batch (random selection)
+                for article in articles.suffix(endIndex - startIndex).shuffled().prefix((endIndex - startIndex) / 2) {
+                    let seenArticle = SeenArticleModel(
+                        id: article.id,
+                        jsonURL: article.jsonURL
+                    )
+                    backgroundContext.insert(seenArticle)
+                }
+
+                // Save this batch
+                do {
+                    let batchSaveStart = Date()
+                    try backgroundContext.save()
+                    let batchSaveDuration = Date().timeIntervalSince(batchSaveStart)
+                    let totalBatchDuration = Date().timeIntervalSince(batchStartTime)
+                    print("📊 Saved batch \(batchIndex + 1) in \(String(format: "%.3f", batchSaveDuration))s (total batch time: \(String(format: "%.3f", totalBatchDuration))s)")
+                } catch {
+                    print("📊 Failed to save batch \(batchIndex + 1): \(error)")
+
+                    // Update UI on main thread with what we managed to create before the error
+                    let articlesCreatedSoFar = articles.count
+                    await MainActor.run {
+                        self.testStatus = "Failed saving batch \(batchIndex + 1): \(error.localizedDescription)"
+                        self.lastOperationDuration = Date().timeIntervalSince(startTime)
+                        self.lastOperationDate = Date()
+                        self.lastOperationArticleCount = articlesCreatedSoFar
+                        self.showPerformanceMetrics = true
+                    }
+
+                    // Refresh UI with what was saved
+                    await MainActor.run { [self] in
+                        self.articles = []
+                        self.topics = []
+                    }
+                    // Call loadData after the MainActor update
+                    await loadData()
+                    return
+                }
+            }
+
+            let duration = Date().timeIntervalSince(startTime)
+            let perArticleTime = duration / Double(articlesCount)
+
+            // Log detailed performance metrics
+            print("📊 Batch created \(articlesCount) articles with \(topicsCount) topics in \(String(format: "%.3f", duration))s")
+            print("📊 Average time per article: \(String(format: "%.3f", perArticleTime))s")
+            print("📊 Theoretical time for 100 articles: \(String(format: "%.3f", perArticleTime * 100))s")
+            print("📊 Theoretical time for 500 articles: \(String(format: "%.3f", perArticleTime * 500))s")
+
+            // First update UI properties on main thread
+            await MainActor.run { [self] in
+                self.testStatus = "Created \(articlesCount) articles with \(topicsCount) topics in \(String(format: "%.3f", duration))s"
+                self.lastOperationDuration = duration
+                self.lastOperationDate = Date()
+                self.lastOperationArticleCount = articlesCount
+                self.showPerformanceMetrics = true
+            }
+
+            // Then call loadData separately after MainActor work is complete
+            await loadData()
+        }.value
     }
 
     @MainActor
@@ -387,40 +610,141 @@ struct SwiftDataTestView: View {
 
     @MainActor
     private func clearTestData() async {
+        let startTime = Date()
+        let logPrefix = "📊 SwiftData Clear:"
+
+        func logTimestamp(_ message: String) {
+            let elapsed = String(format: "%.3f", Date().timeIntervalSince(startTime))
+            print("\(logPrefix) [\(elapsed)s] \(message)")
+            // Also update UI for immediate feedback
+            testStatus = message
+        }
+
+        logTimestamp("Starting deletion process")
+
         do {
-            // Delete all test articles
-            let articlesDescriptor = FetchDescriptor<ArticleModel>()
-            let allArticles = try modelContext.fetch(articlesDescriptor)
+            // Log initial counts
+            let initialArticles = try modelContext.fetch(FetchDescriptor<ArticleModel>()).count
+            let initialTopics = try modelContext.fetch(FetchDescriptor<TopicModel>()).count
+            let initialSeen = try modelContext.fetch(FetchDescriptor<SeenArticleModel>()).count
 
-            for article in allArticles {
-                modelContext.delete(article)
+            logTimestamp("Initial counts - Articles: \(initialArticles), Topics: \(initialTopics), Seen: \(initialSeen)")
+
+            // Create a fresh deletion context
+            logTimestamp("Creating isolation context for deletion")
+            let deletionContext = SwiftDataContainer.shared.newContext()
+
+            // 1. Log and nullify relationships to break circular references
+            logTimestamp("Fetching articles to nullify relationships")
+            let articlesForNullifying = try deletionContext.fetch(FetchDescriptor<ArticleModel>())
+            logTimestamp("Found \(articlesForNullifying.count) articles with potential relationships")
+
+            var relationshipCount = 0
+            for (index, article) in articlesForNullifying.enumerated() {
+                if let topics = article.topics, !topics.isEmpty {
+                    relationshipCount += topics.count
+                    logTimestamp("Article \(index) has \(topics.count) topic relationships")
+                }
+                article.topics = []
+
+                // Log every 10 articles to avoid console spam
+                if index % 10 == 0 && index > 0 {
+                    logTimestamp("Nullified relationships for \(index)/\(articlesForNullifying.count) articles")
+                }
             }
 
-            // Delete all test topics
-            let topicsDescriptor = FetchDescriptor<TopicModel>()
-            let allTopics = try modelContext.fetch(topicsDescriptor)
+            logTimestamp("Nullified \(relationshipCount) total relationships across \(articlesForNullifying.count) articles")
 
-            for topic in allTopics {
-                modelContext.delete(topic)
-            }
+            // Save to commit relationship changes
+            logTimestamp("Saving relationship nullification changes")
+            try deletionContext.save()
+            logTimestamp("Successfully saved relationship nullification")
 
-            // Delete all seen articles
+            // 2. Delete seen articles
+            logTimestamp("Fetching seen articles for deletion")
             let seenDescriptor = FetchDescriptor<SeenArticleModel>()
-            let allSeen = try modelContext.fetch(seenDescriptor)
+            let allSeen = try deletionContext.fetch(seenDescriptor)
+            logTimestamp("Found \(allSeen.count) seen articles to delete")
 
-            for seen in allSeen {
-                modelContext.delete(seen)
+            // Delete in batches with timing info
+            for batch in stride(from: 0, to: allSeen.count, by: 10) {
+                let end = min(batch + 10, allSeen.count)
+                logTimestamp("Deleting seen articles batch \(batch)-\(end - 1) of \(allSeen.count)")
+
+                for i in batch ..< end {
+                    deletionContext.delete(allSeen[i])
+                }
+
+                let batchStartTime = Date()
+                try deletionContext.save()
+                let batchDuration = Date().timeIntervalSince(batchStartTime)
+                logTimestamp("Saved seen deletion batch in \(String(format: "%.3f", batchDuration))s")
             }
 
-            try modelContext.save()
-            testStatus = "Cleared all test data"
+            // 3. Delete topics
+            logTimestamp("Fetching topics for deletion")
+            let topicsDescriptor = FetchDescriptor<TopicModel>()
+            let allTopics = try deletionContext.fetch(topicsDescriptor)
+            logTimestamp("Found \(allTopics.count) topics to delete")
 
-            // Refresh the data
+            for batch in stride(from: 0, to: allTopics.count, by: 5) {
+                let end = min(batch + 5, allTopics.count)
+                logTimestamp("Deleting topics batch \(batch)-\(end - 1) of \(allTopics.count)")
+
+                for i in batch ..< end {
+                    // Check if topic still has articles even after nullification
+                    if let articles = allTopics[i].articles, !articles.isEmpty {
+                        logTimestamp("⚠️ WARNING: Topic still has \(articles.count) articles before deletion")
+                    }
+
+                    deletionContext.delete(allTopics[i])
+                }
+
+                let batchStartTime = Date()
+                try deletionContext.save()
+                let batchDuration = Date().timeIntervalSince(batchStartTime)
+                logTimestamp("Saved topic deletion batch in \(String(format: "%.3f", batchDuration))s")
+            }
+
+            // 4. Delete any remaining articles
+            logTimestamp("Checking for remaining articles")
+            let articlesDescriptor = FetchDescriptor<ArticleModel>()
+            let allArticles = try deletionContext.fetch(articlesDescriptor)
+            logTimestamp("Found \(allArticles.count) remaining articles to delete")
+
+            for batch in stride(from: 0, to: allArticles.count, by: 10) {
+                let end = min(batch + 10, allArticles.count)
+                logTimestamp("Deleting articles batch \(batch)-\(end - 1) of \(allArticles.count)")
+
+                for i in batch ..< end {
+                    deletionContext.delete(allArticles[i])
+                }
+
+                let batchStartTime = Date()
+                try deletionContext.save()
+                let batchDuration = Date().timeIntervalSince(batchStartTime)
+                logTimestamp("Saved article deletion batch in \(String(format: "%.3f", batchDuration))s")
+            }
+
+            // Final verification and UI update
+            let finalArticlesCheck = try modelContext.fetch(FetchDescriptor<ArticleModel>())
+            let finalTopicsCheck = try modelContext.fetch(FetchDescriptor<TopicModel>())
+            let finalSeenCheck = try modelContext.fetch(FetchDescriptor<SeenArticleModel>())
+
+            let totalDuration = Date().timeIntervalSince(startTime)
+            let finalMessage = "Deletion complete in \(String(format: "%.3f", totalDuration))s. Remaining: \(finalArticlesCheck.count) articles, \(finalTopicsCheck.count) topics, \(finalSeenCheck.count) seen records"
+            logTimestamp(finalMessage)
+
+            // Refresh the UI
             articles = []
             topics = []
+            testStatus = finalMessage
 
         } catch {
-            testStatus = "Error clearing test data: \(error.localizedDescription)"
+            let errorDuration = Date().timeIntervalSince(startTime)
+            let errorMessage = "Error after \(String(format: "%.3f", errorDuration))s: \(error.localizedDescription)"
+            logTimestamp("❌ \(errorMessage)")
+            testStatus = errorMessage
         }
     }
 }

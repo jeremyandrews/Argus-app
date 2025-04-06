@@ -4,6 +4,8 @@ import SwiftUI
 struct MigrationView: View {
     @State private var migrationService: MigrationService?
     @State private var isMigrating = false
+    // Removed test mode state as we're now using persistent storage by default
+    private let swiftDataContainer = SwiftDataContainer.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -13,6 +15,14 @@ struct MigrationView: View {
             Text("Migrate your existing articles to the new database format. This is a one-time process.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
+
+            // Warning if using in-memory storage (unlikely since we now default to persistent)
+            if swiftDataContainer.isUsingInMemoryFallback {
+                Text("⚠️ Using in-memory storage. Migration will work but data will NOT be saved permanently!")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .padding(.vertical, 8)
+            }
 
             if let service = migrationService {
                 HStack {
@@ -34,6 +44,8 @@ struct MigrationView: View {
                     // Initialize the service on first button press
                     Task {
                         migrationService = await MigrationService()
+
+                        // No test mode to set as we're now using persistent storage by default
                     }
                 }
 
@@ -47,6 +59,16 @@ struct MigrationView: View {
             }
             .buttonStyle(.bordered)
             .disabled(migrationService?.progress ?? 0 > 0 && migrationService?.progress ?? 0 < 1.0)
+
+            // Add reset button when migration is completed or failed
+            if let service = migrationService, service.progress >= 1.0 || service.error != nil {
+                Button("Reset Migration State") {
+                    service.resetMigration()
+                }
+                .buttonStyle(.bordered)
+                .foregroundColor(.orange)
+                .padding(.top, 8)
+            }
 
             if let service = migrationService, let error = service.error {
                 Text(error.localizedDescription)

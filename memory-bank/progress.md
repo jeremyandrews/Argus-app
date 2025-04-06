@@ -34,6 +34,11 @@
 
 ## What's In Progress
 
+- 🔶 **Migration Testing with Persistent Storage**
+  - Testing migration process with persistent data storage
+  - Verifying migration resilience across app restarts
+  - Gathering performance metrics with persistent storage
+
 - 🔶 **Sync Process Optimization**
   - Background sync process improvements underway using DatabaseCoordinator 
   - UI jitter during sync operations still needs to be addressed
@@ -43,6 +48,21 @@
   - Testing fixes for data integrity issues
 
 ## Recently Completed
+
+- ✅ **Persistent Storage Implementation for SwiftData Testing**
+  - Transitioned from in-memory to persistent storage for SwiftData container
+  - Created dedicated test database "ArgusTestDB.store" in documents directory
+  - Enhanced reset functionality to specifically target test database files
+  - Simplified architecture by removing dual-mode support and test mode toggle
+  - Updated UI to display storage location and mode with clear visual indicators
+  - Maintained fallback to in-memory storage if persistent storage creation fails
+
+- ✅ **SwiftData Performance Validation**
+  - Enhanced test interface with batch creation capabilities (1-10 articles at once)
+  - Implemented performance metrics to measure article creation throughput
+  - Verified that SwiftData efficiently handles batched operations in background tasks
+  - Confirmed that hundreds of articles can be processed with proper batching strategies
+  - Documented optimal patterns for background processing with SwiftData
 
 - ✅ **Topic Switching Optimization**
   - Implemented direct database access path for topics using DatabaseCoordinator
@@ -89,19 +109,30 @@
   - Made models CloudKit-compatible by adding default values to all required properties  
   - Removed unique constraints for CloudKit compatibility
   - Designed model relationships with proper cascade rules
-- ✅ **Initialize SwiftData Container**
-  - Created dedicated SwiftDataContainer class to isolate new models during transition
-  - Configured ModelContainer with proper schema and persistence options
-  - Added test interface (SwiftDataTestView) to verify SwiftData operations 
-  - Integrated with Settings view for developer testing
-- 🔶 **Resolve CloudKit Compatibility Issues**
+  
+- ✅ **Resolve CloudKit Compatibility Issues**
   - Updated model definitions to be CloudKit-compatible
   - Prepared for future cross-device syncing capability
   - Fixed app crash in SwiftData Test view
+  - Implemented robust deletion pattern for SwiftData relationships
+  - Resolved EXC_BAD_ACCESS crashes during entity deletion
+  - Added comprehensive logging for SwiftData operations
 
-- 🔲 **Migrate Existing Data (Optional)**
-  - Create migration routine for converting old data to SwiftData models
-  - Implement fallback to fetch fresh data if local data is incompatible
+- ✅ **Initialize SwiftData Container**
+  - Created dedicated SwiftDataContainer class to isolate new models during transition
+  - Added test interface (SwiftDataTestView) to verify SwiftData operations
+  - Integrated with Settings view for developer testing
+  - Successfully implemented persistent storage with dedicated test database
+  - Enhanced reset store functionality for reliable repeated testing
+  - Updated UI to display storage location and persistent/in-memory status
+
+- 🔶 **Migrate Existing Data**
+  - Created migration routine for converting old data to SwiftData models
+  - Implemented progress tracking with checkpoint system for resiliency
+  - Successfully tested basic migration functionality 
+  - Removed test mode - now using persistent storage for migration testing
+  - Updated MigrationView and MigrationService to work with persistent storage
+  - Several UI and usability issues identified that need to be fixed
 
 #### Phase 2: Networking and API Refactor
 - 🔲 **Create Article API Client**
@@ -187,6 +218,14 @@
    - Status: Will be addressed by implementing application-level uniqueness validation
    - Priority: Medium
 
+4. **Data Migration UI Issues**
+   - ✅ Improved dark mode readability with proper system color adaption
+   - ✅ Fixed cancel button functionality in migration overlay
+   - ✅ Added reset capability to test multiple migrations without rebuilding app
+   - ✅ Implemented comprehensive migration summary with statistics
+   - Status: Most issues resolved, ready for wider testing
+   - Priority: Low
+
 ## Testing Status
 
 - ✅ **Unit Tests**
@@ -198,14 +237,16 @@
   - Detailed feature tests in progress
   
 - 🔶 **Performance Testing**
-  - Basic performance tests for DatabaseCoordinator planned
-  - Manual testing reveals sync performance issues
+  - Implemented SwiftData performance metrics in test interface
+  - Verified article batch creation performance with detailed timing analysis
+  - Planned additional performance tests for DatabaseCoordinator
+  - Manual testing continues to reveal sync performance issues in legacy code
 
 ## Next Milestone Goals
 
 1. **Architecture Modernization (Target: May 2025)**
    - Complete Phases 1-2 of modernization plan
-   - Implement SwiftData models and container
+   - Complete persistent SwiftData implementation for testing
    - Refactor API client for async/await
    - Build ArticleService as repository layer
 
