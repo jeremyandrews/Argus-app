@@ -1,0 +1,60 @@
+{
+  "swift.sourcekit-lsp.serverArguments": ["--log-level=info"],
+  "swift.sourcekit-lsp.inlayHints.enabled": true,
+  "swift.sourcekit-lsp.diagnostics.disabled": [
+    "missing-import", 
+    "undeclared-type", 
+    "invalid-version", 
+    "undefined-module", 
+    "swift-compiler-version",
+    "undefined-symbol",
+    "unknown-error"
+  ],
+  "swift.path.xcodeProject": "${workspaceFolder}/Argus.xcodeproj",
+  "swift.autoGenerateLaunchConfigurations": true,
+  "swift.sourcekit-lsp.excludeIndexPatterns": [
+    "**/memory-bank/**", 
+    "**/*.clinerules",
+    "**/memory-bank/.clinerules",
+    "**/.clinerules",
+    "**/memory-bank/*", 
+    "**/Package.swift"
+  ],
+  "problems.excludePathsItContainsPatterns": [
+    "memory-bank",
+    "Package.swift",
+    ".clinerules",
+    "clinerules"
+  ],
+  "swift.fileExcludingPatterns": [
+    "**/memory-bank/**/*", 
+    "**/*.clinerules",
+    "**/.clinerules",
+    "**/Package.swift"
+  ],
+  "files.associations": {
+    "memory-bank/.clinerules": "plaintext",
+    ".clinerules": "plaintext",
+    "Package.swift": "plaintext"
+  },
+  "editor.semanticHighlighting.enabled": true,
+  "editor.formatOnSave": false,
+  "files.exclude": {
+    "**/.git": true,
+    "**/build": true,
+    "**/DerivedData": true,
+    "**/.build": true
+  },
+  "[swift]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "swiftlang.swift-vscode"
+  },
+  "[markdown]": {
+    "files.trimTrailingWhitespace": false
+  },
+  "files.watcherExclude": {
+    "**/memory-bank/**": true,
+    "**/.clinerules": true,
+    "**/Package.swift": true
+  }
+}

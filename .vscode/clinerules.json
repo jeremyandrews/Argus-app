@@ -1,0 +1,45 @@
+{
+  "name": "Clinerules",
+  "scopeName": "source.clinerules",
+  "fileTypes": [".clinerules"],
+  "patterns": [
+    {
+      "name": "comment.line.number-sign.clinerules",
+      "match": "#.*$"
+    },
+    {
+      "name": "string.quoted.double.clinerules",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.clinerules",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.clinerules",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.clinerules",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "keyword.control.clinerules",
+      "match": "\\b(import|class|func|var|let|if|else|for|while|switch|case|default|struct|enum|protocol|extension|typealias|associatedtype|guard)\\b"
+    },
+    {
+      "name": "markup.heading.clinerules",
+      "match": "^##?\\s.+$"
+    },
+    {
+      "name": "markup.list.clinerules",
+      "match": "^[-*+]\\s.+$"
+    }
+  ]
+}

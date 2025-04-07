@@ -1,0 +1,21 @@
+{
+  "Import Swift Base Types": {
+    "prefix": "importbase",
+    "body": [
+      "import Foundation",
+      "import SwiftUI",
+      "import SwiftData"
+    ],
+    "description": "Import common Swift base types"
+  },
+  "Import Argus Types": {
+    "prefix": "importargus",
+    "body": [
+      "// This file is part of the Argus iOS app",
+      "import Foundation",
+      "import SwiftUI",
+      "import SwiftData"
+    ],
+    "description": "Import common Argus project types"
+  }
+}

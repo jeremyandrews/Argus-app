@@ -1,0 +1,3 @@
+memory-bank/.clinerules
+memory-bank/**/*
+Package.swift
