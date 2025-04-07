@@ -55,36 +55,43 @@ extension NewsView {
         AppLogger.database.debug("Markdown processing observer set up")
     }
 
-    // Updated function to generate blobs with less UI impact
+    // Updated function to generate blobs using ViewModel
     func generateBodyBlob(notificationID: UUID) {
-        // Simply delegate to the queue manager instead of processing directly
-        // The manager handles its own error logging internally
-        ProcessingQueueManager.shared.scheduleProcessing(for: notificationID)
+        Task {
+            await viewModel.generateBodyBlobIfNeeded(notificationID: notificationID)
+        }
     }
 
-    // Enhanced openArticle method that uses PreloadManager for smoother scrolling
+    // Enhanced openArticle method that uses ViewModel for data operations
     func openArticle(_ notification: NotificationData) {
-        guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
+        guard !isActivelyScrolling else { return }
+
+        // Use the view model to mark as read
+        Task {
+            await viewModel.openArticle(notification)
+        }
+
+        // Find the index of the notification
+        guard let index = viewModel.filteredArticles.firstIndex(where: { $0.id == notification.id }) else {
             return
         }
 
-        // Pre-load the rich text content synchronously before creating the detail view
-        // This ensures formatted content is shown immediately
-        let titleAttrString = getAttributedString(for: .title, from: notification, createIfMissing: true)
-        let bodyAttrString = getAttributedString(for: .body, from: notification, createIfMissing: true)
-
+        // Create the detail view
         let detailView = NewsDetailView(
-            notification: notification,
-            preloadedTitle: titleAttrString,
-            preloadedBody: bodyAttrString,
-            notifications: filteredNotifications,
-            allNotifications: totalNotifications,
-            currentIndex: index
+            notifications: viewModel.filteredArticles,
+            allNotifications: viewModel.allArticles,
+            currentIndex: index,
+            initiallyExpandedSection: nil
         )
-        .environment(\.modelContext, modelContext)
 
-        let hostingController = UIHostingController(rootView: detailView)
-        hostingController.modalPresentationStyle = .fullScreen
+        // Get modelContext from the shared container
+        let modelContext = ArgusApp.sharedModelContainer.mainContext
+
+        // Create and present the hosting controller with environment
+        let hostingController = UIHostingController(
+            rootView: detailView.environment(\.modelContext, modelContext)
+        )
+        hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
 
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first,
@@ -93,40 +100,47 @@ extension NewsView {
             rootViewController.present(hostingController, animated: true)
         }
 
-        // After presenting the view, use PreloadManager to prepare the next few articles
-        // This provides a smoother experience when swiping through articles
+        // After presenting the view, use PreloadManager to prepare next few articles
         Task {
             // Use our dedicated PreloadManager to handle preloading
-            PreloadManager.shared.preloadArticles(self.filteredNotifications, currentIndex: index)
+            if let currentIndex = viewModel.filteredArticles.firstIndex(where: { $0.id == notification.id }) {
+                PreloadManager.shared.preloadArticles(viewModel.filteredArticles, currentIndex: currentIndex)
+            }
         }
     }
 
-    // Enhanced loadMoreNotificationsIfNeeded that triggers preloading for smoother scrolling
+    // Enhanced loadMoreNotificationsIfNeeded using ViewModel for pagination
     func loadMoreNotificationsIfNeeded(currentItem: NotificationData) {
-        guard let currentIndex = filteredNotifications.firstIndex(where: { $0.id == currentItem.id }) else {
+        // Check if we're approaching the end of the list using ViewModel data
+        guard let index = viewModel.filteredArticles.firstIndex(where: { $0.id == currentItem.id }),
+              index >= viewModel.filteredArticles.count - 5,
+              viewModel.hasMoreContent,
+              !viewModel.isLoadingMorePages
+        else {
             return
         }
 
-        // Check if the notification needs body blob processing
-        // Note: pagination logic is handled by the main struct method
+        // Trigger pagination through ViewModel
+        Task {
+            await viewModel.loadMoreArticles()
+        }
 
-        // Process the current item if needed
+        // Also check if the notification needs body blob processing
         Task {
             // Check if processing is needed
             let needsProcessing = currentItem.body_blob == nil
 
-            // Get processing status
-            let isAlreadyProcessing = ProcessingQueueManager.shared.isBeingProcessed(currentItem.id)
-
-            if needsProcessing && !isAlreadyProcessing {
-                // Process the current item with high priority
-                ProcessingQueueManager.shared.scheduleProcessing(for: currentItem.id)
+            if needsProcessing {
+                // Process the current item with high priority via ViewModel
+                await viewModel.generateBodyBlobIfNeeded(notificationID: currentItem.id)
             }
         }
 
         // Preload the next few articles to make scrolling smoother
-        Task(priority: .background) {
-            PreloadManager.shared.preloadArticles(self.filteredNotifications, currentIndex: currentIndex)
+        if let currentIndex = viewModel.filteredArticles.firstIndex(where: { $0.id == currentItem.id }) {
+            Task(priority: .background) {
+                PreloadManager.shared.preloadArticles(viewModel.filteredArticles, currentIndex: currentIndex)
+            }
         }
     }
 

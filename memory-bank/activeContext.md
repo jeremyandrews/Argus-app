@@ -3,12 +3,32 @@
 ## Current Work Focus
 - **Active Development Phase**: Modernization implementation in progress
 - **Primary Focus Areas**: SwiftData migration active, implementing shared MVVM architecture, async/await implementation, CloudKit compatibility
-- **Architecture Refinement**: Designing shared components for code reuse between NewsView and NewsDetailView
+- **Architecture Refinement**: Implemented shared components for code reuse between NewsView and NewsDetailView
 - **User Experience Improvements**: Improving UI responsiveness, eliminating sync jitter, enhancing offline capabilities, and refining automatic migration process
 - **Cross-Device Capabilities**: Preparing SwiftData models for future CloudKit integration to enable iPhone/iPad syncing
 - **Migration System Refinement**: Enhancing visual feedback during automatic database migration, removing redundant controls
 
 ## Recent Changes
+- **Fixed Swift 6 Concurrency Issues** (Completed):
+  - Added @MainActor annotations to protocol methods and implementations
+  - Created dedicated MainActor-isolated methods for NSAttributedString handling
+  - Added @discardableResult to batch operations to prevent Swift 6 warnings
+  - Fixed unused return value warnings in NewsViewModel batch operations
+  - Ensured proper handling of non-Sendable types across actor boundaries
+  - Implemented thread-safe rich text generation with MainActor isolation
+  - Maintained proper separation of UI code and background operations
+
+- **Implemented Shared Architecture Components** (Completed):
+  - Created ArticleServiceProtocol as interface for data operations
+  - Implemented ArticleService to handle SwiftData operations with proper error handling and caching
+  - Developed ArticleOperations shared business logic layer
+  - Built NewsViewModel and NewsDetailViewModel that leverage shared components
+  - Followed modern Swift concurrency practices with proper @MainActor isolation
+  - Applied robust error handling throughout the architecture
+  - Used async/await for all asynchronous operations
+  - Implemented proper caching strategies for improved performance
+  - Added comprehensive documentation with detailed method comments
+
 - **Migration System UI Enhancements** (Completed):
   - Enhanced visual feedback with sophisticated animations (animated database icon, gradient progress bar, glowing effects)
   - Improved real-time metrics displays with dedicated counter views for articles processed and speed
@@ -113,7 +133,7 @@
 4. **✅ Build ArticleService (Repository Layer)**:
    - Completed: Implemented ArticleService as bridge between API and SwiftData
    - Created key methods for article data operations:
-     - fetchArticles(topic:isRead:): Retrieves filtered articles
+     - fetchArticles(topic:isRead:isBookmarked:isArchived:): Retrieves filtered articles
      - fetchArticle(byId:): Gets single article by ID
      - syncArticlesFromServer(topic:limit:): Syncs with backend, only adding new articles
      - markArticle(id:asRead/asBookmarked:): Updates user preferences
@@ -124,18 +144,40 @@
    - Implemented modern Swift 6 concurrency with async/await and Task cancellation
    - Designed for gradual adoption with existing components during transition
 
-### Phase 3: MVVM Implementation and UI Refactor
+### Phase 3: MVVM Implementation and UI Refactor ✅
+5. **✅ Develop Shared Architecture Components**:
+   - Completed: Created ArticleServiceProtocol as interface for dependency injection
+   - Completed: Implemented ArticleOperations for shared business logic
+   - Completed: Added rich text processing utilities in shared component
+   - Completed: Implemented consistent error handling and state management
+   - Completed: Created shared methods for article state toggling (read, bookmarked, archived)
 
-### Phase 3: MVVM Implementation and UI Refactor
-6. **Develop Three-Tier Architecture**:
-   - Create ArticleServiceProtocol as interface for ArticleService
-   - Implement ArticleOperations as shared business logic layer
-   - Create NewsViewModel that leverages ArticleOperations
-   - Implement NewsDetailViewModel using same shared components
-   - Refactor SwiftUI views to use ViewModels instead of direct data access
+6. **✅ Implement ViewModels**:
+   - Completed: Created NewsViewModel with proper ObservableObject implementation
+   - Completed: Implemented NewsDetailViewModel with section management
+   - Completed: Added async loading and caching strategies for performance
+   - Completed: Implemented proper @MainActor isolation for UI updates
+   - Completed: Added comprehensive API for views to interact with
 
-### Phase 4: Syncing and Background Tasks
-7. **Implement Robust Background Processing**:
+### Phase 4: UI Refactoring
+7. **✅ Refactor NewsView to Use ViewModel**:
+   - Completed: Updated NewsView to use NewsViewModel instead of direct database access
+   - Fixed property visibility to allow extension access to ViewModel
+   - Properly implemented extension methods to delegate to ViewModel
+   - Fixed SwiftUI/UIKit integration for presenting detail views
+   - Corrected environment value passing between views
+   - Updated pagination to use ViewModel-based article filtering
+   - Removed unused variables to fix Swift compiler warnings
+   - Implemented proper MVVM separation between view and business logic
+
+8. **Refactor NewsDetailView to Use ViewModel**:
+   - Update NewsDetailView to use NewsDetailViewModel
+   - Move rich text generation logic to ArticleOperations
+   - Implement more responsive section loading
+   - Improve navigation between articles
+
+### Phase 5: Background Task Implementation
+9. **Implement Modern Background Tasks**:
    - Replace current syncing with modern background tasks approach
    - Implement push notification handling with async/await
    - Set up periodic syncing using .backgroundTask or BGTaskScheduler
@@ -186,8 +228,7 @@
 ## Recent Architectural Decisions
 
 - **Shared Components Architecture**:
-  - Identified significant code duplication between NewsView and NewsDetailView
-  - Designed three-tier architecture to enable code sharing:
+  - Implemented three-tier architecture to enable code sharing:
     1. **ArticleService (Data Layer)**: API + SwiftData operations
     2. **ArticleOperations (Business Logic)**: Shared operations for article management
     3. **ViewModels (View-Specific Logic)**: NewsViewModel and NewsDetailViewModel
@@ -195,7 +236,7 @@
     - Toggle read/bookmarked/archived status
     - Article deletion
     - Rich text processing
-    - Notification management
+    - Batch operations
   - Benefits: Reduced duplication, improved maintainability, consistent behavior
 
 ## Immediate Priorities
@@ -204,7 +245,9 @@
 3. ✅ Improve migration UI with animation and remove non-functional buttons
 4. ✅ Begin refactoring APIClient to use async/await
 5. ✅ Implement application-level uniqueness validation logic
-6. Create ArticleServiceProtocol for dependency injection and testing
-7. Implement ArticleOperations for shared business logic
-8. Develop NewsViewModel using ArticleOperations
-9. Refactor NewsView to use NewsViewModel
+6. ✅ Create ArticleServiceProtocol for dependency injection and testing
+7. ✅ Implement ArticleOperations for shared business logic
+8. ✅ Develop NewsViewModel using ArticleOperations
+9. ✅ Develop NewsDetailViewModel using ArticleOperations
+10. ✅ Refactor NewsView to use NewsViewModel
+11. Refactor NewsDetailView to use NewsDetailViewModel

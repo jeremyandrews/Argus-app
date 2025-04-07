@@ -2,8 +2,8 @@
 
 ## Current Status
 **Overall Status**: Beta - Core functionality implemented with known issues
-**Development Phase**: Stabilization and bug fixing
-**Last Updated**: April 6, 2025
+**Development Phase**: Architecture Modernization
+**Last Updated**: April 7, 2025
 
 ## What Works
 
@@ -34,26 +34,28 @@
 
 ## What's In Progress
 
+- 🔶 **MVVM Architecture Implementation**
+  - Shared components architecture implemented (ArticleServiceProtocol, ArticleService, ArticleOperations)
+  - ViewModels created (NewsViewModel, NewsDetailViewModel)
+  - View refactoring in progress to use the new ViewModels
+
 - 🔶 **Sync Process Optimization**
-  - Background sync process improvements underway using DatabaseCoordinator 
-  - UI jitter during sync operations still needs to be addressed
+  - Background sync process improvements underway using ArticleService
+  - UI jitter during sync operations being addressed through async/await
+  - Performance improvements through better caching strategies
 
 - 🔶 **Data Consistency**
-  - Improving validation of synchronized content
-  - Testing fixes for data integrity issues
-
-- ✅ **Migration UI Improvements**
-  - Consolidated UI components into a single, enhanced modal view
-  - Replaced simple rotating icon with sophisticated database animation
-  - Added gradient progress bar with animated glow effects
-  - Implemented dedicated counter views with animation for articles and processing speed
-  - Added time remaining indicator with live countdown
-  - Enhanced auto-dismissal with improved timing and smooth transitions
-  - Improved developer controls with clear categorization and information toggle
-  - Structured UI code for better maintainability and future enhancements
-  - Optimized performance metrics visualization for better user feedback
+  - Application-level uniqueness validation implemented as replacement for schema constraints
+  - Batch operations with proper error handling to prevent partial updates
 
 ## Recently Completed
+
+- ✅ **Shared Architecture Components Implementation**
+  - Created ArticleServiceProtocol as interface for all data operations
+  - Implemented ArticleService with SwiftData integration and error handling
+  - Developed ArticleOperations as shared business logic layer
+  - Built NewsViewModel and NewsDetailViewModel with proper MainActor isolation
+  - Added comprehensive documentation with detailed method comments
 
 - ✅ **API Client Refactoring for Modern Swift**
   - Refactored APIClient to use async/await for all network operations
@@ -115,9 +117,13 @@
 
 - ✅ **Swift 6 Concurrency Compliance**
   - Fixed critical issues with NSAttributedString crossing actor boundaries
-  - Added @MainActor constraints to LazyLoadingContentView in NewsDetailView
+  - Added @MainActor annotations to protocol methods and implementations
+  - Added @discardableResult to batch operations to fix "result of call is unused" warnings
+  - Created dedicated @MainActor methods for rich text generation 
+  - Implemented proper actor isolation for UI-related operations
   - Eliminated "getAttributedString called from background thread" warnings
   - Ensured proper handling of non-Sendable types in async contexts
+  - Fixed all NewsViewModel batch operation calls with proper result handling
 
 - ✅ **Error Handling Improvements**
   - Enhanced article fetching with better HTTP status code detection
@@ -138,7 +144,7 @@
 
 ### Modernization Plan Implementation
 
-#### Phase 1: Setup and Model Migration
+#### Phase 1: Setup and Model Migration ✅
 - ✅ **Define SwiftData Models**
   - Created Article, SeenArticle, and Topic models with SwiftData annotations
   - Ensured fields align with backend API structure 
@@ -170,7 +176,7 @@
   - Added re-migration (temporary mode) with state synchronization
   - Created resilient system that can handle app termination during migration
 
-#### Phase 2: Networking and API Refactor
+#### Phase 2: Networking and API Refactor ✅
 - ✅ **Create Article API Client**
   - Refactored APIClient to use async/await for all API calls
   - Implemented key API methods: fetchArticles(), fetchArticle(by:), fetchArticleByURL(), and syncArticles()
@@ -188,30 +194,36 @@
   - Added comprehensive error handling with specific error types
   - Designed for gradual adoption to enable smooth transition from legacy components
 
-#### Phase 3: MVVM Implementation and UI Refactor
-- 🔲 **Implement Shared Architecture Components**
-  - Create ArticleServiceProtocol as interface for dependency injection and testing
-  - Implement ArticleOperations as shared business logic layer to reduce code duplication
-  - Develop shared components for article state management and rich text processing
-  - Create consistent error handling across shared components
+#### Phase 3: MVVM Implementation and UI Refactor ✅
+- ✅ **Implement Shared Architecture Components**
+  - Created ArticleServiceProtocol as interface for dependency injection and testing
+  - Implemented ArticleOperations as shared business logic layer to reduce code duplication
+  - Developed shared components for article state management and rich text processing
+  - Created consistent error handling across shared components
 
-- 🔲 **Refactor NewsView to Use ViewModel**
-  - Create NewsViewModel that leverages ArticleOperations
-  - Implement @Published properties for reactive UI updates
-  - Move filtering, pagination, and state management from view to ViewModel
-  - Update NewsView to use StateObject ViewModel pattern
-  - Replace direct database access with ViewModel methods
+- ✅ **Implement ViewModels**
+  - Created NewsViewModel for article list management
+  - Implemented NewsDetailViewModel for article detail view
+  - Added pagination, filtering, and sorting logic in ViewModels
+  - Incorporated proper state management via @Published properties
+  - Implemented caching strategies for better performance
+  - Added proper error handling and recovery mechanisms
 
-- 🔲 **Implement ArticleDetailViewModel**
-  - Create ArticleDetailViewModel that shares common logic with NewsViewModel
-  - Handle article body Markdown rendering through ArticleOperations
-  - Manage section expansion state
-  - Share rich text processing logic with NewsViewModel via ArticleOperations
-  - Refactor ArticleDetailView to use ViewModel
+- ✅ **Refactor NewsView to Use ViewModel**
+  - Updated NewsView to use NewsViewModel instead of direct database access
+  - Fixed property visibility to allow extension access to ViewModel
+  - Properly implemented extension methods to delegate to ViewModel
+  - Fixed SwiftUI/UIKit integration for presenting detail views
+  - Corrected environment value passing between views
+  - Updated pagination to use ViewModel-based article filtering
+  - Removed unused variables to fix Swift compiler warnings
+  - Implemented proper MVVM separation between view and business logic
 
-- 🔲 **Refactor SubscriptionsView and SettingsView**
-  - Add ViewModels for topic preferences and settings
-  - Migrate UI logic out of SwiftUI views
+- 🔲 **Refactor NewsDetailView to Use ViewModel**
+  - Update NewsDetailView to use NewsDetailViewModel
+  - Move rich text processing to ArticleOperations
+  - Improve section loading with better async support
+  - Enhance navigation between articles
 
 #### Phase 4: Syncing and Background Tasks
 - 🔲 **Implement Periodic Sync Using .backgroundTask**
@@ -274,7 +286,7 @@
    
 3. **Uniqueness Constraints**
    - Schema-level uniqueness constraints removed for CloudKit compatibility
-   - Status: Will be addressed by implementing application-level uniqueness validation
+   - Status: Addressed by implementing application-level uniqueness validation
    - Priority: Medium
 
 4. **Data Migration UI Issues**
@@ -308,13 +320,14 @@
    - ✅ Complete persistent SwiftData implementation for testing
    - ✅ Refactor API client for async/await
    - ✅ Build ArticleService as repository layer
-   - Implement ArticleServiceProtocol and ArticleOperations (shared components)
+   - ✅ Implement ArticleServiceProtocol and ArticleOperations (shared components)
+   - ✅ Create NewsViewModel and NewsDetailViewModel
 
 2. **UI Modernization (Target: June 2025)**
-   - Complete Phases 3-4 of modernization plan
-   - Implement ViewModels for all major views
-   - Refactor UI to use MVVM pattern
-   - Set up modern background task handling
+   - Complete Phase 3-4 of modernization plan
+   - Refactor NewsView to use NewsViewModel
+   - Refactor NewsDetailView to use NewsDetailViewModel
+   - Implement modern background task handling
 
 3. **Cleanup and Performance (Target: July 2025)**
    - Complete Phase 5 of modernization plan
@@ -324,11 +337,11 @@
 
 ## Recently Initiated
 
-- 🔶 **Shared Architecture Implementation**
+- ✅ **Shared Architecture Implementation**
   - Designed three-tier architecture to reduce duplication between views
   - Identified common operations between NewsView and NewsDetailView
-  - Created implementation plan for ArticleOperations shared component
-  - Documented approach in memory-bank for consistent development
+  - Implemented ArticleServiceProtocol, ArticleService, and ArticleOperations
+  - Created NewsViewModel and NewsDetailViewModel for MVVM pattern
 
 ## Progress Metrics
 
@@ -336,4 +349,4 @@
 - **Swift 6 Compatibility**: Major milestone reached with latest NSAttributedString fixes
 - **Known Bugs**: 2 high-priority issues, both potentially affected by recent changes
 - **Test Coverage**: ~70% of non-UI code
-- **Architecture Design**: Detailed design for shared components completed
+- **Architecture Design**: Implemented shared components architecture
