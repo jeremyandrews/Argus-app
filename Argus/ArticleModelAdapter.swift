@@ -40,7 +40,9 @@ extension NotificationData {
             logical_fallacies_blob: articleModel.logicalFallaciesBlob,
             source_analysis_blob: articleModel.sourceAnalysisBlob,
             relation_to_topic_blob: articleModel.relationToTopicBlob,
-            additional_insights_blob: articleModel.additionalInsightsBlob
+            additional_insights_blob: articleModel.additionalInsightsBlob,
+            engine_stats: articleModel.engineStats,
+            similar_articles: articleModel.similarArticles
         )
         return notification
     }
@@ -58,6 +60,10 @@ extension ArticleModel {
         self.sourceAnalysisBlob = notification.source_analysis_blob
         self.relationToTopicBlob = notification.relation_to_topic_blob
         self.additionalInsightsBlob = notification.additional_insights_blob
+        
+        // Update the engine stats and similar articles fields too
+        self.engineStats = notification.engine_stats
+        self.similarArticles = notification.similar_articles
     }
 }
 

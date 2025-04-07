@@ -51,6 +51,23 @@
 
 ## Recently Completed
 
+- ✅ **Fixed NewsDetailView Navigation Chevrons**
+  - Fixed issue where navigation chevrons were always gray and non-functional
+  - Identified type incompatibility between view and ViewModel NavigationDirection enums
+  - Added proper enum type conversion in navigateToArticle() method
+  - Updated button disabling logic to properly use ViewModel state properties
+  - Enhanced visual feedback by adding explicit foregroundColor states for enabled/disabled buttons
+  - Ensured state synchronization between view and ViewModel after navigation
+  - Verified proper navigation through article collections with working next/previous buttons
+  
+- ✅ **Fixed Missing Detail View Sections**
+  - Identified missing data transfer in ArticleModelAdapter for engine stats and related articles
+  - Updated ArticleModelAdapter.from() method to transfer engineStats and similarArticles fields
+  - Modified updateBlobs() method to ensure bidirectional data transfer for these fields
+  - Restored "Argus Engine Stats" and "Related Articles" sections in NewsDetailView
+  - Fixed display of technical metrics and similar article relationships
+  - Ensured proper data flow through the adapter pattern for specialized JSON data
+
 - ✅ **Fixed Rich Text Blob Generation Issue**
   - Added blob storage fields to ArticleModel (titleBlob, bodyBlob, etc.)
   - Implemented bidirectional blob transfer in ArticleModelAdapter

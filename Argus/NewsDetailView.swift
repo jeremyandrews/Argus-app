@@ -185,6 +185,11 @@ struct NewsDetailView: View {
         // Initialize with the view model
         self._viewModel = ObservedObject(initialValue: viewModel)
         self.initiallyExpandedSection = initiallyExpandedSection
+        
+        // Initialize the state properties with the provided values
+        self._notifications = State(initialValue: notifications)
+        self._allNotifications = State(initialValue: allNotifications)
+        self._currentIndex = State(initialValue: currentIndex)
     }
 
     var body: some View {
@@ -292,7 +297,8 @@ struct NewsDetailView: View {
                         .font(.system(size: 24))
                         .frame(width: 44, height: 44)
                 }
-                .disabled(!isCurrentIndexValid || currentIndex == 0)
+                .disabled(viewModel.currentIndex == 0)
+                .foregroundColor(viewModel.currentIndex > 0 ? .primary : .gray)
 
                 Button {
                     navigateToArticle(direction: .next)
@@ -301,7 +307,8 @@ struct NewsDetailView: View {
                         .font(.system(size: 24))
                         .frame(width: 44, height: 44)
                 }
-                .disabled(!isCurrentIndexValid || currentIndex == notifications.count - 1)
+                .disabled(viewModel.currentIndex >= viewModel.articles.count - 1)
+                .foregroundColor(viewModel.currentIndex < viewModel.articles.count - 1 ? .primary : .gray)
             }
             .padding(.trailing, 8)
         }
@@ -509,71 +516,41 @@ struct NewsDetailView: View {
 
     // Make sure we clean up properly when navigating between articles
     private func navigateToArticle(direction: NavigationDirection) {
-        // Cancel any ongoing tasks
+        // Cancel any local ongoing tasks
         tabChangeTask?.cancel()
         for (_, task) in sectionLoadingTasks {
             task.cancel()
         }
         sectionLoadingTasks = [:]
-
-        // Get the next valid index
-        guard let nextIndex = getNextValidIndex(direction: direction),
-              nextIndex >= 0 && nextIndex < notifications.count
-        else {
-            return
-        }
-
-        // Store the notification we're navigating to
-        let nextNotification = notifications[nextIndex]
-
-        // Extract title and body blobs synchronously
-        var extractedTitle: NSAttributedString? = nil
-        var extractedBody: NSAttributedString? = nil
-
-        if let titleBlob = nextNotification.title_blob {
-            extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
-                ofClass: NSAttributedString.self, from: titleBlob
-            )
-        }
-
-        if let bodyBlob = nextNotification.body_blob {
-            extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
-                ofClass: NSAttributedString.self, from: bodyBlob
-            )
-        }
-
-        // Update state with the pre-loaded content
-        currentIndex = nextIndex
-        titleAttributedString = extractedTitle
-        bodyAttributedString = extractedBody
-
-        // Reset other content
+        
+        // Convert our NavigationDirection enum to the ViewModel's NavigationDirection enum
+        let viewModelDirection: NewsDetailViewModel.NavigationDirection = 
+            direction == .next ? .next : .previous
+        
+        // Delegate to view model for navigation
+        viewModel.navigateToArticle(direction: viewModelDirection)
+        
+        // Keep UI state in sync with viewModel
+        currentIndex = viewModel.currentIndex
+        
+        // Reset our cached content
+        titleAttributedString = viewModel.titleAttributedString
+        bodyAttributedString = viewModel.bodyAttributedString
         summaryAttributedString = nil
         criticalAnalysisAttributedString = nil
         logicalFallaciesAttributedString = nil
         sourceAnalysisAttributedString = nil
         cachedContentBySection = [:]
-        preloadedNotification = nil
-
+        
         // Reset expanded sections
         expandedSections = Self.getDefaultExpandedSections()
-
+        
         // Force refresh
         contentTransitionID = UUID()
         scrollToTopTrigger = UUID()
-
-        // Mark as viewed
-        if !nextNotification.isViewed {
-            nextNotification.isViewed = true
-            Task(priority: .background) {
-                try? modelContext.save()
-                NotificationUtils.updateAppBadgeCount()
-            }
-        }
-
-        // Load the Summary in a completely separate process
+        
+        // Load the Summary if it's expanded
         if expandedSections["Summary"] == true {
-            // This is decoupled to ensure navigation remains responsive
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 self.loadContentForSection("Summary")
             }

@@ -39,6 +39,33 @@ This file captures important patterns, preferences, and project intelligence tha
 - The SyncManager handles all data synchronization with the backend
 - The DatabaseCoordinator centralizes all database operations using the actor model
 - View models observe data changes and update the UI accordingly
+- ArticleModelAdapter handles bidirectional conversion between ArticleModel and NotificationData
+- All fields in ArticleModel, including JSON fields (engineStats, similarArticles), must be transferred in both directions
+- Both "from" conversion method and "updateBlobs" method need complete field mapping for proper app functionality
+
+### View-ViewModel Integration
+- ViewModels and Views may define their own enum types with the same names - always check for type compatibility
+- When calling ViewModel methods that take enum parameters, always ensure proper type conversion:
+  ```swift
+  // Convert View's NavigationDirection enum to ViewModel's NavigationDirection enum
+  let viewModelDirection: NewsDetailViewModel.NavigationDirection = 
+      direction == .next ? .next : .previous
+      
+  // Then call the ViewModel method with the converted enum
+  viewModel.navigateToArticle(direction: viewModelDirection)
+  ```
+- Use ViewModel properties directly for UI state management (button enabled/disabled states):
+  ```swift
+  // Previous button - disabled when at first article
+  .disabled(viewModel.currentIndex == 0)
+  .foregroundColor(viewModel.currentIndex > 0 ? .primary : .gray)
+  ```
+- Ensure UI state stays synchronized with ViewModel after operations:
+  ```swift
+  // After navigation, update UI state with ViewModel state
+  currentIndex = viewModel.currentIndex
+  clearCache() // Reset any view-specific cached content
+  ```
 
 ### Known Implementation Paths
 - Push notifications are set up using the Apple Push Notification Service and the AuthKey_KKR79MB4FW.p8 file

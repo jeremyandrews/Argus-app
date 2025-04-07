@@ -10,6 +10,21 @@
 - **SwiftData Container Connection Issue**: Addressed disconnect between SwiftData Test container and main application container
 
 ## Recent Changes
+- **Fixed Navigation Chevrons in NewsDetailView** (Completed):
+  - Identified type incompatibility between NewsDetailView.NavigationDirection and NewsDetailViewModel.NavigationDirection
+  - Added proper conversion between view and ViewModel enum types in navigateToArticle() method
+  - Fixed button disabling logic in the topBar to properly use ViewModel state
+  - Added explicit foregroundColor states to improve visual feedback when buttons are disabled
+  - Ensured proper sync between view state and ViewModel after navigation
+  - Resolved issue where chevrons were always gray and non-functional
+
+- **Fixed Missing Detail View Sections** (Completed):
+  - Identified missing data transfer in ArticleModelAdapter for engine stats and related articles
+  - Updated ArticleModelAdapter.from() method to transfer engineStats and similarArticles fields
+  - Modified updateBlobs() method to ensure bidirectional data transfer
+  - Fixed "Argus Engine Stats" and "Related Articles" sections in NewsDetailView
+  - No changes to the view itself were needed as display code was already correctly implemented
+  - Ensured proper data flow through the adapter pattern for specialized JSON data
 - **Fixed Rich Text Blob Generation** (Completed):
   - Identified missing rich text blob transfer during sync and migration
   - Added blob storage fields (titleBlob, bodyBlob, etc.) to ArticleModel class 
