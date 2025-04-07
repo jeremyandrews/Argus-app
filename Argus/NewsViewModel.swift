@@ -122,10 +122,10 @@ final class NewsViewModel: ObservableObject {
                 showBookmarkedOnly: showBookmarkedOnly,
                 showArchivedContent: showArchivedContent
             )
-            
+
             // Update allArticles for topic bar generation
             allArticles = allArticlesWithoutTopicFilter
-            
+
             // If a specific topic is selected, fetch articles with that topic filter
             if selectedTopic != "All" {
                 // Fetch articles with the selected topic
@@ -135,7 +135,7 @@ final class NewsViewModel: ObservableObject {
                     showBookmarkedOnly: showBookmarkedOnly,
                     showArchivedContent: showArchivedContent
                 )
-                
+
                 // Update filteredArticles with the topic-filtered articles
                 filteredArticles = topicFilteredArticles
             } else {
@@ -471,7 +471,7 @@ final class NewsViewModel: ObservableObject {
     private func updateArticleCache(_ articles: [NotificationData]) {
         // Update cache for current topic
         articleCache[selectedTopic] = articles
-        
+
         // Update "All" cache if we're not already in "All"
         if selectedTopic != "All" {
             // We now want to preserve the "All" entries in the cache for topic bar generation

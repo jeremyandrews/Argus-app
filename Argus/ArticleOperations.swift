@@ -24,6 +24,13 @@ final class ArticleOperations {
     func toggleReadStatus(for article: NotificationData) async throws -> Bool {
         let newReadStatus = !article.isViewed
         try await articleService.markArticle(id: article.id, asRead: newReadStatus)
+
+        // Ensure UI state is updated immediately
+        await MainActor.run {
+            // Force update the in-memory article object
+            article.isViewed = newReadStatus
+        }
+
         return newReadStatus
     }
 

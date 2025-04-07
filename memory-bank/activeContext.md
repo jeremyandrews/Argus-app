@@ -10,6 +10,24 @@
 - **SwiftData Container Connection Issue**: Addressed disconnect between SwiftData Test container and main application container
 
 ## Recent Changes
+- **Fixed Article Read Status and Navigation Formatting Issues** (Completed):
+  - Fixed issue where opening an article wasn't marking it as read (background stayed in unread state)
+  - Fixed problem with articles appearing unformatted and unread when navigating between them using chevrons
+  - Updated ArticleOperations.toggleReadStatus() to force immediate in-memory UI state updates using MainActor.run
+  - Enhanced NewsDetailView.toggleReadStatus() to refresh UI immediately with contentTransitionID updates
+  - Improved NewsDetailViewModel.markAsViewed() to ensure UI updates even for already-read articles
+  - Added explicit objectWillChange.send() calls to properly trigger SwiftUI state updates
+  - Fixed race condition between database updates and UI rendering for read status
+  - Ensured consistent behavior between direct article viewing and chevron navigation
+
+- **Fixed Chevron Color and Article Read Status in NewsDetailView** (Completed):
+  - Restored blue color for clickable navigation chevrons that had reverted to the default primary color
+  - Fixed article read status updating by properly implementing the markAsViewed() method to use the ViewModel's async method
+  - Addressed compile errors in LazyLoadingContentView by fixing incorrect parent view method references
+  - Corrected onAppear handling in nested views to ensure proper content loading
+  - Ensured articles are properly marked as read when viewed, maintaining correct read status throughout the app
+  - Made minimal changes to preserve existing functionality while fixing specific issues
+
 - **Fixed Navigation Chevrons in NewsDetailView** (Completed):
   - Identified type incompatibility between NewsDetailView.NavigationDirection and NewsDetailViewModel.NavigationDirection
   - Added proper conversion between view and ViewModel enum types in navigateToArticle() method

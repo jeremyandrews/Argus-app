@@ -50,7 +50,7 @@ struct NewsView: View {
     /// List of topics to show in topic bar
     private var visibleTopics: [String] {
         // Get unique topics from allArticles (which already match all non-topic filters)
-        // No need to filter further since allArticles is already filtered by showUnreadOnly, 
+        // No need to filter further since allArticles is already filtered by showUnreadOnly,
         // showBookmarkedOnly, and showArchivedContent in the ViewModel
         let topics = Set(viewModel.allArticles.compactMap { $0.topic })
         return ["All"] + topics.sorted()

@@ -90,30 +90,30 @@ final class ArticleModel {
 
     /// Additional AI insights about the article
     var additionalInsights: String?
-    
+
     // MARK: - Rich Text Blobs
-    
+
     /// Rich text blob for title
     var titleBlob: Data?
-    
+
     /// Rich text blob for body content
     var bodyBlob: Data?
-    
+
     /// Rich text blob for summary
     var summaryBlob: Data?
-    
+
     /// Rich text blob for critical analysis
     var criticalAnalysisBlob: Data?
-    
+
     /// Rich text blob for logical fallacies
     var logicalFallaciesBlob: Data?
-    
+
     /// Rich text blob for source analysis
     var sourceAnalysisBlob: Data?
-    
+
     /// Rich text blob for relation to topic
     var relationToTopicBlob: Data?
-    
+
     /// Rich text blob for additional insights
     var additionalInsightsBlob: Data?
 

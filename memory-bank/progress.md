@@ -51,6 +51,26 @@
 
 ## Recently Completed
 
+- ✅ **Fixed Article Read Status and Navigation Formatting Issues**
+  - Fixed issue where opening an article wasn't marking it as read (unread background persisting)
+  - Fixed problem with navigated articles showing as unformatted and unread during chevron navigation
+  - Updated ArticleOperations.toggleReadStatus() to force immediate in-memory UI state updates
+  - Enhanced NewsDetailView.toggleReadStatus() to refresh UI immediately with contentTransitionID
+  - Added explicit objectWillChange.send() calls to ensure proper UI updates even for already-read articles
+  - Improved consistency between direct viewing and navigation with chevrons
+  - Fixed race condition between database updates and UI rendering
+  - Ensured proper formatting of all article sections during navigation
+
+- ✅ **Fixed Chevron Colors and Article Read Status in NewsDetailView**
+  - Restored blue color for navigation chevrons to indicate clickable state
+  - Fixed article read status not updating when viewing articles
+  - Corrected issue in LazyLoadingContentView by fixing nested view references
+  - Fixed compile errors in nested view implementation
+  - Fixed markAsViewed() method to properly use the ViewModel's async implementation
+  - Ensured articles are properly marked as read when viewed
+  - Made minimal changes to preserve existing functionality
+  - Improved visual indication of navigation functionality with correct blue color
+
 - ✅ **Fixed NewsDetailView Navigation Chevrons**
   - Fixed issue where navigation chevrons were always gray and non-functional
   - Identified type incompatibility between view and ViewModel NavigationDirection enums

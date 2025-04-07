@@ -52,18 +52,18 @@ extension NotificationData {
 extension ArticleModel {
     /// Updates blob data from a NotificationData object
     func updateBlobs(from notification: NotificationData) {
-        self.titleBlob = notification.title_blob
-        self.bodyBlob = notification.body_blob
-        self.summaryBlob = notification.summary_blob
-        self.criticalAnalysisBlob = notification.critical_analysis_blob
-        self.logicalFallaciesBlob = notification.logical_fallacies_blob
-        self.sourceAnalysisBlob = notification.source_analysis_blob
-        self.relationToTopicBlob = notification.relation_to_topic_blob
-        self.additionalInsightsBlob = notification.additional_insights_blob
-        
+        titleBlob = notification.title_blob
+        bodyBlob = notification.body_blob
+        summaryBlob = notification.summary_blob
+        criticalAnalysisBlob = notification.critical_analysis_blob
+        logicalFallaciesBlob = notification.logical_fallacies_blob
+        sourceAnalysisBlob = notification.source_analysis_blob
+        relationToTopicBlob = notification.relation_to_topic_blob
+        additionalInsightsBlob = notification.additional_insights_blob
+
         // Update the engine stats and similar articles fields too
-        self.engineStats = notification.engine_stats
-        self.similarArticles = notification.similar_articles
+        engineStats = notification.engine_stats
+        similarArticles = notification.similar_articles
     }
 }
 

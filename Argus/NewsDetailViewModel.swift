@@ -389,10 +389,17 @@ final class NewsDetailViewModel: ObservableObject {
 
     /// Marks the current article as viewed
     func markAsViewed() async throws {
-        guard let article = currentArticle, !article.isViewed else { return }
+        guard let article = currentArticle else { return }
 
-        // Use toggleReadStatus if the article is not already read
-        try await articleOperations.toggleReadStatus(for: article)
+        // Always mark as read when viewing an article, even if already viewed
+        // This ensures that the database state is consistent
+        if !article.isViewed {
+            try await articleOperations.toggleReadStatus(for: article)
+        } else {
+            // Even though it's already viewed, make sure UI is updated
+            // This helps ensure consistent UI state between opened articles and navigated articles
+            objectWillChange.send()
+        }
     }
 
     // MARK: - Section Management

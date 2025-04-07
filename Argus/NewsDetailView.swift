@@ -11,26 +11,26 @@ enum TabTransitionState {
 
 struct NewsDetailView: View {
     // MARK: - View Model
-    
+
     /// The view model that manages article data and operations
     @ObservedObject private var viewModel: NewsDetailViewModel
-    
+
     // MARK: - UI State Properties
-    
+
     /// Legacy state properties (will be migrated to ViewModel)
     @State private var notifications: [NotificationData] = []
     @State private var allNotifications: [NotificationData] = []
     @State private var currentIndex: Int = 0
-    
+
     /// Computed property to check if current index is valid
     private var isCurrentIndexValid: Bool {
         currentIndex >= 0 && currentIndex < notifications.count
     }
-    
+
     /// Access to the model context for database operations
     @Environment(\.modelContext) private var modelContext
     @State private var preloadedNotification: NotificationData? = nil
-    
+
     /// Convert notification content to attributed string
     private func getAttributedString(
         for field: RichTextField,
@@ -58,7 +58,7 @@ struct NewsDetailView: View {
         }
         return nil
     }
-    
+
     /// Converts a RichTextField enum to a human-readable field name
     private func fieldNameFor(_ field: RichTextField) -> String {
         switch field {
@@ -80,7 +80,7 @@ struct NewsDetailView: View {
             return "context & perspective"
         }
     }
-    
+
     /// Gets the text content for a specific rich text field
     private func getTextContentForField(_ field: RichTextField, from notification: NotificationData) -> String? {
         switch field {
@@ -102,6 +102,7 @@ struct NewsDetailView: View {
             return notification.additional_insights
         }
     }
+
     @State private var titleAttributedString: NSAttributedString? = nil
     @State private var bodyAttributedString: NSAttributedString? = nil
     @State private var summaryAttributedString: NSAttributedString? = nil
@@ -116,37 +117,37 @@ struct NewsDetailView: View {
     @State private var tabChangeTask: Task<Void, Never>? = nil
     @State private var deletedIDs: Set<UUID> = []
     @State private var scrollToSection: String? = nil
-    
+
     /// Proxy for scrolling to specific sections
     @State private var scrollViewProxy: ScrollViewProxy? = nil
-    
+
     /// Used to trigger scroll to top
     @State private var scrollToTopTrigger = UUID()
-    
+
     /// Whether to show the delete confirmation dialog
     @State private var showDeleteConfirmation = false
-    
+
     /// Additional content dictionary for sections
     @State private var additionalContent: [String: Any]? = nil
-    
+
     /// Whether to show the share sheet
     @State private var isSharePresented = false
-    
+
     /// Sections selected for sharing
     @State private var selectedSections: Set<String> = []
 
     /// The initially expanded section, if any
     let initiallyExpandedSection: String?
-    
+
     /// Current notification being displayed
     private var currentNotification: NotificationData? {
         viewModel.currentArticle
     }
-    
+
     @Environment(\.dismiss) private var dismiss
-    
+
     /// Returns default section expansion states
-    static private func getDefaultExpandedSections() -> [String: Bool] {
+    private static func getDefaultExpandedSections() -> [String: Bool] {
         return [
             "Summary": true,
             "Critical Analysis": false,
@@ -156,7 +157,7 @@ struct NewsDetailView: View {
             "Context & Perspective": false,
             "Argus Engine Stats": false,
             "Preview": false,
-            "Related Articles": false
+            "Related Articles": false,
         ]
     }
 
@@ -181,15 +182,15 @@ struct NewsDetailView: View {
             preloadedTitle: preloadedTitle,
             preloadedBody: preloadedBody
         )
-        
+
         // Initialize with the view model
-        self._viewModel = ObservedObject(initialValue: viewModel)
+        _viewModel = ObservedObject(initialValue: viewModel)
         self.initiallyExpandedSection = initiallyExpandedSection
-        
+
         // Initialize the state properties with the provided values
-        self._notifications = State(initialValue: notifications)
-        self._allNotifications = State(initialValue: allNotifications)
-        self._currentIndex = State(initialValue: currentIndex)
+        _notifications = State(initialValue: notifications)
+        _allNotifications = State(initialValue: allNotifications)
+        _currentIndex = State(initialValue: currentIndex)
     }
 
     var body: some View {
@@ -298,7 +299,7 @@ struct NewsDetailView: View {
                         .frame(width: 44, height: 44)
                 }
                 .disabled(viewModel.currentIndex == 0)
-                .foregroundColor(viewModel.currentIndex > 0 ? .primary : .gray)
+                .foregroundColor(viewModel.currentIndex > 0 ? .blue : .gray)
 
                 Button {
                     navigateToArticle(direction: .next)
@@ -308,7 +309,7 @@ struct NewsDetailView: View {
                         .frame(width: 44, height: 44)
                 }
                 .disabled(viewModel.currentIndex >= viewModel.articles.count - 1)
-                .foregroundColor(viewModel.currentIndex < viewModel.articles.count - 1 ? .primary : .gray)
+                .foregroundColor(viewModel.currentIndex < viewModel.articles.count - 1 ? .blue : .gray)
             }
             .padding(.trailing, 8)
         }
@@ -522,17 +523,22 @@ struct NewsDetailView: View {
             task.cancel()
         }
         sectionLoadingTasks = [:]
-        
+
         // Convert our NavigationDirection enum to the ViewModel's NavigationDirection enum
-        let viewModelDirection: NewsDetailViewModel.NavigationDirection = 
-            direction == .next ? .next : .previous
-        
+        let viewModelDirection: NewsDetailViewModel.NavigationDirection
+        switch direction {
+        case .next:
+            viewModelDirection = .next
+        case .previous:
+            viewModelDirection = .previous
+        }
+
         // Delegate to view model for navigation
         viewModel.navigateToArticle(direction: viewModelDirection)
-        
+
         // Keep UI state in sync with viewModel
         currentIndex = viewModel.currentIndex
-        
+
         // Reset our cached content
         titleAttributedString = viewModel.titleAttributedString
         bodyAttributedString = viewModel.bodyAttributedString
@@ -541,14 +547,17 @@ struct NewsDetailView: View {
         logicalFallaciesAttributedString = nil
         sourceAnalysisAttributedString = nil
         cachedContentBySection = [:]
-        
+
         // Reset expanded sections
         expandedSections = Self.getDefaultExpandedSections()
-        
+
         // Force refresh
         contentTransitionID = UUID()
         scrollToTopTrigger = UUID()
-        
+
+        // Explicitly mark the article as viewed after navigation
+        markAsViewed()
+
         // Load the Summary if it's expanded
         if expandedSections["Summary"] == true {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -976,13 +985,17 @@ struct NewsDetailView: View {
     private func toggleReadStatus() {
         Task {
             await viewModel.toggleReadStatus()
+
+            // Force an immediate UI refresh of the article header
+            contentTransitionID = UUID()
+
             // Post notification for UI updates elsewhere in the app
             NotificationCenter.default.post(
                 name: Notification.Name("ArticleReadStatusChanged"),
                 object: nil,
                 userInfo: [
                     "articleID": viewModel.currentArticle?.id ?? UUID(),
-                    "isViewed": viewModel.currentArticle?.isViewed ?? false
+                    "isViewed": viewModel.currentArticle?.isViewed ?? false,
                 ]
             )
         }
@@ -997,7 +1010,7 @@ struct NewsDetailView: View {
     private func toggleArchive() {
         Task {
             await viewModel.toggleArchive()
-            
+
             // Check if we need to dismiss or navigate after archiving
             if let article = viewModel.currentArticle, article.isArchived {
                 if currentIndex < notifications.count - 1 {
@@ -1014,7 +1027,7 @@ struct NewsDetailView: View {
     private func deleteNotification() {
         Task {
             await viewModel.deleteArticle()
-            
+
             // Navigate to next article or dismiss
             if currentIndex < notifications.count - 1 {
                 navigateToArticle(direction: .next)
@@ -1069,17 +1082,24 @@ struct NewsDetailView: View {
         return content
     }
 
-    // In NewsDetailView.swift, add after marking an article as viewed:
+    // Mark article as viewed using the view model
     private func markAsViewed() {
-        guard let notification = currentNotification else { return }
-        if !notification.isViewed {
-            notification.isViewed = true
-            saveModel()
-            NotificationUtils.updateAppBadgeCount()
-            AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
+        Task {
+            do {
+                try await viewModel.markAsViewed()
+
+                // Post notification when article is viewed
+                NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
+
+                // Update app badge count and remove notification if exists
+                NotificationUtils.updateAppBadgeCount()
+                if let notification = currentNotification {
+                    AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
+                }
+            } catch {
+                AppLogger.database.error("Failed to mark article as viewed: \(error)")
+            }
         }
-        // Post notification when article is viewed
-        NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
     }
 
     private func hasRequiredContent(_ notification: NotificationData) -> Bool {
@@ -1742,8 +1762,6 @@ struct NewsDetailView: View {
                     }
                     .onDisappear {
                         loadTask?.cancel()
-                        // Notify that the detail view was closed, which might require a list refresh
-                        NotificationCenter.default.post(name: Notification.Name("DetailViewClosed"), object: nil)
                     }
                 } else {
                     // Fallback if loading fails
@@ -1771,7 +1789,7 @@ struct NewsDetailView: View {
                 // Since we're a nested struct within NewsDetailView, we need to use custom implementation
                 // to handle the customFontSize parameter which isn't available in the parent's method
                 let attributedString: NSAttributedString?
-                
+
                 if let textContent = getTextContentFor(field, from: notification) {
                     attributedString = markdownToAttributedString(
                         textContent,
@@ -1800,7 +1818,7 @@ struct NewsDetailView: View {
                 }
             }
         }
-        
+
         // Helper function to extract text content from notification
         private func getTextContentFor(_ field: RichTextField, from notification: NotificationData) -> String? {
             switch field {
@@ -1822,7 +1840,7 @@ struct NewsDetailView: View {
                 return notification.additional_insights
             }
         }
-        
+
         // Helper function to convert enum to readable string
         private func getFieldNameFor(_ field: RichTextField) -> String {
             switch field {
