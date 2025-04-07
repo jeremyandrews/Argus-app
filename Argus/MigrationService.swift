@@ -422,7 +422,15 @@ class MigrationService: ObservableObject {
             relationToTopic: notification.relation_to_topic,
             additionalInsights: notification.additional_insights,
             engineStats: notification.engine_stats,
-            similarArticles: notification.similar_articles
+            similarArticles: notification.similar_articles,
+            titleBlob: notification.title_blob,
+            bodyBlob: notification.body_blob,
+            summaryBlob: notification.summary_blob,
+            criticalAnalysisBlob: notification.critical_analysis_blob,
+            logicalFallaciesBlob: notification.logical_fallacies_blob,
+            sourceAnalysisBlob: notification.source_analysis_blob,
+            relationToTopicBlob: notification.relation_to_topic_blob,
+            additionalInsightsBlob: notification.additional_insights_blob
         )
 
         return article
@@ -529,13 +537,13 @@ class MigrationService: ObservableObject {
         backgroundTaskID = UUID()
 
         // We're still tracking that a task is in progress, but using SwiftUI lifecycle instead
-        AppLogger.database.debug("Background task registered: \(backgroundTaskID)")
+        AppLogger.database.debug("Background task registered: \(self.backgroundTaskID)")
     }
 
     /// End the background task if active
     private func endBackgroundTaskIfNeeded() {
         // Clean up any resources associated with the background task
-        AppLogger.database.debug("Background task completeself.self.d: \(backgroundTaskID)")
+        AppLogger.database.debug("Background task completeself.self.d: \(self.backgroundTaskID)")
 
         // Reset the ID
         backgroundTaskID = UUID()

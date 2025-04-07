@@ -7,8 +7,35 @@
 - **User Experience Improvements**: Improving UI responsiveness, eliminating sync jitter, enhancing offline capabilities, and refining automatic migration process
 - **Cross-Device Capabilities**: Preparing SwiftData models for future CloudKit integration to enable iPhone/iPad syncing
 - **Migration System Refinement**: Enhancing visual feedback during automatic database migration, removing redundant controls
+- **SwiftData Container Connection Issue**: Addressed disconnect between SwiftData Test container and main application container
 
 ## Recent Changes
+- **Fixed Rich Text Blob Generation** (Completed):
+  - Identified missing rich text blob transfer during sync and migration
+  - Added blob storage fields (titleBlob, bodyBlob, etc.) to ArticleModel class 
+  - Updated ArticleModelAdapter to transfer blobs in both directions
+  - Added updateBlobs method to ArticleModel to copy blobs from NotificationData
+  - Modified MigrationService to preserve existing blob data during migration
+  - Fixed ArticleService.processRemoteArticles to transfer generated blobs to ArticleModel before saving
+  - Ensured all newly downloaded content has rich text blobs properly populated without requiring user interaction
+  - Addressed UI issue where article previews showed "Formatting..." overlay due to missing blobs
+- **Fixed Topic Display Issue** (Completed):
+  - Implemented dual article collection approach in NewsViewModel (allArticles and filteredArticles)
+  - Ensured all topics remain visible in topic bar regardless of which topic is selected
+  - Modified NewsViewModel.refreshArticles() to fetch all articles matching non-topic filters for topic bar
+  - Simplified topic filtering in NewsView by using allArticles directly
+  - Preserved "All" topic cache when specific topic is selected
+  - Improved user experience by showing all available topics at all times
+
+- **Fixed SwiftData Content Display Issue** (Completed):
+  - Identified and addressed disconnect between two separate SwiftData containers
+  - Created ArticleModelAdapter to bridge between ArticleModel and NotificationData
+  - Updated ArticleService to query ArticleModel entities instead of NotificationData
+  - Implemented model conversion to maintain backward compatibility in the UI layer
+  - Ensured correct object transformation for all article operations (CRUD)
+  - Modified rich text generation to work with the adapter pattern
+  - Maintained proper MainActor isolation for NSAttributedString handling
+
 - **Fixed Swift 6 Concurrency Issues** (Completed):
   - Added @MainActor annotations to protocol methods and implementations
   - Created dedicated MainActor-isolated methods for NSAttributedString handling
@@ -170,14 +197,27 @@
    - Removed unused variables to fix Swift compiler warnings
    - Implemented proper MVVM separation between view and business logic
 
-8. **Refactor NewsDetailView to Use ViewModel**:
-   - Update NewsDetailView to use NewsDetailViewModel
-   - Move rich text generation logic to ArticleOperations
-   - Implement more responsive section loading
-   - Improve navigation between articles
+8. **✅ Connect ArticleModel with NotificationData**:
+   - Completed: Created ArticleModelAdapter to bridge between data models
+   - Completed: Updated ArticleService to query ArticleModel but return NotificationData
+   - Completed: Implemented bidirectional conversion between model types
+   - Completed: Modified rich text generation to work with the adapter pattern
+   - Completed: Ensured all CRUD operations work with the correct model types
+
+9. **✅ Refactor NewsDetailView to Use ViewModel**:
+   - Completed: Updated NewsDetailView to use NewsDetailViewModel
+   - Completed: Moved article operations to ViewModel (read/bookmark/archive/delete)
+   - Completed: Implemented proper state management with ObservableObject pattern
+   - Completed: Enhanced navigation between articles with better state preservation
+   - Completed: Improved section loading with task cancellation for better performance
+   - Completed: Fixed rich text handling to work without direct access to ArticleOperations
+   - Completed: Implemented custom getAttributedString method for text formatting
+   - Completed: Added helper methods for RichTextField enum conversion to readable strings
+   - Completed: Fixed nested LazyLoadingContentView implementation with customFontSize support
+   - Completed: Ensured proper separation of view-specific formatting from business logic
 
 ### Phase 5: Background Task Implementation
-9. **Implement Modern Background Tasks**:
+10. **Implement Modern Background Tasks**:
    - Replace current syncing with modern background tasks approach
    - Implement push notification handling with async/await
    - Set up periodic syncing using .backgroundTask or BGTaskScheduler
@@ -192,11 +232,13 @@
   - MVVM pattern with shared components for code reuse between views
   - SwiftData selected for modern persistence with Swift-native syntax
   - Swift concurrency (async/await) for improved readability and performance
+  - Adapter pattern to bridge between ArticleModel and NotificationData during transition
 
 - **Migration Strategy**: 
   - Phased implementation to ensure continuous app functionality
   - Testing each phase thoroughly before moving to next
   - Keeping compatibility with existing systems during transition
+  - Using adapters to maintain compatibility with existing UI while modernizing data layer
 
 - **Performance Focus**: 
   - Implementing optimized database access patterns from the start
@@ -213,19 +255,29 @@
 - Maintaining data consistency between old and new databases during the transition period
 - Improving user perception during automatic migration at app startup with better visual feedback
 - Preparing for future removal of migration code once all users have been migrated
+- Resolving data model mismatches between different components during modernization
 
 ## Performance Insights
 - **SwiftData Batch Processing**: Testing confirms SwiftData's ability to efficiently handle batched article creation in background contexts. Batching operations (creating 5-10 articles at once) with intermediate saves provides significant performance benefits.
 - **Background Processing**: Moving database operations off the main thread using Task.detached eliminates UI jitter and improves perceived performance.
 - **Scaling Considerations**: Performance metrics suggest that handling hundreds of articles in real-world syncing is feasible with proper implementation patterns.
 - **Concurrency Management**: Using Swift actor isolation and proper MainActor boundaries ensures thread safety while maintaining performance.
+- **Adapter Pattern Overhead**: Converting between ArticleModel and NotificationData adds minimal overhead while providing better maintainability during transition.
 
 ## Recent Feedback
 - Need for improved UI performance, especially during sync operations
 - Concerns about duplicate content that should be addressed in new architecture
 - Requests for more consistent error handling and recovery mechanisms
+- Report of no articles showing despite database containing content due to container mismatch
 
 ## Recent Architectural Decisions
+
+- **Data Model Adapter Pattern**:
+  - Implemented ArticleModelAdapter to bridge between ArticleModel and NotificationData
+  - Decoupled UI layer from database implementation details
+  - Allows for gradual transition from legacy model to new SwiftData model
+  - Provides clean conversion between model types without UI changes
+  - Will eventually be phased out when UI is fully migrated to ArticleModel
 
 - **Shared Components Architecture**:
   - Implemented three-tier architecture to enable code sharing:
@@ -250,4 +302,6 @@
 8. ✅ Develop NewsViewModel using ArticleOperations
 9. ✅ Develop NewsDetailViewModel using ArticleOperations
 10. ✅ Refactor NewsView to use NewsViewModel
-11. Refactor NewsDetailView to use NewsDetailViewModel
+11. ✅ Create ArticleModelAdapter to connect SwiftData Test and main app containers
+12. ✅ Refactor NewsDetailView to use NewsDetailViewModel
+13. Implement Modern Background Tasks

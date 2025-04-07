@@ -34,10 +34,11 @@
 
 ## What's In Progress
 
-- 🔶 **MVVM Architecture Implementation**
+- ✅ **MVVM Architecture Implementation**
   - Shared components architecture implemented (ArticleServiceProtocol, ArticleService, ArticleOperations)
   - ViewModels created (NewsViewModel, NewsDetailViewModel)
-  - View refactoring in progress to use the new ViewModels
+  - View refactoring completed for NewsView to use the new ViewModel
+  - Fixed container disconnect between SwiftData Test and main app
 
 - 🔶 **Sync Process Optimization**
   - Background sync process improvements underway using ArticleService
@@ -49,6 +50,33 @@
   - Batch operations with proper error handling to prevent partial updates
 
 ## Recently Completed
+
+- ✅ **Fixed Rich Text Blob Generation Issue**
+  - Added blob storage fields to ArticleModel (titleBlob, bodyBlob, etc.)
+  - Implemented bidirectional blob transfer in ArticleModelAdapter
+  - Modified MigrationService to preserve blob data during migration
+  - Fixed ArticleService to properly transfer generated blobs to models before saving
+  - Solved UI issue where article previews showed "Formatting..." overlay
+  - Ensured all newly synced articles have their rich text immediately available
+  - Implemented proper blob handling in both migration and sync workflows
+  - Fixed duplicate content display caused by missing rich text blobs
+
+- ✅ **Topic Bar Filtering Improvement**
+  - Fixed issue where only the selected topic would show in topic bar
+  - Implemented dual article collection approach in NewsViewModel (allArticles and filteredArticles)
+  - Modified ViewModel to fetch all articles matching non-topic filters for topic bar display
+  - Simplified topic filtering in NewsView to use allArticles directly for topic generation
+  - Enhanced caching mechanism to preserve "All" topic cache entries
+  - Improved user experience by showing all available topics at all times
+  - Maintained proper filtering behavior while making topic navigation more intuitive
+
+- ✅ **Model Adapter Implementation**
+  - Created ArticleModelAdapter for converting between ArticleModel and NotificationData
+  - Updated ArticleService to work with ArticleModel but return NotificationData
+  - Modified rich text generation to work with the adapter pattern
+  - Ensured proper model conversion for all CRUD operations
+  - Addressed container mismatch issue between SwiftData Test and main app
+  - Fixed display of articles that were visible in SwiftData Test but not in main app
 
 - ✅ **Shared Architecture Components Implementation**
   - Created ArticleServiceProtocol as interface for all data operations
@@ -219,11 +247,24 @@
   - Removed unused variables to fix Swift compiler warnings
   - Implemented proper MVVM separation between view and business logic
 
-- 🔲 **Refactor NewsDetailView to Use ViewModel**
-  - Update NewsDetailView to use NewsDetailViewModel
-  - Move rich text processing to ArticleOperations
-  - Improve section loading with better async support
-  - Enhance navigation between articles
+- ✅ **Implement Model Adapter Pattern**
+  - Created ArticleModelAdapter to bridge between ArticleModel and NotificationData
+  - Updated ArticleService to query ArticleModel but return NotificationData
+  - Ensured all CRUD operations work with the correct model types
+  - Fixed model container disconnect that was preventing display of articles
+  - Maintained backward compatibility with existing UI while updating data layer
+
+- ✅ **Refactor NewsDetailView to Use ViewModel**
+  - Completed: Updated NewsDetailView to use NewsDetailViewModel
+  - Completed: Moved article operations (read/bookmark/archive/delete) to ViewModel
+  - Completed: Implemented proper state management with ObservableObject pattern
+  - Completed: Enhanced navigation between articles with better state preservation
+  - Completed: Improved section loading with task cancellation for better performance
+  - Completed: Fixed NSAttributedString handling to work without direct access to ArticleOperations
+  - Completed: Implemented custom getAttributedString method for rich text rendering
+  - Completed: Added fieldNameFor helper to convert RichTextField enum to human-readable strings
+  - Completed: Fixed LazyLoadingContentView implementation with proper customFontSize support
+  - Completed: Ensured proper separation of view-specific formatting from business logic
 
 #### Phase 4: Syncing and Background Tasks
 - 🔲 **Implement Periodic Sync Using .backgroundTask**
@@ -284,6 +325,11 @@
    - Status: Will be resolved by migration to SwiftData
    - Priority: High
    
+3. **Rich Text Blob Generation**
+   - Missing blob transfer during sync and migration
+   - Status: Resolved by adding blob fields to ArticleModel and fixing data transfer
+   - Priority: High (Resolved)
+   
 3. **Uniqueness Constraints**
    - Schema-level uniqueness constraints removed for CloudKit compatibility
    - Status: Addressed by implementing application-level uniqueness validation
@@ -296,6 +342,11 @@
    - ✅ Implemented comprehensive migration summary with statistics
    - Status: Most issues resolved, ready for wider testing
    - Priority: Low
+
+5. **Container Mismatch Issue**
+   - SwiftData Test and main app were using different containers
+   - Status: Resolved by implementing ArticleModelAdapter and updating ArticleService
+   - Priority: High (Resolved)
 
 ## Testing Status
 
@@ -324,10 +375,11 @@
    - ✅ Create NewsViewModel and NewsDetailViewModel
 
 2. **UI Modernization (Target: June 2025)**
-   - Complete Phase 3-4 of modernization plan
-   - Refactor NewsView to use NewsViewModel
-   - Refactor NewsDetailView to use NewsDetailViewModel
-   - Implement modern background task handling
+   - ✅ Complete Phase 3 of modernization plan
+   - ✅ Refactor NewsView to use NewsViewModel
+   - ✅ Implement model adapter pattern to connect SwiftData Test and main app
+   - ✅ Refactor NewsDetailView to use NewsDetailViewModel
+   - 🔶 Implement modern background task handling
 
 3. **Cleanup and Performance (Target: July 2025)**
    - Complete Phase 5 of modernization plan
@@ -337,16 +389,16 @@
 
 ## Recently Initiated
 
-- ✅ **Shared Architecture Implementation**
-  - Designed three-tier architecture to reduce duplication between views
-  - Identified common operations between NewsView and NewsDetailView
-  - Implemented ArticleServiceProtocol, ArticleService, and ArticleOperations
-  - Created NewsViewModel and NewsDetailViewModel for MVVM pattern
+- ✅ **Model Adapter Pattern Implementation**
+  - Created ArticleModelAdapter to bridge between legacy and modern models
+  - Updated ArticleService to query ArticleModel but return NotificationData
+  - Ensured proper model conversion for all CRUD operations
+  - Fixed container mismatch that was preventing article display
 
 ## Progress Metrics
 
 - **Features Completed**: 7/9 core features fully implemented
 - **Swift 6 Compatibility**: Major milestone reached with latest NSAttributedString fixes
-- **Known Bugs**: 2 high-priority issues, both potentially affected by recent changes
+- **Known Bugs**: 1 high-priority issue remaining, related to sync performance
 - **Test Coverage**: ~70% of non-UI code
-- **Architecture Design**: Implemented shared components architecture
+- **Architecture Design**: Implemented shared components architecture with model adapter pattern

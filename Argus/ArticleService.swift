@@ -25,7 +25,7 @@ final class ArticleService: ArticleServiceProtocol {
     init(apiClient: APIClient = APIClient.shared, modelContainer: ModelContainer? = nil) {
         self.apiClient = apiClient
 
-        // Use the provided container or get the shared one
+        // Use the provided container or get the SwiftDataContainer
         if let container = modelContainer {
             self.modelContainer = container
         } else {
@@ -50,19 +50,19 @@ final class ArticleService: ArticleServiceProtocol {
             return cachedResults
         }
 
-        // Build the predicate
-        var predicate: Predicate<NotificationData>?
+        // Build the predicate - we need to use ArticleModel predicates now
+        var predicate: Predicate<ArticleModel>?
 
         // Topic predicate (most selective, so apply first)
         if let topic = topic, topic != "All" {
-            predicate = #Predicate<NotificationData> { $0.topic == topic }
+            predicate = #Predicate<ArticleModel> { $0.topic == topic }
         }
 
         // Read status predicate
         if let isRead = isRead {
-            let readPredicate = #Predicate<NotificationData> { $0.isViewed == isRead }
+            let readPredicate = #Predicate<ArticleModel> { $0.isViewed == isRead }
             if let existingPredicate = predicate {
-                predicate = #Predicate<NotificationData> { existingPredicate.evaluate($0) && readPredicate.evaluate($0) }
+                predicate = #Predicate<ArticleModel> { existingPredicate.evaluate($0) && readPredicate.evaluate($0) }
             } else {
                 predicate = readPredicate
             }
@@ -70,9 +70,9 @@ final class ArticleService: ArticleServiceProtocol {
 
         // Bookmarked status predicate
         if let isBookmarked = isBookmarked {
-            let bookmarkPredicate = #Predicate<NotificationData> { $0.isBookmarked == isBookmarked }
+            let bookmarkPredicate = #Predicate<ArticleModel> { $0.isBookmarked == isBookmarked }
             if let existingPredicate = predicate {
-                predicate = #Predicate<NotificationData> { existingPredicate.evaluate($0) && bookmarkPredicate.evaluate($0) }
+                predicate = #Predicate<ArticleModel> { existingPredicate.evaluate($0) && bookmarkPredicate.evaluate($0) }
             } else {
                 predicate = bookmarkPredicate
             }
@@ -80,19 +80,19 @@ final class ArticleService: ArticleServiceProtocol {
 
         // Archived status predicate
         if let isArchived = isArchived {
-            let archivedPredicate = #Predicate<NotificationData> { $0.isArchived == isArchived }
+            let archivedPredicate = #Predicate<ArticleModel> { $0.isArchived == isArchived }
             if let existingPredicate = predicate {
-                predicate = #Predicate<NotificationData> { existingPredicate.evaluate($0) && archivedPredicate.evaluate($0) }
+                predicate = #Predicate<ArticleModel> { existingPredicate.evaluate($0) && archivedPredicate.evaluate($0) }
             } else {
                 predicate = archivedPredicate
             }
         }
 
-        // Create fetch descriptor
-        var fetchDescriptor = FetchDescriptor<NotificationData>(predicate: predicate)
+        // Create fetch descriptor for ArticleModel
+        var fetchDescriptor = FetchDescriptor<ArticleModel>(predicate: predicate)
 
-        // Apply sorting - default to newest first
-        fetchDescriptor.sortBy = [SortDescriptor(\.pub_date, order: .reverse)]
+        // Apply sorting - default to newest first (use publishDate instead of pub_date)
+        fetchDescriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
 
         // Apply pagination if specified
         if let limit = limit {
@@ -106,7 +106,10 @@ final class ArticleService: ArticleServiceProtocol {
         // Execute the fetch in a dedicated context
         do {
             let context = ModelContext(modelContainer)
-            let results = try context.fetch(fetchDescriptor)
+            let articleModels = try context.fetch(fetchDescriptor)
+
+            // Convert the ArticleModel objects to NotificationData objects
+            let results = articleModels.map { NotificationData.from(articleModel: $0) }
 
             // Cache the results
             cacheResults(results, for: cacheKey)
@@ -119,14 +122,19 @@ final class ArticleService: ArticleServiceProtocol {
     }
 
     func fetchArticle(byId id: UUID) async throws -> NotificationData? {
-        let fetchDescriptor = FetchDescriptor<NotificationData>(
-            predicate: #Predicate<NotificationData> { $0.id == id }
+        let fetchDescriptor = FetchDescriptor<ArticleModel>(
+            predicate: #Predicate<ArticleModel> { $0.id == id }
         )
 
         do {
             let context = ModelContext(modelContainer)
             let results = try context.fetch(fetchDescriptor)
-            return results.first
+            
+            // Convert the ArticleModel to NotificationData if found
+            if let articleModel = results.first {
+                return NotificationData.from(articleModel: articleModel)
+            }
+            return nil
         } catch {
             AppLogger.database.error("Error fetching article by ID: \(error)")
             throw ArticleServiceError.databaseError(underlyingError: error)
@@ -134,14 +142,19 @@ final class ArticleService: ArticleServiceProtocol {
     }
 
     func fetchArticle(byJsonURL jsonURL: String) async throws -> NotificationData? {
-        let fetchDescriptor = FetchDescriptor<NotificationData>(
-            predicate: #Predicate<NotificationData> { $0.json_url == jsonURL }
+        let fetchDescriptor = FetchDescriptor<ArticleModel>(
+            predicate: #Predicate<ArticleModel> { $0.jsonURL == jsonURL }
         )
 
         do {
             let context = ModelContext(modelContainer)
             let results = try context.fetch(fetchDescriptor)
-            return results.first
+            
+            // Convert the ArticleModel to NotificationData if found
+            if let articleModel = results.first {
+                return NotificationData.from(articleModel: articleModel)
+            }
+            return nil
         } catch {
             AppLogger.database.error("Error fetching article by JSON URL: \(error)")
             throw ArticleServiceError.databaseError(underlyingError: error)
@@ -154,12 +167,12 @@ final class ArticleService: ArticleServiceProtocol {
         }
 
         // Build the search predicate - search title and body
-        let searchPredicate = #Predicate<NotificationData> {
+        let searchPredicate = #Predicate<ArticleModel> {
             $0.title.localizedStandardContains(queryText) ||
                 $0.body.localizedStandardContains(queryText)
         }
 
-        var fetchDescriptor = FetchDescriptor<NotificationData>(predicate: searchPredicate)
+        var fetchDescriptor = FetchDescriptor<ArticleModel>(predicate: searchPredicate)
 
         // Apply limit if specified
         if let limit = limit {
@@ -167,12 +180,14 @@ final class ArticleService: ArticleServiceProtocol {
         }
 
         // Sort by relevance (approximated by date for now)
-        fetchDescriptor.sortBy = [SortDescriptor(\.pub_date, order: .reverse)]
+        fetchDescriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
 
         do {
             let context = ModelContext(modelContainer)
-            let results = try context.fetch(fetchDescriptor)
-            return results
+            let articleModels = try context.fetch(fetchDescriptor)
+            
+            // Convert the ArticleModel objects to NotificationData objects
+            return articleModels.map { NotificationData.from(articleModel: $0) }
         } catch {
             AppLogger.database.error("Error searching articles: \(error)")
             throw ArticleServiceError.databaseError(underlyingError: error)
@@ -182,39 +197,36 @@ final class ArticleService: ArticleServiceProtocol {
     // MARK: - State Management Operations
 
     func markArticle(id: UUID, asRead isRead: Bool) async throws {
-        guard let article = try await fetchArticle(byId: id) else {
-            throw ArticleServiceError.articleNotFound
-        }
-
-        // Only proceed if the state is actually changing
-        if article.isViewed == isRead {
-            return
-        }
-
+        // Find the ArticleModel by ID
+        let fetchDescriptor = FetchDescriptor<ArticleModel>(
+            predicate: #Predicate<ArticleModel> { $0.id == id }
+        )
+        
         do {
             let context = ModelContext(modelContainer)
-
-            // Re-fetch in this context
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate { $0.id == id }
-            )
-
-            guard let articleInContext = try context.fetch(descriptor).first else {
+            let articleModels = try context.fetch(fetchDescriptor)
+            
+            guard let articleInContext = articleModels.first else {
                 throw ArticleServiceError.articleNotFound
             }
-
+            
+            // Only proceed if the state is actually changing
+            if articleInContext.isViewed == isRead {
+                return
+            }
+            
             // Update the property
             articleInContext.isViewed = isRead
-
+            
             // Save the changes
             try context.save()
-
+            
             // Clear cache since article state has changed
             clearCache()
-
+            
             // Update badge count
             await NotificationUtils.updateAppBadgeCount()
-
+            
             // Post notification for views to update
             await MainActor.run {
                 NotificationCenter.default.post(
@@ -223,7 +235,7 @@ final class ArticleService: ArticleServiceProtocol {
                     userInfo: ["articleID": id, "isViewed": isRead]
                 )
             }
-
+            
         } catch {
             AppLogger.database.error("Error marking article as read: \(error)")
             throw ArticleServiceError.databaseError(underlyingError: error)
@@ -231,36 +243,33 @@ final class ArticleService: ArticleServiceProtocol {
     }
 
     func markArticle(id: UUID, asBookmarked isBookmarked: Bool) async throws {
-        guard let article = try await fetchArticle(byId: id) else {
-            throw ArticleServiceError.articleNotFound
-        }
-
-        // Only proceed if the state is actually changing
-        if article.isBookmarked == isBookmarked {
-            return
-        }
-
+        // Find the ArticleModel by ID
+        let fetchDescriptor = FetchDescriptor<ArticleModel>(
+            predicate: #Predicate<ArticleModel> { $0.id == id }
+        )
+        
         do {
             let context = ModelContext(modelContainer)
-
-            // Re-fetch in this context
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate { $0.id == id }
-            )
-
-            guard let articleInContext = try context.fetch(descriptor).first else {
+            let articleModels = try context.fetch(fetchDescriptor)
+            
+            guard let articleInContext = articleModels.first else {
                 throw ArticleServiceError.articleNotFound
             }
-
+            
+            // Only proceed if the state is actually changing
+            if articleInContext.isBookmarked == isBookmarked {
+                return
+            }
+            
             // Update the property
             articleInContext.isBookmarked = isBookmarked
-
+            
             // Save the changes
             try context.save()
-
+            
             // Clear cache since article state has changed
             clearCache()
-
+            
             // Post notification for views to update
             await MainActor.run {
                 NotificationCenter.default.post(
@@ -269,7 +278,7 @@ final class ArticleService: ArticleServiceProtocol {
                     userInfo: ["articleID": id, "isBookmarked": isBookmarked]
                 )
             }
-
+            
         } catch {
             AppLogger.database.error("Error marking article as bookmarked: \(error)")
             throw ArticleServiceError.databaseError(underlyingError: error)
@@ -277,36 +286,33 @@ final class ArticleService: ArticleServiceProtocol {
     }
 
     func markArticle(id: UUID, asArchived isArchived: Bool) async throws {
-        guard let article = try await fetchArticle(byId: id) else {
-            throw ArticleServiceError.articleNotFound
-        }
-
-        // Only proceed if the state is actually changing
-        if article.isArchived == isArchived {
-            return
-        }
-
+        // Find the ArticleModel by ID
+        let fetchDescriptor = FetchDescriptor<ArticleModel>(
+            predicate: #Predicate<ArticleModel> { $0.id == id }
+        )
+        
         do {
             let context = ModelContext(modelContainer)
-
-            // Re-fetch in this context
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate { $0.id == id }
-            )
-
-            guard let articleInContext = try context.fetch(descriptor).first else {
+            let articleModels = try context.fetch(fetchDescriptor)
+            
+            guard let articleInContext = articleModels.first else {
                 throw ArticleServiceError.articleNotFound
             }
-
+            
+            // Only proceed if the state is actually changing
+            if articleInContext.isArchived == isArchived {
+                return
+            }
+            
             // Update the property
             articleInContext.isArchived = isArchived
-
+            
             // Save the changes
             try context.save()
-
+            
             // Clear cache since article state has changed
             clearCache()
-
+            
             // Post notification for views to update
             await MainActor.run {
                 NotificationCenter.default.post(
@@ -315,13 +321,13 @@ final class ArticleService: ArticleServiceProtocol {
                     userInfo: ["articleID": id, "isArchived": isArchived]
                 )
             }
-
+            
             // Remove notification from system if article is archived
             if isArchived {
                 // AppDelegate's method is actor-isolated, so we need to await it
-                await AppDelegate().removeNotificationIfExists(jsonURL: article.json_url)
+                await AppDelegate().removeNotificationIfExists(jsonURL: articleInContext.jsonURL)
             }
-
+            
         } catch {
             AppLogger.database.error("Error marking article as archived: \(error)")
             throw ArticleServiceError.databaseError(underlyingError: error)
@@ -331,37 +337,37 @@ final class ArticleService: ArticleServiceProtocol {
     func deleteArticle(id: UUID) async throws {
         do {
             let context = ModelContext(modelContainer)
-
+            
             // Re-fetch in this context
-            let descriptor = FetchDescriptor<NotificationData>(
+            let descriptor = FetchDescriptor<ArticleModel>(
                 predicate: #Predicate { $0.id == id }
             )
-
+            
             guard let articleInContext = try context.fetch(descriptor).first else {
                 throw ArticleServiceError.articleNotFound
             }
-
+            
             // Save the JSON URL for notification removal
-            let jsonURL = articleInContext.json_url
-
+            let jsonURL = articleInContext.jsonURL
+            
             // Delete the article
             context.delete(articleInContext)
-
+            
             // Save the changes
             try context.save()
-
+            
             // Clear cache since articles have changed
             clearCache()
-
+            
             // Update badge count
             await NotificationUtils.updateAppBadgeCount()
-
+            
             // Remove any system notification for this article
             if !jsonURL.isEmpty {
                 // AppDelegate's method is actor-isolated, so we need to await it
                 await AppDelegate().removeNotificationIfExists(jsonURL: jsonURL)
             }
-
+            
             // Post notification about deletion
             await MainActor.run {
                 NotificationCenter.default.post(
@@ -370,7 +376,7 @@ final class ArticleService: ArticleServiceProtocol {
                     userInfo: ["articleID": id]
                 )
             }
-
+            
         } catch {
             AppLogger.database.error("Error deleting article: \(error)")
             throw ArticleServiceError.databaseError(underlyingError: error)
@@ -469,22 +475,25 @@ final class ArticleService: ArticleServiceProtocol {
         field: RichTextField
     ) async throws -> NSAttributedString? {
         do {
-            // Fetch the article
-            let fetchDescriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { $0.id == articleId }
+            // Fetch the ArticleModel
+            let fetchDescriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { $0.id == articleId }
             )
 
             let context = ModelContext(modelContainer)
-            let articles = try context.fetch(fetchDescriptor)
+            let articleModels = try context.fetch(fetchDescriptor)
 
-            guard let article = articles.first else {
+            guard let articleModel = articleModels.first else {
                 return nil
             }
+
+            // Convert to NotificationData for rich text generation
+            let notificationData = NotificationData.from(articleModel: articleModel)
 
             // Generate the attributed string
             let attributedString = getAttributedString(
                 for: field,
-                from: article,
+                from: notificationData,
                 createIfMissing: true
             )
 
@@ -499,61 +508,76 @@ final class ArticleService: ArticleServiceProtocol {
 
     private func processRemoteArticles(_ articles: [ArticleJSON]) async throws -> Int {
         guard !articles.isEmpty else { return 0 }
-
+        
         let context = ModelContext(modelContainer)
         var addedCount = 0
-
+        
         for article in articles {
-            // Check if we already have this article
-            let existingArticle = try await fetchArticle(byJsonURL: article.jsonURL)
-
-            if existingArticle == nil {
-                // Create a new article using the proper initializer
+            // Check if we already have this article by jsonURL
+            // We must extract primitive values to avoid type comparison issues in predicates
+            let jsonURLString = article.jsonURL
+            
+            // Use manual fetch and filtering to avoid predicate compilation issues
+            let descriptor = FetchDescriptor<ArticleModel>()
+            let allArticles = try context.fetch(descriptor)
+            
+            // Find any existing articles with this jsonURL
+            let existingArticles = allArticles.filter { $0.jsonURL == jsonURLString }
+            
+            if existingArticles.isEmpty {
+                // Create a new ArticleModel
                 let date = Date()
-                let newArticle = NotificationData(
+                let newArticle = ArticleModel(
                     id: UUID(),
-                    date: date,
+                    jsonURL: article.jsonURL,
+                    url: article.url,
                     title: article.title,
                     body: article.body,
-                    json_url: article.jsonURL,
-                    article_url: article.url,
-                    topic: article.topic,
-                    article_title: article.articleTitle,
+                    domain: article.domain,
+                    articleTitle: article.articleTitle,
                     affected: article.affected,
-                    domain: article.domain ?? "",
-                    pub_date: article.pubDate ?? date,
+                    publishDate: article.pubDate ?? date,
+                    addedDate: date,
+                    topic: article.topic,
                     isViewed: false,
                     isBookmarked: false,
                     isArchived: false,
-                    sources_quality: article.sourcesQuality,
-                    argument_quality: article.argumentQuality,
-                    source_type: article.sourceType,
-                    source_analysis: article.sourceAnalysis,
+                    sourcesQuality: article.sourcesQuality,
+                    argumentQuality: article.argumentQuality,
+                    sourceType: article.sourceType,
+                    sourceAnalysis: article.sourceAnalysis,
                     quality: article.quality,
                     summary: article.summary,
-                    critical_analysis: article.criticalAnalysis,
-                    logical_fallacies: article.logicalFallacies,
-                    relation_to_topic: article.relationToTopic,
-                    additional_insights: article.additionalInsights
+                    criticalAnalysis: article.criticalAnalysis,
+                    logicalFallacies: article.logicalFallacies,
+                    relationToTopic: article.relationToTopic,
+                    additionalInsights: article.additionalInsights
                 )
+                
                 context.insert(newArticle)
-
+                
+                // Create a NotificationData instance for rich text generation
+                let notificationData = NotificationData.from(articleModel: newArticle)
+                
                 // Ensure we generate the rich text for at least title and body
-                await generateInitialRichText(for: newArticle)
-
+                await generateInitialRichText(for: notificationData)
+                
+                // Important: Transfer the generated blobs back to the ArticleModel
+                newArticle.updateBlobs(from: notificationData)
+                
                 addedCount += 1
             } else {
                 // We already have this article - update any missing fields if needed
                 // This could be expanded to update specific fields that might change
             }
         }
-
+        
         // Save changes
         try context.save()
-
+        
         // Clear cache as we have new data
         clearCache()
-
+        
         // Return count of new articles
         return addedCount
     }

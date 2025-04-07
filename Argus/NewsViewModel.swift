@@ -115,27 +115,43 @@ final class NewsViewModel: ObservableObject {
         error = nil
 
         do {
-            // Fetch articles with current filters
-            let articles = try await articleOperations.fetchArticles(
-                topic: selectedTopic,
+            // First, fetch articles with non-topic filters only (for all visible topics)
+            let allArticlesWithoutTopicFilter = try await articleOperations.fetchArticles(
+                topic: "All", // This fetches articles for all topics
                 showUnreadOnly: showUnreadOnly,
                 showBookmarkedOnly: showBookmarkedOnly,
                 showArchivedContent: showArchivedContent
             )
+            
+            // Update allArticles for topic bar generation
+            allArticles = allArticlesWithoutTopicFilter
+            
+            // If a specific topic is selected, fetch articles with that topic filter
+            if selectedTopic != "All" {
+                // Fetch articles with the selected topic
+                let topicFilteredArticles = try await articleOperations.fetchArticles(
+                    topic: selectedTopic,
+                    showUnreadOnly: showUnreadOnly,
+                    showBookmarkedOnly: showBookmarkedOnly,
+                    showArchivedContent: showArchivedContent
+                )
+                
+                // Update filteredArticles with the topic-filtered articles
+                filteredArticles = topicFilteredArticles
+            } else {
+                // If "All" is selected, use the same articles for both
+                filteredArticles = allArticlesWithoutTopicFilter
+            }
 
-            // Update the UI
-            allArticles = articles
-            filteredArticles = articles
-
-            // Update grouping
+            // Update grouping using filtered articles
             await updateGroupedArticles()
 
             // Update cache
-            updateArticleCache(articles)
+            updateArticleCache(filteredArticles)
 
             // Reset pagination state
-            lastLoadedDate = articles.last?.pub_date ?? articles.last?.date
-            hasMoreContent = articles.count >= pageSize
+            lastLoadedDate = filteredArticles.last?.pub_date ?? filteredArticles.last?.date
+            hasMoreContent = filteredArticles.count >= pageSize
 
             // Clear loading state
             isLoading = false
@@ -455,12 +471,15 @@ final class NewsViewModel: ObservableObject {
     private func updateArticleCache(_ articles: [NotificationData]) {
         // Update cache for current topic
         articleCache[selectedTopic] = articles
-
+        
         // Update "All" cache if we're not already in "All"
         if selectedTopic != "All" {
-            // We don't have enough information to update the "All" cache,
-            // so we'll invalidate it
-            articleCache.removeValue(forKey: "All")
+            // We now want to preserve the "All" entries in the cache for topic bar generation
+            // If allArticles is populated, use it to update the "All" cache
+            if !allArticles.isEmpty {
+                articleCache["All"] = allArticles
+            }
+            // Otherwise, we don't touch the existing "All" cache if it exists
         }
 
         lastCacheUpdate = Date()

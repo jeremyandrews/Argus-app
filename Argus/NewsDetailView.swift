@@ -10,68 +10,157 @@ enum TabTransitionState {
 }
 
 struct NewsDetailView: View {
-    @State private var notifications: [NotificationData]
-    @State private var allNotifications: [NotificationData]
-    @State private var currentIndex: Int
-    @State private var deletedIDs: Set<UUID> = []
-    @State private var batchSize: Int = 50
-    @State private var scrollViewProxy: ScrollViewProxy? = nil
-    @State private var scrollToTopTrigger = UUID()
-
-    @State private var titleAttributedString: NSAttributedString?
-    @State private var bodyAttributedString: NSAttributedString?
-    @State private var summaryAttributedString: NSAttributedString?
-    @State private var criticalAnalysisAttributedString: NSAttributedString?
-    @State private var logicalFallaciesAttributedString: NSAttributedString?
-    @State private var sourceAnalysisAttributedString: NSAttributedString?
-
-    @State private var tabTransitionState: TabTransitionState = .idle
-    @State private var tabChangeTask: Task<Void, Never>? = nil
-    @State private var cachedContentBySection: [String: NSAttributedString] = [:]
-    @State private var visibleTabIndex: Int? = nil
-    @State private var preloadedNotification: NotificationData?
-    @State private var isLoadingNextArticle = false
-    @State private var contentTransitionID = UUID()
-    // Store loading tasks per section to be able to cancel them during navigation
-    @State private var sectionLoadingTasks: [String: Task<Void, Never>] = [:]
-
+    // MARK: - View Model
+    
+    /// The view model that manages article data and operations
+    @ObservedObject private var viewModel: NewsDetailViewModel
+    
+    // MARK: - UI State Properties
+    
+    /// Legacy state properties (will be migrated to ViewModel)
+    @State private var notifications: [NotificationData] = []
+    @State private var allNotifications: [NotificationData] = []
+    @State private var currentIndex: Int = 0
+    
+    /// Computed property to check if current index is valid
     private var isCurrentIndexValid: Bool {
         currentIndex >= 0 && currentIndex < notifications.count
     }
-
-    private var currentNotification: NotificationData? {
-        if let preloaded = preloadedNotification {
-            return preloaded
-        }
-        guard isCurrentIndexValid else { return nil }
-        return notifications[currentIndex]
-    }
-
-    @State private var scrollToSection: String? = nil
-    let initiallyExpandedSection: String?
-    @State private var showDeleteConfirmation = false
-    @State private var additionalContent: [String: Any]? = nil
-    @State private var isLoadingAdditionalContent = false
-    @State private var expandedSections: [String: Bool] = getDefaultExpandedSections()
-    @State private var isSharePresented = false
-    @State private var selectedSections: Set<String> = []
-    @State private var articleContent: String? = nil
+    
+    /// Access to the model context for database operations
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
+    @State private var preloadedNotification: NotificationData? = nil
+    
+    /// Convert notification content to attributed string
+    private func getAttributedString(
+        for field: RichTextField,
+        from notification: NotificationData,
+        createIfMissing: Bool = false,
+        customFontSize: CGFloat? = nil
+    ) -> NSAttributedString? {
+        // Call directly to MarkdownUtilities since the customFontSize parameter is needed
+        // but not available in the ArticleOperations API
+        if let textContent = getTextContentForField(field, from: notification) {
+            return markdownToAttributedString(
+                textContent,
+                textStyle: "UIFontTextStyleBody",
+                customFontSize: customFontSize
+            )
+        } else if createIfMissing {
+            // If we should create missing content, use placeholder text
+            let fieldName = fieldNameFor(field)
+            let placeholder = "No \(fieldName) content available."
+            return markdownToAttributedString(
+                placeholder,
+                textStyle: "UIFontTextStyleBody",
+                customFontSize: customFontSize
+            )
+        }
+        return nil
+    }
+    
+    /// Converts a RichTextField enum to a human-readable field name
+    private func fieldNameFor(_ field: RichTextField) -> String {
+        switch field {
+        case .title:
+            return "title"
+        case .body:
+            return "body"
+        case .summary:
+            return "summary"
+        case .criticalAnalysis:
+            return "critical analysis"
+        case .logicalFallacies:
+            return "logical fallacies"
+        case .sourceAnalysis:
+            return "source analysis"
+        case .relationToTopic:
+            return "relevance"
+        case .additionalInsights:
+            return "context & perspective"
+        }
+    }
+    
+    /// Gets the text content for a specific rich text field
+    private func getTextContentForField(_ field: RichTextField, from notification: NotificationData) -> String? {
+        switch field {
+        case .title:
+            return notification.title
+        case .body:
+            return notification.body
+        case .summary:
+            return notification.summary
+        case .criticalAnalysis:
+            return notification.critical_analysis
+        case .logicalFallacies:
+            return notification.logical_fallacies
+        case .sourceAnalysis:
+            return notification.source_analysis
+        case .relationToTopic:
+            return notification.relation_to_topic
+        case .additionalInsights:
+            return notification.additional_insights
+        }
+    }
+    @State private var titleAttributedString: NSAttributedString? = nil
+    @State private var bodyAttributedString: NSAttributedString? = nil
+    @State private var summaryAttributedString: NSAttributedString? = nil
+    @State private var criticalAnalysisAttributedString: NSAttributedString? = nil
+    @State private var logicalFallaciesAttributedString: NSAttributedString? = nil
+    @State private var sourceAnalysisAttributedString: NSAttributedString? = nil
+    @State private var cachedContentBySection: [String: NSAttributedString] = [:]
+    @State private var expandedSections: [String: Bool] = Self.getDefaultExpandedSections()
+    @State private var contentTransitionID = UUID()
+    @State private var isLoadingNextArticle = false
+    @State private var sectionLoadingTasks: [String: Task<Void, Never>] = [:]
+    @State private var tabChangeTask: Task<Void, Never>? = nil
+    @State private var deletedIDs: Set<UUID> = []
+    @State private var scrollToSection: String? = nil
+    
+    /// Proxy for scrolling to specific sections
+    @State private var scrollViewProxy: ScrollViewProxy? = nil
+    
+    /// Used to trigger scroll to top
+    @State private var scrollToTopTrigger = UUID()
+    
+    /// Whether to show the delete confirmation dialog
+    @State private var showDeleteConfirmation = false
+    
+    /// Additional content dictionary for sections
+    @State private var additionalContent: [String: Any]? = nil
+    
+    /// Whether to show the share sheet
+    @State private var isSharePresented = false
+    
+    /// Sections selected for sharing
+    @State private var selectedSections: Set<String> = []
 
-    // Define a private static helper to provide default section states
-    private static func getDefaultExpandedSections() -> [String: Bool] {
+    /// The initially expanded section, if any
+    let initiallyExpandedSection: String?
+    
+    /// Current notification being displayed
+    private var currentNotification: NotificationData? {
+        viewModel.currentArticle
+    }
+    
+    @Environment(\.dismiss) private var dismiss
+    
+    /// Returns default section expansion states
+    static private func getDefaultExpandedSections() -> [String: Bool] {
         return [
             "Summary": true,
-            "Relevance": false,
             "Critical Analysis": false,
             "Logical Fallacies": false,
             "Source Analysis": false,
+            "Relevance": false,
             "Context & Perspective": false,
             "Argus Engine Stats": false,
-            "Related Articles": false,
+            "Preview": false,
+            "Related Articles": false
         ]
     }
+
+    // MARK: - Initialization
 
     init(
         notification: NotificationData? = nil,
@@ -82,17 +171,19 @@ struct NewsDetailView: View {
         currentIndex: Int,
         initiallyExpandedSection: String? = nil
     ) {
-        // Apply uniqueness to prevent duplicate IDs in collections
-        let uniqueNotifications = notifications.uniqued()
-        let uniqueAllNotifications = allNotifications.uniqued()
-
-        _notifications = State(initialValue: uniqueNotifications)
-        _allNotifications = State(initialValue: uniqueAllNotifications)
-        _currentIndex = State(initialValue: min(currentIndex, uniqueNotifications.count - 1))
-        // If we have a direct notification, initialize our state with it
-        _preloadedNotification = State(initialValue: notification)
-        _titleAttributedString = State(initialValue: preloadedTitle)
-        _bodyAttributedString = State(initialValue: preloadedBody)
+        // Create the view model
+        let viewModel = NewsDetailViewModel(
+            articles: notifications,
+            allArticles: allNotifications,
+            currentIndex: currentIndex,
+            initiallyExpandedSection: initiallyExpandedSection,
+            preloadedArticle: notification,
+            preloadedTitle: preloadedTitle,
+            preloadedBody: preloadedBody
+        )
+        
+        // Initialize with the view model
+        self._viewModel = ObservedObject(initialValue: viewModel)
         self.initiallyExpandedSection = initiallyExpandedSection
     }
 
@@ -906,58 +997,53 @@ struct NewsDetailView: View {
     // MARK: - Actions
 
     private func toggleReadStatus() {
-        guard let notification = currentNotification else { return }
-        notification.isViewed.toggle()
-        saveModel()
-        NotificationUtils.updateAppBadgeCount()
-
-        // Post notification that read status changed with additional info
-        NotificationCenter.default.post(
-            name: Notification.Name("ArticleReadStatusChanged"),
-            object: nil,
-            userInfo: ["articleID": notification.id, "isViewed": notification.isViewed]
-        )
+        Task {
+            await viewModel.toggleReadStatus()
+            // Post notification for UI updates elsewhere in the app
+            NotificationCenter.default.post(
+                name: Notification.Name("ArticleReadStatusChanged"),
+                object: nil,
+                userInfo: [
+                    "articleID": viewModel.currentArticle?.id ?? UUID(),
+                    "isViewed": viewModel.currentArticle?.isViewed ?? false
+                ]
+            )
+        }
     }
 
     private func toggleBookmark() {
-        guard let notification = currentNotification else { return }
-        notification.isBookmarked.toggle()
-        saveModel()
-        NotificationUtils.updateAppBadgeCount()
+        Task {
+            await viewModel.toggleBookmark()
+        }
     }
 
     private func toggleArchive() {
-        guard let notification = currentNotification else { return }
-        let wasArchived = notification.isArchived
-        notification.isArchived.toggle()
-        saveModel()
-        NotificationUtils.updateAppBadgeCount()
-
-        if !wasArchived {
-            if currentIndex < notifications.count - 1 {
-                currentIndex += 1
-                markAsViewed()
-            } else {
-                dismiss()
+        Task {
+            await viewModel.toggleArchive()
+            
+            // Check if we need to dismiss or navigate after archiving
+            if let article = viewModel.currentArticle, article.isArchived {
+                if currentIndex < notifications.count - 1 {
+                    // Navigate to next article if possible
+                    navigateToArticle(direction: .next)
+                } else {
+                    // Dismiss if this was the last article
+                    dismiss()
+                }
             }
         }
     }
 
     private func deleteNotification() {
-        guard let notification = currentNotification else { return }
-        modelContext.delete(notification)
-        do {
-            try modelContext.save()
-            NotificationUtils.updateAppBadgeCount()
-
+        Task {
+            await viewModel.deleteArticle()
+            
+            // Navigate to next article or dismiss
             if currentIndex < notifications.count - 1 {
-                currentIndex += 1
-                markAsViewed()
+                navigateToArticle(direction: .next)
             } else {
                 dismiss()
             }
-        } catch {
-            AppLogger.database.error("Failed to delete notification: \(error)")
         }
     }
 
@@ -1705,16 +1791,28 @@ struct NewsDetailView: View {
 
             // Use a MainActor-constrained task to handle NSAttributedString
             loadTask = Task { @MainActor in
-                // Since we're now on the MainActor, we can directly call getAttributedString
-                // without needing to await MainActor.run
-                let attributedString = getAttributedString(
-                    for: field,
-                    from: notification,
-                    createIfMissing: true,
-                    customFontSize: fontSize
-                )
+                // Since we're a nested struct within NewsDetailView, we need to use custom implementation
+                // to handle the customFontSize parameter which isn't available in the parent's method
+                let attributedString: NSAttributedString?
+                
+                if let textContent = getTextContentFor(field, from: notification) {
+                    attributedString = markdownToAttributedString(
+                        textContent,
+                        textStyle: "UIFontTextStyleBody",
+                        customFontSize: fontSize
+                    )
+                } else if true { // createIfMissing is hardcoded to true here
+                    let fieldName = getFieldNameFor(field)
+                    let placeholder = "No \(fieldName) content available."
+                    attributedString = markdownToAttributedString(
+                        placeholder,
+                        textStyle: "UIFontTextStyleBody",
+                        customFontSize: fontSize
+                    )
+                } else {
+                    attributedString = nil
+                }
 
-                // We're already on the MainActor, so no need for another MainActor.run
                 // Check if the task was cancelled
                 if Task.isCancelled { return }
 
@@ -1723,6 +1821,50 @@ struct NewsDetailView: View {
                 if let attributedString = attributedString {
                     onLoad?(attributedString)
                 }
+            }
+        }
+        
+        // Helper function to extract text content from notification
+        private func getTextContentFor(_ field: RichTextField, from notification: NotificationData) -> String? {
+            switch field {
+            case .title:
+                return notification.title
+            case .body:
+                return notification.body
+            case .summary:
+                return notification.summary
+            case .criticalAnalysis:
+                return notification.critical_analysis
+            case .logicalFallacies:
+                return notification.logical_fallacies
+            case .sourceAnalysis:
+                return notification.source_analysis
+            case .relationToTopic:
+                return notification.relation_to_topic
+            case .additionalInsights:
+                return notification.additional_insights
+            }
+        }
+        
+        // Helper function to convert enum to readable string
+        private func getFieldNameFor(_ field: RichTextField) -> String {
+            switch field {
+            case .title:
+                return "title"
+            case .body:
+                return "body"
+            case .summary:
+                return "summary"
+            case .criticalAnalysis:
+                return "critical analysis"
+            case .logicalFallacies:
+                return "logical fallacies"
+            case .sourceAnalysis:
+                return "source analysis"
+            case .relationToTopic:
+                return "relevance"
+            case .additionalInsights:
+                return "context & perspective"
             }
         }
     }
