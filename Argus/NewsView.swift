@@ -3,98 +3,74 @@ import SwiftUI
 import UIKit
 
 struct NewsView: View {
-    @Environment(\.modelContext) var modelContext
+    // MARK: - View Model
+
+    /// View model that manages article state and operations
+    @StateObject var viewModel = NewsViewModel()
+
+    // MARK: - Environment
+
     @Environment(\.editMode) private var editMode
+    @Environment(\.modelContext) private var modelContext
 
-    @Query private var allNotifications: [NotificationData]
+    // MARK: - State
 
-    // Made internal for extensions
-    @State var filteredNotifications: [NotificationData] = []
-    @State private var selectedNotificationIDs: Set<NotificationData.ID> = []
-    @State private var sortedAndGroupedNotifications: [(key: String, notifications: [NotificationData])] = []
+    /// UI State
     @State private var isFilterViewPresented: Bool = false
-    @State private var subscriptions: [String: Subscription] = [:]
-    @State private var needsTopicReset: Bool = false
     @State private var filterViewHeight: CGFloat = 200
-    @State private var scrollProxy: ScrollViewProxy?
-    @State private var lastSelectedTopic: String = "All"
-    @State private var needsScrollReset: Bool = false
     @State private var showDeleteConfirmation = false
     @State private var articleToDelete: NotificationData?
-    @State var totalNotifications: [NotificationData] = []
-    @State private var batchSize: Int = 30
-    @State private var lastUpdateTime: Date = .distantPast
-    @State private var isUpdating: Bool = false
-    @State private var backgroundRefreshTask: Task<Void, Never>?
-    @State private var lastLoadedDate: Date? = nil
-    @State private var isLoadingMorePages: Bool = false
-    @State private var pageSize: Int = 30
-    @State private var hasMoreContent: Bool = true
-    @State private var isActivelyScrolling: Bool = false
-    @State private var pendingUpdateNeeded: Bool = false
+    @State var isActivelyScrolling: Bool = false
     @State private var scrollIdleTimer: Task<Void, Never>? = nil
-    @State private var notificationsCache: [String: [NotificationData]] = [:]
-    @State private var lastCacheUpdate: Date = .distantPast
-    @State private var isCacheValid: Bool = false
-    // Tracks the previous filter state to detect actual changes and avoid redundant updates
-    // This helps prevent unnecessary database queries and UI refreshes
-    @State private var lastFilterState: (
-        topic: String,
-        unread: Bool,
-        bookmarked: Bool,
-        archived: Bool,
-        notificationCount: Int
-    ) = ("All", false, false, false, 0)
-    // Task that manages debounced filter updates to prevent rapid successive updates
-    // when multiple filter settings change in quick succession
-    @State private var filterChangeDebouncer: Task<Void, Never>? = nil
-    // Timestamp of the most recent filter change, used to determine appropriate debounce intervals
-    @State private var lastFilterChangeTime: Date = .distantPast
+    @State private var scrollProxy: ScrollViewProxy?
+    @State private var needsScrollReset: Bool = false
 
-    @AppStorage("sortOrder") private var sortOrder: String = "newest"
-    @AppStorage("groupingStyle") private var groupingStyle: String = "none"
-    @AppStorage("showUnreadOnly") private var showUnreadOnly: Bool = false
-    @AppStorage("showBookmarkedOnly") private var showBookmarkedOnly: Bool = false
-    @AppStorage("showArchivedContent") private var showArchivedContent: Bool = false
-    @AppStorage("selectedTopic") private var selectedTopic: String = "All"
-
+    /// Tab bar height from parent view
     @Binding var tabBarHeight: CGFloat
 
+    // MARK: - Computed Properties
+
+    /// Message for delete confirmation dialog
     var deleteConfirmationMessage: String {
         if articleToDelete != nil {
             return "This article is bookmarked. Are you sure you want to delete it?"
         } else {
-            let count = selectedNotificationIDs.count
+            let count = viewModel.selectedArticleIds.count
             return count == 1
                 ? "Are you sure you want to delete this article?"
                 : "Are you sure you want to delete \(count) articles?"
         }
     }
 
+    /// Determines if any filter is active
     private var isAnyFilterActive: Bool {
-        showUnreadOnly || showBookmarkedOnly || showArchivedContent
+        viewModel.showUnreadOnly || viewModel.showBookmarkedOnly || viewModel.showArchivedContent
     }
 
+    /// List of topics to show in topic bar
     private var visibleTopics: [String] {
-        let filtered = allNotifications.filter { note in
-            let archivedCondition = showArchivedContent || !note.isArchived
-            let unreadCondition = !showUnreadOnly || !note.isViewed
-            let bookmarkedCondition = !showBookmarkedOnly || note.isBookmarked
+        // Get unique topics from articles that match current filters
+        let filteredArticles = viewModel.allArticles.filter { article in
+            let archivedCondition = viewModel.showArchivedContent || !article.isArchived
+            let unreadCondition = !viewModel.showUnreadOnly || !article.isViewed
+            let bookmarkedCondition = !viewModel.showBookmarkedOnly || article.isBookmarked
             return archivedCondition && unreadCondition && bookmarkedCondition
         }
-        let topics = Set(filtered.compactMap { $0.topic })
+
+        let topics = Set(filteredArticles.compactMap { $0.topic })
         return ["All"] + topics.sorted()
     }
+
+    // MARK: - Body
 
     var body: some View {
         NavigationView {
             ZStack(alignment: .bottom) {
-                // A single List that includes our header, topic bar, and then the notifications
-                List(selection: $selectedNotificationIDs) {
-                    // Place the header & filter button at the top so it scrolls away
+                // Main List containing header, topic bar, and articles
+                List(selection: $viewModel.selectedArticleIds) {
+                    // Header Section
                     Section {
                         headerView
-                            // Remove the extra padding/spacing that Lists normally add:
                             .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
                             .listRowSeparator(.hidden)
 
@@ -103,24 +79,23 @@ struct NewsView: View {
                             .listRowSeparator(.hidden)
                     }
 
-                    // Main content: either empty state or the grouped notifications
-                    if filteredNotifications.isEmpty {
+                    // Content Section - either empty state or articles
+                    if viewModel.filteredArticles.isEmpty {
                         Section {
                             emptyStateView
-                                // Keep it flush to edges in the list
                                 .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
                                 .listRowSeparator(.hidden)
                         }
                     } else {
                         // Build each group as a section
-                        ForEach(sortedAndGroupedNotifications, id: \.key) { group in
+                        ForEach(viewModel.groupedArticles, id: \.key) { group in
                             if !group.key.isEmpty {
                                 Section(header: Text(group.key)) {
                                     ForEach(group.notifications.uniqued(), id: \.id) { notification in
                                         NotificationRow(
                                             notification: notification,
                                             editMode: editMode,
-                                            selectedNotificationIDs: $selectedNotificationIDs
+                                            selectedNotificationIDs: $viewModel.selectedArticleIds
                                         )
                                         .onAppear {
                                             loadMoreNotificationsIfNeeded(currentItem: notification)
@@ -133,7 +108,7 @@ struct NewsView: View {
                                     NotificationRow(
                                         notification: notification,
                                         editMode: editMode,
-                                        selectedNotificationIDs: $selectedNotificationIDs
+                                        selectedNotificationIDs: $viewModel.selectedArticleIds
                                     )
                                     .onAppear {
                                         loadMoreNotificationsIfNeeded(currentItem: notification)
@@ -148,76 +123,43 @@ struct NewsView: View {
                 // Pull-to-refresh for the entire list
                 .refreshable {
                     Task {
-                        await SyncManager.shared.sendRecentArticlesToServer()
+                        await viewModel.syncWithServer()
                     }
                 }
+                // Edit mode handling
                 .onChange(of: editMode?.wrappedValue) { _, newValue in
                     if newValue == .inactive {
-                        selectedNotificationIDs.removeAll()
+                        viewModel.selectedArticleIds.removeAll()
                     }
                 }
-                // When topic changes, use the specialized filter handler with the topic change flag
-                // to ensure immediate responsive update
-                .onChange(of: selectedTopic) { _, newTopic in
-                    handleFilterChange(topicChanged: lastSelectedTopic != newTopic, newTopic: newTopic)
-                }
-                // Filter setting changes may require topic reset and filtered notifications update
-                // but can use debounced updates for better performance
-                .onChange(of: showUnreadOnly) { _, _ in
-                    needsTopicReset = true
-                    handleFilterChange()
-                }
-                .onChange(of: showBookmarkedOnly) { _, _ in
-                    needsTopicReset = true
-                    handleFilterChange()
-                }
-                .onChange(of: showArchivedContent) { _, _ in
-                    needsTopicReset = true
-                    handleFilterChange()
-                }
-                // When notification data changes, update with debouncing
-                // This is separate from filter changes and doesn't need topic reset logic
-                .onChange(of: allNotifications.count) { _, _ in
-                    // Just a notification count change - might need a different type of update
-                    // Use debouncing to avoid multiple quick updates
-                    handleFilterChange(isDataChange: true)
-                }
-                // Dedicated observer for badge updates that only triggers when read status changes
-                // This prevents over-fetching and only updates the badge count when needed
-                .onChange(of: allNotifications.filter { !$0.isViewed }.count) { _, _ in
-                    NotificationUtils.updateAppBadgeCount()
-                }
-                .onAppear {
-                    if subscriptions.isEmpty {
-                        subscriptions = SubscriptionsView().loadSubscriptions()
-                    }
-                    if filteredNotifications.isEmpty {
-                        updateFilteredNotifications()
-                    }
-                    startBackgroundRefresh()
-                }
-                .onDisappear {
-                    backgroundRefreshTask?.cancel()
-                    backgroundRefreshTask = nil
-                }
-                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NotificationPermissionGranted"))) { _ in
-                    subscriptions = SubscriptionsView().loadSubscriptions()
-                }
+                // Notification handling
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleArchived"))) { _ in
-                    updateFilteredNotifications()
+                    Task {
+                        await viewModel.refreshArticles()
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleViewed"))) { _ in
-                    // Update filtered notifications when an article is marked as viewed
-                    handleFilterChange(isDataChange: true)
+                    Task {
+                        await viewModel.refreshArticles()
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DetailViewClosed"))) { _ in
-                    // Update filtered notifications when returning from detail view
-                    updateFilteredNotifications(force: true)
+                    Task {
+                        await viewModel.refreshArticles()
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleReadStatusChanged"))) { _ in
-                    // This will ensure changes to read status are reflected
-                    updateFilteredNotifications(force: true)
+                    Task {
+                        await viewModel.refreshArticles()
+                    }
                 }
+                // Initial setup
+                .onAppear {
+                    Task {
+                        await viewModel.refreshArticles()
+                    }
+                }
+                // Handle scrolling for better performance
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 10)
                         .onChanged { _ in
@@ -226,6 +168,7 @@ struct NewsView: View {
                             }
                         }
                 )
+                // Delete confirmation dialog
                 .confirmationDialog(
                     deleteConfirmationMessage,
                     isPresented: $showDeleteConfirmation,
@@ -234,10 +177,14 @@ struct NewsView: View {
                     Button("Delete", role: .destructive) {
                         withAnimation {
                             if let article = articleToDelete {
-                                deleteNotification(article)
+                                Task {
+                                    await viewModel.deleteArticle(article)
+                                }
                                 articleToDelete = nil
                             } else {
-                                deleteSelectedNotifications()
+                                Task {
+                                    await viewModel.performBatchOperation(.delete)
+                                }
                             }
                         }
                     }
@@ -246,19 +193,17 @@ struct NewsView: View {
                     }
                 }
 
-                // The filter sheet slides up from the bottom
+                // Filter sheet and edit toolbar
                 if isFilterViewPresented {
                     filterSheet
                         .zIndex(1)
                 }
 
-                // The custom bottom toolbar for Edit mode
                 if editMode?.wrappedValue == .active {
                     editToolbar
                         .zIndex(1)
                 }
             }
-            // A trailing nav bar button to toggle Edit mode
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     customEditButton()
@@ -267,114 +212,29 @@ struct NewsView: View {
         }
     }
 
-    // Central handler for all filter changes with smart debouncing
-    // - Immediately processes topic changes (for responsive UI)
-    // - Handles topic reset logic when filters affect available topics
-    // - Applies variable debounce intervals based on user activity and recency of changes
-    // - Cancels pending updates when new changes occur
-    // Parameters:
-    //   - topicChanged: Whether the selected topic has changed (requires immediate update)
-    //   - newTopic: The new topic if topic has changed
-    //   - isDataChange: Whether this is a data change rather than a filter settings change
-    private func handleFilterChange(topicChanged: Bool = false, newTopic: String? = nil, isDataChange: Bool = false) {
-        // Cancel any pending debounced update
-        filterChangeDebouncer?.cancel()
-
-        // Handle topic change - these need immediate attention
-        if topicChanged {
-            needsScrollReset = true
-
-            // First use cache if available for immediate feedback
-            let topicToUse = newTopic ?? selectedTopic
-            if isCacheValid && notificationsCache.keys.contains(topicToUse) {
-                let cachedTopicData = notificationsCache[topicToUse] ?? []
-                let filtered = filterNotificationsWithCurrentSettings(cachedTopicData)
-
-                // Update UI immediately with cached data
-                Task(priority: .userInitiated) {
-                    let updatedGrouping = await createGroupedNotifications(filtered)
-
-                    await MainActor.run {
-                        self.filteredNotifications = filtered
-                        self.sortedAndGroupedNotifications = updatedGrouping
-                    }
-                }
+    // Central handler for all filter changes
+    private func handleFilterChange(topicChanged: Bool = false, newTopic: String? = nil, isDataChange _: Bool = false) {
+        Task {
+            // Handle topic changes
+            if topicChanged, let newTopic = newTopic {
+                await viewModel.applyTopicFilter(newTopic)
+                needsScrollReset = true
+            } else {
+                // Just refresh with current filters
+                await viewModel.refreshArticles()
             }
 
-            // Then fall back to traditional filtering since we had an issue with the database method
-            updateFilteredNotifications(force: true)
-            return
-        }
-
-        // Fallback for when we don't have a topic change
-        updateFilteredNotifications(force: true)
-
-        // Check if this is a filter change that needs topic reset
-        if needsTopicReset && !isDataChange {
-            if !visibleTopics.contains(selectedTopic) {
-                selectedTopic = "All"
-            }
-            needsTopicReset = false
-        }
-
-        // Determine appropriate debounce interval based on:
-        // - How recently a change was made (avoid rapid successive updates)
-        // - Whether the user is actively scrolling (avoid UI hitches)
-        // - Whether this is an isolated change (can be faster)
-        let now = Date()
-        let timeSinceLastChange = now.timeIntervalSince(lastFilterChangeTime)
-
-        // Amount of debounce depends on how recently we updated
-        let debounceInterval: TimeInterval
-        if timeSinceLastChange < 0.5 {
-            // For very rapid changes, use a longer debounce
-            debounceInterval = 0.5
-        } else if isActivelyScrolling {
-            // Longer debounce while scrolling
-            debounceInterval = 0.75
-        } else {
-            // Small debounce for isolated changes
-            debounceInterval = 0.25
-        }
-
-        // Create a debouncer task
-        filterChangeDebouncer = Task {
-            // Wait for the debounce period
-            try? await Task.sleep(for: .seconds(debounceInterval))
-
-            if Task.isCancelled { return }
-
-            // Update the last change timestamp
-            await MainActor.run {
-                lastFilterChangeTime = Date()
-
-                // Use the optimized database method for filter changes
-                Task(priority: .userInitiated) {
-                    let articles = await DatabaseCoordinator.shared.fetchArticlesForTopic(
-                        selectedTopic,
-                        showUnreadOnly: showUnreadOnly,
-                        showBookmarkedOnly: showBookmarkedOnly,
-                        showArchivedContent: showArchivedContent
-                    )
-
-                    let updatedGrouping = await createGroupedNotifications(articles)
-
-                    await MainActor.run {
-                        self.filteredNotifications = articles
-                        self.sortedAndGroupedNotifications = updatedGrouping
-
-                        // Update cache
-                        self.notificationsCache[selectedTopic] = articles
-                        self.lastCacheUpdate = Date()
-                        self.isCacheValid = true
-                    }
-                }
+            // If we need to scroll to top after filter changes and we're not actively scrolling
+            if needsScrollReset && !isActivelyScrolling {
+                needsScrollReset = false
+                // (Scroll reset logic would go here if we had direct scroll control)
             }
         }
     }
 
     // MARK: - Subviews
 
+    /// Header view with logo and filter button
     var headerView: some View {
         HStack {
             Image("Argus")
@@ -399,29 +259,30 @@ struct NewsView: View {
         .background(Color(UIColor.systemBackground))
     }
 
+    /// Topic filtering bar
     var topicsBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 16) {
                 ForEach(visibleTopics, id: \.self) { topic in
                     Button {
-                        // First, update the selected topic visually (immediate feedback)
                         withAnimation {
-                            // Store previous topic for transition
-                            let previousTopic = selectedTopic
-                            selectedTopic = topic
+                            let lastTopic = viewModel.selectedTopic
 
-                            // Update lastSelectedTopic to enable proper change detection
-                            lastSelectedTopic = previousTopic
+                            Task {
+                                await viewModel.applyTopicFilter(topic)
+                            }
 
-                            // Try to use cache first for instant response
-                            updateTopicFromCache(newTopic: topic, previousTopic: previousTopic)
+                            // Request scroll reset if topic changes
+                            if lastTopic != topic {
+                                needsScrollReset = true
+                            }
                         }
                     } label: {
                         Text(topic)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(selectedTopic == topic ? Color.blue : Color.gray.opacity(0.2))
-                            .foregroundColor(selectedTopic == topic ? .white : .primary)
+                            .background(viewModel.selectedTopic == topic ? Color.blue : Color.gray.opacity(0.2))
+                            .foregroundColor(viewModel.selectedTopic == topic ? .white : .primary)
                             .cornerRadius(8)
                     }
                 }
@@ -432,6 +293,7 @@ struct NewsView: View {
         .background(Color(UIColor.systemGray6))
     }
 
+    /// Empty state view shown when no articles are available
     var emptyStateView: some View {
         VStack(spacing: 16) {
             Text("RSS Fed")
@@ -811,9 +673,9 @@ struct NewsView: View {
         }
     }
 
-    // Function moved to NewsView+Extensions.swift
+    // Load summaryContent from NewsView+Extensions.swift
 
-    // Function moved to NewsView+Extensions.swift
+    // Load affectedFieldView from NewsView+Extensions.swift
 
     private func domainView(_ notification: NotificationData) -> some View {
         Group {
@@ -859,17 +721,14 @@ struct NewsView: View {
                 isActivelyScrolling = false
 
                 // If there's a pending update, run it now
-                if pendingUpdateNeeded {
-                    pendingUpdateNeeded = false
-                    updateFilteredNotifications()
+                if viewModel.pendingUpdateNeeded {
+                    Task {
+                        await viewModel.refreshArticles()
+                    }
                 }
             }
         }
     }
-
-    // Function moved to NewsView+Extensions.swift
-
-    // Method moved to NewsView+Extensions.swift
 
     // Simplified bookmark icon on the trailing side
     private func BookmarkButton(notification: NotificationData) -> some View {
@@ -894,9 +753,18 @@ struct NewsView: View {
                     }
                 }
             FilterView(
-                showUnreadOnly: $showUnreadOnly,
-                showBookmarkedOnly: $showBookmarkedOnly,
-                showArchivedContent: $showArchivedContent
+                showUnreadOnly: Binding(
+                    get: { viewModel.showUnreadOnly },
+                    set: { viewModel.showUnreadOnly = $0 }
+                ),
+                showBookmarkedOnly: Binding(
+                    get: { viewModel.showBookmarkedOnly },
+                    set: { viewModel.showBookmarkedOnly = $0 }
+                ),
+                showArchivedContent: Binding(
+                    get: { viewModel.showArchivedContent },
+                    set: { viewModel.showArchivedContent = $0 }
+                )
             )
             .frame(height: filterViewHeight)
             .background(Color(UIColor.systemBackground))
@@ -981,7 +849,7 @@ struct NewsView: View {
                     editMode?.wrappedValue = .active
                 } else {
                     editMode?.wrappedValue = .inactive
-                    selectedNotificationIDs.removeAll()
+                    viewModel.selectedArticleIds.removeAll()
                 }
             }
         }) {
@@ -1017,9 +885,9 @@ struct NewsView: View {
             // Use the new optimized database method
             let articles = await DatabaseCoordinator.shared.fetchArticlesForTopic(
                 newTopic,
-                showUnreadOnly: showUnreadOnly,
-                showBookmarkedOnly: showBookmarkedOnly,
-                showArchivedContent: showArchivedContent
+                showUnreadOnly: viewModel.showUnreadOnly,
+                showBookmarkedOnly: viewModel.showBookmarkedOnly,
+                showArchivedContent: viewModel.showArchivedContent
             )
 
             // If we got fresh data from the database, update the UI
@@ -1049,10 +917,10 @@ struct NewsView: View {
         // If in Edit mode, toggle selection
         if editMode?.wrappedValue == .active {
             withAnimation {
-                if selectedNotificationIDs.contains(notification.id) {
-                    selectedNotificationIDs.remove(notification.id)
+                if viewModel.selectedArticleIds.contains(notification.id) {
+                    viewModel.selectedArticleIds.remove(notification.id)
                 } else {
-                    selectedNotificationIDs.insert(notification.id)
+                    viewModel.selectedArticleIds.insert(notification.id)
                 }
             }
         } else {
@@ -1066,373 +934,105 @@ struct NewsView: View {
         withAnimation {
             if editMode?.wrappedValue == .inactive {
                 editMode?.wrappedValue = .active
-                selectedNotificationIDs.insert(notification.id)
+                viewModel.selectedArticleIds.insert(notification.id)
             }
         }
     }
 
     private func handleEditModeDelete() {
-        if !selectedNotificationIDs.isEmpty {
+        if !viewModel.selectedArticleIds.isEmpty {
             // If user is deleting multiple selected rows
             articleToDelete = nil
             showDeleteConfirmation = true
         }
     }
 
-    private func deleteNotification(_: NotificationData) {
-        do {
-            try modelContext.save()
+    private func deleteNotification(_ notification: NotificationData) {
+        Task {
+            await viewModel.deleteArticle(notification)
+
+            // Update app badge count
             NotificationUtils.updateAppBadgeCount()
-            updateFilteredNotifications()
-            selectedNotificationIDs.removeAll()
-        } catch {
-            AppLogger.database.error("Failed to delete notification: \(error)")
+
+            // Clear selection
+            viewModel.selectedArticleIds.removeAll()
         }
     }
 
     private func deleteSelectedNotifications() {
         withAnimation {
-            for id in selectedNotificationIDs {
-                if let notification = filteredNotifications.first(where: { $0.id == id }) {
-                    AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
-                }
+            Task {
+                await viewModel.performBatchOperation(.delete)
             }
-            saveChanges()
-            updateFilteredNotifications()
             editMode?.wrappedValue = .inactive
-            selectedNotificationIDs.removeAll()
+            // The selectedArticleIds are cleared in the ViewModel's performBatchOperation
         }
     }
 
     private func toggleReadStatus(_ notification: NotificationData) {
-        notification.isViewed.toggle()
-        do {
-            try modelContext.save()
-            NotificationUtils.updateAppBadgeCount()
-            // Also clean up related notification, if any.
-            AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
-            // Post notification when read status changes
-            NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
-        } catch {
-            AppLogger.database.error("Failed to toggle read status: \(error)")
+        Task {
+            await viewModel.toggleReadStatus(for: notification)
         }
     }
 
     private func toggleBookmark(_ notification: NotificationData) {
-        notification.isBookmarked.toggle()
-        saveChanges()
-        updateFilteredNotifications()
+        Task {
+            await viewModel.toggleBookmark(for: notification)
+        }
     }
 
     private func toggleArchive(_ notification: NotificationData) {
-        withAnimation {
-            notification.isArchived.toggle()
-            saveChanges()
-            updateFilteredNotifications()
-            // Also delete notification if exists.
-            AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
+        Task {
+            await viewModel.toggleArchive(for: notification)
         }
     }
 
     private func performActionOnSelection(action: (NotificationData) -> Void) {
-        if !selectedNotificationIDs.isEmpty {
-            for id in selectedNotificationIDs {
-                if let notification = filteredNotifications.first(where: { $0.id == id }) {
+        if !viewModel.selectedArticleIds.isEmpty {
+            // For complex operations that aren't directly supported by viewModel batch operations,
+            // we apply the action to each selected article
+            for id in viewModel.selectedArticleIds {
+                if let notification = viewModel.filteredArticles.first(where: { $0.id == id }) {
                     action(notification)
                 }
             }
-            saveChanges()
-            updateFilteredNotifications()
 
+            // Reset selection state
             withAnimation {
                 editMode?.wrappedValue = .inactive
-                selectedNotificationIDs.removeAll()
+                viewModel.selectedArticleIds.removeAll()
             }
         }
     }
 
-    private func saveChanges() {
-        do {
-            try modelContext.save()
-            NotificationUtils.updateAppBadgeCount()
-        } catch {
-            AppLogger.database.error("Failed to save changes: \(error)")
-        }
-    }
+    // Load openArticle, generateBodyBlob, and loadMoreNotificationsIfNeeded from NewsView+Extensions.swift
 
-    // Handles filter changes with minimal UI blocking by:
-    // 1. Using in-memory cache for fast topic filtering when possible
-    // 2. Moving heavy database operations to background threads
-    // 3. Only updating UI state on the main thread once data is ready
-    // 4. Implementing smart debouncing to avoid redundant updates
-    // This significantly improves responsiveness when filtering large datasets
     @MainActor
-    private func updateFilteredNotifications(isBackgroundUpdate: Bool = false, force: Bool = false) {
-        // Update the instance property instead of creating a new local variable
-        lastFilterState = (
-            selectedTopic,
-            showUnreadOnly,
-            showBookmarkedOnly,
-            showArchivedContent,
-            allNotifications.count
-        )
-
-        // Check update timing and scrolling constraints
-        let updateInterval: TimeInterval = 10.0
-        let now = Date()
-        if isBackgroundUpdate {
-            guard now.timeIntervalSince(lastUpdateTime) > updateInterval,
-                  !isUpdating
-            else {
-                return
-            }
-        }
-
-        if !force && isActivelyScrolling {
-            pendingUpdateNeeded = true
-            return
-        }
-
+    private func updateFilteredNotifications(force: Bool = false) {
         Task {
-            // Set updating flag
-            isUpdating = true
-            defer {
-                isUpdating = false
-                lastUpdateTime = Date()
-            }
-
-            // Check for new content when forced
-            if force {
-                let hasNewContent = await checkForNewContent()
-                if hasNewContent {
-                    isCacheValid = false
-                }
-            }
-
-            // Fast path: Use cache for quick filtering
-            if !force && isCacheValid && now.timeIntervalSince(lastCacheUpdate) < 60.0 &&
-                notificationsCache.keys.contains("All")
-            {
-                if let cachedData = notificationsCache["All"] {
-                    // IMPORTANT: Create a local copy of the filtered data before updating UI
-                    let filtered: [NotificationData]
-                    if selectedTopic == "All" {
-                        filtered = filterNotificationsWithCurrentSettings(cachedData)
-                    } else {
-                        let topicFiltered = cachedData.filter { $0.topic == selectedTopic }
-                        filtered = filterNotificationsWithCurrentSettings(topicFiltered)
-                    }
-
-                    // Update grouping first with the filtered data before updating the UI
-                    let updatedGrouping = await createGroupedNotifications(filtered)
-
-                    // Now update the UI in one step to prevent flickering
-                    await MainActor.run {
-                        self.sortedAndGroupedNotifications = updatedGrouping
-                        self.filteredNotifications = filtered
-                    }
-                    return
-                }
-            }
-
-            // Reset pagination state but keep current data visible until new data is ready
-            await MainActor.run {
-                self.lastLoadedDate = nil
-                self.hasMoreContent = true
-                // Don't clear existing data yet
-                // self.totalNotifications = []
-                // self.filteredNotifications = []
-            }
-
-            // Load the first page in the background
-            let (newNotifications, groups) = await loadPageAndPrepareGroups()
-
-            // Only update UI when we have the new data ready
-            await MainActor.run {
-                // Update all state at once to minimize flickering - apply uniqueness before updating UI
-                let uniqueNotifications = newNotifications.uniqued()
-                self.totalNotifications = uniqueNotifications
-                self.filteredNotifications = uniqueNotifications
-                self.sortedAndGroupedNotifications = groups
-            }
-
-            // Cache the results
-            await updateNotificationsCache()
+            await viewModel.updateFilteredArticles(
+                isBackgroundUpdate: false,
+                force: force,
+                isActivelyScrolling: isActivelyScrolling
+            )
         }
     }
 
-    // Add this new helper function to prepare groups without updating UI
-    private func loadPageAndPrepareGroups() async -> ([NotificationData], [(key: String, notifications: [NotificationData])]) {
-        guard !isLoadingMorePages else { return ([], []) }
-
-        await MainActor.run {
-            isLoadingMorePages = true
+    private func filterNotificationsWithCurrentSettings(_ notifications: [NotificationData]) -> [NotificationData] {
+        return notifications.filter { note in
+            let archivedCondition = viewModel.showArchivedContent || !note.isArchived
+            let unreadCondition = !viewModel.showUnreadOnly || !note.isViewed
+            let bookmarkedCondition = !viewModel.showBookmarkedOnly || note.isBookmarked
+            return archivedCondition && unreadCondition && bookmarkedCondition
         }
-
-        defer {
-            Task { @MainActor in
-                isLoadingMorePages = false
-            }
-        }
-
-        // Capture values needed for background processing
-        let currentTopic = selectedTopic
-        let currentShowUnreadOnly = showUnreadOnly
-        let currentShowBookmarkedOnly = showBookmarkedOnly
-        let currentShowArchivedContent = showArchivedContent
-        let currentSortOrder = sortOrder
-        let currentGroupingStyle = groupingStyle
-        let currentPageSize = pageSize
-
-        // Perform the fetch in a background context
-        let result = await BackgroundContextManager.shared.performBackgroundTask { backgroundContext in
-            do {
-                // Build the predicate efficiently to match database indexes
-                var basePredicate: Predicate<NotificationData>?
-
-                // Topic filter (most selective)
-                if currentTopic != "All" {
-                    basePredicate = #Predicate<NotificationData> { $0.topic == currentTopic }
-                }
-
-                // Archive filter
-                if !currentShowArchivedContent {
-                    let archivePredicate = #Predicate<NotificationData> { !$0.isArchived }
-                    if let existing = basePredicate {
-                        basePredicate = #Predicate<NotificationData> {
-                            existing.evaluate($0) && archivePredicate.evaluate($0)
-                        }
-                    } else {
-                        basePredicate = archivePredicate
-                    }
-                }
-
-                // Unread filter
-                if currentShowUnreadOnly {
-                    let unreadPredicate = #Predicate<NotificationData> { !$0.isViewed }
-                    if let existing = basePredicate {
-                        basePredicate = #Predicate<NotificationData> {
-                            existing.evaluate($0) && unreadPredicate.evaluate($0)
-                        }
-                    } else {
-                        basePredicate = unreadPredicate
-                    }
-                }
-
-                // Bookmark filter
-                if currentShowBookmarkedOnly {
-                    let bookmarkPredicate = #Predicate<NotificationData> { $0.isBookmarked }
-                    if let existing = basePredicate {
-                        basePredicate = #Predicate<NotificationData> {
-                            existing.evaluate($0) && bookmarkPredicate.evaluate($0)
-                        }
-                    } else {
-                        basePredicate = bookmarkPredicate
-                    }
-                }
-
-                var descriptor = FetchDescriptor<NotificationData>(
-                    predicate: basePredicate
-                )
-
-                // Set up database sorting - use only indexed fields here
-                // For complex sorting, we'll do a second pass in memory
-                if currentSortOrder == "bookmarked" {
-                    // For bookmarked sort, just fetch by date first and we'll sort later
-                    descriptor.sortBy = [
-                        SortDescriptor(\NotificationData.pub_date, order: .reverse),
-                    ]
-                } else if currentSortOrder == "oldest" {
-                    descriptor.sortBy = [
-                        SortDescriptor(\NotificationData.pub_date, order: .forward),
-                    ]
-                } else { // "newest"
-                    descriptor.sortBy = [
-                        SortDescriptor(\NotificationData.pub_date, order: .reverse),
-                    ]
-                }
-
-                descriptor.fetchLimit = currentPageSize
-
-                // Fetch the notifications
-                var fetchedNotifications = try backgroundContext.fetch(descriptor)
-
-                // Apply any complex sorting in memory after fetching
-                if currentSortOrder == "bookmarked" {
-                    // Sort bookmarked items first, then by date
-                    fetchedNotifications.sort { n1, n2 in
-                        if n1.isBookmarked != n2.isBookmarked {
-                            return n1.isBookmarked
-                        }
-                        let date1 = n1.pub_date ?? n1.date
-                        let date2 = n2.pub_date ?? n2.date
-                        return date1 > date2
-                    }
-                }
-
-                // Directly prepare the grouping data
-                let groupedData: [(key: String, notifications: [NotificationData])]
-
-                switch currentGroupingStyle {
-                case "date":
-                    let groupedByDay = Dictionary(grouping: fetchedNotifications) {
-                        Calendar.current.startOfDay(for: $0.pub_date ?? $0.date)
-                    }
-                    let sortedDayKeys = groupedByDay.keys.sorted { $0 > $1 }
-                    groupedData = sortedDayKeys.map { day in
-                        let displayKey = day.formatted(date: .abbreviated, time: .omitted)
-                        let notifications = groupedByDay[day] ?? []
-                        return (key: displayKey, notifications: notifications)
-                    }
-                case "topic":
-                    let groupedByTopic = Dictionary(grouping: fetchedNotifications) { $0.topic ?? "Uncategorized" }
-                    groupedData = groupedByTopic.map {
-                        (key: $0.key, notifications: $0.value)
-                    }.sorted { $0.key < $1.key }
-                default:
-                    groupedData = [("", fetchedNotifications)]
-                }
-
-                return (fetchedNotifications, groupedData)
-            } catch {
-                AppLogger.sync.error("Error fetching notifications: \(error)")
-                return ([], [])
-            }
-        }
-
-        return result
     }
 
     private func createGroupedNotifications(_ notifications: [NotificationData]) async -> [(key: String, notifications: [NotificationData])] {
-        let currentGroupingStyle = groupingStyle
-        let currentSortOrder = sortOrder
-
         return await Task.detached(priority: .userInitiated) {
-            // Sort notifications in background
-            let sorted = notifications.sorted { n1, n2 in
-                switch currentSortOrder {
-                case "oldest":
-                    let date1 = n1.pub_date ?? n1.date
-                    let date2 = n2.pub_date ?? n2.date
-                    return date1 < date2
-                case "bookmarked":
-                    if n1.isBookmarked != n2.isBookmarked {
-                        return n1.isBookmarked
-                    }
-                    let date1 = n1.pub_date ?? n1.date
-                    let date2 = n2.pub_date ?? n2.date
-                    return date1 > date2
-                default: // "newest"
-                    let date1 = n1.pub_date ?? n1.date
-                    let date2 = n2.pub_date ?? n2.date
-                    return date1 > date2
-                }
-            }
-
             // Group notifications
-            switch currentGroupingStyle {
+            switch await viewModel.groupingStyle {
             case "date":
-                let groupedByDay = Dictionary(grouping: sorted) {
+                let groupedByDay = Dictionary(grouping: notifications) {
                     Calendar.current.startOfDay(for: $0.pub_date ?? $0.date)
                 }
                 let sortedDayKeys = groupedByDay.keys.sorted { $0 > $1 }
@@ -1442,708 +1042,46 @@ struct NewsView: View {
                     return (key: displayKey, notifications: notifications)
                 }
             case "topic":
-                let groupedByTopic = Dictionary(grouping: sorted) { $0.topic ?? "Uncategorized" }
+                let groupedByTopic = Dictionary(grouping: notifications) { $0.topic ?? "Uncategorized" }
                 return groupedByTopic.map {
                     (key: $0.key, notifications: $0.value)
                 }.sorted { $0.key < $1.key }
             default:
-                return [("", sorted)]
+                return [("", notifications)]
             }
         }.value
-    }
-
-    // Helper function to filter notifications with current settings
-    private func filterNotificationsWithCurrentSettings(_ notifications: [NotificationData]) -> [NotificationData] {
-        return notifications.filter { note in
-            let archivedCondition = showArchivedContent || !note.isArchived
-            let unreadCondition = !showUnreadOnly || !note.isViewed
-            let bookmarkedCondition = !showBookmarkedOnly || note.isBookmarked
-            return archivedCondition && unreadCondition && bookmarkedCondition
-        }
-    }
-
-    // Updates notification caches in the background to speed up future filtering.
-    // Key optimizations:
-    // 1. Performs all processing work on a background thread
-    // 2. Creates separate caches for each topic to enable instant topic switching
-    // 3. Only builds the cache once but can reuse it for multiple filter operations
-    // 4. Only returns to the main thread to update the final cache references
-    // This dramatically improves performance by avoiding repeated database queries
-    private func updateNotificationsCache() async {
-        await BackgroundContextManager.shared.performBackgroundTask { _ in
-            // Only update the cache if we have data
-            guard !self.totalNotifications.isEmpty else { return }
-
-            // Create a copy of the data for thread safety
-            let notificationsToCache = self.totalNotifications
-
-            // Store in the cache based on topic
-            var newCache: [String: [NotificationData]] = [:]
-            newCache["All"] = notificationsToCache
-
-            // Get unique topics and store them separately
-            let topics = Set(notificationsToCache.compactMap { $0.topic })
-            for topic in topics {
-                let topicNotifications = notificationsToCache.filter { $0.topic == topic }
-                newCache[topic] = topicNotifications
-            }
-
-            // Update the main thread cache
-            Task { @MainActor in
-                self.notificationsCache = newCache
-                self.lastCacheUpdate = Date()
-                self.isCacheValid = true
-            }
-        }
-    }
-
-    // Performs efficient paginated database fetching on a background thread.
-    // Optimizations include:
-    // 1. Building predicates in the background to avoid main thread work
-    // 2. Using SwiftData's sortDescriptors to let the database handle sorting
-    // 3. Setting appropriate fetch limits to only load what's needed
-    // 4. Capturing state variables before background work to avoid race conditions
-    // 5. Only returning to the main thread for final UI updates
-    // This keeps scrolling smooth even with large datasets
-    private func loadPage(isInitialLoad: Bool = false) async {
-        guard !isLoadingMorePages && (isInitialLoad || hasMoreContent) else { return }
-
-        await MainActor.run {
-            isLoadingMorePages = true
-        }
-
-        defer {
-            Task { @MainActor in
-                isLoadingMorePages = false
-            }
-        }
-
-        // Capture values needed for background processing
-        let currentTopic = selectedTopic
-        let currentShowUnreadOnly = showUnreadOnly
-        let currentShowBookmarkedOnly = showBookmarkedOnly
-        let currentShowArchivedContent = showArchivedContent
-        let currentSortOrder = sortOrder
-        let currentLastLoadedDate = lastLoadedDate
-        let currentPageSize = pageSize
-
-        // Perform the fetch in a background context
-        let result = await BackgroundContextManager.shared.performBackgroundTask { backgroundContext in
-            do {
-                // Build the predicate
-                var basePredicate: Predicate<NotificationData>?
-
-                // Topic filter
-                if currentTopic != "All" {
-                    basePredicate = #Predicate<NotificationData> { $0.topic == currentTopic }
-                }
-
-                // Archive filter
-                if !currentShowArchivedContent {
-                    let archivePredicate = #Predicate<NotificationData> { !$0.isArchived }
-                    if let existing = basePredicate {
-                        basePredicate = #Predicate<NotificationData> {
-                            existing.evaluate($0) && archivePredicate.evaluate($0)
-                        }
-                    } else {
-                        basePredicate = archivePredicate
-                    }
-                }
-
-                // Unread filter
-                if currentShowUnreadOnly {
-                    let unreadPredicate = #Predicate<NotificationData> { !$0.isViewed }
-                    if let existing = basePredicate {
-                        basePredicate = #Predicate<NotificationData> {
-                            existing.evaluate($0) && unreadPredicate.evaluate($0)
-                        }
-                    } else {
-                        basePredicate = unreadPredicate
-                    }
-                }
-
-                // Bookmark filter
-                if currentShowBookmarkedOnly {
-                    let bookmarkPredicate = #Predicate<NotificationData> { $0.isBookmarked }
-                    if let existing = basePredicate {
-                        basePredicate = #Predicate<NotificationData> {
-                            existing.evaluate($0) && bookmarkPredicate.evaluate($0)
-                        }
-                    } else {
-                        basePredicate = bookmarkPredicate
-                    }
-                }
-
-                // Date boundary predicate for pagination
-                var datePredicateWrapper: Predicate<NotificationData>? = nil
-                if let oldestSoFar = currentLastLoadedDate, !isInitialLoad {
-                    // Subtract 1 second so we skip everything at or after oldestSoFar
-                    // This ensures no overlap with prior page
-                    let cutoff = oldestSoFar.addingTimeInterval(-1)
-                    datePredicateWrapper = #Predicate<NotificationData> {
-                        ($0.pub_date ?? $0.date) < cutoff // Single expression
-                    }
-                }
-
-                // Combine predicates
-                var combinedPredicate: Predicate<NotificationData>?
-                if let basePredicate = basePredicate {
-                    if let datePredicateWrapper = datePredicateWrapper {
-                        combinedPredicate = #Predicate<NotificationData> {
-                            basePredicate.evaluate($0) && datePredicateWrapper.evaluate($0)
-                        }
-                    } else {
-                        combinedPredicate = basePredicate
-                    }
-                } else {
-                    combinedPredicate = datePredicateWrapper
-                }
-
-                // Create the fetch descriptor
-                var descriptor = FetchDescriptor<NotificationData>(
-                    predicate: combinedPredicate
-                )
-
-                // Sort by date
-                if currentSortOrder == "oldest" {
-                    descriptor.sortBy = [
-                        SortDescriptor(\.pub_date, order: .forward),
-                        SortDescriptor(\.date, order: .forward),
-                    ]
-                } else {
-                    descriptor.sortBy = [
-                        SortDescriptor(\.pub_date, order: .reverse),
-                        SortDescriptor(\.date, order: .reverse),
-                    ]
-                }
-
-                // Set fetch limit for pagination
-                // For initial load, still use a reasonable page size
-                descriptor.fetchLimit = currentPageSize
-
-                // Fetch the notifications
-                let fetchedNotifications = try backgroundContext.fetch(descriptor)
-
-                // Track last loaded date for pagination
-                let newLastLoadedDate: Date? = fetchedNotifications.last?.pub_date ?? fetchedNotifications.last?.date
-
-                // Determine if we have more content to load
-                let hasMore = !fetchedNotifications.isEmpty && fetchedNotifications.count == currentPageSize
-
-                return (fetchedNotifications, newLastLoadedDate, hasMore)
-            } catch {
-                AppLogger.sync.error("Error fetching notifications: \(error)")
-                return ([], nil, false)
-            }
-        }
-
-        // Process results on the main thread
-        await MainActor.run {
-            let (notificationsToProcess, newLastLoadedDate, hasMore) = result
-
-            if let newLastLoadedDate = newLastLoadedDate {
-                self.lastLoadedDate = newLastLoadedDate
-            }
-
-            self.hasMoreContent = hasMore
-
-            if isInitialLoad {
-                self.totalNotifications = notificationsToProcess
-                self.filteredNotifications = notificationsToProcess
-            } else {
-                // For pagination, deduplicate before adding new items
-                // First ensure new items don't have duplicates within themselves
-                let uniqueNewItems = notificationsToProcess.uniqued(by: \.id)
-
-                // Then filter out any items already in our collections
-                let existingIDs = Set(self.totalNotifications.map { $0.id })
-                let uniqueNewItemsNotInTotal = uniqueNewItems.filter { !existingIDs.contains($0.id) }
-
-                // Now it's safe to append
-                self.totalNotifications.append(contentsOf: uniqueNewItemsNotInTotal)
-
-                // Do the same for filteredNotifications
-                let existingFilteredIDs = Set(self.filteredNotifications.map { $0.id })
-                let uniqueNewItemsNotInFiltered = uniqueNewItems.filter { !existingFilteredIDs.contains($0.id) }
-                self.filteredNotifications.append(contentsOf: uniqueNewItemsNotInFiltered)
-            }
-
-            // Update grouping
-            updateGrouping()
-        }
-    }
-
-    @MainActor
-    private func processInitialPage(_ notifications: [NotificationData]) async {
-        // Sort the new page based on current sort order
-        let sortedNotifications = sortNotifications(notifications)
-
-        // Update the UI WITHOUT animation
-        totalNotifications = sortedNotifications
-        filteredNotifications = sortedNotifications
-
-        updateGrouping()
-    }
-
-    @MainActor
-    private func processNextPage(_ newNotifications: [NotificationData]) async {
-        // Don't process if there's nothing new
-        guard !newNotifications.isEmpty else {
-            AppLogger.sync.debug("No more notifications to load")
-            return
-        }
-
-        // Sort the combined results
-        let combinedNotifications = totalNotifications + newNotifications
-        let sortedCombined = sortNotifications(combinedNotifications)
-
-        // Update the UI WITHOUT animation
-        totalNotifications = sortedCombined
-        filteredNotifications = sortedCombined
-
-        updateGrouping()
-        AppLogger.database.debug("Added \(newNotifications.count) more notifications, total: \(sortedCombined.count)")
-    }
-
-    private func sortNotifications(_ notifications: [NotificationData]) -> [NotificationData] {
-        return notifications.sorted { n1, n2 in
-            switch sortOrder {
-            case "oldest":
-                return (n1.pub_date ?? n1.date) < (n2.pub_date ?? n2.date)
-            case "bookmarked":
-                if n1.isBookmarked != n2.isBookmarked {
-                    return n1.isBookmarked
-                }
-                return (n1.pub_date ?? n1.date) > (n2.pub_date ?? n2.date)
-            default: // "newest"
-                return (n1.pub_date ?? n1.date) > (n2.pub_date ?? n2.date)
-            }
-        }
-    }
-
-    private func mergeAndProcessNotifications(_ newNotifications: [NotificationData]) async {
-        // Move to background for heavy processing
-        return await Task.detached {
-            // Capture needed values
-            let currentSortOrder = await self.sortOrder
-            let currentBatchSize = await self.batchSize
-
-            // Force a full replacement when the content is completely different or
-            // when the topic filter has changed
-            let isFullReplacement = true // Treat all updates as full replacements for now
-
-            // Create a sorting function that properly uses effectiveDate
-            let sortNotifications: ([NotificationData]) -> [NotificationData] = { notifications in
-                notifications.sorted { n1, n2 in
-                    switch currentSortOrder {
-                    case "oldest":
-                        return n1.effectiveDate < n2.effectiveDate
-                    case "bookmarked":
-                        if n1.isBookmarked != n2.isBookmarked {
-                            return n1.isBookmarked
-                        }
-                        return n1.effectiveDate > n2.effectiveDate
-                    default: // "newest"
-                        return n1.effectiveDate > n2.effectiveDate
-                    }
-                }
-            }
-
-            // Sort all the notifications properly
-            let sortedTotal = sortNotifications(newNotifications)
-
-            // Debug the sorting
-            await MainActor.run {
-                AppLogger.database.debug("-- Sorting Diagnostics --")
-                AppLogger.database.debug("Sort order: \(currentSortOrder)")
-                if let firstFew = sortedTotal.prefix(3).map({ "\($0.effectiveDate): \($0.title.prefix(20))..." }).joined(separator: "\n- ").nilIfEmpty {
-                    AppLogger.database.debug("First few sorted items:\n- \(firstFew)")
-                }
-
-                // Extra diagnostics - check pub_date vs date
-                for notification in sortedTotal.prefix(3) {
-                    AppLogger.database.debug("ID: \(notification.id)")
-                    AppLogger.database.debug("  pub_date: \(String(describing: notification.pub_date))")
-                    AppLogger.database.debug("  date: \(notification.date)")
-                    AppLogger.database.debug("  effectiveDate: \(notification.effectiveDate)")
-                    AppLogger.database.debug("  title: \(notification.title.prefix(30))")
-                }
-            }
-
-            // Create the batched array for display, respecting the current batch size
-            let batchedNotifications = Array(sortedTotal.prefix(currentBatchSize))
-
-            // Update UI on main thread with optimized arrays
-            await MainActor.run {
-                let hasChanges = true // Always update when filtering
-
-                // Always update if the topic has changed
-                if hasChanges || isFullReplacement {
-                    // Update the full collection
-                    self.totalNotifications = sortedTotal
-
-                    self.filteredNotifications = batchedNotifications
-                    self.updateGrouping()
-                }
-            }
-        }.value
-    }
-
-    // Creates an optimized database query predicate based on current filter settings
-    // Combines multiple filter conditions efficiently to minimize database load
-    @MainActor
-    private func buildPredicate() -> Predicate<NotificationData>? {
-        // Handle common filter combinations that match our indexes
-
-        // Case 1: Topic filter is present (most selective)
-        if selectedTopic != "All" {
-            // Topic + other filters (matching our composite indexes)
-            if showBookmarkedOnly && showUnreadOnly && !showArchivedContent {
-                // Topic + bookmarked + unread + not archived
-                return #Predicate<NotificationData> { note in
-                    note.topic == selectedTopic &&
-                        note.isBookmarked &&
-                        !note.isViewed &&
-                        !note.isArchived
-                }
-            } else if showBookmarkedOnly && !showArchivedContent {
-                // Topic + bookmarked + not archived
-                return #Predicate<NotificationData> { note in
-                    note.topic == selectedTopic &&
-                        note.isBookmarked &&
-                        !note.isArchived
-                }
-            } else if showUnreadOnly && !showArchivedContent {
-                // Topic + unread + not archived
-                return #Predicate<NotificationData> { note in
-                    note.topic == selectedTopic &&
-                        !note.isViewed &&
-                        !note.isArchived
-                }
-            } else if showBookmarkedOnly {
-                // Topic + bookmarked
-                return #Predicate<NotificationData> { note in
-                    note.topic == selectedTopic && note.isBookmarked
-                }
-            } else if showUnreadOnly {
-                // Topic + unread
-                return #Predicate<NotificationData> { note in
-                    note.topic == selectedTopic && !note.isViewed
-                }
-            } else if !showArchivedContent {
-                // Topic + not archived
-                return #Predicate<NotificationData> { note in
-                    note.topic == selectedTopic && !note.isArchived
-                }
-            } else {
-                // Just topic
-                return #Predicate<NotificationData> { note in
-                    note.topic == selectedTopic
-                }
-            }
-        }
-
-        // Case 2: No topic filter, but other filters are present
-        if showBookmarkedOnly && showUnreadOnly && !showArchivedContent {
-            // Bookmarked + unread + not archived
-            return #Predicate<NotificationData> { note in
-                note.isBookmarked &&
-                    !note.isViewed &&
-                    !note.isArchived
-            }
-        } else if showBookmarkedOnly && !showArchivedContent {
-            // Bookmarked + not archived
-            return #Predicate<NotificationData> { note in
-                note.isBookmarked && !note.isArchived
-            }
-        } else if showUnreadOnly && !showArchivedContent {
-            // Unread + not archived
-            return #Predicate<NotificationData> { note in
-                !note.isViewed && !note.isArchived
-            }
-        } else if showBookmarkedOnly {
-            // Just bookmarked
-            return #Predicate<NotificationData> { note in
-                note.isBookmarked
-            }
-        } else if showUnreadOnly {
-            // Just unread
-            return #Predicate<NotificationData> { note in
-                !note.isViewed
-            }
-        } else if !showArchivedContent {
-            // Just not archived
-            return #Predicate<NotificationData> { note in
-                !note.isArchived
-            }
-        }
-
-        // No filters active
-        return nil
-    }
-
-    private func startBackgroundRefresh() {
-        // Cancel any existing task first
-        backgroundRefreshTask?.cancel()
-
-        // Background refresh uses a long interval (5 minutes) to minimize battery usage
-        // while still keeping content reasonably fresh
-        // Only triggers UI updates if there is actually new content
-        backgroundRefreshTask = Task {
-            while !Task.isCancelled {
-                // Use a much longer interval - 5 minutes instead of 30 seconds
-                try? await Task.sleep(nanoseconds: 5 * 60 * 1_000_000_000) // 5 minutes
-
-                if Task.isCancelled { break }
-
-                // First check if we need to update in the background
-                let needsUpdate = await checkForNewContent()
-
-                // Only trigger UI update if we actually have new content
-                if needsUpdate {
-                    await MainActor.run {
-                        updateFilteredNotifications(isBackgroundUpdate: true)
-                    }
-                }
-            }
-        }
-    }
-
-    // Efficiently determines if new content exists without fetching all items.
-    // Optimizations:
-    // 1. Uses a background context for the database query
-    // 2. Creates a targeted predicate that only looks for newer items
-    // 3. Sets a fetchLimit=1 to return as soon as any new item is found
-    // 4. Returns just a boolean result rather than fetching actual content
-    // This allows for frequent polling without performance penalties
-    private func checkForNewContent() async -> Bool {
-        return await BackgroundContextManager.shared.performBackgroundTask { backgroundContext in
-            do {
-                // Get the timestamp of our newest notification
-                let newestTimestamp = self.filteredNotifications.first?.pub_date ?? .distantPast
-
-                // Create a predicate to find only newer items
-                let newerPredicate = #Predicate<NotificationData> {
-                    if let pubDate = $0.pub_date {
-                        return pubDate > newestTimestamp
-                    } else {
-                        return $0.date > newestTimestamp
-                    }
-                }
-
-                // Create the fetch descriptor with our predicate
-                var descriptor = FetchDescriptor<NotificationData>(
-                    predicate: newerPredicate
-                )
-
-                // We just need to know if there are any, not fetch them all
-                descriptor.fetchLimit = 1
-
-                // Check if there are any new notifications
-                let newNotifications = try backgroundContext.fetch(descriptor)
-                return !newNotifications.isEmpty
-            } catch {
-                AppLogger.sync.error("Error checking for new content: \(error)")
-                return false
-            }
-        }
-    }
-
-    @MainActor
-    private func processNotifications(_ notifications: [NotificationData]) async {
-        // Move to background for heavy processing
-        return await Task.detached {
-            // Capture needed values
-            let currentSortOrder = await self.sortOrder
-            let currentBatchSize = await self.batchSize
-
-            // Add debug logging to see what's happening
-            AppLogger.database.debug("Sort order: \(currentSortOrder)")
-
-            // Make sure we consistently use effectiveDate, not a mix of date types
-            let sortedNotifications = notifications.sorted { n1, n2 in
-                // Debug: Show a sample of what we're comparing
-                if notifications.count > 0 && n1.id == notifications[0].id {
-                    AppLogger.database.debug("Comparing dates for sorting:")
-                    AppLogger.database.debug("  n1 pub_date: \(String(describing: n1.pub_date))")
-                    AppLogger.database.debug("  n1 date: \(n1.date)")
-                    AppLogger.database.debug("  n1 effectiveDate: \(n1.pub_date ?? n1.date)")
-                    AppLogger.database.debug("  n2 pub_date: \(String(describing: n2.pub_date))")
-                    AppLogger.database.debug("  n2 date: \(n2.date)")
-                    AppLogger.database.debug("  n2 effectiveDate: \(n2.pub_date ?? n2.date)")
-                }
-
-                // Use direct date comparison with explicit property access
-                // to avoid any extension issues
-                switch currentSortOrder {
-                case "oldest":
-                    // For oldest first, earlier dates come first
-                    let date1 = n1.pub_date ?? n1.date
-                    let date2 = n2.pub_date ?? n2.date
-                    return date1 < date2
-                case "bookmarked":
-                    if n1.isBookmarked != n2.isBookmarked {
-                        return n1.isBookmarked
-                    }
-                    // For bookmarked, sort by newest within bookmarked status
-                    let date1 = n1.pub_date ?? n1.date
-                    let date2 = n2.pub_date ?? n2.date
-                    return date1 > date2
-                default: // "newest"
-                    // For newest first, later dates come first
-                    let date1 = n1.pub_date ?? n1.date
-                    let date2 = n2.pub_date ?? n2.date
-                    return date1 > date2
-                }
-            }
-
-            // Show the first few sorted items to verify
-            AppLogger.database.debug("After sorting (\(currentSortOrder)):")
-            for (i, notification) in sortedNotifications.prefix(3).enumerated() {
-                let date = notification.pub_date ?? notification.date
-                AppLogger.database.debug("  \(i). \(date) - \(notification.title.prefix(20))...")
-            }
-
-            // Create the batched array
-            let batchedNotifications = Array(sortedNotifications.prefix(currentBatchSize))
-
-            // Update UI on main thread with copied arrays
-            await MainActor.run {
-                self.totalNotifications = sortedNotifications
-
-                self.filteredNotifications = batchedNotifications
-
-                self.updateGrouping()
-            }
-        }.value
-    }
-
-    // Function moved to NewsView+Extensions.swift
-
-    // Performs expensive sorting and grouping operations on a background thread.
-    // Benefits include:
-    // 1. Moving Dictionary grouping operations off the main thread
-    // 2. Performing date calculations in the background
-    // 3. Handling complex sorting logic without blocking UI
-    // 4. Only dispatching back to main thread for the final UI update
-    // This prevents UI hitches when changing grouping styles or when data updates
-    private func updateGrouping() {
-        Task {
-            // Prepare the grouping in the background
-            let updatedGrouping = await createGroupedNotifications(filteredNotifications)
-
-            // Update UI in one step
-            await MainActor.run {
-                self.sortedAndGroupedNotifications = updatedGrouping
-            }
-        }
-    }
-
-    private func areGroupingArraysEqual(
-        _ lhs: [(key: String, notifications: [NotificationData])],
-        _ rhs: [(key: String, notifications: [NotificationData])]
-    ) -> Bool {
-        guard lhs.count == rhs.count else { return false }
-
-        for (index, leftGroup) in lhs.enumerated() {
-            let rightGroup = rhs[index]
-            if leftGroup.key != rightGroup.key || leftGroup.notifications.map(\.id) != rightGroup.notifications.map(\.id) {
-                return false
-            }
-        }
-        return true
     }
 
     private func getEmptyStateMessage() -> String {
-        let activeSubscriptions = subscriptions.filter { $0.value.isSubscribed }.keys.sorted()
+        let activeSubscriptions = viewModel.subscriptions.filter { $0.value.isSubscribed }.keys.sorted()
         if activeSubscriptions.isEmpty {
             return "You are not currently subscribed to any topics. Click 'Subscriptions' below."
         }
         var message = "Please be patient, news will arrive automatically. You do not need to leave this application open.\n\nYou are currently subscribed to: \(activeSubscriptions.joined(separator: ", "))."
         if isAnyFilterActive {
             message += "\n\n"
-            if showUnreadOnly && showBookmarkedOnly {
+            if viewModel.showUnreadOnly && viewModel.showBookmarkedOnly {
                 message += "You are filtering to show only Unread articles that have also been Bookmarked."
-            } else if showUnreadOnly {
+            } else if viewModel.showUnreadOnly {
                 message += "You are filtering to show only Unread articles."
-            } else if showBookmarkedOnly {
+            } else if viewModel.showBookmarkedOnly {
                 message += "You are filtering to show only Bookmarked articles."
             }
-            if !showArchivedContent {
+            if !viewModel.showArchivedContent {
                 message += "\n\nYou can enable the 'Show archived' filter to show articles you archived earlier."
             }
-        } else if !showArchivedContent && allNotifications.contains(where: { $0.isArchived }) {
+        } else if !viewModel.showArchivedContent && viewModel.allArticles.contains(where: { $0.isArchived }) {
             message += "\n\nYou can enable the 'Show archived' filter to show articles you archived earlier."
         }
         return message
     }
 
-    // MARK: - Row Content Helpers
-
-    private func rowContent(for notification: NotificationData) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Top row: topic pill + archived pill
-            HStack(spacing: 8) {
-                if let topic = notification.topic, !topic.isEmpty {
-                    TopicPill(topic: topic)
-                }
-                if notification.isArchived {
-                    ArchivedPill()
-                }
-            }
-            .padding(.horizontal, 10)
-
-            // Title - use accessible attributed text if available
-            if let titleBlob = notification.title_blob,
-               let attributedTitle = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: titleBlob)
-            {
-                AccessibleAttributedText(attributedString: attributedTitle)
-                    .frame(height: 50) // Allow some space for the text to grow with Dynamic Type
-                    .lineLimit(2)
-                    .padding(.horizontal, 10)
-            } else {
-                Text(notification.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 10)
-            }
-
-            // Domain (optional)
-            if let domain = notification.domain, !domain.isEmpty {
-                Text(domain)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.blue)
-                    .lineLimit(1)
-                    .padding(.horizontal, 10)
-            }
-
-            // Body - use accessible attributed text if available
-            if let bodyBlob = notification.body_blob,
-               let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
-            {
-                AccessibleAttributedText(attributedString: attributedBody)
-                    .frame(minHeight: 50) // Allow space for dynamic type
-                    .padding(.horizontal, 10)
-            } else {
-                Text(notification.body)
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, 10)
-            }
-
-            // Affected (optional)
-            if !notification.affected.isEmpty {
-                Text(notification.affected)
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, 18)
-            }
-        }
-    }
+    // Private properties needed for caching
+    @State private var notificationsCache: [String: [NotificationData]] = [:]
+    @State private var lastCacheUpdate = Date.distantPast
+    @State private var isCacheValid = false
+    @State private var filteredNotifications: [NotificationData] = []
+    @State private var sortedAndGroupedNotifications: [(key: String, notifications: [NotificationData])] = []
 }
 
 // MARK: - FilterView
@@ -2168,5 +1106,3 @@ struct FilterView: View {
         .shadow(radius: 10)
     }
 }
-
-// Note: uniqued(by:) is defined in ArrayExtensions.swift
