@@ -2,19 +2,23 @@
 
 ## Current Work Focus
 - **Active Development Phase**: Modernization implementation in progress
-- **Primary Focus Areas**: SwiftData migration active, preparing for MVVM architecture adoption, async/await implementation, CloudKit compatibility
+- **Primary Focus Areas**: SwiftData migration active, implementing shared MVVM architecture, async/await implementation, CloudKit compatibility
+- **Architecture Refinement**: Designing shared components for code reuse between NewsView and NewsDetailView
 - **User Experience Improvements**: Improving UI responsiveness, eliminating sync jitter, enhancing offline capabilities, and refining automatic migration process
 - **Cross-Device Capabilities**: Preparing SwiftData models for future CloudKit integration to enable iPhone/iPad syncing
 - **Migration System Refinement**: Enhancing visual feedback during automatic database migration, removing redundant controls
 
 ## Recent Changes
-- **Migration System UI Enhancements** (In Progress):
-  - Removing non-functional buttons from migration screens since migration is mandatory at startup
-  - Adding animated elements (spinner, progress bar animations) to provide visual feedback during migration
-  - Implementing auto-dismissal behavior upon migration completion
-  - Displaying real-time performance metrics (articles/sec, estimated time) during migration
-  - Eliminating controls that might confuse users during the non-interactive migration process
-  - Improving UX by ensuring the system appears responsive during longer migrations
+- **Migration System UI Enhancements** (Completed):
+  - Enhanced visual feedback with sophisticated animations (animated database icon, gradient progress bar, glowing effects)
+  - Improved real-time metrics displays with dedicated counter views for articles processed and speed
+  - Implemented time remaining indicator with live countdown
+  - Added clear completion state with smooth transitions
+  - Consolidated UI components for consistency across the app
+  - Removed non-functional buttons from migration screens
+  - Improved developer view with clearer labeling and informational section
+  - Enhanced auto-dismissal behavior with proper timing and animations
+  - Restructured code to better separate concerns and improve maintainability
 
 - **Enhanced Database Migration System**:
   - Implemented automatic migration that runs at app launch without manual triggering
@@ -123,11 +127,12 @@
 ### Phase 3: MVVM Implementation and UI Refactor
 
 ### Phase 3: MVVM Implementation and UI Refactor
-6. **Create ViewModels and Refactor UI Components**:
-   - Create NewsViewModel, ArticleDetailViewModel, and other required ViewModels
-   - Implement proper @Published properties and state management
+6. **Develop Three-Tier Architecture**:
+   - Create ArticleServiceProtocol as interface for ArticleService
+   - Implement ArticleOperations as shared business logic layer
+   - Create NewsViewModel that leverages ArticleOperations
+   - Implement NewsDetailViewModel using same shared components
    - Refactor SwiftUI views to use ViewModels instead of direct data access
-   - Move business logic from views to corresponding ViewModels
 
 ### Phase 4: Syncing and Background Tasks
 7. **Implement Robust Background Processing**:
@@ -138,7 +143,11 @@
 
 ## Active Decisions and Considerations
 - **Architectural Approach**: 
-  - MVVM pattern chosen for clear separation of concerns and better testability
+  - Three-tier architecture with shared business logic:
+    - Data Layer: ArticleService (API + SwiftData)
+    - Business Logic Layer: ArticleOperations (shared functionality)
+    - View Models: NewsViewModel and NewsDetailViewModel (view-specific logic)
+  - MVVM pattern with shared components for code reuse between views
   - SwiftData selected for modern persistence with Swift-native syntax
   - Swift concurrency (async/await) for improved readability and performance
 
@@ -174,10 +183,28 @@
 - Concerns about duplicate content that should be addressed in new architecture
 - Requests for more consistent error handling and recovery mechanisms
 
+## Recent Architectural Decisions
+
+- **Shared Components Architecture**:
+  - Identified significant code duplication between NewsView and NewsDetailView
+  - Designed three-tier architecture to enable code sharing:
+    1. **ArticleService (Data Layer)**: API + SwiftData operations
+    2. **ArticleOperations (Business Logic)**: Shared operations for article management
+    3. **ViewModels (View-Specific Logic)**: NewsViewModel and NewsDetailViewModel
+  - Common operations extracted to ArticleOperations:
+    - Toggle read/bookmarked/archived status
+    - Article deletion
+    - Rich text processing
+    - Notification management
+  - Benefits: Reduced duplication, improved maintainability, consistent behavior
+
 ## Immediate Priorities
 1. ✅ Implement persistent storage for SwiftData testing
 2. ✅ Complete migration testing with persistent storage
-3. Improve migration UI with animation and remove non-functional buttons
-4. Begin refactoring APIClient to use async/await
-5. Implement application-level uniqueness validation logic
-6. Develop and test initial ViewModel prototypes
+3. ✅ Improve migration UI with animation and remove non-functional buttons
+4. ✅ Begin refactoring APIClient to use async/await
+5. ✅ Implement application-level uniqueness validation logic
+6. Create ArticleServiceProtocol for dependency injection and testing
+7. Implement ArticleOperations for shared business logic
+8. Develop NewsViewModel using ArticleOperations
+9. Refactor NewsView to use NewsViewModel

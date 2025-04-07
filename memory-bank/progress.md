@@ -43,11 +43,15 @@
   - Testing fixes for data integrity issues
 
 - ✅ **Migration UI Improvements**
-  - Removed non-functional buttons from migration screens
-  - Added animated elements (spinner, progress bar animations) for visual feedback
-  - Implemented auto-dismissal behavior for a more seamless experience
-  - Enhanced progress display with real-time performance metrics
-  - Improved user perception during longer migrations
+  - Consolidated UI components into a single, enhanced modal view
+  - Replaced simple rotating icon with sophisticated database animation
+  - Added gradient progress bar with animated glow effects
+  - Implemented dedicated counter views with animation for articles and processing speed
+  - Added time remaining indicator with live countdown
+  - Enhanced auto-dismissal with improved timing and smooth transitions
+  - Improved developer controls with clear categorization and information toggle
+  - Structured UI code for better maintainability and future enhancements
+  - Optimized performance metrics visualization for better user feedback
 
 ## Recently Completed
 
@@ -185,14 +189,24 @@
   - Designed for gradual adoption to enable smooth transition from legacy components
 
 #### Phase 3: MVVM Implementation and UI Refactor
+- 🔲 **Implement Shared Architecture Components**
+  - Create ArticleServiceProtocol as interface for dependency injection and testing
+  - Implement ArticleOperations as shared business logic layer to reduce code duplication
+  - Develop shared components for article state management and rich text processing
+  - Create consistent error handling across shared components
+
 - 🔲 **Refactor NewsView to Use ViewModel**
-  - Create NewsViewModel with observable articles, loading state, and refresh method
+  - Create NewsViewModel that leverages ArticleOperations
+  - Implement @Published properties for reactive UI updates
+  - Move filtering, pagination, and state management from view to ViewModel
   - Update NewsView to use StateObject ViewModel pattern
-  - Replace manual fetches with ViewModel properties
+  - Replace direct database access with ViewModel methods
 
 - 🔲 **Implement ArticleDetailViewModel**
-  - Handle article body Markdown rendering
-  - Manage read/bookmark state
+  - Create ArticleDetailViewModel that shares common logic with NewsViewModel
+  - Handle article body Markdown rendering through ArticleOperations
+  - Manage section expansion state
+  - Share rich text processing logic with NewsViewModel via ArticleOperations
   - Refactor ArticleDetailView to use ViewModel
 
 - 🔲 **Refactor SubscriptionsView and SettingsView**
@@ -290,10 +304,11 @@
 ## Next Milestone Goals
 
 1. **Architecture Modernization (Target: May 2025)**
-   - Complete Phases 1-2 of modernization plan
-   - Complete persistent SwiftData implementation for testing
-   - Refactor API client for async/await
-   - Build ArticleService as repository layer
+   - ✅ Complete Phases 1-2 of modernization plan
+   - ✅ Complete persistent SwiftData implementation for testing
+   - ✅ Refactor API client for async/await
+   - ✅ Build ArticleService as repository layer
+   - Implement ArticleServiceProtocol and ArticleOperations (shared components)
 
 2. **UI Modernization (Target: June 2025)**
    - Complete Phases 3-4 of modernization plan
@@ -307,9 +322,18 @@
    - Conduct performance profiling
    - Resolve any remaining issues
 
+## Recently Initiated
+
+- 🔶 **Shared Architecture Implementation**
+  - Designed three-tier architecture to reduce duplication between views
+  - Identified common operations between NewsView and NewsDetailView
+  - Created implementation plan for ArticleOperations shared component
+  - Documented approach in memory-bank for consistent development
+
 ## Progress Metrics
 
 - **Features Completed**: 7/9 core features fully implemented
 - **Swift 6 Compatibility**: Major milestone reached with latest NSAttributedString fixes
 - **Known Bugs**: 2 high-priority issues, both potentially affected by recent changes
 - **Test Coverage**: ~70% of non-UI code
+- **Architecture Design**: Detailed design for shared components completed

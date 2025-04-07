@@ -145,18 +145,70 @@ This file captures important patterns, preferences, and project intelligence tha
 
 ## Modernization Strategy
 
+### Three-Tier Architecture Pattern
+- Implement a three-tiered architecture to maximize code reuse:
+  1. **Data Layer**: ArticleService handles API and SwiftData operations
+  2. **Business Logic Layer**: ArticleOperations contains shared operations
+  3. **View Models Layer**: ViewModels specific to each view
+
+- ArticleServiceProtocol enables dependency injection and testing:
+  ```swift
+  protocol ArticleServiceProtocol {
+      func fetchArticles(topic: String?, isRead: Bool?, isBookmarked: Bool?, isArchived: Bool?) async throws -> [NotificationData]
+      func fetchArticle(byId id: UUID) async throws -> NotificationData?
+      func markArticle(id: UUID, asRead: Bool) async throws
+      func markArticle(id: UUID, asBookmarked: Bool) async throws
+      func markArticle(id: UUID, asArchived: Bool) async throws
+      func deleteArticle(id: UUID) async throws
+      // Other methods...
+  }
+  ```
+
+- ArticleOperations provides shared functionality:
+  ```swift
+  class ArticleOperations {
+      private let articleService: ArticleServiceProtocol
+      
+      init(articleService: ArticleServiceProtocol = ArticleService.shared) {
+          self.articleService = articleService
+      }
+      
+      // Shared operations for both NewsViewModel and NewsDetailViewModel
+      func toggleReadStatus(for article: NotificationData) async throws {
+          try await articleService.markArticle(id: article.id, asRead: !article.isViewed)
+          NotificationUtils.updateAppBadgeCount()
+      }
+      
+      func toggleBookmark(for article: NotificationData) async throws {
+          try await articleService.markArticle(id: article.id, asBookmarked: !article.isBookmarked)
+      }
+      
+      func getAttributedContent(for article: NotificationData, field: RichTextField) async -> NSAttributedString? {
+          await MainActor.run {
+              return getAttributedString(for: field, from: article, createIfMissing: true)
+          }
+      }
+  }
+  ```
+
 ### MVVM Pattern Implementation
-- Each SwiftUI view should have a corresponding ViewModel class:
+- ViewModels should use the shared ArticleOperations for common functionality:
   ```swift
   class NewsViewModel: ObservableObject {
+    private let articleOperations: ArticleOperations
+    
     @Published var articles: [Article] = []
     @Published var isLoading: Bool = false
     @Published var error: Error? = nil
     
+    init(articleOperations: ArticleOperations = ArticleOperations()) {
+        self.articleOperations = articleOperations
+    }
+    
     func refreshArticles() async {
         await MainActor.run { isLoading = true }
         do {
-            let articles = try await articleService.fetchArticles()
+            let articles = try await articleOperations.fetchArticles(topic: selectedTopic)
             await MainActor.run { 
                 self.articles = articles
                 self.isLoading = false
@@ -167,6 +219,10 @@ This file captures important patterns, preferences, and project intelligence tha
                 self.isLoading = false
             }
         }
+    }
+    
+    func toggleReadStatus(for article: Article) async {
+        try? await articleOperations.toggleReadStatus(for: article)
     }
   }
   ```
@@ -296,19 +352,30 @@ This file captures important patterns, preferences, and project intelligence tha
   - ArticleService will handle all synchronization operations using async/await
   - Will interact directly with SwiftData rather than through DatabaseCoordinator
   - Will implement proper error handling and retry logic
+
 - **DatabaseCoordinator → SwiftData ModelContext**:
   - Direct use of SwiftData ModelContext will replace DatabaseCoordinator
   - Transaction management will be handled by SwiftData's built-in mechanisms
   - Complex queries will be handled by SwiftData's query DSL
+
+- **Shared UI Logic → ArticleOperations**:
+  - Common operations between NewsView and NewsDetailView extracted to shared layer
+  - State management (read/bookmark/archive) handled consistently
+  - Rich text processing consolidated in shared component
+  - Consistent error handling across both views
+
 - **NotificationCenter → Observable Properties**:
   - State updates will be communicated via @Published properties
   - Views will observe ViewModels through ObservableObject conformance
   - No more manual subscription/unsubscription management
+
 - **Background Tasks → .backgroundTask or BGTaskScheduler**:
   - Modern background task APIs will replace custom background task handling
   - Proper task cancellation will be implemented for all background operations
 
 ## Modernization Strategy Guidelines
+- Implement shared components first to establish foundation for ViewModels
+- Prioritize code reuse to eliminate duplication between similar views
 - Implement features incrementally, following the phased approach
 - Maintain feature parity throughout the modernization process
 - Test each component thoroughly before moving to the next phase
@@ -316,6 +383,15 @@ This file captures important patterns, preferences, and project intelligence tha
 - Keep comprehensive documentation of architectural decisions
 - Use Swift's newest features where appropriate, but maintain compatibility with iOS 18
 - Prioritize user experience over implementation elegance
+
+## Shared Component Best Practices
+- **Interface-Based Design**: Use protocols to define service interfaces
+- **Dependency Injection**: Make dependencies injectable for testing
+- **Clear Responsibilities**: Each layer should have well-defined responsibilities
+- **Thin View Models**: Keep view models focused on UI state, delegate business logic to ArticleOperations
+- **Consistent Error Handling**: Implement unified error types across components
+- **State Synchronization**: Ensure shared state is consistent between components
+- **Testing Strategy**: Test shared components independently from ViewModels
 
 ## User Workflow Preferences
 - Focus on fixing critical bugs before adding new features
