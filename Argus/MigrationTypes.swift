@@ -5,7 +5,7 @@ import SwiftUI
 enum MigrationMode: String, Codable {
     /// Temporary mode: Migration runs on each app start, keeps databases in sync
     case temporary
-    
+
     /// Production mode: One-time migration, after which old database is no longer used
     case production
 }
@@ -62,24 +62,24 @@ struct MigrationMetrics {
     var totalDuration: TimeInterval = 0
     var minDuration: TimeInterval = .infinity
     var maxDuration: TimeInterval = 0
-    
+
     mutating func recordOperation(duration: TimeInterval) {
         operationCount += 1
         totalDuration += duration
         minDuration = min(minDuration, duration)
         maxDuration = max(maxDuration, duration)
     }
-    
+
     var averageDuration: TimeInterval {
         guard operationCount > 0 else { return 0 }
         return totalDuration / Double(operationCount)
     }
-    
+
     func formattedSummary() -> String {
         if operationCount == 0 {
             return "No operations performed"
         }
-        
+
         return """
         Operations: \(operationCount)
         Average: \(String(format: "%.2f", averageDuration * 1000))ms

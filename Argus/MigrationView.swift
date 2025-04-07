@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 /// View for triggering migration from Settings
 struct MigrationView: View {
@@ -46,7 +46,7 @@ struct MigrationView: View {
                     Task {
                         let service = await MigrationService(mode: .temporary)
                         service.resetMigration()
-                        
+
                         // Refresh coordinator status
                         _ = await coordinator.checkMigrationStatus()
                     }

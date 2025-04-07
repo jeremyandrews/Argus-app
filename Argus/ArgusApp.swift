@@ -41,7 +41,7 @@ struct ArgusApp: App {
 
     // Migration coordinator for auto-migration
     @StateObject private var migrationCoordinator = MigrationCoordinator.shared
-    
+
     var body: some Scene {
         WindowGroup {
             ZStack {
@@ -53,7 +53,7 @@ struct ArgusApp: App {
                             Task { @MainActor in
                                 self.appDelegate.cleanupOldArticles()
                                 self.appDelegate.removeDuplicateNotifications()
-                                
+
                                 // Check if migration is needed
                                 await checkMigration()
                             }
@@ -65,7 +65,7 @@ struct ArgusApp: App {
                         }
                     }
                     .disabled(migrationCoordinator.isMigrationActive) // Disable all interaction during migration
-                
+
                 // Migration modal with highest z-index when active
                 if migrationCoordinator.isMigrationActive {
                     FullScreenBlockingView {
@@ -81,7 +81,7 @@ struct ArgusApp: App {
             }
         }
     }
-    
+
     /// Check and start migration if needed
     private func checkMigration() async {
         // Check if migration is needed

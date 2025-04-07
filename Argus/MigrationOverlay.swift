@@ -14,39 +14,51 @@ struct MigrationOverlay: View {
                 Text("Migrating Data")
                     .font(.headline)
 
-                ProgressView(value: migrationService.progress)
-                    .frame(width: 250)
+                // Animated progress indicator with spinner
+                ZStack(alignment: .top) {
+                    // Progress bar with animation
+                    ProgressView(value: migrationService.progress)
+                        .frame(width: 250)
+                        .animation(.easeInOut(duration: 0.3), value: migrationService.progress)
 
+                    // Spinner animation above progress bar
+                    if migrationService.progress < 1.0 {
+                        ProgressView() // Indeterminate circular spinner
+                            .scaleEffect(0.7)
+                            .offset(y: -24)
+                    }
+                }
+
+                // Status with animation
                 Text(migrationService.status)
                     .font(.subheadline)
+                    .animation(.easeIn, value: migrationService.status)
+                    .multilineTextAlignment(.center)
 
-                // Display migrated article count during migration
-                if migrationService.progress > 0 && migrationService.progress < 1.0 {
-                    Text("Articles processed: \(migrationService.totalArticlesMigrated)")
-                        .font(.caption)
-                        .padding(.top, 4)
-                }
+                // Metrics display - article count during migration
+                VStack(spacing: 8) {
+                    if migrationService.progress > 0 && migrationService.progress < 1.0 {
+                        Text("Articles processed: \(migrationService.totalArticlesMigrated)")
+                            .font(.caption)
 
-                if migrationService.progress >= 1.0 {
-                    Button("Done") {
-                        onComplete()
-                    }
-                    .buttonStyle(.bordered)
-                } else if migrationService.progress < 0.95 {
-                    // Cancel button
-                    Button("Cancel", role: .destructive) {
-                        Task {
-                            migrationService.cancelMigration()
-                            // Allow time for cancellation to process
-                            try? await Task.sleep(nanoseconds: 500_000_000)
-                            onComplete()
+                        // Only show speed when we have meaningful data
+                        if migrationService.articlesPerSecond > 0 {
+                            Text("\(Int(migrationService.articlesPerSecond)) articles/sec")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        // Estimated time remaining
+                        if migrationService.estimatedTimeRemaining > 0 {
+                            Text("Estimated time: \(timeString(from: migrationService.estimatedTimeRemaining))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .padding(.top, 4)
                 }
+                .padding(.top, 4)
 
+                // Display error if present
                 if let error = migrationService.error {
                     Text(error.localizedDescription)
                         .font(.caption)
@@ -60,6 +72,15 @@ struct MigrationOverlay: View {
                     .fill(Color(.systemBackground).opacity(0.95))
             )
             .shadow(color: Color.primary.opacity(0.2), radius: 10)
+            .onChange(of: migrationService.progress) { _, newValue in
+                // Auto-dismiss when complete
+                if newValue >= 1.0 {
+                    // Delay dismissal briefly to show completion state
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        onComplete()
+                    }
+                }
+            }
         }
     }
 

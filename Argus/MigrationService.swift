@@ -16,14 +16,14 @@ class MigrationService: ObservableObject {
     @Published var estimatedTimeRemaining: TimeInterval = 0
     @Published var memoryUsage: UInt64 = 0
     @Published var totalArticlesMigrated: Int = 0
-    
+
     // New property for state sync metrics
-    @Published var stateUpdateMetrics: MigrationMetrics = MigrationMetrics()
-    
+    @Published var stateUpdateMetrics: MigrationMetrics = .init()
+
     // Migration mode and state tracking
     @Published var migrationMode: MigrationMode = .temporary
     @Published var isRunningInBackground: Bool = false
-    
+
     // Batch size optimization
     private let OPTIMAL_BATCH_SIZE = 100 // Tuned for 2-8 second performance target
 
@@ -33,7 +33,7 @@ class MigrationService: ObservableObject {
     private var batchStartTime: Date?
     private var batchArticlesProcessed: Int = 0
     private var timer: Timer?
-    
+
     // Counters for progress reports
     private var didFindExistingRecords: Bool = false
     private var updatedRecordCount: Int = 0
@@ -41,7 +41,7 @@ class MigrationService: ObservableObject {
     private var progressSaveCounter: Int = 0
 
     // Background task identifier
-    private var backgroundTaskID: UUID = UUID()
+    private var backgroundTaskID: UUID = .init()
 
     // Migration state tracking
     var migrationProgress = MigrationProgress()
@@ -53,8 +53,8 @@ class MigrationService: ObservableObject {
 
     init(mode: MigrationMode = .temporary) async {
         // Set migration mode
-        self.migrationMode = mode
-        
+        migrationMode = mode
+
         // Initialize with shared instances
         databaseCoordinator = await DatabaseCoordinator.shared
         swiftDataContainer = SwiftDataContainer.shared
@@ -111,7 +111,7 @@ class MigrationService: ObservableObject {
             // Temporary mode: always process all batches from the beginning
             // Production mode: start from last successful batch
             let startIndex = migrationMode == .temporary ? 0 : migrationProgress.lastBatchIndex
-            
+
             for (index, batch) in articleBatches.enumerated().dropFirst(startIndex) {
                 // Check for cancellation
                 if isCancelled {
@@ -121,7 +121,7 @@ class MigrationService: ObservableObject {
                 // Update progress
                 progress = Double(index + 1) / Double(articleBatches.count)
                 migrationProgress.progressPercentage = progress
-                
+
                 // In temporary mode, don't update lastBatchIndex to ensure full reprocessing
                 if migrationMode == .production {
                     migrationProgress.lastBatchIndex = index
@@ -145,7 +145,7 @@ class MigrationService: ObservableObject {
             }
             migrationProgress.progressPercentage = 1.0
             progress = 1.0
-            
+
             // Calculate final elapsed time directly before generating summary
             if let start = startTime {
                 elapsedTime = Date().timeIntervalSince(start)
@@ -158,7 +158,7 @@ class MigrationService: ObservableObject {
 
             // Clean up after migration
             cleanupAfterMigration()
-            
+
             // Stop performance metrics tracking
             stopMetricsTimer()
             return true
@@ -183,12 +183,12 @@ class MigrationService: ObservableObject {
             return false
         }
     }
-    
+
     /// Create a detailed migration summary
     private func createMigrationSummary() -> String {
-        let syncDetails = migrationMode == .temporary && didFindExistingRecords ? 
+        let syncDetails = migrationMode == .temporary && didFindExistingRecords ?
             "\n• Records updated: \(updatedRecordCount)" : ""
-            
+
         return """
         Migration Complete:
         • Articles processed: \(totalArticlesProcessed)
@@ -229,7 +229,7 @@ class MigrationService: ObservableObject {
 
         // Get SwiftData context for this batch
         let context = swiftDataContainer.mainContext()
-        
+
         // Optimize context for performance
         optimizeContextForBulkOperation(context)
 
@@ -241,7 +241,7 @@ class MigrationService: ObservableObject {
         for (index, notification) in articles.enumerated() {
             // Check if this article already exists in SwiftData
             let existingArticle = try await findExistingArticle(for: notification, in: context)
-            
+
             if let existing = existingArticle {
                 // Update state only (isViewed, isBookmarked, isArchived, etc.)
                 didFindExistingRecords = true
@@ -278,7 +278,7 @@ class MigrationService: ObservableObject {
                 migrationProgress.lastProcessedArticleId = notification.id
                 saveMigrationProgressEfficiently()
             }
-            
+
             // Update batch metrics
             batchArticlesProcessed += 1
             totalArticlesProcessed += 1
@@ -293,13 +293,13 @@ class MigrationService: ObservableObject {
         // Calculate batch processing speed
         updateBatchMetrics()
     }
-    
+
     /// Find an existing article by ID or JSON URL
     private func findExistingArticle(for notification: NotificationData, in context: ModelContext) async throws -> ArticleModel? {
         // Extract values from notification to avoid cross-type predicate issues
         let articleId = notification.id
         let jsonUrl = notification.json_url
-        
+
         // Try finding by ID first
         var idDescriptor = FetchDescriptor<ArticleModel>(
             predicate: #Predicate { article in
@@ -307,11 +307,11 @@ class MigrationService: ObservableObject {
             }
         )
         idDescriptor.fetchLimit = 1
-        
+
         if let existing = try context.fetch(idDescriptor).first {
             return existing
         }
-        
+
         // Fall back to JSON URL
         var urlDescriptor = FetchDescriptor<ArticleModel>(
             predicate: #Predicate { article in
@@ -319,51 +319,51 @@ class MigrationService: ObservableObject {
             }
         )
         urlDescriptor.fetchLimit = 1
-        
+
         return try context.fetch(urlDescriptor).first
     }
 
     /// Update article state properties only
-    private func updateArticleState(_ article: ArticleModel, from notification: NotificationData, in context: ModelContext) async throws {
+    private func updateArticleState(_ article: ArticleModel, from notification: NotificationData, in _: ModelContext) async throws {
         // Create metrics for performance analysis
         let startTime = Date()
-        defer { 
+        defer {
             let duration = Date().timeIntervalSince(startTime)
             stateUpdateMetrics.recordOperation(duration: duration)
         }
-        
+
         // Only update state properties that may change after initial migration
         var wasUpdated = false
-        
+
         // Check and update isViewed state
         if article.isViewed != notification.isViewed {
             article.isViewed = notification.isViewed
             wasUpdated = true
         }
-        
+
         // Check and update isBookmarked state
         if article.isBookmarked != notification.isBookmarked {
             article.isBookmarked = notification.isBookmarked
             wasUpdated = true
         }
-        
+
         // Check and update isArchived state
         if article.isArchived != notification.isArchived {
             article.isArchived = notification.isArchived
             wasUpdated = true
         }
-        
+
         // Only log if we actually made changes
         if wasUpdated {
             AppLogger.database.debug("Updated state for article ID \(article.id)")
         }
     }
-    
+
     /// Save context with retry logic for resilience
     private func saveContextWithRetry(_ context: ModelContext, attempts: Int = 3) async throws {
         var attempt = 0
         var lastError: Error? = nil
-        
+
         while attempt < attempts {
             do {
                 try context.save()
@@ -371,7 +371,7 @@ class MigrationService: ObservableObject {
             } catch {
                 lastError = error
                 attempt += 1
-                
+
                 if attempt < attempts {
                     // Exponential backoff
                     let delay = Double(attempt) * 0.1
@@ -380,14 +380,14 @@ class MigrationService: ObservableObject {
                 }
             }
         }
-        
+
         // If we get here, all attempts failed
         if let error = lastError {
             AppLogger.database.error("Failed to save context after \(attempts) attempts: \(error)")
             throw error
         }
     }
-    
+
     /// Optimize context handling for performance
     private func optimizeContextForBulkOperation(_ context: ModelContext) {
         // Disable auto-save to control transaction boundaries
@@ -455,7 +455,7 @@ class MigrationService: ObservableObject {
 
         return result
     }
-    
+
     /// Pre-fetch and cache all topic data
     private func prefetchAndCacheAllTopics(in context: ModelContext) async -> [String: TopicModel] {
         // Fetch all topics once
@@ -468,7 +468,7 @@ class MigrationService: ObservableObject {
                 topicMap[topic.name] = topic
             }
         }
-        
+
         return topicMap
     }
 
@@ -483,12 +483,12 @@ class MigrationService: ObservableObject {
             AppLogger.database.error("Failed to save migration progress: \(error)")
         }
     }
-    
+
     /// Save progress less frequently during active migration for performance
     private func saveMigrationProgressEfficiently() {
         // Save progress less frequently when we know runtime is short
         progressSaveCounter += 1
-        
+
         // Only save every 5th call unless we're at the end
         if progressSaveCounter % 5 == 0 || progress >= 0.99 {
             saveMigrationProgress()
@@ -527,16 +527,16 @@ class MigrationService: ObservableObject {
     private func registerBackgroundTask() {
         // Use a simple UUID instead of UIBackgroundTaskIdentifier for SwiftUI
         backgroundTaskID = UUID()
-        
+
         // We're still tracking that a task is in progress, but using SwiftUI lifecycle instead
-        AppLogger.database.debug("Background task registered: \(self.backgroundTaskID)")
+        AppLogger.database.debug("Background task registered: \(backgroundTaskID)")
     }
 
     /// End the background task if active
     private func endBackgroundTaskIfNeeded() {
         // Clean up any resources associated with the background task
-        AppLogger.database.debug("Background task completed: \(self.backgroundTaskID)")
-        
+        AppLogger.database.debug("Background task completed: \(backgroundTaskID)")
+
         // Reset the ID
         backgroundTaskID = UUID()
     }
@@ -556,7 +556,7 @@ class MigrationService: ObservableObject {
         }
         return false
     }
-    
+
     /// Check if the migration was interrupted
     func wasMigrationInterrupted() -> Bool {
         return migrationProgress.state == .inProgress || migrationProgress.migrationInterrupted
@@ -581,17 +581,17 @@ class MigrationService: ObservableObject {
         updatedRecordCount = 0
         newRecordCount = 0
     }
-    
+
     /// Clean up resources after migration
     private func cleanupAfterMigration() {
         // Force garbage collection hint
         Task.detached(priority: .background) {
             // Sleep briefly to allow UI updates to complete
             try? await Task.sleep(nanoseconds: 100_000_000)
-            
+
             // Force cleanup of temporary resources
             AppLogger.database.debug("Cleaning up after migration")
-            
+
             // Since Swift doesn't have direct garbage collection,
             // we'll explicitly release any cached resources we have control over
             await MainActor.run {
@@ -599,7 +599,7 @@ class MigrationService: ObservableObject {
             }
         }
     }
-    
+
     /// Update batch metrics
     private func updateBatchMetrics() {
         if let batchStart = batchStartTime, batchArticlesProcessed > 0 {

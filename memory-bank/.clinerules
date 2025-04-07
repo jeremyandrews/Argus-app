@@ -15,6 +15,18 @@ This file captures important patterns, preferences, and project intelligence tha
 - Extract reusable components into separate views
 - Use preview providers for all UI components
 - Avoid excessive view modifiers that can impact performance
+- Use updated onChange API (iOS 17+) with two parameters:
+  ```swift
+  // Deprecated in iOS 17 (single parameter version):
+  .onChange(of: someValue) { newValue in
+      // Handle change
+  }
+  
+  // New API (two parameter version):
+  .onChange(of: someValue) { oldValue, newValue in
+      // Handle change with access to both values
+  }
+  ```
 
 ## Project-Specific Patterns
 

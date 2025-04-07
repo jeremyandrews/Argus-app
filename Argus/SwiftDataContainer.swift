@@ -35,10 +35,10 @@ class SwiftDataContainer {
         // Use persistent storage with a dedicated test database name
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let testStorageURL = documentsDirectory.appendingPathComponent("ArgusTestDB.store")
-        
+
         print("Creating persistent SwiftData container at: \(testStorageURL.path)")
         let config = ModelConfiguration(url: testStorageURL)
-        
+
         do {
             container = try ModelContainer(for: schema, configurations: [config])
             print("Persistent SwiftData container successfully created")

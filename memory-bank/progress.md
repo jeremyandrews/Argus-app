@@ -34,11 +34,6 @@
 
 ## What's In Progress
 
-- 🔶 **Create Article API Client**
-  - Refactoring APIClient to use async/await for all API calls
-  - Implementing key API methods with proper error handling
-  - Setting up robust response validation
-
 - 🔶 **Sync Process Optimization**
   - Background sync process improvements underway using DatabaseCoordinator 
   - UI jitter during sync operations still needs to be addressed
@@ -47,7 +42,23 @@
   - Improving validation of synchronized content
   - Testing fixes for data integrity issues
 
+- ✅ **Migration UI Improvements**
+  - Removed non-functional buttons from migration screens
+  - Added animated elements (spinner, progress bar animations) for visual feedback
+  - Implemented auto-dismissal behavior for a more seamless experience
+  - Enhanced progress display with real-time performance metrics
+  - Improved user perception during longer migrations
+
 ## Recently Completed
+
+- ✅ **API Client Refactoring for Modern Swift**
+  - Refactored APIClient to use async/await for all network operations
+  - Implemented comprehensive error handling with domain-specific ApiError types
+  - Added robust HTTP response validation with detailed status code checks
+  - Created key API methods: fetchArticles(), fetchArticle(by:), fetchArticleByURL(), and syncArticles()
+  - Implemented automatic JWT token refresh and authentication
+  - Set up proper error propagation with Swift structured concurrency
+  - Ensured thread-safety with explicit self-capture in closures
 
 - ✅ **Enhanced Database Migration System**
   - Implemented automatic migration at app startup without manual triggering
@@ -156,15 +167,22 @@
   - Created resilient system that can handle app termination during migration
 
 #### Phase 2: Networking and API Refactor
-- 🔶 **Create Article API Client**
-  - Refactor APIClient to use async/await for all API calls
-  - Implement fetchArticles(), fetchArticle(by id:), and authenticateDevice(token:)
-  - Enhance error handling with proper status code detection
+- ✅ **Create Article API Client**
+  - Refactored APIClient to use async/await for all API calls
+  - Implemented key API methods: fetchArticles(), fetchArticle(by:), fetchArticleByURL(), and syncArticles()
+  - Enhanced error handling with comprehensive status code validation
+  - Added automatic token refresh and JWT authentication
 
-- 🔲 **Build ArticleService**
-  - Create bridge between API and SwiftData
-  - Implement updateArticlesFromServer(), fetchArticles(), and saveArticle(_:)
-  - Set up proper concurrency handling
+- ✅ **Build ArticleService**
+  - Implemented as bridge between API and SwiftData using repository pattern
+  - Created key methods for article syncing, filtering, and status management
+  - Implemented immutable article pattern (articles are never updated once synced)
+  - Applied application-level uniqueness validation using jsonURL as identifier
+  - Used batch processing with intermediate saves for performance
+  - Incorporated full Swift 6 concurrency with async/await and proper cancellation
+  - Implemented efficient SwiftData query patterns with optimized existence checks
+  - Added comprehensive error handling with specific error types
+  - Designed for gradual adoption to enable smooth transition from legacy components
 
 #### Phase 3: MVVM Implementation and UI Refactor
 - 🔲 **Refactor NewsView to Use ViewModel**
