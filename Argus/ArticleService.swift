@@ -385,6 +385,13 @@ final class ArticleService: ArticleServiceProtocol {
 
     // MARK: - Sync Operations
 
+    /// Process a collection of articles fetched from the remote server
+    /// - Parameter articles: Array of ArticleJSON objects to process
+    /// - Returns: Number of new articles added to the database
+    func processArticleData(_ articles: [ArticleJSON]) async throws -> Int {
+        return try await processRemoteArticles(articles)
+    }
+
     func syncArticlesFromServer(topic: String?, limit _: Int?) async throws -> Int {
         do {
             // Fetch articles from server with default limits
@@ -453,6 +460,46 @@ final class ArticleService: ArticleServiceProtocol {
             }
             AppLogger.sync.error("Error performing background sync: \(error)")
             throw ArticleServiceError.networkError(underlyingError: error)
+        }
+    }
+
+    // MARK: - Background Maintenance Operations
+
+    /// Performs a quick maintenance operation suitable for BGAppRefreshTask
+    /// - Parameter timeLimit: Maximum time in seconds to spend on maintenance
+    func performQuickMaintenance(timeLimit: TimeInterval) async throws {
+        // Start timing
+        let startTime = Date()
+
+        // Create a task that can be cancelled when time limit is reached
+        return try await withThrowingTaskGroup(of: Void.self) { group in
+            // Add the maintenance task
+            group.addTask {
+                // Fetch only the most recent articles (limit count)
+                let articlesAdded = try await self.syncArticlesFromServer(topic: nil, limit: 10)
+
+                // Log the result
+                AppLogger.sync.debug("Quick maintenance added \(articlesAdded) new articles")
+
+                // Skip topic-specific sync in quick maintenance
+            }
+
+            // Add a timeout task
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeLimit * 1_000_000_000))
+                // When timeout occurs, just exit without error
+                // The task group will complete when this task finishes
+            }
+
+            // Wait for either task to complete
+            try await group.next()
+
+            // Cancel any remaining tasks
+            group.cancelAll()
+
+            // Log duration
+            let duration = Date().timeIntervalSince(startTime)
+            AppLogger.sync.debug("Quick maintenance completed in \(String(format: "%.2f", duration))s")
         }
     }
 

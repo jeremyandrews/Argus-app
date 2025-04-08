@@ -104,6 +104,50 @@ Uses Swift's background task framework to perform sync operations when the app i
 - Handles non-Sendable types like NSAttributedString with proper boundaries
 - Implements defensive design patterns to avoid SwiftData context access issues
 
+### Actor Dependency Initialization Pattern
+The project uses a specialized pattern for initializing classes that depend on actors, particularly handling the "self captured before all members were initialized" error:
+
+```mermaid
+flowchart TD
+    A[1. Initialize properties to nil/default values]
+    B[2. Complete initialization of all properties]
+    C[3. Call separate method to create async tasks]
+    D[4. Use weak-strong self pattern in tasks]
+    E[5. Implement timeout-protected accessor methods]
+    
+    A --> B --> C --> D --> E
+```
+
+Implementation steps:
+1. Start with optional properties for async dependencies: `private var actorDependency: SomeActor?`
+2. Complete full initialization with nil values: `self.actorDependency = nil`
+3. Create a separate method for async tasks: `createInitializationTaskIfNeeded()`
+4. Use weak-strong pattern in async tasks to avoid retain cycles:
+   ```swift
+   weak var weakSelf = self
+   Task {
+     let dependency = await SomeActor.shared
+     if let strongSelf = weakSelf {
+       await MainActor.run {
+         strongSelf.actorDependency = dependency
+       }
+     }
+   }
+   ```
+5. Implement accessor methods with timeout protection:
+   ```swift
+   private func getInitializedDependency() async throws -> SomeActor {
+     if let dependency = actorDependency { return dependency }
+     
+     // Wait with timeout for initialization
+     return try await withTimeout(duration: .seconds(5)) {
+       try await initializationTask!.value
+     }
+   }
+   ```
+
+This pattern is used in services like MigrationAwareArticleService to handle DatabaseCoordinator dependencies safely.
+
 ### Two-Tier Cache for Topic Switching
 - Uses in-memory caching for immediate UI feedback during topic changes
 - Falls back to traditional filtering when direct database methods encounter issues

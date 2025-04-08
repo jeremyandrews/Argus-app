@@ -165,6 +165,22 @@
   - Planned ArticleDetailViewModel for article rendering logic
   - Structured SubscriptionsViewModel and SettingsViewModel for preference management
 
+## Recent Changes
+
+- **Implemented Modern Background Task System** (Completed):
+  - Created dedicated BackgroundTaskManager class to replace the callback-based SyncManager
+  - Implemented proper BGTaskScheduler registration with separate handlers for app refresh and processing tasks
+  - Added intelligent network condition checking with checked continuations
+  - Implemented timeout handling using Swift task groups and cancellation
+  - Enhanced ArticleService with performQuickMaintenance method for background operations
+  - Added processArticleData method to ArticleService to expose public article processing API 
+  - Updated AppDelegate to use modern async/await for push notification handling
+  - Fixed all compiler warnings including unreachable catch blocks and unused results
+  - Ensured proper error propagation with structured error handling
+  - Improved logging of background operations with detailed success/failure tracking
+  - Maintained full compatibility with existing API while modernizing implementation
+  - Completed Phase 4 (Background Tasks) of the modernization plan
+
 ## Next Steps
 
 ### Phase 1: Setup and Model Migration ✅
@@ -249,12 +265,92 @@
    - Completed: Fixed nested LazyLoadingContentView implementation with customFontSize support
    - Completed: Ensured proper separation of view-specific formatting from business logic
 
-### Phase 5: Background Task Implementation
-10. **Implement Modern Background Tasks**:
-   - Replace current syncing with modern background tasks approach
-   - Implement push notification handling with async/await
-   - Set up periodic syncing using .backgroundTask or BGTaskScheduler
-   - Ensure proper task cancellation and expiration handling
+### Phase 5: Testing and Cleanup
+10. **✅ Implement Modern Background Tasks**:
+   - Completed: Created BackgroundTaskManager to replace SyncManager
+   - Completed: Implemented proper task cancellation and expiration handling
+   - Completed: Set up periodic syncing using BGTaskScheduler
+   - Completed: Enhanced push notification handling with async/await
+   
+11. **Test Data Migration and Persistence**:
+   - Verify SwiftData migration resilience
+   - Test offline behavior and article consistency
+   - Validate proper state preservation 
+
+12. **Validate Syncing and Push Behavior**:
+   - Test background sync functionality under various conditions
+   - Verify push notification handling
+   - Ensure proper article updates in all scenarios 
+
+13. **Performance and Battery Profiling**:
+   - Use Instruments to verify optimal resource usage
+   - Analyze memory and CPU patterns during extended use
+   - Ensure UI responsiveness during sync operations
+   - Measure battery impact of background operations
+
+14. **Legacy Code Removal Plan**:
+   - **Phase 1: Dependency Analysis** (In Progress)
+     - Create a comprehensive dependency map for all legacy components
+     - Verify modern replacements fully implement required functionality
+     - Document necessary preservation for migration system
+     - Identify components with no remaining dependencies
+   
+   - **Phase 2: SyncManager Removal**
+     - Verify BackgroundTaskManager implements all SyncManager functionality
+     - Create adapter for any edge cases discovered in dependency analysis
+     - Update all code references to use BackgroundTaskManager instead
+     - Create versioned migration path to ensure older app versions still work with backend
+     - Add comprehensive logging during transition period
+     - Remove SyncManager class and related helper methods
+     - Refactor remaining code to use proper Swift 6 concurrency
+   
+   - **Phase 3: Notification Center Cleanup**
+     - Identify all NotificationCenter observers in the codebase
+     - Replace with @Published properties and ObservableObject pattern
+     - Update view refresh mechanisms to use SwiftUI state system
+     - Remove redundant observers and notification posts
+     - Add defensive measures for potential missed updates
+     - Verify UI updates properly with state changes
+   
+   - **Phase 4: DatabaseCoordinator Transition**
+     - Create MigrationAwareArticleService that supports both models
+     - Implement migration-preserving path for persistent data
+     - Ensure proper data flow through migration coordinator
+     - Update all database access to use MigrationAwareArticleService
+     - Move one-time migration responsibility to startup sequence
+     - Reduce DatabaseCoordinator to minimal implementation
+     - Add version detection to support existing users
+   
+   - **Phase 5: Final Verification**
+     - Comprehensive testing of all app functionality
+     - Performance analysis to verify improved responsiveness
+     - Memory usage validation with Instruments
+     - Migration path verification (fresh install vs. upgrade)
+     - Verify proper cleanup of legacy components
+
+## Legacy Code Removal Special Considerations
+
+- **Migration Protection Strategy**:
+  - Migration system must be preserved as dozens of users will take weeks to upgrade
+  - Implement one-time migration at startup with improved visual feedback
+  - Use version detection to determine if migration is necessary
+  - Maintain migration coordinator as isolated module with minimal dependencies
+  - Create versioned migration path for transitioning from legacy to modern code
+  - Add robust error handling for migration failures
+
+- **Critical Implementation Paths**:
+  - Current implementation uses MigrationCoordinator as the entry point
+  - Must preserve the coordinator pattern while removing unnecessary dependencies
+  - Keep the modal UI to prevent user interaction during migration
+  - Maintain migration state persistence to handle app termination
+  - Ensure recovery mechanisms for interrupted migrations
+  - Verify full database integrity after migration completes
+
+- **Transition Timeline**:
+  - Migration system must remain functional for at least 8 weeks
+  - After sufficient user base has upgraded, we can remove migration code entirely
+  - Self-contained architecture of migration module will facilitate future removal
+  - Final app update can safely remove migration components after transition period
 
 ## Active Decisions and Considerations
 - **Architectural Approach**: 
@@ -337,4 +433,56 @@
 10. ✅ Refactor NewsView to use NewsViewModel
 11. ✅ Create ArticleModelAdapter to connect SwiftData Test and main app containers
 12. ✅ Refactor NewsDetailView to use NewsDetailViewModel
-13. Implement Modern Background Tasks
+13. ✅ Implement Modern Background Tasks
+
+## Recent Changes
+
+- **Legacy Code Removal Plan - Phase 2: SyncManager Removal** (In Progress):
+  - Implemented adapter pattern for legacy code migration:
+    - Created MigrationAdapter with compatibility methods matching SyncManager's API
+    - Developed MigrationAwareArticleService to support both legacy and modern data systems
+    - Modified MigrationService to use MigrationAwareArticleService instead of direct dependencies
+    - Created proper migration path that preserves existing functionality
+  - Decoupled migration from direct SyncManager dependencies:
+    - Redirected article processing through ArticleService
+    - Redirected background task scheduling through BackgroundTaskManager
+    - Added proper error handling and logging in adapter components
+    - Ensured state synchronization between legacy and modern storage
+  - Enabled gradual removal of legacy components:
+    - Created versioned API that maintains compatibility with existing code
+    - Added comprehensive documentation of adapter interfaces
+    - Implemented defensive programming in transition components
+    - Set up framework for complete SyncManager removal
+  
+- **Legacy Code Removal Plan - Phase 1: Dependency Analysis** (Completed):
+  - Created comprehensive dependency map for all legacy components
+  - Identified SyncManager dependencies and replacement pathways:
+    - Background task scheduling → BackgroundTaskManager (completed)
+    - Article sync operations → ArticleService.performBackgroundSync (completed)
+    - Article processing → ArticleService.processArticleData (completed)
+    - Network connectivity checking → BackgroundTaskManager.shouldAllowSync (completed)
+  - Identified DatabaseCoordinator dependencies:
+    - Database transactions → ArticleService direct SwiftData operations
+    - Batch operations → ArticleService with SwiftData batch methods
+    - Article existence checking → ArticleService with FetchDescriptor
+  - Identified NotificationCenter usages requiring replacement:
+    - articleProcessingCompleted → ViewModel @Published properties
+    - syncStatusChanged → ViewModel @Published properties
+    - State updates → ObservableObject pattern
+  - Analyzed migration system dependencies:
+    - MigrationCoordinator still requires DatabaseCoordinator
+    - MigrationService needs SyncManager for processing articles
+    - Migration UI requires notification system for progress updates
+  - Documented complete migration preservation requirements
+  - Created MigrationAwareArticleService design for transition period
+
+- **Implemented Modern Background Task System** (Completed):
+  - Created dedicated BackgroundTaskManager class to handle all background processing
+  - Implemented proper task cancellation and scheduling with modern Swift concurrency
+  - Added performQuickMaintenance method to ArticleService for optimized background operations
+  - Modernized AppDelegate's executeDeferredStartupTasks with Task.detached and async/await
+  - Updated push notification handling with comprehensive error management
+  - Maintained API compatibility with backend while modernizing client implementation
+  - Implemented proper timeout handling for background operations
+  - Ensured concurrency-safe operations with Task groups and checked continuations
+  - Set up proper power and network requirement handling for background tasks

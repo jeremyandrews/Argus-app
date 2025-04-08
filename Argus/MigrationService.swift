@@ -47,7 +47,8 @@ class MigrationService: ObservableObject {
     var migrationProgress = MigrationProgress()
     private var isCancelled = false
 
-    // References to old and new storage
+    // References to storage and services
+    private let migrationArticleService: MigrationAwareArticleService
     private let databaseCoordinator: DatabaseCoordinator
     private let swiftDataContainer: SwiftDataContainer
 
@@ -58,6 +59,9 @@ class MigrationService: ObservableObject {
         // Initialize with shared instances
         databaseCoordinator = await DatabaseCoordinator.shared
         swiftDataContainer = SwiftDataContainer.shared
+
+        // Create migration-aware service with the coordinator
+        migrationArticleService = MigrationAwareArticleService(databaseCoordinator: databaseCoordinator)
 
         // Load any existing progress
         loadMigrationProgress()
@@ -208,17 +212,16 @@ class MigrationService: ObservableObject {
 
     /// Fetch all articles that need migration
     private func fetchArticlesToMigrate() async -> [NotificationData] {
-        // Fetch all articles from the old database
-        do {
-            return try await databaseCoordinator.performTransaction { _, context in
-                let descriptor = FetchDescriptor<NotificationData>()
-                let articles = try context.fetch(descriptor)
-                return articles
-            }
-        } catch {
-            AppLogger.database.error("Failed to fetch articles for migration: \(error)")
-            return []
+        // Use migrationArticleService to fetch articles from legacy system
+        let articles = await migrationArticleService.fetchArticlesFromLegacySystem()
+
+        if articles.isEmpty {
+            AppLogger.database.error("Failed to fetch articles for migration or no articles found")
+        } else {
+            AppLogger.database.debug("Fetched \(articles.count) articles for migration")
         }
+
+        return articles
     }
 
     /// Process a batch of articles with state synchronization

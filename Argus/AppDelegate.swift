@@ -30,7 +30,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // Register background tasks MUST happen during app launch
         // This can't be deferred as it triggered the crash
-        SyncManager.shared.registerBackgroundTasks()
+        BackgroundTaskManager.shared.registerBackgroundTasks()
 
         // Request notification permissions
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -61,26 +61,30 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func executeDeferredStartupTasks() {
-        // Use async scheduling instead of sleep
-        DispatchQueue.global(qos: .background).async {
-            // Initial delay
-            DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1.0) {
-                ArgusApp.logDatabaseTableSizes()
+        Task.detached(priority: .background) {
+            // Initial delay (1 second)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
 
-                DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 2.0) {
-                    self.verifyDatabaseIndexes()
+            // Log database sizes
+            await ArgusApp.logDatabaseTableSizes()
 
-                    DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 2.0) {
-                        Task(priority: .background) {
-                            // Use the maintenance function instead of the old queue processing
-                            await SyncManager.shared.performScheduledMaintenance()
-                        }
+            // Verify database indexes (after 2 second delay)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await self.verifyDatabaseIndexes()
 
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                            self.cleanupOldArticles()
-                        }
-                    }
-                }
+            // Perform maintenance (after another 2 second delay)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+
+            // Use ArticleService for quick maintenance operations
+            do {
+                try await ArticleService.shared.performQuickMaintenance(timeLimit: 10)
+            } catch {
+                AppLogger.app.error("Error performing startup maintenance: \(error)")
+            }
+
+            // Clean up old articles
+            await MainActor.run {
+                self.cleanupOldArticles()
             }
         }
     }
@@ -148,13 +152,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // 2. Process the article directly using DatabaseCoordinator
+        // 2. Process the article using modern API
         Task.detached {
-            // Use the DatabaseCoordinator for processing the article
-            let success = await DatabaseCoordinator.shared.processArticle(jsonURL: jsonURL)
+            do {
+                // Fetch the article data using APIClient
+                let articleData = try await APIClient.shared.fetchArticleByURL(jsonURL: jsonURL)
 
-            // Complete based on the result
-            await finish(success ? .newData : .noData)
+                // Process it using ArticleService
+                _ = try await ArticleService.shared.processArticleData([articleData])
+
+                // Success
+                await finish(.newData)
+            } catch {
+                AppLogger.app.error("Failed to process push notification article: \(error)")
+                await finish(.failed)
+            }
         }
     }
 

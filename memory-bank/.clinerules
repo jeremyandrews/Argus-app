@@ -144,6 +144,57 @@ This file captures important patterns, preferences, and project intelligence tha
 - Instead, read values from caches at the beginning of functions, then use locals in closures
 - Update caches after transaction completion, not within transaction blocks
 
+### Actor Initialization and Self Capture
+- Never capture self in a task or closure before all properties are initialized
+- Use a two-step initialization pattern for actors with async dependencies:
+  ```swift
+  // Initialize properties to nil/default values first
+  private var asyncDependency: AsyncDependency?
+  
+  init() {
+    // Set all required properties
+    self.asyncDependency = nil
+    
+    // After full initialization, create the task
+    createInitializationTaskIfNeeded()
+  }
+  
+  private func createInitializationTaskIfNeeded() {
+    if asyncDependency != nil { return }
+    
+    // Use weak self to avoid retain cycles
+    weak var weakSelf = self
+    
+    Task {
+      let dependency = await AsyncDependency.shared
+      
+      // Update stored reference on the main actor
+      if let strongSelf = weakSelf {
+        await MainActor.run {
+          strongSelf.asyncDependency = dependency
+        }
+      }
+    }
+  }
+  ```
+- For accessor methods that need the async dependency, implement wait-with-timeout pattern:
+  ```swift
+  private func getInitializedDependency() async throws -> AsyncDependency {
+    // Try direct access first
+    if let dependency = asyncDependency {
+      return dependency
+    }
+    
+    // Create the initialization task if needed
+    createInitializationTaskIfNeeded()
+    
+    // Wait with timeout
+    return try await withTimeout(duration: .seconds(5)) {
+      try await initializationTask!.value
+    }
+  }
+  ```
+
 ### SwiftData Context Safety Patterns
 - Always implement a fallback mechanism when using direct DatabaseCoordinator methods
 - For topic switching, use a two-tier approach:
