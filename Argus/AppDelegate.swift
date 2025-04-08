@@ -4,6 +4,7 @@ import SQLite3
 import SwiftData
 import SwiftUI
 import UserNotifications
+import CloudKit
 
 #if canImport(UIKit)
     import UIKit
@@ -31,6 +32,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Register background tasks MUST happen during app launch
         // This can't be deferred as it triggered the crash
         BackgroundTaskManager.shared.registerBackgroundTasks()
+        
+        // Register CloudKit health check background task
+        registerCloudKitHealthCheckTask()
 
         // Request notification permissions
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -43,6 +47,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 AppLogger.app.error("Error requesting notification authorization: \(error)")
             }
         }
+        
+        // Set up CloudKit notification observer for account changes
+        setupCloudKitNotificationObservers()
 
         // Check for and resume any in-progress migrations
         checkAndResumeMigration()
@@ -71,6 +78,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             // Verify database indexes (after 2 second delay)
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             await self.verifyDatabaseIndexes()
+            
+            // Check CloudKit health status
+            await self.checkCloudKitHealth()
 
             // Perform maintenance (after another 2 second delay)
             try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -85,6 +95,124 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             // Clean up old articles
             await MainActor.run {
                 self.cleanupOldArticles()
+            }
+        }
+    }
+    
+    /// Registers the background task for CloudKit health check
+    private func registerCloudKitHealthCheckTask() {
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: "com.andrews.Argus.cloudKitHealthCheck",
+            using: nil
+        ) { task in
+            self.handleCloudKitHealthCheck(task: task as! BGProcessingTask)
+        }
+        
+        AppLogger.app.debug("CloudKit health check background task registered")
+    }
+    
+    /// Schedules a background task for CloudKit health check
+    private func scheduleCloudKitHealthCheck() {
+        let request = BGProcessingTaskRequest(identifier: "com.andrews.Argus.cloudKitHealthCheck")
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
+        
+        // Schedule for 1 hour later, system will optimize the exact timing
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 3600)
+        
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            ModernizationLogger.log(.debug, component: .cloudKit,
+                message: "Scheduled CloudKit health check for background execution")
+        } catch {
+            ModernizationLogger.log(.error, component: .cloudKit,
+                message: "Failed to schedule CloudKit health check: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Handles the background task for CloudKit health check
+    private func handleCloudKitHealthCheck(task: BGProcessingTask) {
+        // Create a task to perform the health check
+        let healthCheckTask = Task.detached(priority: .background) {
+            // Attempt CloudKit recovery
+            await self.checkCloudKitHealth()
+        }
+        
+        // Set up task expiration handler
+        task.expirationHandler = {
+            healthCheckTask.cancel()
+        }
+        
+        // Set up task completion
+        Task {
+            await healthCheckTask.value
+            
+            // Schedule next health check before marking complete
+            scheduleCloudKitHealthCheck()
+            
+            task.setTaskCompleted(success: true)
+        }
+    }
+    
+    /// Performs a health check on CloudKit and attempts recovery if needed
+    private func checkCloudKitHealth() async {
+        let container = SwiftDataContainer.shared
+        
+        // Perform health check to update status
+        await container.healthMonitor.performHealthCheck()
+        
+        // Attempt recovery if not using CloudKit
+        if container.containerType != .cloudKit {
+            if await container.attemptCloudKitRecovery() {
+                ModernizationLogger.log(.info, component: .cloudKit,
+                    message: "CloudKit recovery successful in background task")
+            }
+        }
+    }
+    
+    /// Set up notification observers for CloudKit account status changes
+    private func setupCloudKitNotificationObservers() {
+        // Observe CloudKit account changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(cloudKitAccountDidChange),
+            name: .CKAccountChanged,
+            object: nil
+        )
+        
+        // Listen for network availability changes - use Path monitor instead of notification
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            if path.status == .satisfied {
+                // Only check when network becomes available
+                Task.detached { [weak self] in
+                    guard let self = self else { return }
+                    await self.checkCloudKitHealth()
+                }
+            }
+        }
+        
+        // Start monitoring network
+        networkMonitor.start(queue: monitorQueue)
+    }
+    
+    /// Handle CloudKit account changes
+    @objc private func cloudKitAccountDidChange(_ notification: Notification) {
+        AppLogger.app.info("CloudKit account status changed")
+        
+        // Schedule a health check
+        Task.detached(priority: .background) {
+            await self.checkCloudKitHealth()
+        }
+    }
+    
+    /// Handle network availability changes
+    @objc private func networkAvailabilityDidChange(_ notification: Notification) {
+        // Only check CloudKit if network becomes available
+        if networkMonitor.currentPath.status == .satisfied {
+            AppLogger.app.info("Network became available, checking CloudKit status")
+            
+            Task.detached(priority: .background) {
+                await self.checkCloudKitHealth()
             }
         }
     }

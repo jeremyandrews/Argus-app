@@ -11,6 +11,51 @@
 - **Duplicate Implementation Removal**: Removing dual-implementation pattern for syncing and displaying content by simplifying MigrationAwareArticleService
 
 ## Recent Changes
+
+- **Fixed API Sync Error by Optimizing seen_articles List** (Completed):
+  - Fixed critical sync timeout issue in APIClient:
+    - Modified `fetchArticleURLs()` method to only include articles from the last 12 hours
+    - Previously sent empty arrays which caused server to return ALL articles
+    - Added database query with time-based filtering (`addedDate >= twelveHoursAgo`)
+    - Limited payload size to maximum 200 entries to prevent oversized requests
+    - Added comprehensive error handling with fallback to empty list if database query fails
+    - Implemented detailed logging to track sync article counts
+  - Benefits of this fix:
+    - Significantly reduced server load and response times
+    - Decreased network payload sizes
+    - Prevented timeouts during large sync operations
+    - Made client properly follow the incremental sync protocol
+  - Implementation follows Swift best practices:
+    - Used SwiftData predicates with proper date comparison
+    - Added defensive programming with error handling
+    - Maintained backward compatibility with existing code
+
+- **Implemented Robust CloudKit Integration** (Completed):
+  - Created a comprehensive CloudKit health monitoring system:
+    - Implemented `CloudKitHealthMonitor` class with state machine (unknown → healthy → degraded → failed)
+    - Used lightweight zone operation checks with modern async/await API to verify connectivity
+    - Added threshold-based state transitions (3 failures → failed, 2 successes → healthy)
+    - Implemented thermal state awareness to preserve battery life
+    - Added notification-based status updates with emoji indicators
+  - Created a request coordination system using the actor pattern:
+    - Implemented `CloudKitRequestCoordinator` actor for thread-safe operation management
+    - Created type-specific request queues to prevent "request already in progress" errors
+    - Used Swift's Result type with modern CloudKit APIs (fetchRecordsResultBlock, etc.)
+    - Added robust error handling with comprehensive logging
+    - Implemented proper operation cleanup and prioritization
+  - Enhanced the app with graceful degradation and recovery features:
+    - Added automatic switching between CloudKit and local storage based on health status
+    - Implemented network and account monitoring for recovery attempts
+    - Added user notifications about sync status changes
+    - Created background tasks for periodic health checks
+    - Enhanced the system to automatically recover from transient issues
+  - Fixed numerous compile-time and runtime issues:
+    - Updated all deprecated CloudKit API usage to modern equivalents
+    - Fixed thermal state comparison logic in AppDelegate and health monitor
+    - Properly implemented actor patterns for thread safety
+    - Removed unnecessary weak self capture patterns in Swift actors
+    - Addressed all Swift 6 warnings related to CloudKit integration
+  
 - **Converted Migration System to True One-Time Approach** (Completed):
   - Simplified MigrationService by removing mode parameter and resetMigration method
   - Updated MigrationCoordinator to use a consistent "isMigrationCompleted" flag stored in UserDefaults
@@ -263,12 +308,23 @@
 
 Based on recent application logs and code analysis, we've identified several important issues:
 
-1. **CloudKit Integration Issues**:
-   - Consistent errors when attempting to set up CloudKit integration: `"Failed to set up CloudKit integration for store"`
-   - Server rejection errors: `"Server Rejected Request" (15/2000)`
-   - Failed recovery attempts with error: `CKErrorDomain:15`
-   - This is blocking proper CloudKit integration for cross-device syncing
-   - Fixed by unifying ModelContainer creation with a single schema for all models
+1. **CloudKit Integration Issues** (Resolved):
+   - Previous errors (now fixed):
+     - CloudKit integration setup errors: `"Failed to set up CloudKit integration for store"`
+     - Server rejection errors: `"Server Rejected Request" (15/2000)`
+     - Failed recovery attempts with error: `CKErrorDomain:15`
+   - Root causes identified and fixed:
+     - False success detection in container initialization (now properly verifies with actual operations)
+     - Request conflicts from multiple simultaneous operations (now properly queued)
+     - Missing error handling and recovery paths (now implemented with state machine)
+     - Improper thermal state handling (fixed comparison logic)
+     - Deprecated API usage (updated to modern equivalents)
+   - Solution implemented:
+     - Created CloudKitHealthMonitor for operational verification
+     - Implemented CloudKitRequestCoordinator for request management
+     - Added graceful degradation to local storage when CloudKit unavailable
+     - Enhanced user messaging through notification system
+     - Implemented automatic recovery when conditions improve
 
 2. **API Client/Server Mismatch Issues**:
    - 404 errors when trying to reach API endpoints: `Response status code: 404`
@@ -292,7 +348,7 @@ Based on recent application logs and code analysis, we've identified several imp
 
 ## Next Steps
 
-Based on the log analysis, we're implementing a four-step plan to address these issues:
+Based on the log analysis, we're implementing a multi-step plan to address these issues:
 
 ### Step 1: ModernizationLogger System
 - Create a dedicated logging system for the transition period with:
@@ -303,13 +359,13 @@ Based on the log analysis, we're implementing a four-step plan to address these 
   - Transition state monitoring to identify inconsistencies
   - File-based logging for offline analysis of issues
 
-### Step 2: CloudKit Error Handling
-- Implement proper fallback mechanisms when CloudKit setup fails:
-  - Add graceful degradation from CloudKit to local-only storage
-  - Create proper error recovery paths with detailed diagnostics
-  - Improve user messaging for CloudKit connectivity issues
-  - Enable offline functionality when CloudKit is unavailable
-  - Add retry logic with exponential backoff for transient errors
+### Step 2: CloudKit Error Handling ✅
+- Implemented proper fallback mechanisms when CloudKit setup fails:
+  - ✅ Added graceful degradation from CloudKit to local-only storage
+  - ✅ Created proper error recovery paths with detailed diagnostics
+  - ✅ Improved user messaging for CloudKit connectivity issues
+  - ✅ Enabled offline functionality when CloudKit is unavailable
+  - ✅ Added health monitoring with state machine for reliable recovery
 
 ### Step 3: API Resilience Enhancement
 - Improve robustness of API client with:

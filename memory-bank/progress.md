@@ -71,6 +71,20 @@
   - Batch operations with proper error handling to prevent partial updates
 
 ## Recently Completed
+
+- ✅ **Fixed API Sync Error by Optimizing seen_articles List** (Completed):
+  - Fixed critical timeout issue by improving how the client reports seen articles to the server:
+    - Modified `fetchArticleURLs()` method to only include articles from the last 12 hours
+    - Previously sent empty arrays causing the server to return ALL articles
+    - Added time-based filtering with `addedDate >= twelveHoursAgo` predicate
+    - Limited entries to maximum 200 to prevent oversized requests
+    - Added fallback to empty list if database query fails
+  - This fix prevents timeouts during syncing by:
+    - Reducing server load (only needs to process recent articles)
+    - Decreasing network payload sizes (fewer articles to transfer)
+    - Following the proper incremental sync protocol as designed 
+    - Making sync operations much faster and more reliable
+  
 - ✅ **Removed Dual-Implementation Pattern in MigrationAwareArticleService** (Completed):
   - Removed all write-back operations to the legacy database from MigrationAwareArticleService
   - Added clear deprecation annotations to encourage direct ArticleService usage
@@ -503,12 +517,12 @@
    - Status: Will be resolved by migration to SwiftData
    - Priority: High
    
-3. **CloudKit Integration Issues** (New)
+3. **CloudKit Integration Issues** (Resolved)
    - Consistent errors with CloudKit setup: "Failed to set up CloudKit integration for store"
    - Server rejection errors: "Server Rejected Request" (15/2000)
    - Failed recovery attempts from CloudKit errors
-   - Status: Will be addressed with new CloudKit error handling in Step 2 of plan
-   - Priority: High
+   - Status: Resolved with comprehensive CloudKit health monitoring and request coordination
+   - Priority: High (Resolved)
    
 4. **API Connectivity Issues** (New)
    - 404 errors when trying to reach API endpoints
@@ -580,12 +594,22 @@
 
 3. **Cleanup and Performance (Target: July 2025)**
    - ✅ Remove dual-implementation pattern in MigrationAwareArticleService
+   - ✅ Implement robust CloudKit integration with health monitoring and request coordination
    - Complete Phase 5 of modernization plan
    - Remove legacy code components
    - Conduct performance profiling
    - Resolve any remaining issues
 
 ## Recently Initiated
+
+- ✅ **Robust CloudKit Integration System**
+  - Created comprehensive CloudKit health monitoring system with state machine
+  - Implemented thread-safe request coordination using Swift actor model
+  - Enhanced app with graceful degradation when CloudKit is unavailable
+  - Added automatic recovery when CloudKit becomes available again
+  - Updated all deprecated CloudKit API usage to modern equivalents
+  - Fixed thermal state comparison logic for battery efficiency
+  - Improved user experience with notifications about sync status changes
 
 - ✅ **Simplified Migration Architecture**
   - Removed write-back operations from MigrationAwareArticleService

@@ -6,6 +6,7 @@ Argus implements a client-side architecture that focuses on:
 2. Local data persistence with SwiftData
 3. UI rendering with SwiftUI
 4. Background processing and notifications
+5. CloudKit integration for cross-device syncing
 
 ```mermaid
 flowchart TD
@@ -18,6 +19,10 @@ flowchart TD
     NotificationSystem["Notification System"]
     UI["SwiftUI Views"]
     
+    CloudKitHM["CloudKitHealthMonitor"]
+    CloudKitRC["CloudKitRequestCoordinator (Actor)"]
+    CloudKit["CloudKit"]
+    
     Backend <--> BGTaskManager
     Backend <--> ArticleSvc
     MigAdapter --> BGTaskManager
@@ -27,6 +32,11 @@ flowchart TD
     LocalStorage --> UI
     Backend --> NotificationSystem
     NotificationSystem --> UI
+    
+    CloudKit <--> CloudKitRC
+    CloudKitRC --> LocalStorage
+    CloudKitHM --> CloudKitRC
+    CloudKitHM --> LocalStorage
 ```
 
 ## Key Components
@@ -88,6 +98,25 @@ flowchart LR
     UI -->|"Direct optimized queries"| DC
 ```
 
+The ArticleService similarly acts as a repository, but adds CloudKit awareness:
+
+```mermaid
+flowchart LR
+    UI["UI Components"]
+    VM["ViewModels"]
+    AS["ArticleService"]
+    CK["CloudKit"]
+    SD["SwiftData"]
+    CKHM["CloudKitHealthMonitor"]
+    
+    UI --> VM
+    VM --> AS
+    AS -->|"Sync data"| CK
+    AS -->|"Local storage"| SD
+    CKHM -->|"Health status"| AS
+    AS -->|"Storage mode switch"| SD
+```
+
 The UI components (particularly NewsView) now have two data access paths:
 1. Through SyncManager for general operations and data synchronization
 2. Directly to DatabaseCoordinator for optimized, filtered queries like topic switching
@@ -97,8 +126,84 @@ The UI components (particularly NewsView) now have two data access paths:
 - **Views**: SwiftUI views like NewsView, NewsDetailView
 - **ViewModels**: Implemented as ObservableObjects that prepare data for views
 
-### Background Processing
-Uses Swift's background task framework to perform sync operations when the app is in the background.
+### CloudKit Integration Patterns
+
+### Health Monitoring State Machine
+The CloudKit integration uses a state machine pattern to track and manage CloudKit operational health:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unknown
+    Unknown --> Healthy: 2+ Successful operations
+    Unknown --> Degraded: Initial failure
+    Healthy --> Degraded: Any operation failure
+    Degraded --> Failed: 3+ Consecutive failures 
+    Degraded --> Healthy: 2+ Successful operations
+    Failed --> Degraded: Any successful operation
+    Degraded --> Failed: Additional failures
+```
+
+This state machine:
+- Tracks CloudKit operational health through successive operations
+- Allows for immediate degradation but requires multiple successes for recovery
+- Enables threshold-based decisions for fallback to local storage
+- Provides clear state transitions for UI notifications
+
+### CloudKit Request Coordination
+The CloudKit request coordination uses a priority queue system with type isolation:
+
+```mermaid
+flowchart TD
+    CKOp1["CloudKit Operation"] --> RC["RequestCoordinator (Actor)"]
+    CKOp2["CloudKit Operation"] --> RC
+    CKOp3["CloudKit Operation"] --> RC
+    
+    subgraph "RequestCoordinator"
+        TypeQueues["Type-specific Queues"]
+        ActiveOps["Active Operations"]
+    end
+    
+    RC --> TypeQueues
+    TypeQueues --> ActiveOps
+    ActiveOps --> CK["CloudKit"]
+    CK --> HM["HealthMonitor"]
+    HM --> SM["Storage Mode"]
+```
+
+Key aspects:
+- Operations are categorized by type (export, import, setup, fetch, modify)
+- Only one operation of each type can run at a time
+- Pending operations are queued based on priority
+- Results feed back to the health monitoring system
+- Proper error handling with consistent reporting
+
+### Graceful Degradation Pattern
+The system implements a graceful degradation pattern for CloudKit failures:
+
+```mermaid
+flowchart TD
+    Start[App Start] --> Check{CloudKit Available?}
+    Check -->|Yes| UseCloudKit[Use CloudKit Storage]
+    Check -->|No| UseLocal[Use Local Storage]
+    
+    UseCloudKit --> Monitor{Health Monitor}
+    Monitor -->|"Health Degraded"| Degrade[Switch to Local]
+    Monitor -->|"Health Improved"| Recover[Switch to CloudKit]
+    
+    UseLocal --> BGCheck{Background Check}
+    BGCheck -->|"Available Again"| AttemptRecover[Attempt Recovery]
+    AttemptRecover --> Check
+```
+
+This pattern ensures:
+- System always starts in an operational state regardless of CloudKit availability
+- Runtime failures trigger graceful mode switching without data loss
+- Transparent recovery when conditions improve
+- Users are notified of important state changes
+- Periodic background checks attempt recovery automatically
+
+## Background Processing
+Uses Swift's background task framework to perform sync operations when the app is in the background. CloudKit health checks are scheduled using BGTaskScheduler to run periodically when the app is in the background.
 
 ## Concurrency Patterns
 
@@ -341,6 +446,12 @@ This pattern avoids the EXC_BAD_ACCESS crashes and freezes that can occur when S
   1. First try optimized database method
   2. Fall back to cache if database operation fails
   3. Final fallback to traditional filtering for guaranteed results
+- CloudKit error handling with state-based recovery:
+  1. Detect CloudKit issues using health monitoring state machine
+  2. Switch to local storage when CloudKit fails repeatedly
+  3. Provide user feedback through notifications
+  4. Attempt automatic recovery when conditions improve
+  5. Monitor system events (account changes, network availability) for recovery triggers
 
 ## Testing Approach
 - Unit tests for core business logic
@@ -463,6 +574,7 @@ The current SyncManager acts as a repository but will be replaced with a more fo
 | Direct UI database access | ViewModel-mediated access |
 | BackgroundContextManager | Task + UNUserNotificationCenter |
 | Push notification handling in AppDelegate | Focused async notification handlers |
+| Manual CloudKit checks | CloudKitHealthMonitor + CloudKitRequestCoordinator |
 
 ### Implementation Phases
 

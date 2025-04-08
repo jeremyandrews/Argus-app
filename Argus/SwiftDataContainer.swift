@@ -29,12 +29,18 @@ class SwiftDataContainer {
     // Status tracking
     private(set) var lastError: Error?
     private(set) var cloudKitError: Error?
+    
+    // Health monitor for CloudKit operations
+    let healthMonitor: CloudKitHealthMonitor
+    
+    // Request coordinator for managing CloudKit operations
+    private let requestCoordinator: CloudKitRequestCoordinator
 
     // Initialization status
     var status: String {
         switch containerType {
         case .cloudKit:
-            return "Using CloudKit integration"
+            return "Using CloudKit integration (\(healthMonitor.status.emoji) \(healthMonitor.status.rawValue))"
         case .localPersistent:
             return "Using local persistent storage"
         case .fallback:
@@ -57,6 +63,13 @@ class SwiftDataContainer {
         containerType = .fallback // Default until we succeed
         cloudKitError = nil
         lastError = nil
+        
+        // Initialize health monitor
+        healthMonitor = CloudKitHealthMonitor(containerIdentifier: cloudKitContainerIdentifier)
+        CloudKitHealthMonitor.shared = healthMonitor
+        
+        // Initialize request coordinator
+        requestCoordinator = CloudKitRequestCoordinator(containerIdentifier: cloudKitContainerIdentifier)
 
         // Create a schema with ALL required models for migration
         let schema = Schema([
@@ -79,23 +92,40 @@ class SwiftDataContainer {
 
         do {
             // Create configuration with CloudKit integration
-            // Use a simple ModelConfiguration with URL/schema
-            // SwiftData should detect the CloudKit container from the app's entitlements
             ModernizationLogger.log(.debug, component: .cloudKit,
                                     message: "Setting up CloudKit container for identifier: \(cloudKitContainerIdentifier)")
             let cloudKitConfig = ModelConfiguration(schema: schema)
 
             container = try ModelContainer(for: schema, configurations: [cloudKitConfig])
+            
+            // Set as provisional CloudKit container, pending verification
             containerType = .cloudKit
 
             ModernizationLogger.logTransitionCompletion(
                 "CloudKit container creation",
                 component: .cloudKit,
                 success: true,
-                detail: "Successfully created container with CloudKit integration"
+                detail: "Container created, verifying operational status"
             )
-
-            print("CloudKit-enabled SwiftData container successfully created")
+            
+            // IMPORTANT: Container creation succeeded, but we need to verify
+            // CloudKit operations actually work by running a test
+            Task {
+                if await healthMonitor.verifyCloudKitAvailability() {
+                    // CloudKit is fully operational
+                    ModernizationLogger.log(.info, component: .cloudKit, 
+                        message: "CloudKit integration verified and operational")
+                } else {
+                    // Container created but operations fail, switch to local mode
+                    ModernizationLogger.logFallback(
+                        from: "CloudKit storage",
+                        to: "Local persistent storage",
+                        reason: "CloudKit operational verification failed",
+                        component: .cloudKit
+                    )
+                    await switchToLocalMode()
+                }
+            }
         } catch {
             // Log CloudKit error details
             ModernizationLogger.logCloudKitError(
@@ -169,10 +199,119 @@ class SwiftDataContainer {
                 }
             }
         }
+        
+        // Set up notification observers for CloudKit health changes
+        setupCloudKitHealthObservers()
     }
 
+    /// Switches from CloudKit mode to local persistent storage mode
+    /// Call this when CloudKit operations are failing
+    @MainActor
+    func switchToLocalMode() async {
+        // Only switch if we're currently in CloudKit mode
+        guard containerType == .cloudKit else { return }
+        
+        ModernizationLogger.log(.warning, component: .cloudKit, 
+            message: "Switching from CloudKit to local-only mode")
+        
+        containerType = .localPersistent
+        
+        // Cancel any pending CloudKit operations
+        Task {
+            await requestCoordinator.cancelOperations(ofType: nil)
+        }
+        
+        // If we have a properly created container, keep using it but without CloudKit operations
+        // No need to recreate the container, just change how we use it
+        
+        // Notify observers about the mode change
+        NotificationCenter.default.post(
+            name: .cloudKitModeChanged,
+            object: self,
+            userInfo: ["containerType": containerType.rawValue]
+        )
+    }
+    
+    /// Try to recover CloudKit functionality when it becomes available again
+    @MainActor
+    func attemptCloudKitRecovery() async -> Bool {
+        // Only attempt recovery if we're not already using CloudKit
+        guard containerType != .cloudKit else { return true }
+        
+        // Verify CloudKit is now available
+        if await healthMonitor.verifyCloudKitAvailability() {
+            ModernizationLogger.log(.info, component: .cloudKit,
+                message: "CloudKit recovery successful, reinstating CloudKit mode")
+            
+            // Switch back to CloudKit mode
+            containerType = .cloudKit
+            
+            // Notify observers about the mode change
+            NotificationCenter.default.post(
+                name: .cloudKitModeChanged,
+                object: self,
+                userInfo: ["containerType": containerType.rawValue]
+            )
+            
+            return true
+        }
+        
+        return false
+    }
+    
+    /// Set up observers for CloudKit health status changes
+    private func setupCloudKitHealthObservers() {
+        NotificationCenter.default.addObserver(
+            forName: .cloudKitHealthStatusChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            
+            // If health status indicates failure, switch to local mode
+            if let status = notification.userInfo?["status"] as? String,
+               status == CloudKitHealthMonitor.HealthStatus.failed.rawValue,
+               self.containerType == .cloudKit {
+                
+                Task { @MainActor in
+                    await self.switchToLocalMode()
+                }
+            }
+        }
+    }
+    
+    /// Schedule a CloudKit operation through the coordinator
+    /// This method will check health status first
+    func scheduleCloudKitOperation<T: CKOperation>(_ operation: T, 
+                                                 type: CloudKitRequestCoordinator.RequestType, 
+                                                 priority: Int = 1,
+                                                 description: String = "") async -> UUID? {
+        // Check if we should use CloudKit at all
+        guard containerType == .cloudKit && !healthMonitor.shouldUseFallback() else {
+            ModernizationLogger.log(.warning, component: .cloudKit,
+                message: "Skipping CloudKit operation - using local mode or health check failed")
+            return nil
+        }
+        
+        // Schedule through coordinator
+        return await requestCoordinator.scheduleOperation(
+            operation,
+            type: type,
+            priority: priority,
+            description: description
+        )
+    }
+    
     /// Makes a best effort to delete any persistent store files
     func resetStore() -> String {
+        // Cancel any scheduled health checks
+        healthMonitor.cancelScheduledChecks()
+        
+        // Cancel any pending operations
+        Task {
+            await requestCoordinator.cancelOperations(ofType: nil)
+        }
+        
         var deletedFiles: [String] = []
         var errors: [String] = []
 
@@ -295,6 +434,34 @@ class SwiftDataContainer {
     @MainActor
     func mainContext() -> ModelContext {
         return ModelContext(container)
+    }
+}
+
+// Extension to define CloudKit-related notification names
+extension Notification.Name {
+    /// Posted when the CloudKit mode changes (between CloudKit and local-only)
+    static let cloudKitModeChanged = Notification.Name("cloudKitModeChanged")
+}
+
+// Make ContainerType Rawrepresentable for notifications
+extension SwiftDataContainer.ContainerType: RawRepresentable {
+    typealias RawValue = String
+    
+    init?(rawValue: String) {
+        switch rawValue {
+        case "cloudKit": self = .cloudKit
+        case "localPersistent": self = .localPersistent
+        case "fallback": self = .fallback
+        default: return nil
+        }
+    }
+    
+    var rawValue: String {
+        switch self {
+        case .cloudKit: return "cloudKit"
+        case .localPersistent: return "localPersistent"
+        case .fallback: return "fallback"
+        }
     }
 }
 

@@ -1,6 +1,8 @@
 import SQLite3
 import SwiftData
 import SwiftUI
+import BackgroundTasks
+import CloudKit
 
 @main
 struct ArgusApp: App {
@@ -9,7 +11,12 @@ struct ArgusApp: App {
 
     // Flag to show the SwiftData test interface
     @State private var showSwiftDataTest = false
-
+    
+    // State for CloudKit status alert
+    @State private var showCloudKitStatusAlert = false
+    @State private var cloudKitAlertMessage = ""
+    @State private var cloudKitStatusChange = false
+    
     // Use the existing SwiftDataContainer instead of creating our own
     @MainActor
     static var sharedModelContainer: ModelContainer {
@@ -27,6 +34,13 @@ struct ArgusApp: App {
                 // Main content
                 ContentView()
                     .modelContainer(ArgusApp.sharedModelContainer)
+                    .onAppear {
+                        // Set up CloudKit observers when app appears
+                        setupCloudKitObservers()
+                        
+                        // Register background tasks
+                        registerBackgroundTasks()
+                    }
                     .onChange(of: scenePhase) { _, newPhase in
                         if newPhase == .active {
                             Task { @MainActor in
@@ -35,15 +49,26 @@ struct ArgusApp: App {
 
                                 // Check if migration is needed
                                 await checkMigration()
+                                
+                                // Check CloudKit health on becoming active
+                                await performCloudKitHealthCheck()
                             }
                         } else if newPhase == .background {
                             // Mark migration as interrupted if app goes to background during migration
                             if migrationCoordinator.isMigrationActive {
                                 migrationCoordinator.appWillTerminate()
                             }
+                            
+                            // Schedule background health check
+                            scheduleCloudKitHealthCheck()
                         }
                     }
                     .disabled(migrationCoordinator.isMigrationActive) // Disable all interaction during migration
+                    .alert("CloudKit Status Change", isPresented: $showCloudKitStatusAlert) {
+                        Button("OK", role: .cancel) { }
+                    } message: {
+                        Text(cloudKitAlertMessage)
+                    }
 
                 // Migration modal with highest z-index when active
                 if migrationCoordinator.isMigrationActive {
@@ -58,6 +83,145 @@ struct ArgusApp: App {
                 // Check migration on app launch
                 await checkMigration()
             }
+        }
+    }
+    
+    /// Sets up notification observers for CloudKit status changes
+    private func setupCloudKitObservers() {
+        // Listen for health status changes
+        NotificationCenter.default.addObserver(
+            forName: .cloudKitHealthStatusChanged,
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let status = notification.userInfo?["status"] as? String,
+               let previousStatus = notification.userInfo?["previousStatus"] as? String,
+               status != previousStatus {
+                
+                // Only show alert for significant changes
+                if status == CloudKitHealthMonitor.HealthStatus.failed.rawValue {
+                    cloudKitAlertMessage = "CloudKit sync is currently unavailable. Your data will be stored locally until iCloud is available again."
+                    showCloudKitStatusAlert = true
+                } else if status == CloudKitHealthMonitor.HealthStatus.healthy.rawValue && 
+                          previousStatus == CloudKitHealthMonitor.HealthStatus.failed.rawValue {
+                    cloudKitAlertMessage = "CloudKit sync has been restored. Your data will now sync across your devices."
+                    showCloudKitStatusAlert = true
+                }
+            }
+        }
+        
+        // Listen for mode changes between CloudKit and local storage
+        NotificationCenter.default.addObserver(
+            forName: .cloudKitModeChanged,
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let containerType = notification.userInfo?["containerType"] as? String {
+                let isUsingCloudKit = containerType == "cloudKit"
+                
+                cloudKitStatusChange = true
+                cloudKitAlertMessage = isUsingCloudKit ? 
+                    "CloudKit sync has been enabled. Your data will now sync across your devices." :
+                    "CloudKit sync is currently disabled. Your data will be stored locally until iCloud is available again."
+                showCloudKitStatusAlert = true
+            }
+        }
+        
+        // Also observe account status and network condition changes
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.CKAccountChanged, 
+            object: nil,
+            queue: .main
+        ) { _ in
+            // Account status changed - check if CloudKit is now available
+            Task { @MainActor in
+                await attemptCloudKitRecovery()
+            }
+        }
+    }
+    
+    /// Performs a health check on CloudKit to update status
+    @MainActor
+    private func performCloudKitHealthCheck() async {
+        await SwiftDataContainer.shared.healthMonitor.performHealthCheck()
+    }
+    
+    /// Attempts to recover CloudKit functionality
+    @MainActor
+    private func attemptCloudKitRecovery() async {
+        // Only try recovery if we're not already using CloudKit
+        let container = SwiftDataContainer.shared
+        
+        if container.containerType != .cloudKit, await container.attemptCloudKitRecovery() {
+            // Successfully recovered - no need to show alert as .cloudKitModeChanged notification will trigger it
+            ModernizationLogger.log(.info, component: .cloudKit,
+                message: "CloudKit recovery successful")
+        }
+    }
+    
+    /// Registers background tasks for CloudKit health monitoring
+    private func registerBackgroundTasks() {
+        // Register the background task identifier
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: "com.andrews.Argus.cloudKitHealthCheck",
+            using: nil
+        ) { task in
+            handleCloudKitHealthCheck(task: task as! BGProcessingTask)
+        }
+    }
+    
+    /// Schedules a background health check for CloudKit
+    private func scheduleCloudKitHealthCheck() {
+        let request = BGProcessingTaskRequest(identifier: "com.andrews.Argus.cloudKitHealthCheck")
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
+        
+        // Schedule for about 1 hour later
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 3600)
+        
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            ModernizationLogger.log(.debug, component: .cloudKit,
+                message: "Scheduled CloudKit health check for background execution")
+        } catch {
+            ModernizationLogger.log(.error, component: .cloudKit,
+                message: "Failed to schedule CloudKit health check: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Handles the background task for CloudKit health check
+    private func handleCloudKitHealthCheck(task: BGProcessingTask) {
+        // Create a task to perform the health check
+        let healthCheckTask = Task.detached(priority: .background) {
+            // Attempt CloudKit recovery
+            let container = SwiftDataContainer.shared
+            if container.containerType != .cloudKit {
+                if await container.healthMonitor.verifyCloudKitAvailability() {
+                    let recoverySucceeded = await container.attemptCloudKitRecovery()
+                    if recoverySucceeded {
+                        ModernizationLogger.log(.info, component: .cloudKit,
+                            message: "CloudKit recovery successful in background task")
+                    }
+                }
+            } else {
+                // Just do a health check if already using CloudKit
+                await container.healthMonitor.performHealthCheck()
+            }
+        }
+        
+        // Set up a task completion handler
+        task.expirationHandler = {
+            healthCheckTask.cancel()
+        }
+        
+        // Set up task completion
+        Task {
+            await healthCheckTask.value
+            
+            // Schedule next health check before marking complete
+            scheduleCloudKitHealthCheck()
+            
+            task.setTaskCompleted(success: true)
         }
     }
 
