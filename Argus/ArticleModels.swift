@@ -84,6 +84,7 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     }
 
     let url = json["url"] as? String // Extract the URL but don't make it required
+    // Use the global extractDomain function from CommonUtilities
     let domain = extractDomain(from: url ?? "")
 
     // Include quality badge information in the first pass
@@ -135,29 +136,4 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     )
 }
 
-func extractDomain(from urlString: String) -> String {
-    // 1) Remove scheme (e.g. http://, https://)
-    // 2) Remove leading "www."
-    // 3) Return the rest (the domain)
-    var working = urlString.lowercased()
-
-    // Strip scheme
-    if working.hasPrefix("http://") {
-        working.removeFirst("http://".count)
-    } else if working.hasPrefix("https://") {
-        working.removeFirst("https://".count)
-    }
-
-    // Strip any leading "www."
-    if working.hasPrefix("www.") {
-        working.removeFirst("www.".count)
-    }
-
-    // Now split on first slash to remove any path
-    if let slashIndex = working.firstIndex(of: "/") {
-        working = String(working[..<slashIndex])
-    }
-
-    // Trim whitespace, just in case
-    return working.trimmingCharacters(in: .whitespacesAndNewlines)
-}
+// Function moved to CommonUtilities.swift for centralized implementation

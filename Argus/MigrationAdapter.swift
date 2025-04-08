@@ -2,8 +2,8 @@ import Foundation
 import SwiftData
 import UIKit
 
-/// Migration adapter to help transition from SyncManager to BackgroundTaskManager and ArticleService
-/// This provides backward compatibility while we refactor remaining legacy code references
+/// Migration adapter to enable transition to modern architecture components
+/// This provides backward compatibility while we migrate to BackgroundTaskManager and ArticleService
 class MigrationAdapter {
     static let shared = MigrationAdapter()
 
@@ -19,9 +19,9 @@ class MigrationAdapter {
         self.articleService = articleService
     }
 
-    // MARK: - SyncManager Compatibility Methods
+    // MARK: - Legacy Compatibility Methods
 
-    /// Processes an article directly from the server - compatibility method for SyncManager.directProcessArticle
+    /// Processes an article directly from the server - legacy compatibility method
     /// - Parameter jsonURL: The JSON URL of the article to process
     /// - Returns: True if successful, false otherwise
     func directProcessArticle(jsonURL: String) async -> Bool {
@@ -44,7 +44,7 @@ class MigrationAdapter {
         }
     }
 
-    /// Processes multiple articles via ArticleService - compatibility method for SyncManager.processArticlesDirectly
+    /// Processes multiple articles via ArticleService - legacy batch processing compatibility method
     /// - Parameter urls: Array of JSON URLs to process
     func processArticlesDirectly(urls: [String]) async {
         guard !urls.isEmpty else { return }
@@ -88,7 +88,7 @@ class MigrationAdapter {
         }
     }
 
-    /// Performs database maintenance - compatibility method for SyncManager.performScheduledMaintenance
+    /// Performs database maintenance - legacy maintenance method compatibility
     /// - Parameter timeLimit: Optional time limit for the operation
     func performScheduledMaintenance(timeLimit: TimeInterval? = nil) async {
         do {
@@ -98,22 +98,22 @@ class MigrationAdapter {
         }
     }
 
-    /// Compatibility method for SyncManager.registerBackgroundTasks
+    /// Legacy compatibility method for registering background tasks
     func registerBackgroundTasks() {
         backgroundTaskManager.registerBackgroundTasks()
     }
 
-    /// Compatibility method for SyncManager.scheduleBackgroundFetch
+    /// Legacy compatibility method for scheduling background refreshes
     func scheduleBackgroundFetch() {
         backgroundTaskManager.scheduleBackgroundRefresh()
     }
 
-    /// Compatibility method for SyncManager.scheduleBackgroundSync
+    /// Legacy compatibility method for scheduling background processing
     func scheduleBackgroundSync() {
         backgroundTaskManager.scheduleBackgroundProcessing()
     }
 
-    /// Compatibility method for SyncManager.manualSync
+    /// Legacy compatibility method for triggering a manual synchronization
     func manualSync() async -> Bool {
         do {
             _ = try await articleService.performBackgroundSync()
@@ -124,7 +124,7 @@ class MigrationAdapter {
         }
     }
 
-    /// Compatibility method for SyncManager.findExistingArticle
+    /// Legacy compatibility method for finding existing articles
     func findExistingArticle(jsonURL: String, articleID: UUID? = nil, articleURL _: String? = nil) async -> NotificationData? {
         do {
             if let articleID = articleID {
@@ -137,7 +137,7 @@ class MigrationAdapter {
         }
     }
 
-    /// Compatibility method for SyncManager.standardizedArticleExistsCheck
+    /// Legacy compatibility method for checking if an article exists
     func standardizedArticleExistsCheck(jsonURL: String, articleID: UUID? = nil, articleURL: String? = nil) async -> Bool {
         return await findExistingArticle(jsonURL: jsonURL, articleID: articleID, articleURL: articleURL) != nil
     }

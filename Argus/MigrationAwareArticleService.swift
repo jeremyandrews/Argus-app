@@ -2,8 +2,9 @@ import Foundation
 import SwiftData
 import SwiftUI
 
-/// A specialized ArticleService implementation that handles both migration needs and modern operations
-/// This service acts as a bridge during the transition period, supporting both migration system and new architecture
+/// A specialized ArticleService implementation that handles one-time migration needs
+/// This service acts as a bridge during the one-time migration process
+@available(*, deprecated, message: "Use ArticleService directly. This class exists only for the one-time migration process and will be removed in a future update.")
 class MigrationAwareArticleService: ArticleServiceProtocol {
     // MARK: - Properties
 
@@ -96,33 +97,28 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         try await articleService.searchArticles(queryText: queryText, limit: limit)
     }
 
+    @available(*, deprecated, message: "Use ArticleService.shared directly instead")
     func markArticle(id: UUID, asRead isRead: Bool) async throws {
+        // Simply forward to the regular article service - no more legacy database updates
         try await articleService.markArticle(id: id, asRead: isRead)
-
-        // Migration compatibility: also update in legacy system if needed
-        // This maintains state sync during the migration period
-        try await updateLegacyArticleState(id: id, field: "isViewed", value: isRead)
     }
 
+    @available(*, deprecated, message: "Use ArticleService.shared directly instead")
     func markArticle(id: UUID, asBookmarked isBookmarked: Bool) async throws {
+        // Simply forward to the regular article service - no more legacy database updates
         try await articleService.markArticle(id: id, asBookmarked: isBookmarked)
-
-        // Migration compatibility: also update in legacy system if needed
-        try await updateLegacyArticleState(id: id, field: "isBookmarked", value: isBookmarked)
     }
 
+    @available(*, deprecated, message: "Use ArticleService.shared directly instead")
     func markArticle(id: UUID, asArchived isArchived: Bool) async throws {
+        // Simply forward to the regular article service - no more legacy database updates
         try await articleService.markArticle(id: id, asArchived: isArchived)
-
-        // Migration compatibility: also update in legacy system if needed
-        try await updateLegacyArticleState(id: id, field: "isArchived", value: isArchived)
     }
 
+    @available(*, deprecated, message: "Use ArticleService.shared directly instead")
     func deleteArticle(id: UUID) async throws {
+        // Simply forward to the regular article service - no more legacy database updates
         try await articleService.deleteArticle(id: id)
-
-        // Migration compatibility: also delete in legacy system if needed
-        try await deleteLegacyArticle(id: id)
     }
 
     func processArticleData(_ articles: [ArticleJSON]) async throws -> Int {

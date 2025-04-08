@@ -556,10 +556,11 @@ This file captures important patterns, preferences, and project intelligence tha
 - **Graceful Degradation**: Client returns empty arrays for 404 responses
 
 ## Modernization Component Mapping
-- **SyncManager → ArticleService**:
-  - ArticleService will handle all synchronization operations using async/await
-  - Will interact directly with SwiftData rather than through DatabaseCoordinator
-  - Will implement proper error handling and retry logic
+- **SyncManager → BackgroundTaskManager + ArticleService** (✅ Completed):
+  - ArticleService handles all data synchronization operations using async/await
+  - BackgroundTaskManager handles all background task scheduling and execution
+  - MigrationAdapter provides backward compatibility for legacy code during transition
+  - CommonUtilities contains shared utility functions extracted from SyncManager
 
 - **DatabaseCoordinator → SwiftData ModelContext**:
   - Direct use of SwiftData ModelContext will replace DatabaseCoordinator

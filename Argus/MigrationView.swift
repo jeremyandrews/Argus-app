@@ -38,61 +38,34 @@ struct MigrationView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .disabled((coordinator.progress > 0 && coordinator.progress < 1.0 && !coordinator.isMigrationActive) || coordinator.isOneTimeMigrationCompleted)
+            .disabled((coordinator.progress > 0 && coordinator.progress < 1.0 && !coordinator.isMigrationActive) || coordinator.isMigrationCompleted)
 
-            // Add reset buttons for testing
-            VStack {
-                // Regular reset button
-                Button("Reset Migration State") {
+            // Manual test button (only shown if migration not completed)
+            if !coordinator.isMigrationCompleted {
+                Button("Run Migration Manually") {
                     Task {
-                        // Use the coordinator's reset method
-                        coordinator.resetOneTimeMigrationStatus()
-
-                        // Also reset the service if available
-                        let service = await MigrationService(mode: .production)
-                        service.resetMigration()
-
-                        // Refresh coordinator status
-                        _ = await coordinator.checkMigrationStatus()
+                        isMigrating = true
+                        // Handle the migration result
+                        let success = await coordinator.startMigration()
+                        if !success {
+                            // If migration failed, stop showing the modal
+                            isMigrating = false
+                        }
                     }
                 }
                 .buttonStyle(.bordered)
-                .foregroundColor(.orange)
                 .padding(.top, 8)
+                .foregroundColor(.blue)
 
-                // Force reset button - always visible and forceful
-                Button("Force Complete Reset (Debug)") {
-                    Task {
-                        // Use our new force reset method
-                        await coordinator.forceCompleteReset()
-
-                        // Refresh coordinator status
-                        _ = await coordinator.checkMigrationStatus()
-                    }
-                }
-                .buttonStyle(.bordered)
-                .foregroundColor(.red)
-                .padding(.top, 4)
+                // Info about one-time migration
+                Text("Migration runs only once per device")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 2)
             }
-
-            // Manual test button
-            Button("Run Migration Manually") {
-                Task {
-                    isMigrating = true
-                    // Handle the migration result
-                    let success = await coordinator.startMigration()
-                    if !success {
-                        // If migration failed, stop showing the modal
-                        isMigrating = false
-                    }
-                }
-            }
-            .buttonStyle(.bordered)
-            .padding(.top, 8)
-            .foregroundColor(.blue)
 
             // Migration completion status (shown if completed)
-            if coordinator.isOneTimeMigrationCompleted {
+            if coordinator.isMigrationCompleted {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)

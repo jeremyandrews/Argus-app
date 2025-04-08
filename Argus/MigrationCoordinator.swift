@@ -5,8 +5,7 @@ import SwiftUI
 
 // Keys for UserDefaults
 private enum MigrationDefaults {
-    static let migrationModeKey = "migration_mode"
-    static let oneTimeMigrationCompletedKey = "one_time_migration_completed"
+    static let migrationCompletedKey = "migration_completed"
     static let migrationCountKey = "migration_count"
     static let lastMigrationDateKey = "last_migration_date"
 }
@@ -23,13 +22,10 @@ final class MigrationCoordinator: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var status: String = ""
 
-    // Migration mode - now permanent production mode
-    private(set) var currentMigrationMode: MigrationMode = .production
-
     // Additional tracking properties
     @Published private(set) var migrationCount: Int = 0
     @Published private(set) var lastMigrationDate: Date?
-    @Published private(set) var isOneTimeMigrationCompleted: Bool = false
+    @Published private(set) var isMigrationCompleted: Bool = false
 
     // Internal state and service
     private var migrationService: MigrationService?
@@ -45,12 +41,8 @@ final class MigrationCoordinator: ObservableObject {
     private func loadMigrationSettings() {
         let defaults = UserDefaults.standard
 
-        // Note: We no longer load the migration mode - always using production mode
-        ModernizationLogger.log(.info, component: .migration,
-                                message: "Using permanent one-time migration mode (production)")
-
-        // Load one-time migration completion state
-        isOneTimeMigrationCompleted = defaults.bool(forKey: MigrationDefaults.oneTimeMigrationCompletedKey)
+        // Load migration completion state
+        isMigrationCompleted = defaults.bool(forKey: MigrationDefaults.migrationCompletedKey)
 
         // Load migration count
         migrationCount = defaults.integer(forKey: MigrationDefaults.migrationCountKey)
@@ -62,8 +54,8 @@ final class MigrationCoordinator: ObservableObject {
 
         // Log current state
         ModernizationLogger.log(.info, component: .migration,
-                                message: "Migration settings loaded - Mode: \(currentMigrationMode.rawValue), " +
-                                    "Completed: \(isOneTimeMigrationCompleted), " +
+                                message: "Migration settings loaded - " +
+                                    "Completed: \(isMigrationCompleted), " +
                                     "Count: \(migrationCount)")
     }
 
@@ -71,8 +63,7 @@ final class MigrationCoordinator: ObservableObject {
     private func saveMigrationSettings() {
         let defaults = UserDefaults.standard
 
-        defaults.set(currentMigrationMode.rawValue, forKey: MigrationDefaults.migrationModeKey)
-        defaults.set(isOneTimeMigrationCompleted, forKey: MigrationDefaults.oneTimeMigrationCompletedKey)
+        defaults.set(isMigrationCompleted, forKey: MigrationDefaults.migrationCompletedKey)
         defaults.set(migrationCount, forKey: MigrationDefaults.migrationCountKey)
 
         if let date = lastMigrationDate {
@@ -87,16 +78,16 @@ final class MigrationCoordinator: ObservableObject {
 
     /// Public method to check if migration is needed
     func checkMigrationStatus() async -> Bool {
-        // If one-time migration is completed and mode is production, no migration is needed
-        if currentMigrationMode == .production && isOneTimeMigrationCompleted {
+        // If migration is already completed, no migration is needed
+        if isMigrationCompleted {
             ModernizationLogger.log(.info, component: .migration,
-                                    message: "One-time migration already completed, no migration needed")
+                                    message: "Migration already completed, no migration needed")
             return false
         }
 
-        // Lazy initialization of migration service with current mode
+        // Lazy initialization of migration service
         if migrationService == nil {
-            migrationService = await MigrationService(mode: currentMigrationMode)
+            migrationService = await MigrationService()
         }
 
         // Setup bindings if not already done
@@ -107,10 +98,9 @@ final class MigrationCoordinator: ObservableObject {
             return false
         }
 
-        isMigrationRequired = service.migrationMode == .temporary ||
-            service.wasMigrationInterrupted() ||
+        isMigrationRequired = service.wasMigrationInterrupted() ||
             service.migrationProgress.state == .inProgress ||
-            (service.migrationMode == .production && !isOneTimeMigrationCompleted)
+            !isMigrationCompleted
 
         ModernizationLogger.log(.info, component: .migration,
                                 message: "Migration status check - Required: \(isMigrationRequired)")
@@ -127,7 +117,7 @@ final class MigrationCoordinator: ObservableObject {
         }
 
         ModernizationLogger.log(.info, component: .migration,
-                                message: "Starting migration in \(service.migrationMode.rawValue) mode")
+                                message: "Starting migration")
 
         // Flag as active
         isMigrationActive = true
@@ -141,11 +131,11 @@ final class MigrationCoordinator: ObservableObject {
         migrationCount += 1
         lastMigrationDate = Date()
 
-        // If we're in production mode and migration succeeded, mark it as completed
-        if result && service.migrationMode == .production {
-            isOneTimeMigrationCompleted = true
+        // If migration succeeded, mark it as completed
+        if result {
+            isMigrationCompleted = true
             ModernizationLogger.log(.info, component: .migration,
-                                    message: "One-time migration completed successfully")
+                                    message: "Migration completed successfully")
         }
 
         // Save updated settings
@@ -202,157 +192,7 @@ final class MigrationCoordinator: ObservableObject {
         isMigrationActive = false
     }
 
-    /// Reset one-time migration status (for testing)
-    func resetOneTimeMigrationStatus() {
-        ModernizationLogger.log(.warning, component: .migration,
-                                message: "Resetting one-time migration status")
-        isOneTimeMigrationCompleted = false
-        saveMigrationSettings()
-    }
-
-    /// Force a complete migration reset - clears all migration state and forces re-migration
-    /// Additionally ensures database tables are properly rebuilt
-    func forceCompleteReset() async {
-        ModernizationLogger.log(.warning, component: .migration,
-                                message: "FORCING COMPLETE MIGRATION RESET")
-
-        // Reset one-time migration completion flag
-        isOneTimeMigrationCompleted = false
-
-        // Reset any stored migration progress
-        let defaults = UserDefaults.standard
-        defaults.removeObject(forKey: "migrationProgress")
-        defaults.removeObject(forKey: "one_time_migration_completed")
-
-        // CRITICAL: Delete and recreate database files
-        // First attempt to use the SwiftDataContainer's resetStore method
-        let resetResult = SwiftDataContainer.shared.resetStore()
-        ModernizationLogger.log(.warning, component: .migration,
-                                message: "Database reset result: \(resetResult)")
-
-        // Also try direct deletion of any default.store files
-        // that might be causing the table creation issues
-        do {
-            // Try to find and delete the default store file
-            let fileManager = FileManager.default
-            let applicationSupportURL = try fileManager.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: false
-            )
-
-            // Paths to check for CoreData stores
-            let possiblePaths = [
-                applicationSupportURL.appendingPathComponent("default.store"),
-                applicationSupportURL.appendingPathComponent("Argus.store"),
-                applicationSupportURL.appendingPathComponent("ArgusDB.store"),
-            ]
-
-            // Extensions to check for each store path
-            let extensions = ["", "-wal", "-shm", ".sqlite-wal", ".sqlite-shm", ".sqlite"]
-
-            // Try to remove all store files and variants
-            for path in possiblePaths {
-                for ext in extensions {
-                    let filePath = path.appendingPathExtension(ext)
-                    if fileManager.fileExists(atPath: filePath.path) {
-                        try fileManager.removeItem(at: filePath)
-                        ModernizationLogger.log(.info, component: .migration,
-                                                message: "Successfully deleted database file: \(filePath.path)")
-                    }
-                }
-            }
-        } catch {
-            ModernizationLogger.log(.error, component: .migration,
-                                    message: "Error deleting database files: \(error.localizedDescription)")
-        }
-
-        // Clear service if it exists
-        if migrationService != nil {
-            migrationService = await MigrationService(mode: currentMigrationMode)
-            migrationService?.resetMigration()
-        }
-
-        // Reset progress tracking
-        progress = 0
-        status = "Reset - migration required"
-
-        // Force migration to be required
-        isMigrationRequired = true
-
-        // Save all settings
-        saveMigrationSettings()
-
-        // CRITICAL: Ensure database tables are recreated AFTER all files are deleted
-        // This is important because we need to make sure the legacy tables exist
-        // for the migration process to work properly
-        ModernizationLogger.log(.info, component: .migration,
-                                message: "Triggering database tables creation after reset")
-
-        Task {
-            do {
-                // First try to ensure database indexes which will also create tables if needed
-                let indexResult = try ArgusApp.ensureDatabaseIndexes()
-                ModernizationLogger.log(.info, component: .migration,
-                                        message: "Database tables and indexes created: \(indexResult)")
-
-                // Verify the tables were created by checking if they exist
-                let tablesExist = await verifyTablesExistAfterReset()
-                if tablesExist {
-                    ModernizationLogger.log(.info, component: .migration,
-                                            message: "Legacy database tables verified after reset")
-                } else {
-                    ModernizationLogger.log(.error, component: .migration,
-                                            message: "Failed to verify legacy tables after reset - migration may fail")
-                }
-            } catch {
-                ModernizationLogger.log(.error, component: .migration,
-                                        message: "Error creating database tables/indexes: \(error.localizedDescription)")
-            }
-        }
-
-        ModernizationLogger.log(.info, component: .migration,
-                                message: "Migration completely reset - will run on next attempt")
-    }
-
-    /// Helper method to verify tables exist after a reset
-    private func verifyTablesExistAfterReset() async -> Bool {
-        // Using SQLite directly to check if the tables exist
-        guard let dbURL = ArgusApp.sharedModelContainer.configurations.first?.url else {
-            return false
-        }
-
-        var db: OpaquePointer?
-        defer {
-            if db != nil {
-                sqlite3_close(db)
-            }
-        }
-
-        if sqlite3_open(dbURL.path, &db) != SQLITE_OK {
-            return false
-        }
-
-        let tableCheckQuery = """
-            SELECT count(*) FROM sqlite_master 
-            WHERE type='table' AND (name LIKE '%NOTIFICATIONDATA' OR name LIKE '%SEENARTICLE');
-        """
-
-        var statement: OpaquePointer?
-        var tableCount = 0
-
-        if sqlite3_prepare_v2(db, tableCheckQuery, -1, &statement, nil) == SQLITE_OK {
-            if sqlite3_step(statement) == SQLITE_ROW {
-                tableCount = Int(sqlite3_column_int(statement, 0))
-            }
-            sqlite3_finalize(statement)
-
-            return tableCount >= 2
-        }
-
-        return false
-    }
+    // Reset functionality is no longer needed in one-time migration approach
 
     /// Mark migration as completed without actually running it
     /// Used when source tables don't exist but we need to mark migration as complete
@@ -360,7 +200,7 @@ final class MigrationCoordinator: ObservableObject {
         ModernizationLogger.log(.warning, component: .migration,
                                 message: "Manually marking migration as completed without migration")
         // Set as completed
-        isOneTimeMigrationCompleted = true
+        isMigrationCompleted = true
         // Update tracking
         migrationCount += 1
         lastMigrationDate = Date()

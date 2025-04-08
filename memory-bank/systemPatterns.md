@@ -10,14 +10,19 @@ Argus implements a client-side architecture that focuses on:
 ```mermaid
 flowchart TD
     Backend["Backend Server"]
-    SyncManager["SyncManager"]
+    BGTaskManager["BackgroundTaskManager"]
+    ArticleSvc["ArticleService"]
+    MigAdapter["MigrationAdapter"]
     DbCoord["DatabaseCoordinator (Actor)"]
     LocalStorage["SwiftData"]
     NotificationSystem["Notification System"]
     UI["SwiftUI Views"]
     
-    Backend <--> SyncManager
-    SyncManager --> DbCoord
+    Backend <--> BGTaskManager
+    Backend <--> ArticleSvc
+    MigAdapter --> BGTaskManager
+    MigAdapter --> ArticleSvc
+    ArticleSvc --> LocalStorage
     DbCoord <--> LocalStorage
     LocalStorage --> UI
     Backend --> NotificationSystem
@@ -183,13 +188,14 @@ This pattern is used in services like MigrationAwareArticleService to handle Dat
 - NSCache for in-memory caching of frequently accessed data
 - Batch processing for efficient handling of multiple articles
 
-### Self-Contained Migration Architecture
+### One-Time Migration Architecture
 
-The migration system uses a coordinator pattern to ensure clean isolation and future removability:
+The migration system uses a coordinator pattern to ensure clean isolation and future removability, with an emphasis on running exactly once per device:
 
 ```mermaid
 flowchart TD
     App[ArgusApp] --> Coordinator[MigrationCoordinator]
+    Coordinator --> UserDefaults[UserDefaults State]
     Coordinator --> Service[MigrationService]
     Service --> DBOld[Old Database]
     Service --> DBNew[SwiftData]
@@ -208,15 +214,18 @@ This architecture ensures:
 1. Single entry point through the MigrationCoordinator
 2. Complete isolation of migration logic
 3. Minimal touch points with the main application
-4. Easy removal when migration is complete for all users
+4. One-time execution with persistent state tracking
+5. Easy removal when migration is complete for all users
 
-#### Migration Flow Process
+#### One-Time Migration Flow
 
 ```mermaid
 flowchart TD
-    Start[App Launch] --> Check{Migration Required?}
-    Check -->|No| Continue[Continue App Flow]
-    Check -->|Yes| ShowModal[Show Modal UI]
+    Start[App Launch] --> CheckDefault{Migration Completed\nin UserDefaults?}
+    CheckDefault -->|Yes| Continue[Continue App Flow]
+    CheckDefault -->|No| CheckInterrupted{Was Migration\nInterrupted?}
+    CheckInterrupted -->|No| ShowModal[Show Migration Modal UI]
+    CheckInterrupted -->|Yes| ShowModal
     ShowModal --> ProcessBatch[Process Article Batch]
     ProcessBatch --> Exists{Article Exists?}
     Exists -->|Yes| Update[Update Status Only]
@@ -225,16 +234,18 @@ flowchart TD
     Create --> NextBatch
     NextBatch -->|Yes| ProcessBatch
     NextBatch -->|No| Complete[Complete Migration]
-    Complete --> HideModal[Hide Modal UI]
+    Complete --> MarkCompleted[Set Migration Completed\nin UserDefaults]
+    MarkCompleted --> HideModal[Hide Modal UI]
     HideModal --> Continue
 ```
 
-The migration temporarily operates in a dual-database mode, where it:
-1. Automatically runs on app startup
-2. Uses blocking modal UI to prevent user interaction during migration
-3. Performs state synchronization to keep old and new databases in sync
-4. Will eventually be switchable to one-time migration mode
-5. Can be completely removed from the codebase in a future update
+The migration now operates with a true one-time approach, where it:
+1. Checks if migration is already completed using UserDefaults
+2. Only runs once per device, even after app updates or reinstalls
+3. Uses blocking modal UI to prevent user interaction during migration
+4. Creates a read-only view of the legacy database for migration purposes
+5. Maintains resilience for interrupted migrations with progress tracking
+6. Can be completely removed from the codebase in a future update once all users have migrated
 
 ### SwiftData Relationship Management
 

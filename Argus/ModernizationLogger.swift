@@ -6,7 +6,7 @@ import os.log
 class ModernizationLogger {
     /// Logging components for categorization
     enum Component: String, CaseIterable {
-        case syncManager = "SyncManager"
+        case sync = "Sync" // Renamed from syncManager
         case migration = "Migration"
         case cloudKit = "CloudKit"
         case apiClient = "APIClient"

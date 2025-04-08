@@ -1,15 +1,37 @@
 # Active Context: Argus iOS App
 
 ## Current Work Focus
-- **Active Development Phase**: Modernization implementation in progress with focus on error handling and robustness
-- **Primary Focus Areas**: Implementing error handling improvements, CloudKit integration fixes, API resilience enhancements, and finalizing migration system
+- **Active Development Phase**: Modernization implementation in progress with focus on error handling, robustness, and simplifying migration
+- **Primary Focus Areas**: Implementing error handling improvements, CloudKit integration fixes, API resilience enhancements, and simplifying migration system
 - **Architecture Refinement**: Creating ModernizationLogger for transition period monitoring and diagnostics
 - **User Experience Improvements**: Improving error recovery, eliminating sync jitter, enhancing offline capabilities, and converting to one-time migration
 - **Cross-Device Capabilities**: Addressing CloudKit integration errors to enable future iPhone/iPad syncing
 - **Migration System Refinement**: Converting from temporary to production migration mode with one-time execution
 - **API Connectivity**: Implementing graceful degradation patterns for API connectivity issues
+- **Duplicate Implementation Removal**: Removing dual-implementation pattern for syncing and displaying content by simplifying MigrationAwareArticleService
 
 ## Recent Changes
+- **Converted Migration System to True One-Time Approach** (Completed):
+  - Simplified MigrationService by removing mode parameter and resetMigration method
+  - Updated MigrationCoordinator to use a consistent "isMigrationCompleted" flag stored in UserDefaults
+  - Removed all reset functionality to ensure migration runs exactly once per device
+  - Enhanced MigrationView UI with clearer messaging about the one-time nature of migration
+  - Removed debug/testing buttons from the production UI
+  - Enhanced deprecation notices in MigrationAwareArticleService to indicate future removal
+  - Updated initialization paths to remove MigrationMode enum entirely
+  - Simplified error handling and state tracking in migration components
+  - Made system more maintainable by removing conditional logic for different migration modes
+
+- **Removed Dual-Implementation Pattern in MigrationAwareArticleService** (Completed):
+  - Removed all write-back operations to the legacy database from MigrationAwareArticleService
+  - Added clear deprecation annotations to encourage direct ArticleService usage
+  - Maintained read-only access to legacy data for migration purposes
+  - Simplified architecture to eliminate redundant database operations
+  - Prepared for eventual removal of legacy components when migration is no longer needed
+  - Improved code maintainability with more straightforward data flow
+  - Made the transition from dual-database mode to single-database mode more explicit
+  - Reduced potential bugs from maintaining state across multiple databases
+
 - **Attempted Fix for Missing Engine Stats and Related Articles with Chevron Navigation** (Unsuccessful):
   - Identified two interrelated issues:
     1. Missing Argus Engine Stats and Related Articles sections when navigating with chevrons
@@ -69,47 +91,24 @@
     - Improved handling of unused values in counting operations
     - Simplified error handling in methods that don't throw errors
     
-- **Enhanced SyncManager Robustness with Improved Error Handling** (Completed):
-  - Fixed unnecessary try/catch blocks in SyncManager forwarding methods:
-    - directProcessArticle(): Simplified forwarding to return direct result
-    - performScheduledMaintenance(): Removed redundant error handling for non-throwing operation
-    - manualSync(): Streamlined to return direct result without unnecessary try/catch
-    - sendRecentArticlesToServer(): Simplified with direct async call without try/catch
-    - processArticlesDirectly(): Removed redundant error handling
-    - processArticlesDetached(): Simplified implementation to improve reliability
-    - processArticleIsolated(): Fixed error handling to properly handle and convert boolean results
-  - Enhanced ModernizationLogger integration for better diagnostics:
-    - Added consistent logging of forwarding start and completion
-    - Improved performance monitoring with measureForwardingPerformance method
-    - Created specialized fallback logging for cases without direct equivalent
-  - Improved code maintainability:
-    - Removed redundant error handling layers
-    - Simplified code flow for better readability
-    - Ensured consistent error reporting across all forwarding methods
-    - Made error handling more predictable by removing unnecessary try/catch blocks
-  - Fixed Swift 6 concurrency warnings:
-    - Updated method signatures to align with modern Swift conventions
-    - Fixed unreachable catch blocks warnings
-    - Ensured proper async/await usage throughout the codebase
-    - Improved reliability during transition period with better error propagation
+- **Completed SyncManager Removal** (Completed):
+  - Completely removed SyncManager.swift file from the codebase
+  - Created CommonUtilities.swift to house shared utility functions:
+    - Moved TimeoutError and withTimeout helper from SyncManager
+    - Added extractDomain utility function
+    - Added comprehensive documentation for all utility functions
+  - Moved notification name extensions to NotificationUtils:
+    - Relocated articleProcessingCompleted and syncStatusChanged notifications
+  - Updated Logger system to use "Sync" instead of "SyncManager":
+    - Changed ModernizationLogger.Component.syncManager to .sync with description update
+    - Updated AppLogger.sync to reference "Sync" category
+  - Removed all direct SyncManager references from MigrationAdapter:
+    - Updated all method documentation to use "legacy compatibility method" terminology
+    - Removed all references to SyncManager in comments and documentation
+  - Verified no direct SyncManager references remain in the codebase
+  - Ensured that all functionality continues to work through the MigrationAdapter layer
 
-- **Added SyncManager Deprecation and Forwarding Implementation** (Completed):
-  - Added comprehensive deprecation annotations to SyncManager class and methods:
-    - Applied `@available(*, deprecated, message: "Use MigrationAdapter instead")` to SyncManager class
-    - Added individual deprecation annotations to each public method with specific migration paths
-    - Implemented consistent logDeprecationWarning method for runtime warnings
-  - Created forwarding implementation in SyncManager:
-    - Updated all public methods to forward to their MigrationAdapter counterparts
-    - Fixed proper method signatures and return type conversions
-    - Maintained backward compatibility while encouraging migration to modern components
-    - Added method-specific deprecation messages with clear migration instructions
-  - Fixed Swift closure capture semantics in MigrationService:
-    - Added explicit `self.` references to backgroundTaskID property in closures
-    - Resolved compiler warnings about implicit self capture in closures
-  - Verified compiler generates appropriate deprecation warnings on SyncManager usage
-  - Successfully integrated with existing MigrationAdapter and BackgroundTaskManager
-
-- **Legacy Code Removal Plan - Phase 2: SyncManager Removal** (In Progress):
+- **Legacy Code Removal Plan - Phase 2: SyncManager Removal** (Completed):
   - Implemented adapter pattern for legacy code migration:
     - Created MigrationAdapter with compatibility methods matching SyncManager's API
     - Developed MigrationAwareArticleService to support both legacy and modern data systems
@@ -552,4 +551,5 @@ Based on the log analysis, we're implementing a four-step plan to address these 
 11. ✅ Create ArticleModelAdapter to connect SwiftData Test and main app containers
 12. ✅ Refactor NewsDetailView to use NewsDetailViewModel
 13. ✅ Implement Modern Background Tasks
-14. 🔶 Investigate deeper issues with Missing Argus Engine Stats during navigation
+14. ✅ Remove dual-implementation pattern in MigrationAwareArticleService
+15. 🔶 Investigate deeper issues with Missing Argus Engine Stats during navigation

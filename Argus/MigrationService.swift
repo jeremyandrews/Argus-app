@@ -17,11 +17,10 @@ class MigrationService: ObservableObject {
     @Published var memoryUsage: UInt64 = 0
     @Published var totalArticlesMigrated: Int = 0
 
-    // New property for state sync metrics
+    // Property for state sync metrics
     @Published var stateUpdateMetrics: MigrationMetrics = .init()
 
-    // Migration mode and state tracking
-    @Published var migrationMode: MigrationMode = .temporary
+    // State tracking
     @Published var isRunningInBackground: Bool = false
 
     // Batch size optimization
@@ -52,10 +51,7 @@ class MigrationService: ObservableObject {
     private let databaseCoordinator: DatabaseCoordinator
     private let swiftDataContainer: SwiftDataContainer
 
-    init(mode: MigrationMode = .temporary) async {
-        // Set migration mode
-        migrationMode = mode
-
+    init() async {
         // Initialize with shared instances
         databaseCoordinator = await DatabaseCoordinator.shared
         swiftDataContainer = SwiftDataContainer.shared
@@ -78,8 +74,8 @@ class MigrationService: ObservableObject {
         newRecordCount = 0
         progressSaveCounter = 0
 
-        // Configure based on migration mode
-        if migrationMode == .production && migrationProgress.state == .completed {
+        // Check if migration is already completed
+        if migrationProgress.state == .completed {
             status = "Migration already completed"
             progress = 1.0
             return true
@@ -100,9 +96,8 @@ class MigrationService: ObservableObject {
 
             if allArticles.isEmpty {
                 status = "No articles to migrate"
-                if migrationMode == .production {
-                    migrationProgress.state = .completed
-                }
+                // Always mark as completed when we have nothing to migrate
+                migrationProgress.state = .completed
                 migrationProgress.progressPercentage = 1.0
                 progress = 1.0
                 saveMigrationProgress()
@@ -112,9 +107,8 @@ class MigrationService: ObservableObject {
             let articleBatches = allArticles.chunked(into: OPTIMAL_BATCH_SIZE)
             status = "Processing \(allArticles.count) articles in \(articleBatches.count) batches..."
 
-            // Temporary mode: always process all batches from the beginning
-            // Production mode: start from last successful batch
-            let startIndex = migrationMode == .temporary ? 0 : migrationProgress.lastBatchIndex
+            // Always start from last successful batch
+            let startIndex = migrationProgress.lastBatchIndex
 
             for (index, batch) in articleBatches.enumerated().dropFirst(startIndex) {
                 // Check for cancellation
@@ -126,10 +120,8 @@ class MigrationService: ObservableObject {
                 progress = Double(index + 1) / Double(articleBatches.count)
                 migrationProgress.progressPercentage = progress
 
-                // In temporary mode, don't update lastBatchIndex to ensure full reprocessing
-                if migrationMode == .production {
-                    migrationProgress.lastBatchIndex = index
-                }
+                // Always update batch index for resilience
+                migrationProgress.lastBatchIndex = index
                 saveMigrationProgressEfficiently()
 
                 status = "Processing batch \(index + 1) of \(articleBatches.count)..."
@@ -144,9 +136,7 @@ class MigrationService: ObservableObject {
             }
 
             // Migration completed successfully
-            if migrationMode == .production {
-                migrationProgress.state = .completed
-            }
+            migrationProgress.state = .completed
             migrationProgress.progressPercentage = 1.0
             progress = 1.0
 
@@ -190,7 +180,7 @@ class MigrationService: ObservableObject {
 
     /// Create a detailed migration summary
     private func createMigrationSummary() -> String {
-        let syncDetails = migrationMode == .temporary && didFindExistingRecords ?
+        let syncDetails = didFindExistingRecords ?
             "\n• Records updated: \(updatedRecordCount)" : ""
 
         return """
@@ -200,7 +190,6 @@ class MigrationService: ObservableObject {
         • Topics migrated: \(migrationProgress.migratedTopics.count)
         • Total time: \(formatTimeInterval(elapsedTime))
         • Average speed: \(String(format: "%.1f", Double(totalArticlesProcessed) / max(0.1, elapsedTime))) articles/sec
-        • Mode: \(migrationMode.rawValue)
         """
     }
 
@@ -571,26 +560,6 @@ class MigrationService: ObservableObject {
     /// Check if the migration was interrupted
     func wasMigrationInterrupted() -> Bool {
         return migrationProgress.state == .inProgress || migrationProgress.migrationInterrupted
-    }
-
-    /// Reset migration state (for testing)
-    func resetMigration() {
-        migrationProgress = MigrationProgress()
-        progress = 0
-        status = "Not started"
-        error = nil
-        isCancelled = false
-        saveMigrationProgress()
-
-        // Reset metrics
-        articlesPerSecond = 0
-        elapsedTime = 0
-        estimatedTimeRemaining = 0
-        memoryUsage = 0
-        totalArticlesMigrated = 0
-        didFindExistingRecords = false
-        updatedRecordCount = 0
-        newRecordCount = 0
     }
 
     /// Clean up resources after migration

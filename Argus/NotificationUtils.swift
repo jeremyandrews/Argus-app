@@ -2,6 +2,12 @@ import SwiftData
 import UIKit
 import UserNotifications
 
+// Custom notification names (moved from SyncManager)
+extension Notification.Name {
+    static let articleProcessingCompleted = Notification.Name("ArticleProcessingCompleted")
+    static let syncStatusChanged = Notification.Name("SyncStatusChanged")
+}
+
 class NotificationUtils {
     // Badge count caching
     private static var cachedUnviewedCount: Int = -1

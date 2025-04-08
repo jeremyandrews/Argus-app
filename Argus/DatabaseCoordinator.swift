@@ -1116,14 +1116,7 @@ extension DatabaseCoordinator {
         )
     }
 
-    // Helper method to extract the domain from a URL
-    private func extractDomain(from urlString: String) -> String? {
-        guard let url = URL(string: urlString) else {
-            return nil
-        }
-
-        return url.host?.replacingOccurrences(of: "www.", with: "")
-    }
+    // We now use the global extractDomain function from CommonUtilities.swift
 
     // Helper to extract engine stats from JSON
     private func extractEngineStats(from json: [String: Any]) -> String? {

@@ -1,15 +1,6 @@
 import Foundation
 import SwiftUI
 
-/// Migration mode defines how the migration service operates
-enum MigrationMode: String, Codable {
-    /// Temporary mode: Migration runs on each app start, keeps databases in sync
-    case temporary
-
-    /// Production mode: One-time migration, after which old database is no longer used
-    case production
-}
-
 /// Tracks the state of the data migration process
 enum MigrationState: String, Codable {
     case notStarted
