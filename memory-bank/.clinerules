@@ -323,6 +323,91 @@ This file captures important patterns, preferences, and project intelligence tha
 - UI state should be represented by @Published properties in ViewModels
 - Use a dependency injection approach for services accessed by ViewModels
 
+### SwiftData and CloudKit Integration
+- Avoid creating multiple ModelContainer instances with different schemas:
+  ```swift
+  // INCORRECT: Creating multiple containers with different schemas
+  static let legacyContainer = ModelContainer(for: [LegacyModel.self])
+  static let newContainer = ModelContainer(for: [NewModel.self])
+  
+  // CORRECT: One unified container with all models
+  static let sharedContainer = ModelContainer(for: Schema([
+      // Legacy models
+      LegacyModel.self,
+      // New models
+      NewModel.self
+  ]))
+  ```
+- Use a singleton container pattern to ensure consistent database access:
+  ```swift
+  class SwiftDataContainer {
+      static let shared = SwiftDataContainer()
+      let container: ModelContainer
+      
+      private init() {
+          // Initialize container with all models in a single schema
+      }
+  }
+  
+  // In your app struct:
+  @MainActor
+  static var sharedModelContainer: ModelContainer {
+      return SwiftDataContainer.shared.container
+  }
+  ```
+- Implement proper fallback mechanisms for CloudKit errors:
+  ```swift
+  do {
+      // First try CloudKit integration
+      let cloudKitConfig = ModelConfiguration(schema: schema)
+      container = try ModelContainer(for: schema, configurations: [cloudKitConfig])
+  } catch {
+      // Log CloudKit error details
+      logger.error("CloudKit container creation failed: \(error)")
+      
+      // Fall back to local persistent storage
+      do {
+          let localConfig = ModelConfiguration(url: localDbPath)
+          container = try ModelContainer(for: schema, configurations: [localConfig])
+      } catch {
+          // Last resort - in-memory container
+          logger.critical("All persistent storage attempts failed: \(error)")
+          let fallbackConfig = ModelConfiguration(isStoredInMemoryOnly: true)
+          container = try ModelContainer(for: schema, configurations: [fallbackConfig])
+      }
+  }
+  ```
+- Ensure database table creation works for all required tables, adding direct SQL for legacy tables:
+  ```swift
+  // Direct SQL creation for legacy tables as fallback
+  if tableCount == 0 || legacyTablesCount == 0 {
+      let createTableSQL = """
+      CREATE TABLE IF NOT EXISTS ZLEGACYTABLE (
+          Z_PK INTEGER PRIMARY KEY AUTOINCREMENT,
+          ZFIELD TEXT NOT NULL
+      );
+      """
+      sqlite3_exec(db, createTableSQL, nil, nil, nil)
+  }
+  ```
+- Use consistent URL paths for database access across all components
+- Add table existence verification before operations:
+  ```swift
+  func verifyDatabaseTablesExist() -> Bool {
+      // Check if required tables exist using SQLite directly
+      let tableCheckQuery = """
+          SELECT count(*) FROM sqlite_master
+          WHERE type='table' AND (name LIKE '%REQUIREDTABLE');
+      """
+      // Execute query and verify result
+  }
+  ```
+- Document CloudKit container identifiers in your code for clarity:
+  ```swift
+  // CloudKit container identifier from app entitlements
+  private let cloudKitContainerIdentifier = "iCloud.com.company.AppName"
+  ```
+
 ### SwiftData Implementation
 - Use the @Model macro for all persistent model types:
   ```swift
@@ -424,6 +509,51 @@ This file captures important patterns, preferences, and project intelligence tha
 - Duplicate content issues occur during synchronization - will be resolved by SwiftData's unique constraints
 - Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - will be eliminated with proper async/await implementation
 - SwiftData context access issues can cause EXC_BAD_ACCESS crashes - will be addressed by using SwiftData's native context management instead of custom DatabaseCoordinator
+
+## Argus API Server Endpoints and Behavior
+
+### API Endpoints
+- **Base URL**: `https://api.arguspulse.com`
+- **Authentication**: `/authenticate` (POST)
+  - Requires device token in request body: `{"device_id": "token"}`
+  - Device token must be 64-character hex string
+  - Returns JWT token valid for 1 hour: `{"token": "jwt_token_value"}`
+- **Status Check**: `/status` (POST)
+  - Can be called with or without JWT authentication
+  - Returns simple "OK" response
+- **Topic Management**:
+  - `/subscriptions` (POST) - Get device's topic subscriptions
+  - `/subscribe` (POST) - Subscribe device to a topic
+    - Requires valid topic name and optional priority
+    - Returns 409 CONFLICT if already subscribed
+  - `/unsubscribe` (POST) - Unsubscribe device from a topic
+    - Returns 404 NOT_FOUND if subscription doesn't exist
+- **Articles Sync**: `/articles/sync` (POST)
+  - Takes list of seen article URLs: `{"seen_articles": ["url1", "url2", ...]}`
+  - Returns list of unseen article URLs: `{"unseen_articles": ["url1", "url2", ...]}`
+  - This is the only endpoint for article management in the backend
+
+### Important Implementation Notes
+- **JWT Authentication**:
+  - All endpoints except `/status` require Bearer token authentication
+  - Tokens expire after 1 hour and must be refreshed
+- **Topic Validation**:
+  - Server has a predefined list of valid topics from environment variables
+  - Default topics include "Alert: Direct", "Alert: Near", and "Test"
+- **Client-Side Assumptions**:
+  - Client code assumes additional endpoints that don't exist in server:
+    - `/articles/{id}` for fetching a specific article (not implemented on server)
+    - Direct article content fetching (not provided by server)
+  - Client must handle these discrepancies with appropriate error handling
+- **Missing Server Features**:
+  - No direct endpoint to fetch article content by ID or URL
+  - Client must implement workarounds for these limitations
+
+### Resilience Patterns
+- **Timeout Handling**: Client uses increased timeouts (15s connection, 60s resource)
+- **Network Monitoring**: Client uses NWPathMonitor to track connectivity status
+- **Exponential Backoff**: Client implements retries with increasing delays
+- **Graceful Degradation**: Client returns empty arrays for 404 responses
 
 ## Modernization Component Mapping
 - **SyncManager → ArticleService**:

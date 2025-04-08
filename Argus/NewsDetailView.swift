@@ -524,17 +524,18 @@ struct NewsDetailView: View {
         }
         sectionLoadingTasks = [:]
 
-        // Convert our NavigationDirection enum to the ViewModel's NavigationDirection enum
-        let viewModelDirection: NewsDetailViewModel.NavigationDirection
-        switch direction {
-        case .next:
-            viewModelDirection = .next
-        case .previous:
-            viewModelDirection = .previous
+        // Log navigation action for debugging
+        if let currentArticle = currentNotification {
+            AppLogger.database.debug("Navigating from article ID: \(currentArticle.id), direction: \(direction == .next ? "next" : "previous")")
+
+            // Log current article's JSON fields for debugging
+            let hasEngineStats = currentArticle.engine_stats != nil
+            let hasSimilarArticles = currentArticle.similar_articles != nil
+            AppLogger.database.debug("Current article before navigation - Has engine stats: \(hasEngineStats), Has similar articles: \(hasSimilarArticles)")
         }
 
-        // Delegate to view model for navigation
-        viewModel.navigateToArticle(direction: viewModelDirection)
+        // Delegate to view model for navigation using shared NavigationDirection
+        viewModel.navigateToArticle(direction: direction)
 
         // Keep UI state in sync with viewModel
         currentIndex = viewModel.currentIndex
@@ -557,6 +558,13 @@ struct NewsDetailView: View {
 
         // Explicitly mark the article as viewed after navigation
         markAsViewed()
+
+        // Log the current state after navigation
+        if let article = currentNotification {
+            let hasEngineStats = article.engine_stats != nil
+            let hasSimilarArticles = article.similar_articles != nil
+            AppLogger.database.debug("After navigation to article ID: \(article.id) - Has engine stats: \(hasEngineStats), Has similar articles: \(hasSimilarArticles)")
+        }
 
         // Load the Summary if it's expanded
         if expandedSections["Summary"] == true {
@@ -769,10 +777,7 @@ struct NewsDetailView: View {
         }
     }
 
-    enum NavigationDirection {
-        case next
-        case previous
-    }
+    // Using shared NavigationDirection enum
 
     // MARK: - Article Header
 

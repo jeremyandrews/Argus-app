@@ -61,7 +61,7 @@ struct MigrationModalView: View {
 
                 // Help text with automatic dismissal logic
                 Text(coordinator.progress >= 1.0 ?
-                    "Migration complete - continuing automatically..." :
+                    "This is the update you've been waiting for... doing stuff..." :
                     "Please wait while your data is being prepared")
                     .font(.caption)
                     .foregroundColor(.secondary)

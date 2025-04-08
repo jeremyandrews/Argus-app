@@ -2,8 +2,8 @@
 
 ## Current Status
 **Overall Status**: Beta - Core functionality implemented with known issues
-**Development Phase**: Architecture Modernization
-**Last Updated**: April 7, 2025
+**Development Phase**: Architecture Modernization - Error Handling Phase
+**Last Updated**: April 8, 2025
 
 ## What Works
 
@@ -40,6 +40,15 @@
   - View refactoring completed for NewsView to use the new ViewModel
   - Fixed container disconnect between SwiftData Test and main app
 
+- 🔶 **Modernization Robustness Improvements** (In Progress)
+  - ✅ Enhanced SyncManager with improved error handling (fixed try/catch in forwarding methods)
+  - ✅ Created MigrationAdapter with proper SyncManager API compatibility
+  - ✅ Added comprehensive deprecation annotations with clear migration paths
+  - Creating ModernizationLogger system for transition period diagnostics
+  - Implementing CloudKit error handling with graceful fallback
+  - Enhancing API resilience with better error recovery
+  - Converting temporary migration to one-time migration mode
+  
 - 🔶 **Sync Process Optimization**
   - Background sync process improvements underway using ArticleService
   - UI jitter during sync operations being addressed through async/await
@@ -50,6 +59,40 @@
   - Batch operations with proper error handling to prevent partial updates
 
 ## Recently Completed
+- ✅ **Fixed ModelContainer Initialization Crash and Database Table Creation**
+  - Fixed critical app startup crash in `sharedModelContainer` initialization
+  - Resolved issue where articles weren't appearing in the database after migration
+  - Fixed CloudKit integration conflicts by unifying ModelContainer creation:
+    - Modified `ArgusApp.swift` to use `SwiftDataContainer.shared.container` instead of creating its own container
+    - Updated `SwiftDataContainer.swift` to include legacy models in its schema
+    - Ensured consistent database access throughout the application
+  - Enhanced database table creation with direct SQL for legacy tables
+  - Improved the migration coordinator with proper table verification and reset handling
+  - Fixed SQLite import issues in MigrationCoordinator
+  - Fixed compiler errors in ModelConfiguration parameter format
+  - Documented critical findings about SwiftData and CloudKit integration
+
+- ✅ **Fixed Database Counting and Arithmetic Overflow Issue**
+  - Fixed critical arithmetic overflow crash in `logDatabaseTableSizes()` method
+  - Implemented robust error handling for database operations with safe defaults
+  - Created helper functions for safe counting and addition with overflow protection
+  - Enhanced database table verification to gracefully handle missing tables
+  - Added safeguards in the migration process to handle missing source tables
+  - Improved database error logging and diagnostics
+  - Made `ensureDatabaseIndexes()` more resilient by adding preliminary table checks
+  - Added `markMigrationCompleted()` method to properly handle migration when source tables are missing
+  - Fixed compiler warnings related to async/non-async method calls and unused values
+
+
+- ✅ **Enhanced SyncManager Robustness** (Completed):
+  - Fixed unnecessary try/catch blocks in all SyncManager forwarding methods
+  - Removed redundant error handling for non-throwing operations
+  - Updated forwarders to directly return results without excess error wrapping
+  - Enhanced ModernizationLogger integration for better diagnostics
+  - Fixed Swift 6 concurrency warnings (unreachable catch blocks)
+  - Ensured proper async/await usage throughout the codebase
+  - Improved code maintainability with simpler flows and consistent error reporting
+  - Added proper method signature alignment with modern Swift conventions
 
 - ✅ **Fixed Article Read Status and Navigation Formatting Issues**
   - Fixed issue where opening an article wasn't marking it as read (unread background persisting)
@@ -365,6 +408,11 @@
     - ✅ Fixed closure capture semantics in MigrationService:
       - Added explicit self references in backgroundTaskID closure captures
       - Resolved compiler warnings about implicit self capture in closures
+    - ✅ Fixed unnecessary try/catch blocks in SyncManager forwarding methods:
+      - Simplified forwarding implementations to remove redundant error handling
+      - Fixed unreachable catch blocks to improve reliability
+      - Made error handling more predictable by removing unnecessary try/catch
+      - Ensured consistent error reporting across all forwarding methods
     - ⬜ Add comprehensive logging during transition period
     - ⬜ Implement final SyncManager removal
   
@@ -421,12 +469,31 @@
    - Status: Will be resolved by migration to SwiftData
    - Priority: High
    
-3. **Rich Text Blob Generation**
+3. **CloudKit Integration Issues** (New)
+   - Consistent errors with CloudKit setup: "Failed to set up CloudKit integration for store"
+   - Server rejection errors: "Server Rejected Request" (15/2000)
+   - Failed recovery attempts from CloudKit errors
+   - Status: Will be addressed with new CloudKit error handling in Step 2 of plan
+   - Priority: High
+   
+4. **API Connectivity Issues** (New)
+   - 404 errors when trying to reach API endpoints
+   - Resource not found errors: "The requested resource was not found"
+   - Error propagation from API through multiple layers
+   - Status: Will be addressed with API resilience enhancements in Step 3 of plan
+   - Priority: High
+   
+5. **Repeated Migration Execution** (New)
+   - Migration running on every app launch rather than once
+   - Status: Will be addressed by converting to one-time migration mode in Step 4 of plan
+   - Priority: Medium
+   
+6. **Rich Text Blob Generation**
    - Missing blob transfer during sync and migration
    - Status: Resolved by adding blob fields to ArticleModel and fixing data transfer
    - Priority: High (Resolved)
    
-3. **Uniqueness Constraints**
+7. **Uniqueness Constraints**
    - Schema-level uniqueness constraints removed for CloudKit compatibility
    - Status: Addressed by implementing application-level uniqueness validation
    - Priority: Medium
@@ -485,11 +552,11 @@
 
 ## Recently Initiated
 
-- ✅ **Model Adapter Pattern Implementation**
-  - Created ArticleModelAdapter to bridge between legacy and modern models
-  - Updated ArticleService to query ArticleModel but return NotificationData
-  - Ensured proper model conversion for all CRUD operations
-  - Fixed container mismatch that was preventing article display
+- ✅ **SyncManager Robustness Enhancement**
+  - Fixed unnecessary try/catch blocks in forwarding methods
+  - Enhanced ModernizationLogger integration for transition diagnostics
+  - Created proper error handling and forwarding in adapter components
+  - Simplified code flow for better maintainability
 
 ## Progress Metrics
 

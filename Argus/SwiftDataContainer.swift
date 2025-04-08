@@ -1,3 +1,4 @@
+import CloudKit
 import Foundation
 import SwiftData
 import SwiftUI
@@ -12,41 +13,161 @@ class SwiftDataContainer {
     // The model container for our new models
     let container: ModelContainer
 
+    // Container configuration
+    enum ContainerType {
+        case cloudKit // With CloudKit integration
+        case localPersistent // Local persistent storage only
+        case fallback // Fallback mode after error
+    }
+
+    // Current container type
+    private(set) var containerType: ContainerType
+
+    // CloudKit container identifier
+    private let cloudKitContainerIdentifier = "iCloud.com.andrews.Argus.Argus"
+
     // Status tracking
     private(set) var lastError: Error?
+    private(set) var cloudKitError: Error?
 
     // Initialization status
     var status: String {
-        if let error = lastError {
-            return "Error: \(error.localizedDescription)"
-        } else {
-            return "Using persistent storage"
+        switch containerType {
+        case .cloudKit:
+            return "Using CloudKit integration"
+        case .localPersistent:
+            return "Using local persistent storage"
+        case .fallback:
+            if let error = lastError {
+                return "Using fallback after error: \(error.localizedDescription)"
+            } else {
+                return "Using fallback storage"
+            }
         }
     }
 
+    // Database location
+    private let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    private var testStorageURL: URL {
+        return documentsDirectory.appendingPathComponent("ArgusTestDB.store")
+    }
+
     private init() {
-        // Create a schema with our models
+        // Initialize all stored properties first
+        containerType = .fallback // Default until we succeed
+        cloudKitError = nil
+        lastError = nil
+
+        // Create a schema with ALL required models for migration
         let schema = Schema([
+            // Legacy models needed for migration
+            NotificationData.self,
+            SeenArticle.self,
+
+            // New SwiftData models
             ArticleModel.self,
             SeenArticleModel.self,
             TopicModel.self,
         ])
 
-        // Use persistent storage with a dedicated test database name
-        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let testStorageURL = documentsDirectory.appendingPathComponent("ArgusTestDB.store")
+        // Storage path
+        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dbPath = documentsDir.appendingPathComponent("ArgusTestDB.store")
 
-        print("Creating persistent SwiftData container at: \(testStorageURL.path)")
-        let config = ModelConfiguration(url: testStorageURL)
+        // First attempt: Try CloudKit integration
+        ModernizationLogger.logTransitionStart("Creating SwiftData container with CloudKit", component: .cloudKit)
 
         do {
-            container = try ModelContainer(for: schema, configurations: [config])
-            print("Persistent SwiftData container successfully created")
+            // Create configuration with CloudKit integration
+            // Use a simple ModelConfiguration with URL/schema
+            // SwiftData should detect the CloudKit container from the app's entitlements
+            ModernizationLogger.log(.debug, component: .cloudKit,
+                                    message: "Setting up CloudKit container for identifier: \(cloudKitContainerIdentifier)")
+            let cloudKitConfig = ModelConfiguration(schema: schema)
+
+            container = try ModelContainer(for: schema, configurations: [cloudKitConfig])
+            containerType = .cloudKit
+
+            ModernizationLogger.logTransitionCompletion(
+                "CloudKit container creation",
+                component: .cloudKit,
+                success: true,
+                detail: "Successfully created container with CloudKit integration"
+            )
+
+            print("CloudKit-enabled SwiftData container successfully created")
         } catch {
-            print("Failed to create persistent container: \(error)")
-            lastError = error
-            // Propagate the error instead of falling back to in-memory
-            fatalError("Cannot create persistent ModelContainer - app cannot function: \(error)")
+            // Log CloudKit error details
+            ModernizationLogger.logCloudKitError(
+                operation: "Creating CloudKit container",
+                error: error,
+                detail: "Falling back to local persistent storage"
+            )
+
+            print("Failed to create CloudKit container: \(error)")
+            cloudKitError = error
+
+            // Second attempt: Fall back to local persistent storage
+            ModernizationLogger.logTransitionStart("Creating fallback persistent container", component: .cloudKit)
+
+            // Use persistent storage with a dedicated test database name
+            print("Creating persistent SwiftData container at: \(dbPath.path)")
+            let localConfig = ModelConfiguration(url: dbPath)
+
+            do {
+                container = try ModelContainer(for: schema, configurations: [localConfig])
+                containerType = .localPersistent
+
+                ModernizationLogger.logTransitionCompletion(
+                    "Fallback container creation",
+                    component: .cloudKit,
+                    success: true,
+                    detail: "Successfully created local persistent container as fallback"
+                )
+
+                print("Local persistent SwiftData container successfully created")
+            } catch {
+                // Log the fallback error
+                ModernizationLogger.log(
+                    .critical,
+                    component: .cloudKit,
+                    message: "CRITICAL: Failed to create both CloudKit and local persistent containers: \(error.localizedDescription)"
+                )
+
+                print("Failed to create persistent container: \(error)")
+                lastError = error
+                containerType = .fallback
+
+                // Create a container in the temp directory as a last resort
+                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("ArgusEmergencyFallback.store")
+
+                ModernizationLogger.logFallback(
+                    from: "Normal storage paths",
+                    to: "Temporary directory fallback",
+                    reason: "Both CloudKit and persistent storage failed",
+                    component: .cloudKit
+                )
+
+                do {
+                    let emergencyConfig = ModelConfiguration(url: tempURL)
+                    container = try ModelContainer(for: schema, configurations: [emergencyConfig])
+
+                    ModernizationLogger.log(
+                        .warning,
+                        component: .cloudKit,
+                        message: "Created emergency fallback container in temporary directory"
+                    )
+                } catch {
+                    // At this point, we have no choice but to crash, as we've tried all options
+                    ModernizationLogger.log(
+                        .critical,
+                        component: .cloudKit,
+                        message: "FATAL: All container creation attempts failed - app cannot function: \(error.localizedDescription)"
+                    )
+
+                    fatalError("All container creation attempts failed - app cannot function: \(error)")
+                }
+            }
         }
     }
 
@@ -201,6 +322,7 @@ struct SwiftDataTestView: View {
     @State private var isLoading = false
     @State private var showResetConfirmation = false
     @State private var diagnosticInfo: String = ""
+    @State private var showCloudKitInfo: Bool = false
 
     // Performance metrics
     @State private var lastOperationDuration: TimeInterval = 0
@@ -214,15 +336,19 @@ struct SwiftDataTestView: View {
                 Section(header: Text("Container Status")) {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
+                            let container = SwiftDataContainer.shared
+                            let statusColor: Color = container.containerType == .cloudKit ? .blue :
+                                container.containerType == .localPersistent ? .green : .orange
+
                             Circle()
-                                .fill(Color.green)
+                                .fill(statusColor)
                                 .frame(width: 12, height: 12)
-                            Text(SwiftDataContainer.shared.status)
+                            Text(container.status)
                                 .font(.headline)
-                                .foregroundColor(.green)
+                                .foregroundColor(statusColor)
                         }
 
-                        // Always show storage location since we're always in persistent mode
+                        // Storage location
                         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
                         let dbPath = documentsDirectory.appendingPathComponent("ArgusTestDB.store").path
                         Text("Storage location: \(dbPath)")
@@ -231,6 +357,32 @@ struct SwiftDataTestView: View {
                             .padding(.top, 2)
                             .lineLimit(1)
                             .truncationMode(.middle)
+
+                        // CloudKit container if applicable
+                        if SwiftDataContainer.shared.containerType == .cloudKit {
+                            HStack {
+                                Image(systemName: "icloud")
+                                    .foregroundColor(.blue)
+                                Text("iCloud.com.andrews.Argus.Argus")
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
+                            }
+                            .padding(.top, 2)
+                        }
+
+                        // Show error info button if there was a CloudKit error
+                        if SwiftDataContainer.shared.cloudKitError != nil {
+                            Button(action: { showCloudKitInfo.toggle() }) {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .foregroundColor(.orange)
+                                    Text("CloudKit Error Info")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                            .padding(.top, 2)
+                        }
                     }
 
                     Button("Reset SwiftData Store", role: .destructive) {
@@ -262,6 +414,43 @@ struct SwiftDataTestView: View {
                         Text(diagnosticInfo)
                             .font(.caption)
                             .foregroundColor(.secondary)
+                    }
+                }
+
+                if showCloudKitInfo, let error = SwiftDataContainer.shared.cloudKitError {
+                    Section(header: Text("CloudKit Error Details")) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Error Type: \(type(of: error))")
+                                .font(.caption)
+                                .bold()
+
+                            Text("Description: \(error.localizedDescription)")
+                                .font(.caption)
+
+                            if let ckError = error as? CKError {
+                                Text("CloudKit Error Code: \(ckError.errorCode)")
+                                    .font(.caption)
+
+                                if let errorDescription = ckError.errorUserInfo[NSLocalizedDescriptionKey] as? String {
+                                    Text("Error Description: \(errorDescription)")
+                                        .font(.caption)
+                                }
+
+                                if let recoveryAction = ckError.errorUserInfo[NSLocalizedRecoverySuggestionErrorKey] as? String {
+                                    Text("Recovery Suggestion: \(recoveryAction)")
+                                        .font(.caption)
+                                }
+                            }
+
+                            // Check account status
+                            Button("Check iCloud Account Status") {
+                                checkCloudKitAccountStatus()
+                            }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                            .padding(.top, 4)
+                        }
+                        .foregroundColor(.orange)
                     }
                 }
 
@@ -571,6 +760,61 @@ struct SwiftDataTestView: View {
             testStatus = "Loaded \(articles.count) articles, \(topics.count) topics, and \(seenCount) seen records"
         } catch {
             testStatus = "Error loading data: \(error.localizedDescription)"
+        }
+    }
+
+    // Helper function to check CloudKit account status
+    private func checkCloudKitAccountStatus() {
+        isLoading = true
+        diagnosticInfo = "Checking iCloud account status..."
+
+        // Use CKContainer to check the account status
+        CKContainer.default().accountStatus { status, error in
+            DispatchQueue.main.async {
+                self.isLoading = false
+
+                var statusInfo = "iCloud Account Status Check:\n"
+
+                if let error = error {
+                    statusInfo += "Error: \(error.localizedDescription)\n"
+                    ModernizationLogger.logCloudKitError(
+                        operation: "Checking account status",
+                        error: error
+                    )
+                }
+
+                // Report account status
+                statusInfo += "Account Status: "
+                switch status {
+                case .available:
+                    statusInfo += "Available ✅\n"
+                    statusInfo += "The user is logged into iCloud and can use CloudKit."
+                case .restricted:
+                    statusInfo += "Restricted ⚠️\n"
+                    statusInfo += "The user's iCloud account is restricted (e.g., parental controls)."
+                case .noAccount:
+                    statusInfo += "No Account ❌\n"
+                    statusInfo += "The user is not logged into iCloud. No iCloud account is configured."
+                case .couldNotDetermine:
+                    statusInfo += "Could Not Determine ❓\n"
+                    statusInfo += "The status could not be determined. Please check internet connectivity."
+                case .temporarilyUnavailable:
+                    statusInfo += "Temporarily Unavailable ⏳\n"
+                    statusInfo += "iCloud is temporarily unavailable, possibly due to maintenance."
+                @unknown default:
+                    statusInfo += "Unknown Status\n"
+                    statusInfo += "Unknown status code: \(status.rawValue)"
+                }
+
+                // Log the status
+                ModernizationLogger.log(
+                    .info,
+                    component: .cloudKit,
+                    message: "iCloud account status: \(statusInfo)"
+                )
+
+                self.diagnosticInfo = statusInfo
+            }
         }
     }
 

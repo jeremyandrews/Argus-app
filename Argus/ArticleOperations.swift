@@ -60,6 +60,28 @@ final class ArticleOperations {
         try await articleService.deleteArticle(id: article.id)
     }
 
+    /// Fetches a complete article by ID, ensuring all fields are loaded
+    /// - Parameter id: The article ID to fetch
+    /// - Returns: The complete article, or nil if not found
+    func getCompleteArticle(byId id: UUID) async -> NotificationData? {
+        do {
+            // Fetch the article using ArticleService to ensure all fields are loaded
+            let article = try await articleService.fetchArticle(byId: id)
+
+            // Log for debugging
+            if let article = article {
+                let hasEngineStats = article.engine_stats != nil
+                let hasSimilarArticles = article.similar_articles != nil
+                AppLogger.database.debug("Fetched article \(id): Engine stats: \(hasEngineStats), Similar articles: \(hasSimilarArticles)")
+            }
+
+            return article
+        } catch {
+            AppLogger.database.error("Error fetching complete article: \(error)")
+            return nil
+        }
+    }
+
     // MARK: - Fetch Operations
 
     /// Fetches articles with the specified filters

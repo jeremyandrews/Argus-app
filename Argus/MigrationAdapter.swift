@@ -28,8 +28,16 @@ class MigrationAdapter {
         do {
             // Use the ArticleService's processArticleData method via APIClient
             let article = try await APIClient.shared.fetchArticleByURL(jsonURL: jsonURL)
-            let processed = try await articleService.processArticleData([article])
-            return processed > 0
+
+            // Safely unwrap optional article
+            if let article = article {
+                let processed = try await articleService.processArticleData([article])
+                return processed > 0
+            } else {
+                ModernizationLogger.log(.warning, component: .migration,
+                                        message: "No article data found for URL: \(jsonURL)")
+                return false
+            }
         } catch {
             AppLogger.sync.error("Failed to process article \(jsonURL): \(error)")
             return false
@@ -55,7 +63,14 @@ class MigrationAdapter {
             for url in batchUrls {
                 do {
                     let article = try await APIClient.shared.fetchArticleByURL(jsonURL: url)
-                    processed += try await articleService.processArticleData([article])
+
+                    // Safely unwrap optional article
+                    if let article = article {
+                        processed += try await articleService.processArticleData([article])
+                    } else {
+                        ModernizationLogger.log(.warning, component: .migration,
+                                                message: "No article data found for URL: \(url)")
+                    }
                 } catch {
                     AppLogger.sync.error("Failed to process article \(url): \(error)")
                 }

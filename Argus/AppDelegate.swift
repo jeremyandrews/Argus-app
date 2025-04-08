@@ -158,8 +158,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 // Fetch the article data using APIClient
                 let articleData = try await APIClient.shared.fetchArticleByURL(jsonURL: jsonURL)
 
-                // Process it using ArticleService
-                _ = try await ArticleService.shared.processArticleData([articleData])
+                // Process it using ArticleService (safely unwrap optional)
+                if let articleData = articleData {
+                    _ = try await ArticleService.shared.processArticleData([articleData])
+                } else {
+                    ModernizationLogger.log(.warning, component: .apiClient,
+                                            message: "Remote notification contained no article data for URL: \(jsonURL)")
+                    throw NSError(domain: "com.argus", code: 404, userInfo: [NSLocalizedDescriptionKey: "No article data found"])
+                }
 
                 // Success
                 await finish(.newData)

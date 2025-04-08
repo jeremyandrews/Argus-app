@@ -132,7 +132,21 @@ final class ArticleService: ArticleServiceProtocol {
 
             // Convert the ArticleModel to NotificationData if found
             if let articleModel = results.first {
-                return NotificationData.from(articleModel: articleModel)
+                // Check for complete article fields
+                let hasEngineStats = articleModel.engineStats != nil
+                let hasSimilarArticles = articleModel.similarArticles != nil
+
+                AppLogger.database.debug("Fetched ArticleModel \(articleModel.id): Has engine stats: \(hasEngineStats), Has similar articles: \(hasSimilarArticles)")
+
+                let notificationData = NotificationData.from(articleModel: articleModel)
+
+                // Verify converted data has the fields
+                let hasEngineStatsConverted = notificationData.engine_stats != nil
+                let hasSimilarArticlesConverted = notificationData.similar_articles != nil
+
+                AppLogger.database.debug("Converted to NotificationData: Has engine stats: \(hasEngineStatsConverted), Has similar articles: \(hasSimilarArticlesConverted)")
+
+                return notificationData
             }
             return nil
         } catch {

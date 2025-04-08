@@ -12,7 +12,7 @@ struct MigrationView: View {
             Text("Data Migration")
                 .font(.headline)
 
-            Text("Migrate your existing articles to the new database format. This process now runs automatically at app startup.")
+            Text("One-time migration from legacy to modern database. This process runs automatically on first app startup with the new version.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
@@ -38,13 +38,18 @@ struct MigrationView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(coordinator.progress > 0 && coordinator.progress < 1.0 && !coordinator.isMigrationActive)
+            .disabled((coordinator.progress > 0 && coordinator.progress < 1.0 && !coordinator.isMigrationActive) || coordinator.isOneTimeMigrationCompleted)
 
-            // Add reset button for manual testing
-            if coordinator.progress >= 1.0 {
-                Button("Reset Migration State (For Testing)") {
+            // Add reset buttons for testing
+            VStack {
+                // Regular reset button
+                Button("Reset Migration State") {
                     Task {
-                        let service = await MigrationService(mode: .temporary)
+                        // Use the coordinator's reset method
+                        coordinator.resetOneTimeMigrationStatus()
+
+                        // Also reset the service if available
+                        let service = await MigrationService(mode: .production)
                         service.resetMigration()
 
                         // Refresh coordinator status
@@ -54,6 +59,20 @@ struct MigrationView: View {
                 .buttonStyle(.bordered)
                 .foregroundColor(.orange)
                 .padding(.top, 8)
+
+                // Force reset button - always visible and forceful
+                Button("Force Complete Reset (Debug)") {
+                    Task {
+                        // Use our new force reset method
+                        await coordinator.forceCompleteReset()
+
+                        // Refresh coordinator status
+                        _ = await coordinator.checkMigrationStatus()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .foregroundColor(.red)
+                .padding(.top, 4)
             }
 
             // Manual test button
@@ -72,8 +91,20 @@ struct MigrationView: View {
             .padding(.top, 8)
             .foregroundColor(.blue)
 
+            // Migration completion status (shown if completed)
+            if coordinator.isOneTimeMigrationCompleted {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Migration completed. Using new database exclusively.")
+                        .font(.subheadline)
+                        .foregroundColor(.green)
+                }
+                .padding(.top, 4)
+            }
+
             // Information message
-            Text("Note: Migration now runs automatically at app startup. This view is for manual testing and troubleshooting only.")
+            Text("Note: This is a one-time migration to the modern database. After migration completes, the legacy database will no longer be used.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .padding(.top, 8)

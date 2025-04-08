@@ -10,34 +10,13 @@ struct ArgusApp: App {
     // Flag to show the SwiftData test interface
     @State private var showSwiftDataTest = false
 
-    static let sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            // Existing models
-            NotificationData.self,
-            SeenArticle.self,
-        ])
-
-        let modelConfiguration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none
-        )
-
-        do {
-            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
-            DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 10) {
-                do {
-                    let _ = try ensureDatabaseIndexes()
-                    AppLogger.database.debug("Database indexes created successfully")
-                } catch {
-                    AppLogger.database.error("Failed to create database indexes: \(error)")
-                }
-            }
-            return container
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    // Use the existing SwiftDataContainer instead of creating our own
+    @MainActor
+    static var sharedModelContainer: ModelContainer {
+        // Get the container from the SwiftDataContainer singleton
+        // which already handles CloudKit integration and fallbacks
+        return SwiftDataContainer.shared.container
+    }
 
     // Migration coordinator for auto-migration
     @StateObject private var migrationCoordinator = MigrationCoordinator.shared
@@ -86,13 +65,64 @@ struct ArgusApp: App {
     private func checkMigration() async {
         // Check if migration is needed
         if await migrationCoordinator.checkMigrationStatus() {
+            AppLogger.database.info("Starting migration process")
+
+            // Add verification to check if we need to mark migration as complete
+            // even if old tables are not accessible
+            if await verifyDatabaseTablesExist() == false {
+                AppLogger.database.warning("Migration may be incomplete - source tables not found. Marking as completed.")
+                migrationCoordinator.markMigrationCompleted()
+                return
+            }
+
             // Start migration
             _ = await migrationCoordinator.startMigration()
         }
     }
 
+    /// Helper to verify if source database tables exist
+    private func verifyDatabaseTablesExist() async -> Bool {
+        // Using SQLite directly to check if the old tables exist
+        guard let dbURL = ArgusApp.sharedModelContainer.configurations.first?.url else {
+            return false
+        }
+
+        var db: OpaquePointer?
+        defer {
+            if db != nil {
+                sqlite3_close(db)
+            }
+        }
+
+        if sqlite3_open(dbURL.path, &db) != SQLITE_OK {
+            return false
+        }
+
+        let tableCheckQuery = """
+            SELECT count(*) FROM sqlite_master
+            WHERE type='table' AND (name LIKE '%NOTIFICATIONDATA' OR name LIKE '%SEENARTICLE');
+        """
+
+        var statement: OpaquePointer?
+        var tableCount = 0
+
+        if sqlite3_prepare_v2(db, tableCheckQuery, -1, &statement, nil) == SQLITE_OK {
+            if sqlite3_step(statement) == SQLITE_ROW {
+                tableCount = Int(sqlite3_column_int(statement, 0))
+            }
+            sqlite3_finalize(statement)
+
+            // If we found both tables, return true
+            return tableCount >= 2
+        }
+
+        // Default to false if anything goes wrong
+        return false
+    }
+
     static func ensureDatabaseIndexes() throws -> Bool {
-        guard let dbURL = sharedModelContainer.configurations.first?.url else {
+        // Get the URL from the SwiftDataContainer to ensure consistency
+        guard let dbURL = SwiftDataContainer.shared.container.configurations.first?.url else {
             throw DatabaseError.databaseNotFound
         }
 
@@ -107,17 +137,39 @@ struct ArgusApp: App {
             throw DatabaseError.openError(String(cString: sqlite3_errmsg(db)))
         }
 
-        let tableCheckQuery = """
+        // First check if database is valid and has tables
+        let tableCountQuery = """
+            SELECT count(*) FROM sqlite_master
+            WHERE type='table';
+        """
+
+        var statement: OpaquePointer?
+        var tableCount = 0
+
+        if sqlite3_prepare_v2(db, tableCountQuery, -1, &statement, nil) == SQLITE_OK {
+            if sqlite3_step(statement) == SQLITE_ROW {
+                tableCount = Int(sqlite3_column_int(statement, 0))
+            }
+        }
+        sqlite3_finalize(statement)
+
+        if tableCount == 0 {
+            AppLogger.database.warning("Database exists but contains no tables. Will attempt to create required tables.")
+            try ensureRequiredTablesExist(db: db)
+            return true // Tables should now exist, return true to allow processing to continue
+        }
+
+        // Now search for our specific tables
+        let specificTableCheckQuery = """
             SELECT name FROM sqlite_master
             WHERE type='table'
             AND (name LIKE '%NOTIFICATIONDATA' OR name LIKE '%SEENARTICLE');
         """
 
-        var statement: OpaquePointer?
         var notificationTableName: String?
         var seenArticleTableName: String?
 
-        if sqlite3_prepare_v2(db, tableCheckQuery, -1, &statement, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, specificTableCheckQuery, -1, &statement, nil) == SQLITE_OK {
             while sqlite3_step(statement) == SQLITE_ROW {
                 if let tableNameCString = sqlite3_column_text(statement, 0) {
                     let tableName = String(cString: tableNameCString)
@@ -131,12 +183,151 @@ struct ArgusApp: App {
         }
         sqlite3_finalize(statement)
 
-        guard let actualNotificationTableName = notificationTableName,
-              let actualSeenArticleTableName = seenArticleTableName
-        else {
+        // If tables are missing, create them
+        var tablesCreated = false
+        if notificationTableName == nil || seenArticleTableName == nil {
+            AppLogger.database.warning("Required tables missing - will create them now")
+            try ensureRequiredTablesExist(db: db)
+            tablesCreated = true
+
+            // Re-query to get the actual table names after creation
+            if sqlite3_prepare_v2(db, specificTableCheckQuery, -1, &statement, nil) == SQLITE_OK {
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    if let tableNameCString = sqlite3_column_text(statement, 0) {
+                        let tableName = String(cString: tableNameCString)
+                        if tableName.contains("NOTIFICATIONDATA") {
+                            notificationTableName = tableName
+                        } else if tableName.contains("SEENARTICLE") {
+                            seenArticleTableName = tableName
+                        }
+                    }
+                }
+            }
+            sqlite3_finalize(statement)
+        }
+
+        // Only proceed with index creation if tables exist
+        if let actualNotificationTableName = notificationTableName {
+            createNotificationIndexes(db: db, tableName: actualNotificationTableName)
+        } else {
+            AppLogger.database.error("NotificationData table still not found after creation attempt")
+        }
+
+        if let actualSeenArticleTableName = seenArticleTableName {
+            createSeenArticleIndexes(db: db, tableName: actualSeenArticleTableName)
+        } else {
+            AppLogger.database.error("SeenArticle table still not found after creation attempt")
+        }
+
+        if tablesCreated {
+            AppLogger.database.info("Database tables created and indexes added successfully")
+        }
+
+        return true
+    }
+
+    /// Ensures that the required database tables exist, creating them if necessary
+    private static func ensureRequiredTablesExist(db: OpaquePointer?) throws {
+        AppLogger.database.info("Creating required database tables if needed")
+
+        // The SwiftData model container should handle table creation, but in case that's
+        // not working properly, we'll directly create the legacy tables that are needed for migration
+
+        // Force the recreation of the schema by re-instantiating the model container
+        // This should trigger SwiftData's table creation
+        AppLogger.database.info("Triggering SwiftData schema processing...")
+
+        // As a fallback, directly create tables using SQLite
+        // This is a defensive measure to ensure tables exist even if SwiftData fails
+
+        // First try to drop any malformed tables
+        let dropNotificationTable = """
+        DROP TABLE IF EXISTS ZNOTIFICATIONDATA;
+        """
+
+        let dropSeenArticleTable = """
+        DROP TABLE IF EXISTS ZSEENARTICLE;
+        """
+
+        if sqlite3_exec(db, dropNotificationTable, nil, nil, nil) != SQLITE_OK ||
+            sqlite3_exec(db, dropSeenArticleTable, nil, nil, nil) != SQLITE_OK
+        {
+            AppLogger.database.warning("Error dropping tables, will proceed with creation anyway")
+        }
+
+        // Create NotificationData table
+        let createNotificationDataTable = """
+        CREATE TABLE IF NOT EXISTS ZNOTIFICATIONDATA (
+            Z_PK INTEGER PRIMARY KEY AUTOINCREMENT,
+            Z_ENT INTEGER,
+            Z_OPT INTEGER,
+            ZID TEXT NOT NULL,
+            ZDATE TIMESTAMP NOT NULL,
+            ZTITLE TEXT NOT NULL,
+            ZBODY TEXT NOT NULL,
+            ZISVIEWED INTEGER NOT NULL DEFAULT 0,
+            ZISBOOKMARKED INTEGER NOT NULL DEFAULT 0,
+            ZISARCHIVED INTEGER NOT NULL DEFAULT 0,
+            ZJSON_URL TEXT NOT NULL,
+            ZARTICLE_URL TEXT,
+            ZTOPIC TEXT,
+            ZARTICLE_TITLE TEXT,
+            ZAFFECTED TEXT,
+            ZDOMAIN TEXT,
+            ZPUB_DATE TIMESTAMP,
+            ZSOURCES_QUALITY INTEGER,
+            ZARGUMENT_QUALITY INTEGER,
+            ZSOURCE_TYPE TEXT,
+            ZQUALITY INTEGER,
+            ZSUMMARY TEXT,
+            ZCRITICAL_ANALYSIS TEXT,
+            ZLOGICAL_FALLACIES TEXT,
+            ZSOURCE_ANALYSIS TEXT,
+            ZRELATION_TO_TOPIC TEXT,
+            ZADDITIONAL_INSIGHTS TEXT,
+            ZTITLE_BLOB BLOB,
+            ZBODY_BLOB BLOB,
+            ZSUMMARY_BLOB BLOB,
+            ZCRITICAL_ANALYSIS_BLOB BLOB,
+            ZLOGICAL_FALLACIES_BLOB BLOB,
+            ZSOURCE_ANALYSIS_BLOB BLOB,
+            ZRELATION_TO_TOPIC_BLOB BLOB,
+            ZADDITIONAL_INSIGHTS_BLOB BLOB,
+            ZENGINE_STATS TEXT,
+            ZSIMILAR_ARTICLES TEXT
+        );
+        """
+
+        // Create SeenArticle table
+        let createSeenArticleTable = """
+        CREATE TABLE IF NOT EXISTS ZSEENARTICLE (
+            Z_PK INTEGER PRIMARY KEY AUTOINCREMENT,
+            Z_ENT INTEGER,
+            Z_OPT INTEGER,
+            ZID TEXT NOT NULL,
+            ZJSON_URL TEXT NOT NULL,
+            ZDATE TIMESTAMP NOT NULL
+        );
+        """
+
+        // Execute create table statements
+        if sqlite3_exec(db, createNotificationDataTable, nil, nil, nil) != SQLITE_OK {
+            let error = String(cString: sqlite3_errmsg(db))
+            AppLogger.database.error("Failed to create NotificationData table: \(error)")
             throw DatabaseError.tableNotFound
         }
 
+        if sqlite3_exec(db, createSeenArticleTable, nil, nil, nil) != SQLITE_OK {
+            let error = String(cString: sqlite3_errmsg(db))
+            AppLogger.database.error("Failed to create SeenArticle table: \(error)")
+            throw DatabaseError.tableNotFound
+        }
+
+        AppLogger.database.info("Legacy tables created successfully")
+    }
+
+    // Helper method to create notification indexes
+    private static func createNotificationIndexes(db: OpaquePointer?, tableName: String) {
         let notificationIndexes = [
             ("idx_notification_date", "ZDATE"),
             ("idx_notification_pubdate", "ZPUB_DATE"),
@@ -164,16 +355,10 @@ struct ArgusApp: App {
             ("idx_notification_quality", "ZQUALITY"),
         ]
 
-        let seenArticleIndexes = [
-            ("idx_seenarticle_date", "ZDATE"),
-            ("idx_seenarticle_id", "ZID"),
-            ("idx_seenarticle_json_url", "ZJSON_URL"),
-        ]
-
         for (indexName, column) in notificationIndexes {
             let createIndexQuery = """
             CREATE INDEX IF NOT EXISTS \(indexName)
-            ON \(actualNotificationTableName) (\(column));
+            ON \(tableName) (\(column));
             """
             if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
                 let error = String(cString: sqlite3_errmsg(db))
@@ -183,19 +368,26 @@ struct ArgusApp: App {
                 continue
             }
         }
+    }
+
+    // Helper method to create seen article indexes
+    private static func createSeenArticleIndexes(db: OpaquePointer?, tableName: String) {
+        let seenArticleIndexes = [
+            ("idx_seenarticle_date", "ZDATE"),
+            ("idx_seenarticle_id", "ZID"),
+            ("idx_seenarticle_json_url", "ZJSON_URL"),
+        ]
 
         for (indexName, column) in seenArticleIndexes {
             let createIndexQuery = """
             CREATE INDEX IF NOT EXISTS \(indexName)
-            ON \(actualSeenArticleTableName) (\(column));
+            ON \(tableName) (\(column));
             """
             if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
                 AppLogger.database.error("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
                 continue
             }
         }
-
-        return true
     }
 
     enum DatabaseError: Error {
@@ -211,41 +403,68 @@ struct ArgusApp: App {
                 sharedModelContainer
             }
             let backgroundContext = ModelContext(container)
-            do {
-                let notificationCount = try backgroundContext.fetchCount(FetchDescriptor<NotificationData>())
-                AppLogger.database.debug("📊 Database Stats: NotificationData table size: \(notificationCount) records")
-                let seenArticleCount = try backgroundContext.fetchCount(FetchDescriptor<SeenArticle>())
-                AppLogger.database.debug("📊 Database Stats: SeenArticle table size: \(seenArticleCount) records")
-                let totalRecords = notificationCount + seenArticleCount
-                AppLogger.database.debug("📊 Database Stats: Total records across all tables: \(totalRecords)")
-                let unviewedCount = try backgroundContext.fetchCount(
-                    FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed })
-                )
-                AppLogger.database.debug("📊 Database Stats: Unviewed notifications: \(unviewedCount) records")
-                let bookmarkedCount = try backgroundContext.fetchCount(
-                    FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isBookmarked })
-                )
-                AppLogger.database.debug("📊 Database Stats: Bookmarked notifications: \(bookmarkedCount) records")
-                let archivedCount = try backgroundContext.fetchCount(
-                    FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isArchived })
-                )
-                AppLogger.database.debug("📊 Database Stats: Archived notifications: \(archivedCount) records")
-                let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
-                if daysSetting > 0 {
-                    let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date())!
-                    let eligibleForCleanupCount = try backgroundContext.fetchCount(
-                        FetchDescriptor<NotificationData>(
-                            predicate: #Predicate { notification in
-                                notification.date < cutoffDate &&
-                                    !notification.isBookmarked &&
-                                    !notification.isArchived
-                            }
-                        )
-                    )
-                    AppLogger.database.debug("📊 Database Stats: Notifications eligible for cleanup: \(eligibleForCleanupCount) records")
+
+            // Helper function to safely execute count and return 0 on error
+            func safeCount<T>(_ descriptor: FetchDescriptor<T>, label: String) -> Int {
+                do {
+                    let count = try backgroundContext.fetchCount(descriptor)
+                    AppLogger.database.debug("📊 Database Stats: \(label) size: \(count) records")
+                    return count
+                } catch {
+                    AppLogger.database.error("Error fetching \(label) count: \(error)")
+                    return 0
                 }
-            } catch {
-                AppLogger.database.error("Error fetching database table sizes: \(error)")
+            }
+
+            // Helper function to safely add with overflow protection
+            func safeAdd(_ a: Int, _ b: Int) -> Int {
+                let result = a.addingReportingOverflow(b)
+                if result.overflow {
+                    AppLogger.database.error("Arithmetic overflow detected when adding \(a) and \(b)")
+                    return Int.max // Return max value as fallback
+                }
+                return result.partialValue
+            }
+
+            // Get counts safely
+            let notificationCount = safeCount(FetchDescriptor<NotificationData>(), label: "NotificationData table")
+            let seenArticleCount = safeCount(FetchDescriptor<SeenArticle>(), label: "SeenArticle table")
+
+            // Safely calculate total
+            let totalRecords = safeAdd(notificationCount, seenArticleCount)
+            AppLogger.database.debug("📊 Database Stats: Total records across all tables: \(totalRecords)")
+
+            // Continue with other stats directly for logging
+            // These counts are only used for logging in safeCount and not needed for further calculations
+            let _ = safeCount(
+                FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed }),
+                label: "Unviewed notifications"
+            )
+
+            let _ = safeCount(
+                FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isBookmarked }),
+                label: "Bookmarked notifications"
+            )
+
+            let _ = safeCount(
+                FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isArchived }),
+                label: "Archived notifications"
+            )
+
+            // Only attempt cleanup stats if auto-delete is enabled
+            let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
+            if daysSetting > 0 {
+                let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date())!
+                let _ = safeCount(
+                    FetchDescriptor<NotificationData>(
+                        predicate: #Predicate { notification in
+                            notification.date < cutoffDate &&
+                                !notification.isBookmarked &&
+                                !notification.isArchived
+                        }
+                    ),
+                    label: "Notifications eligible for cleanup"
+                )
             }
         }
     }

@@ -92,12 +92,40 @@ extension SyncManager {
 
 @available(*, deprecated, message: "Use MigrationAdapter instead")
 class SyncManager {
-    // MARK: - Deprecation Warning
-    
+    // MARK: - Deprecation and Transition Logging
+
     /// Log a deprecation warning for the method that's being called
-    private func logDeprecationWarning(method: String) {
+    private func logDeprecationWarning(method: String, file: String = #file, line: Int = #line) {
+        // Use ModernizationLogger for enhanced deprecation tracking
+        ModernizationLogger.logDeprecatedMethodCall(method, component: .syncManager, file: file, line: line)
+
+        // Log with AppLogger as well for backward compatibility
         AppLogger.sync.warning("⚠️ DEPRECATED: \(method) is deprecated and will be removed in a future update. Use MigrationAdapter or BackgroundTaskManager instead.")
     }
+
+    /// Log a method call forwarding to the adapter
+    private func logMethodForwarding(from method: String, to adapter: String, file: String = #file, line: Int = #line) {
+        ModernizationLogger.logTransitionStart("\(method) forwarded to \(adapter)", component: .syncManager, file: file, line: line)
+    }
+
+    /// Log the completion of a forwarded method call
+    private func logForwardingCompletion(method: String, success: Bool, errorMessage: String? = nil, file: String = #file, line: Int = #line) {
+        let detail = errorMessage ?? ""
+        ModernizationLogger.logTransitionCompletion(method, component: .syncManager, success: success, detail: detail, file: file, line: line)
+    }
+
+    /// Log performance metrics for method execution
+    private func measureForwardingPerformance<T>(method: String, file: String = #file, line: Int = #line, operation: () async throws -> T) async rethrows -> T {
+        return try await ModernizationLogger.measureAsyncPerformance(
+            operation: method,
+            component: .syncManager,
+            context: "Forwarding to MigrationAdapter",
+            file: file,
+            line: line,
+            block: operation
+        )
+    }
+
     // Thread-safe lock for sync operations using an actor
     private actor SyncLockManager {
         private var isSyncing = false
@@ -520,20 +548,31 @@ class SyncManager {
     // Processes articles directly without intermediate steps
     // Now with update capability for existing articles
     @available(*, deprecated, message: "Use MigrationAdapter.directProcessArticle instead")
-    func directProcessArticle(jsonURL: String) async -> Bool {
-        logDeprecationWarning(method: "directProcessArticle")
-        
-        // Forward call to MigrationAdapter instead
-        return await MigrationAdapter.shared.directProcessArticle(jsonURL: jsonURL)
+    func directProcessArticle(jsonURL: String, file: String = #file, line: Int = #line) async -> Bool {
+        logDeprecationWarning(method: "directProcessArticle", file: file, line: line)
+        logMethodForwarding(from: "directProcessArticle", to: "MigrationAdapter.directProcessArticle", file: file, line: line)
+
+        // Measure performance of forwarded call
+        let success = await measureForwardingPerformance(method: "directProcessArticle", file: file, line: line) {
+            await MigrationAdapter.shared.directProcessArticle(jsonURL: jsonURL)
+        }
+
+        logForwardingCompletion(method: "directProcessArticle", success: success, file: file, line: line)
+        return success
     }
 
     // Delegates database maintenance to MigrationAdapter
     @available(*, deprecated, message: "Use MigrationAdapter.performScheduledMaintenance instead")
-    func performScheduledMaintenance(timeLimit: TimeInterval? = nil) async {
-        logDeprecationWarning(method: "performScheduledMaintenance")
-        
-        // Forward call to MigrationAdapter
-        await MigrationAdapter.shared.performScheduledMaintenance(timeLimit: timeLimit)
+    func performScheduledMaintenance(timeLimit: TimeInterval? = nil, file: String = #file, line: Int = #line) async {
+        logDeprecationWarning(method: "performScheduledMaintenance", file: file, line: line)
+        logMethodForwarding(from: "performScheduledMaintenance", to: "MigrationAdapter.performScheduledMaintenance", file: file, line: line)
+
+        // Measure performance and log completion
+        await measureForwardingPerformance(method: "performScheduledMaintenance", file: file, line: line) {
+            await MigrationAdapter.shared.performScheduledMaintenance(timeLimit: timeLimit)
+        }
+
+        logForwardingCompletion(method: "performScheduledMaintenance", success: true, file: file, line: line)
     }
 
     // Public compatibility methods that now just perform maintenance
@@ -547,38 +586,91 @@ class SyncManager {
 
     // Registers the app's background tasks with the system
     @available(*, deprecated, message: "Use BackgroundTaskManager.registerBackgroundTasks instead")
-    func registerBackgroundTasks() {
-        logDeprecationWarning(method: "registerBackgroundTasks")
-        
-        // Forward call to MigrationAdapter
-        MigrationAdapter.shared.registerBackgroundTasks()
+    func registerBackgroundTasks(file: String = #file, line: Int = #line) {
+        logDeprecationWarning(method: "registerBackgroundTasks", file: file, line: line)
+        logMethodForwarding(from: "registerBackgroundTasks", to: "MigrationAdapter.registerBackgroundTasks", file: file, line: line)
+
+        // Measure synchronous performance
+        let success = ModernizationLogger.measurePerformance(
+            operation: "registerBackgroundTasks",
+            component: .syncManager,
+            file: file,
+            line: line
+        ) {
+            MigrationAdapter.shared.registerBackgroundTasks()
+            return true
+        }
+
+        logForwardingCompletion(method: "registerBackgroundTasks", success: success, file: file, line: line)
     }
 
     // Schedules a background app refresh task
     @available(*, deprecated, message: "Use BackgroundTaskManager.scheduleBackgroundRefresh instead")
-    func scheduleBackgroundFetch() {
-        logDeprecationWarning(method: "scheduleBackgroundFetch")
-        
-        // Forward call to MigrationAdapter
-        MigrationAdapter.shared.scheduleBackgroundFetch()
+    func scheduleBackgroundFetch(file: String = #file, line: Int = #line) {
+        logDeprecationWarning(method: "scheduleBackgroundFetch", file: file, line: line)
+        logMethodForwarding(from: "scheduleBackgroundFetch", to: "MigrationAdapter.scheduleBackgroundFetch", file: file, line: line)
+
+        // Measure synchronous performance
+        let success = ModernizationLogger.measurePerformance(
+            operation: "scheduleBackgroundFetch",
+            component: .syncManager,
+            file: file,
+            line: line
+        ) {
+            MigrationAdapter.shared.scheduleBackgroundFetch()
+            return true
+        }
+
+        logForwardingCompletion(method: "scheduleBackgroundFetch", success: success, file: file, line: line)
     }
 
     // Schedules a background processing task
     @available(*, deprecated, message: "Use BackgroundTaskManager.scheduleBackgroundProcessing instead")
-    func scheduleBackgroundSync() {
-        logDeprecationWarning(method: "scheduleBackgroundSync")
-        
-        // Forward call to MigrationAdapter
-        MigrationAdapter.shared.scheduleBackgroundSync()
+    func scheduleBackgroundSync(file: String = #file, line: Int = #line) {
+        logDeprecationWarning(method: "scheduleBackgroundSync", file: file, line: line)
+        logMethodForwarding(from: "scheduleBackgroundSync", to: "MigrationAdapter.scheduleBackgroundSync", file: file, line: line)
+
+        // Measure synchronous performance
+        let success = ModernizationLogger.measurePerformance(
+            operation: "scheduleBackgroundSync",
+            component: .syncManager,
+            file: file,
+            line: line
+        ) {
+            MigrationAdapter.shared.scheduleBackgroundSync()
+            return true
+        }
+
+        logForwardingCompletion(method: "scheduleBackgroundSync", success: success, file: file, line: line)
     }
 
     // Requests expedited background processing
     @available(*, deprecated, message: "Use BackgroundTaskManager.scheduleBackgroundRefresh instead")
-    func requestExpediteBackgroundProcessing() {
-        logDeprecationWarning(method: "requestExpediteBackgroundProcessing")
-        
-        // Forward call to BackgroundTaskManager since MigrationAdapter doesn't have this method
-        BackgroundTaskManager.shared.scheduleBackgroundRefresh()
+    func requestExpediteBackgroundProcessing(file: String = #file, line: Int = #line) {
+        logDeprecationWarning(method: "requestExpediteBackgroundProcessing", file: file, line: line)
+
+        // Log that this call is forwarded to BackgroundTaskManager instead of MigrationAdapter
+        ModernizationLogger.logFallback(
+            from: "requestExpediteBackgroundProcessing",
+            to: "BackgroundTaskManager.scheduleBackgroundRefresh",
+            reason: "No equivalent in MigrationAdapter",
+            component: .syncManager,
+            file: file,
+            line: line
+        )
+
+        // Measure performance
+        let success = ModernizationLogger.measurePerformance(
+            operation: "requestExpediteBackgroundProcessing",
+            component: .syncManager,
+            file: file,
+            line: line
+        ) {
+            BackgroundTaskManager.shared.scheduleBackgroundRefresh()
+            return true
+        }
+
+        logForwardingCompletion(method: "requestExpediteBackgroundProcessing", success: success, file: file, line: line)
     }
 
     // MARK: - Deterministic UUID Generation
@@ -776,20 +868,40 @@ class SyncManager {
     // Prevents excessive sync operations by enforcing a minimum time between manual syncs.
     // Returns a boolean indicating whether the sync was started or skipped due to throttling.
     @available(*, deprecated, message: "Use MigrationAdapter.manualSync instead")
-    func manualSync() async -> Bool {
-        logDeprecationWarning(method: "manualSync")
-        
-        // Forward to MigrationAdapter for future compatibility
-        return await MigrationAdapter.shared.manualSync()
+    func manualSync(file: String = #file, line: Int = #line) async -> Bool {
+        logDeprecationWarning(method: "manualSync", file: file, line: line)
+        logMethodForwarding(from: "manualSync", to: "MigrationAdapter.manualSync", file: file, line: line)
+
+        // Measure performance and log results
+        let success = await measureForwardingPerformance(method: "manualSync", file: file, line: line) {
+            await MigrationAdapter.shared.manualSync()
+        }
+
+        logForwardingCompletion(method: "manualSync", success: success, file: file, line: line)
+        return success
     }
 
     // Syncs recent article history with the server
     @available(*, deprecated, message: "Use MigrationAdapter.manualSync instead")
-    func sendRecentArticlesToServer() async {
-        logDeprecationWarning(method: "sendRecentArticlesToServer")
-        
-        // Forward to MigrationAdapter.manualSync instead since sendRecentArticlesToServer doesn't exist
-        _ = await MigrationAdapter.shared.manualSync()
+    func sendRecentArticlesToServer(file: String = #file, line: Int = #line) async {
+        logDeprecationWarning(method: "sendRecentArticlesToServer", file: file, line: line)
+
+        // Log the fallback to manualSync since direct equivalent doesn't exist
+        ModernizationLogger.logFallback(
+            from: "sendRecentArticlesToServer",
+            to: "MigrationAdapter.manualSync",
+            reason: "No direct equivalent in MigrationAdapter",
+            component: .syncManager,
+            file: file,
+            line: line
+        )
+
+        // Measure performance
+        await measureForwardingPerformance(method: "sendRecentArticlesToServer", file: file, line: line) {
+            _ = await MigrationAdapter.shared.manualSync()
+        }
+
+        logForwardingCompletion(method: "sendRecentArticlesToServer", success: true, file: file, line: line)
     }
 
     // Helper to check if an ID is already used in the database
@@ -874,30 +986,74 @@ class SyncManager {
 
     // Process articles using the MigrationAdapter
     @available(*, deprecated, message: "Use MigrationAdapter.processArticlesDirectly instead")
-    func processArticlesDirectly(urls: [String]) async {
-        logDeprecationWarning(method: "processArticlesDirectly")
-        
-        // Forward call to MigrationAdapter
-        await MigrationAdapter.shared.processArticlesDirectly(urls: urls)
+    func processArticlesDirectly(urls: [String], file: String = #file, line: Int = #line) async {
+        logDeprecationWarning(method: "processArticlesDirectly", file: file, line: line)
+        logMethodForwarding(from: "processArticlesDirectly", to: "MigrationAdapter.processArticlesDirectly", file: file, line: line)
+
+        // Log batch size for metrics
+        ModernizationLogger.log(
+            .info,
+            component: .syncManager,
+            message: "Processing batch of \(urls.count) articles",
+            file: file,
+            line: line
+        )
+
+        // Measure performance
+        await measureForwardingPerformance(method: "processArticlesDirectly", file: file, line: line) {
+            await MigrationAdapter.shared.processArticlesDirectly(urls: urls)
+        }
+
+        logForwardingCompletion(method: "processArticlesDirectly", success: true, file: file, line: line)
     }
 
     // Process multiple articles in the background
     @available(*, deprecated, message: "Use MigrationAdapter.processArticlesDirectly instead")
-    private func processArticlesDetached(urls: [String]) async {
-        logDeprecationWarning(method: "processArticlesDetached")
-        
-        // Forward to MigrationAdapter.processArticlesDirectly since processArticlesInBackground doesn't exist
-        await MigrationAdapter.shared.processArticlesDirectly(urls: urls)
+    private func processArticlesDetached(urls: [String], file: String = #file, line: Int = #line) async {
+        logDeprecationWarning(method: "processArticlesDetached", file: file, line: line)
+
+        // Log the fallback
+        ModernizationLogger.logFallback(
+            from: "processArticlesDetached",
+            to: "MigrationAdapter.processArticlesDirectly",
+            reason: "No direct equivalent in MigrationAdapter",
+            component: .syncManager,
+            file: file,
+            line: line
+        )
+
+        // Measure performance
+        await measureForwardingPerformance(method: "processArticlesDetached", file: file, line: line) {
+            await MigrationAdapter.shared.processArticlesDirectly(urls: urls)
+        }
+
+        logForwardingCompletion(method: "processArticlesDetached", success: true, file: file, line: line)
     }
 
     // Process a single article in isolation
     @available(*, deprecated, message: "Use MigrationAdapter.directProcessArticle instead")
-    private func processArticleIsolated(jsonURL: String, container: ModelContainer? = nil) async -> (created: Int, updated: Int, failed: Int) {
-        logDeprecationWarning(method: "processArticleIsolated")
-        
-        // Forward to MigrationAdapter.directProcessArticle since processArticleIsolated doesn't exist
-        let success = await MigrationAdapter.shared.directProcessArticle(jsonURL: jsonURL)
+    private func processArticleIsolated(jsonURL: String, container _: ModelContainer? = nil, file: String = #file, line: Int = #line) async -> (created: Int, updated: Int, failed: Int) {
+        logDeprecationWarning(method: "processArticleIsolated", file: file, line: line)
+
+        // Log the conversion from one return type to another
+        ModernizationLogger.logFallback(
+            from: "processArticleIsolated",
+            to: "MigrationAdapter.directProcessArticle",
+            reason: "Return type conversion needed: bool -> (created, updated, failed)",
+            component: .syncManager,
+            file: file,
+            line: line
+        )
+
+        // Measure performance and convert the result
+        let success = await measureForwardingPerformance(method: "processArticleIsolated", file: file, line: line) {
+            await MigrationAdapter.shared.directProcessArticle(jsonURL: jsonURL)
+        }
+
         // Convert the boolean result to the expected tuple return type
-        return success ? (1, 0, 0) : (0, 0, 1)
+        let result = success ? (1, 0, 0) : (0, 0, 1)
+
+        logForwardingCompletion(method: "processArticleIsolated", success: success, file: file, line: line)
+        return result
     }
 }

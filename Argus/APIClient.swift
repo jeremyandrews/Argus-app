@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import OSLog
 import SwiftData
 import SwiftUI
@@ -15,6 +16,15 @@ class APIClient {
 
     /// Logger for API operations
     private let logger = AppLogger.api
+
+    /// Network path monitor for connectivity status
+    private let networkMonitor = NWPathMonitor()
+
+    /// Current network path status
+    private var currentPath: NWPath?
+
+    /// Maximum number of retries for a request
+    private let maxRetries = 3
 
     /// API-specific error types
     enum ApiError: Error, LocalizedError {
@@ -63,9 +73,49 @@ class APIClient {
     private init() {
         // Configure timeouts at initialization
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 10.0 // 10 seconds for initial connection
-        configuration.timeoutIntervalForResource = 30.0 // 30 seconds for the entire resource
+        configuration.timeoutIntervalForRequest = 15.0 // 15 seconds for initial connection (increased from 10)
+        configuration.timeoutIntervalForResource = 60.0 // 60 seconds for the entire resource (increased from 30)
         session = URLSession(configuration: configuration)
+
+        // Start monitoring network status
+        setupNetworkMonitoring()
+    }
+
+    // MARK: - Network Monitoring
+
+    /// Set up network path monitoring
+    private func setupNetworkMonitoring() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            self?.currentPath = path
+
+            let statusDescription = path.status == .satisfied ? "connected" : "disconnected"
+            let interfaceTypes = path.availableInterfaces.map { interface -> String in
+                // Need to capture self strongly here for the mapping function
+                guard let self = self else { return "Unknown" }
+                return self.interfaceTypeToString(interface.type)
+            }.joined(separator: ", ")
+
+            if path.status == .satisfied {
+                ModernizationLogger.log(.info, component: .apiClient,
+                                        message: "Network connection: \(statusDescription) using \(interfaceTypes)")
+            } else {
+                ModernizationLogger.log(.warning, component: .apiClient,
+                                        message: "Network connection: \(statusDescription). No internet access.")
+            }
+        }
+
+        // Start monitoring on a background queue
+        networkMonitor.start(queue: DispatchQueue.global(qos: .background))
+    }
+
+    /// Check if the device has network connectivity
+    var isNetworkConnected: Bool {
+        return currentPath?.status == .satisfied
+    }
+
+    /// Check if the device is on WiFi
+    var isOnWifi: Bool {
+        return currentPath?.usesInterfaceType(.wifi) ?? false
     }
 
     // MARK: - Authentication
@@ -108,92 +158,138 @@ class APIClient {
 
     // MARK: - Article APIs
 
-    /// Fetches articles from the server
+    /// Fetches articles from the server using the sync endpoint
     /// - Parameters:
-    ///   - limit: Maximum number of articles to fetch
-    ///   - topic: Optional topic filter
-    ///   - since: Optional date to fetch articles published after
+    ///   - limit: Maximum number of articles to fetch (note: may be ignored by server)
+    ///   - topic: Optional topic filter (note: may be ignored by server)
+    ///   - since: Optional date filter (note: may be ignored by server)
+    ///   - allowRetries: Whether to retry on network failures
     /// - Returns: Array of ArticleJSON objects
     /// - Throws: ApiError if fetch fails
-    func fetchArticles(limit: Int = 50, topic: String? = nil, since: Date? = nil) async throws -> [ArticleJSON] {
-        var queryItems = [URLQueryItem(name: "limit", value: "\(limit)")]
+    func fetchArticles(limit: Int = 50, topic _: String? = nil, since _: Date? = nil,
+                       allowRetries: Bool = true) async throws -> [ArticleJSON]
+    {
+        // Note: The backend only supports the /articles/sync endpoint, not /articles
+        // The parameters (limit, topic, since) are kept for backward compatibility
+        // but won't be used by the server.
 
-        if let topic = topic {
-            queryItems.append(URLQueryItem(name: "topic", value: topic))
+        ModernizationLogger.log(.info, component: .apiClient,
+                                message: "Fetching articles using the articles/sync endpoint")
+
+        // We need to get a list of article URLs first
+        let articleURLs = try await fetchArticleURLs(allowRetries: allowRetries)
+
+        if articleURLs.isEmpty {
+            ModernizationLogger.log(.info, component: .apiClient,
+                                    message: "No article URLs returned from sync endpoint")
+            return []
         }
 
-        if let since = since {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            queryItems.append(URLQueryItem(name: "since", value: formatter.string(from: since)))
-        }
+        ModernizationLogger.log(.info, component: .apiClient,
+                                message: "Retrieved \(articleURLs.count) article URLs, fetching content...")
 
-        var urlComponents = URLComponents(string: baseURL + "/articles")!
-        urlComponents.queryItems = queryItems
+        // For each URL, fetch the actual article
+        var articles: [ArticleJSON] = []
 
-        guard let url = urlComponents.url else {
-            throw ApiError.invalidURL
-        }
-
-        return try await performAuthenticatedRequestWithDecoding(to: url, method: "GET") { data in
-            // First try to decode as an array directly
+        for url in articleURLs.prefix(limit) { // Honor the limit parameter locally
             do {
-                let jsonObjects = try JSONSerialization.jsonObject(with: data) as? [Any]
+                if let article = try await fetchArticleByURL(jsonURL: url, allowEmptyResponse: true, allowRetries: allowRetries) {
+                    articles.append(article)
 
-                // Check if this is a dictionary response with an articles key
-                if let jsonObjects = jsonObjects {
-                    return try self.processArticleArray(jsonObjects)
-                } else if let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let articlesArray = jsonDict["articles"] as? [Any]
-                {
-                    return try self.processArticleArray(articlesArray)
-                } else {
-                    self.logger.error("Unexpected response format for articles")
-                    throw ApiError.invalidResponse
+                    // Check if we've hit the limit
+                    if articles.count >= limit {
+                        break
+                    }
                 }
             } catch {
-                self.logger.error("Error parsing article JSON: \(error.localizedDescription)")
-                throw ApiError.decodingError(error)
+                // Log the error but continue with other articles
+                logger.error("Error fetching article at URL \(url): \(error)")
+                ModernizationLogger.log(.error, component: .apiClient,
+                                        message: "Error fetching article at URL \(url): \(error)")
             }
         }
+
+        return articles
+    }
+
+    /// Fetches only the URLs of available articles from the server
+    /// - Parameter allowRetries: Whether to retry on network failures
+    /// - Returns: Array of article JSON URLs
+    /// - Throws: ApiError if fetch fails
+    private func fetchArticleURLs(allowRetries: Bool = true) async throws -> [String] {
+        // Use the syncArticles method with an empty list of seen articles
+        // to get all available articles
+        let emptySeenArticles: [String] = []
+
+        return try await syncArticles(seenArticles: emptySeenArticles, allowRetries: allowRetries)
     }
 
     /// Fetches a specific article by ID
-    /// - Parameter id: The UUID of the article to fetch
-    /// - Returns: ArticleJSON object
+    /// - Parameters:
+    ///   - id: The UUID of the article to fetch
+    ///   - allowEmptyResponse: If true, returns nil instead of throwing for 404 errors
+    ///   - allowRetries: Whether to allow automatic retries for network failures
+    /// - Returns: ArticleJSON object or nil if allowEmptyResponse is true and article not found
     /// - Throws: ApiError if fetch fails
-    func fetchArticle(by id: UUID) async throws -> ArticleJSON {
+    func fetchArticle(by id: UUID, allowEmptyResponse: Bool = false, allowRetries: Bool = true) async throws -> ArticleJSON? {
         let url = URL(string: baseURL + "/articles/\(id.uuidString)")!
 
-        return try await performAuthenticatedRequestWithDecoding(to: url, method: "GET") { data in
-            do {
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    throw ApiError.invalidResponse
-                }
+        do {
+            return try await performAuthenticatedRequestWithDecoding(to: url, method: "GET") { data in
+                ModernizationLogger.log(.debug, component: .apiClient,
+                                        message: "Decoding article with ID: \(id.uuidString)")
 
-                // Ensure the json_url is set in case it's missing from server response
-                var enrichedJson = json
-                if enrichedJson["json_url"] == nil {
-                    enrichedJson["json_url"] = "/articles/\(id.uuidString).json"
-                }
+                do {
+                    guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        throw ApiError.invalidResponse
+                    }
 
-                guard let articleJSON = processArticleJSON(enrichedJson) else {
-                    throw ApiError.invalidResponse
-                }
+                    // Ensure the json_url is set in case it's missing from server response
+                    var enrichedJson = json
+                    if enrichedJson["json_url"] == nil {
+                        enrichedJson["json_url"] = "/articles/\(id.uuidString).json"
+                    }
 
-                return articleJSON
-            } catch {
-                self.logger.error("Error decoding article JSON: \(error.localizedDescription)")
-                throw ApiError.decodingError(error)
+                    guard let articleJSON = processArticleJSON(enrichedJson) else {
+                        throw ApiError.invalidResponse
+                    }
+
+                    return articleJSON
+                } catch {
+                    self.logger.error("Error decoding article JSON: \(error.localizedDescription)")
+                    ModernizationLogger.log(.error, component: .apiClient,
+                                            message: "Error decoding article JSON: \(error.localizedDescription)")
+                    throw ApiError.decodingError(error)
+                }
             }
+        } catch ApiError.resourceNotFound where allowEmptyResponse {
+            // Return nil instead of throwing for 404 errors if allowEmptyResponse is true
+            ModernizationLogger.log(.warning, component: .apiClient,
+                                    message: "Article with ID \(id.uuidString) not found. Returning nil.")
+            return nil
+        } catch let error as ApiError where allowRetries {
+            if case .networkError = error, isNetworkConnected {
+                ModernizationLogger.log(.warning, component: .apiClient,
+                                        message: "Network error fetching article with ID \(id.uuidString). Will retry: \(error.localizedDescription)")
+                // Retry with exponential backoff
+                return try await retryWithBackoff { [weak self] in
+                    guard let self = self else { throw ApiError.unknown(NSError(domain: "com.argus", code: -1)) }
+                    // Retry without allowing further retries to prevent infinite recursion
+                    return try await self.fetchArticle(by: id, allowEmptyResponse: allowEmptyResponse, allowRetries: false)
+                }
+            }
+            throw error
         }
     }
 
     /// Fetches an article by its JSON URL
-    /// - Parameter jsonURL: Full URL to the article JSON
-    /// - Returns: ArticleJSON object
+    /// - Parameters:
+    ///   - jsonURL: Full URL to the article JSON
+    ///   - allowEmptyResponse: If true, returns nil instead of throwing for 404 errors
+    ///   - allowRetries: Whether to allow automatic retries for network failures
+    /// - Returns: ArticleJSON object or nil if allowEmptyResponse is true and article not found
     /// - Throws: ApiError if fetch fails
-    func fetchArticleByURL(jsonURL: String) async throws -> ArticleJSON {
+    func fetchArticleByURL(jsonURL: String, allowEmptyResponse: Bool = false, allowRetries: Bool = true) async throws -> ArticleJSON? {
         // Determine if this is a full URL or just a path
         let url: URL
         if jsonURL.hasPrefix("http") {
@@ -210,47 +306,152 @@ class APIClient {
             url = validURL
         }
 
-        return try await performAuthenticatedRequestWithDecoding(to: url, method: "GET") { data in
-            do {
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    throw ApiError.invalidResponse
-                }
+        ModernizationLogger.log(.debug, component: .apiClient,
+                                message: "Fetching article by URL: \(jsonURL)")
 
-                // Ensure the json_url is set
-                var enrichedJson = json
-                if enrichedJson["json_url"] == nil {
-                    enrichedJson["json_url"] = jsonURL
-                }
+        do {
+            return try await performAuthenticatedRequestWithDecoding(to: url, method: "GET") { data in
+                do {
+                    guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        throw ApiError.invalidResponse
+                    }
 
-                guard let articleJSON = processArticleJSON(enrichedJson) else {
-                    throw ApiError.invalidResponse
-                }
+                    // Ensure the json_url is set
+                    var enrichedJson = json
+                    if enrichedJson["json_url"] == nil {
+                        enrichedJson["json_url"] = jsonURL
+                    }
 
-                return articleJSON
-            } catch {
-                self.logger.error("Error decoding article JSON for URL \(jsonURL): \(error.localizedDescription)")
-                throw ApiError.decodingError(error)
+                    guard let articleJSON = processArticleJSON(enrichedJson) else {
+                        throw ApiError.invalidResponse
+                    }
+
+                    return articleJSON
+                } catch {
+                    self.logger.error("Error decoding article JSON for URL \(jsonURL): \(error.localizedDescription)")
+                    ModernizationLogger.log(.error, component: .apiClient,
+                                            message: "Error decoding article JSON for URL \(jsonURL): \(error.localizedDescription)")
+                    throw ApiError.decodingError(error)
+                }
             }
+        } catch ApiError.resourceNotFound where allowEmptyResponse {
+            // Return nil instead of throwing for 404 errors if allowEmptyResponse is true
+            ModernizationLogger.log(.warning, component: .apiClient,
+                                    message: "Article with URL \(jsonURL) not found. Returning nil.")
+            return nil
+        } catch let error as ApiError where allowRetries {
+            if case .networkError = error, isNetworkConnected {
+                ModernizationLogger.log(.warning, component: .apiClient,
+                                        message: "Network error fetching article with URL \(jsonURL). Will retry: \(error.localizedDescription)")
+                // Retry with exponential backoff
+                return try await retryWithBackoff { [weak self] in
+                    guard let self = self else { throw ApiError.unknown(NSError(domain: "com.argus", code: -1)) }
+                    // Retry without allowing further retries to prevent infinite recursion
+                    return try await self.fetchArticleByURL(jsonURL: jsonURL, allowEmptyResponse: allowEmptyResponse, allowRetries: false)
+                }
+            }
+            throw error
         }
     }
 
     /// Sync viewed articles with the server and get unseen articles
-    /// - Parameter seenArticles: Array of recently seen article JSON URLs
-    /// - Returns: Array of unseen article URLs
-    /// - Throws: ApiError if sync fails
-    func syncArticles(seenArticles: [String]) async throws -> [String] {
+    /// - Parameters:
+    ///   - seenArticles: Array of recently seen article JSON URLs
+    ///   - allowRetries: Whether to allow automatic retries for network failures
+    /// - Returns: Array of unseen article URLs (empty array if sync fails with 404)
+    /// - Throws: ApiError if sync fails with other errors
+    func syncArticles(seenArticles: [String], allowRetries: Bool = true) async throws -> [String] {
         let url = URL(string: baseURL + "/articles/sync")!
         let payload = ["seen_articles": seenArticles]
 
-        return try await performAuthenticatedRequestWithDecoding(to: url, method: "POST", body: payload) { data in
+        ModernizationLogger.log(.debug, component: .apiClient,
+                                message: "Syncing \(seenArticles.count) articles with server")
+
+        do {
+            return try await performAuthenticatedRequestWithDecoding(to: url, method: "POST", body: payload) { data in
+                do {
+                    let response = try JSONDecoder().decode([String: [String]].self, from: data)
+                    let unseenArticles = response["unseen_articles"] ?? []
+                    ModernizationLogger.log(.info, component: .apiClient,
+                                            message: "Sync successful. Found \(unseenArticles.count) unseen articles.")
+                    return unseenArticles
+                } catch {
+                    self.logger.error("Error decoding sync response: \(error.localizedDescription)")
+                    ModernizationLogger.log(.error, component: .apiClient,
+                                            message: "Error decoding sync response: \(error.localizedDescription)")
+                    throw ApiError.decodingError(error)
+                }
+            }
+        } catch ApiError.resourceNotFound {
+            // Return empty array instead of throwing for 404 errors
+            ModernizationLogger.log(.warning, component: .apiClient,
+                                    message: "Sync endpoint not found (404). Returning empty array.")
+            return []
+        } catch let error as ApiError where allowRetries {
+            if case .networkError = error, isNetworkConnected {
+                ModernizationLogger.log(.warning, component: .apiClient,
+                                        message: "Network error during sync. Will retry: \(error.localizedDescription)")
+                // Retry with exponential backoff
+                return try await retryWithBackoff { [weak self] in
+                    guard let self = self else { throw ApiError.unknown(NSError(domain: "com.argus", code: -1)) }
+                    // Retry without allowing further retries to prevent infinite recursion
+                    return try await self.syncArticles(seenArticles: seenArticles, allowRetries: false)
+                }
+            }
+            throw error
+        }
+    }
+
+    // MARK: - Retry Logic
+
+    /// Retry a block with exponential backoff
+    /// - Parameters:
+    ///   - maxAttempts: Maximum number of retry attempts
+    ///   - block: The async operation to retry
+    /// - Returns: The result of the operation
+    /// - Throws: The last error encountered if all retries fail
+    private func retryWithBackoff<T>(maxAttempts: Int = 3, block: @escaping () async throws -> T) async throws -> T {
+        var lastError: Error?
+
+        for attempt in 1 ... maxAttempts {
             do {
-                let response = try JSONDecoder().decode([String: [String]].self, from: data)
-                return response["unseen_articles"] ?? []
+                // Wait with exponential backoff before retrying
+                if attempt > 1 {
+                    let backoffSeconds = Double(Swift.min(2 << (attempt - 2), 30))
+                    ModernizationLogger.log(.info, component: .apiClient,
+                                            message: "Retry attempt \(attempt)/\(maxAttempts) after \(backoffSeconds)s backoff")
+                    try await Task.sleep(nanoseconds: UInt64(backoffSeconds * 1_000_000_000))
+                }
+
+                // If we lost network connectivity while waiting for retry, throw immediately
+                if attempt > 1 && !isNetworkConnected {
+                    ModernizationLogger.log(.warning, component: .apiClient,
+                                            message: "Aborting retry - no network connectivity")
+                    throw ApiError.networkError(URLError(.notConnectedToInternet))
+                }
+
+                return try await block()
             } catch {
-                self.logger.error("Error decoding sync response: \(error.localizedDescription)")
-                throw ApiError.decodingError(error)
+                lastError = error
+
+                // If this is a fatal error that won't be fixed by retrying, don't retry
+                if let apiError = error as? ApiError {
+                    switch apiError {
+                    case .authenticationRequired, .invalidURL, .decodingError, .resourceNotFound:
+                        // These errors won't be fixed by retrying
+                        throw error
+                    default:
+                        // Other errors might be temporary, continue with retry
+                        ModernizationLogger.log(.warning, component: .apiClient,
+                                                message: "Retry attempt \(attempt) failed: \(error.localizedDescription)")
+                    }
+                }
             }
         }
+
+        ModernizationLogger.log(.error, component: .apiClient,
+                                message: "All retry attempts failed")
+        throw lastError ?? ApiError.unknown(NSError(domain: "com.argus", code: -1))
     }
 
     // MARK: - Helper Methods
@@ -373,9 +574,50 @@ class APIClient {
             throw ApiError.invalidResponse
         }
 
-        logger.info("Response status code: \(httpResponse.statusCode)")
+        let statusCode = httpResponse.statusCode
+        logger.info("Response status code: \(statusCode)")
 
-        switch httpResponse.statusCode {
+        // Log more detailed information for important status codes
+        switch statusCode {
+        case 200 ..< 300:
+            ModernizationLogger.log(.debug, component: .apiClient,
+                                    message: "Successful response: \(statusCode)")
+        case 400 ..< 500:
+            ModernizationLogger.log(.warning, component: .apiClient,
+                                    message: "Client error response: \(statusCode)")
+        case 500 ..< 600:
+            ModernizationLogger.log(.error, component: .apiClient,
+                                    message: "Server error response: \(statusCode)")
+        default:
+            ModernizationLogger.log(.warning, component: .apiClient,
+                                    message: "Unusual status code: \(statusCode)")
+        }
+
+        // Log response headers for debugging
+        if statusCode >= 400 {
+            let headers = httpResponse.allHeaderFields
+            let relevantHeaders = ["Content-Type", "Date", "Retry-After", "X-Request-ID"]
+                .compactMap { key in
+                    if let value = headers[key] ?? headers[key.lowercased()] {
+                        return "\(key): \(value)"
+                    }
+                    return nil
+                }
+                .joined(separator: ", ")
+
+            ModernizationLogger.log(.debug, component: .apiClient,
+                                    message: "Response headers: \(relevantHeaders)")
+
+            // Try to extract and log error message from response body
+            if let errorJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let errorMessage = errorJSON["message"] as? String
+            {
+                ModernizationLogger.log(.warning, component: .apiClient,
+                                        message: "Error message from server: \(errorMessage)")
+            }
+        }
+
+        switch statusCode {
         case 200 ..< 300:
             // Success range
             return
@@ -432,6 +674,26 @@ class APIClient {
             return .networkError(error)
         default:
             return .networkError(error)
+        }
+    }
+
+    /// Helper function to convert NWInterface.InterfaceType to string
+    /// - Parameter type: The network interface type
+    /// - Returns: String representation of the interface type
+    private func interfaceTypeToString(_ type: NWInterface.InterfaceType) -> String {
+        switch type {
+        case .wifi:
+            return "WiFi"
+        case .cellular:
+            return "Cellular"
+        case .wiredEthernet:
+            return "Ethernet"
+        case .loopback:
+            return "Loopback"
+        case .other:
+            return "Other"
+        @unknown default:
+            return "Unknown(\(type))"
         }
     }
 

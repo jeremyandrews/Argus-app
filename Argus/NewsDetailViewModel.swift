@@ -143,15 +143,18 @@ final class NewsDetailViewModel: ObservableObject {
             return
         }
 
-        // Store the notification we're navigating to
-        let nextArticle = articles[nextIndex]
+        // Get the article from the array first
+        let nextArticleId = articles[nextIndex].id
 
         // Set loading state
         isLoadingNextArticle = true
 
-        // Update state with the pre-loaded content
+        // First update the index to ensure UI is responsive
         currentIndex = nextIndex
-        currentArticle = nextArticle
+
+        // Use the current article temporarily while we load the complete one
+        let tempArticle = articles[nextIndex]
+        currentArticle = tempArticle
 
         // Reset rich text content
         clearRichTextContent()
@@ -163,9 +166,36 @@ final class NewsDetailViewModel: ObservableObject {
         contentTransitionID = UUID()
         scrollToTopTrigger = UUID()
 
-        // Mark as viewed
+        // Fetch the complete article from the database by ID
         Task {
+            // First try to mark as viewed
             try? await markAsViewed()
+
+            // Log for debugging
+            AppLogger.database.debug("Navigating to article with ID: \(nextArticleId)")
+
+            // Get complete article from service or use the one we have
+            if let completeArticle = await articleOperations.getCompleteArticle(byId: nextArticleId) {
+                // Log for diagnostic purposes
+                let hasEngineStats = completeArticle.engine_stats != nil
+                let hasSimilarArticles = completeArticle.similar_articles != nil
+                AppLogger.database.debug("Got complete article. Has engine stats: \(hasEngineStats), has similar articles: \(hasSimilarArticles)")
+
+                // Update with the complete article that has all fields
+                await MainActor.run {
+                    currentArticle = completeArticle
+                    // Update our local article in the array too if needed
+                    if !hasEngineStats || !hasSimilarArticles {
+                        if let index = articles.firstIndex(where: { $0.id == completeArticle.id }) {
+                            articles[index] = completeArticle
+                        }
+                    }
+                    // Force another refresh with the complete article
+                    contentTransitionID = UUID()
+                }
+            } else {
+                AppLogger.database.error("Failed to get complete article with ID: \(nextArticleId)")
+            }
 
             // Load the minimal content needed for the header
             await loadMinimalContent()
@@ -193,11 +223,7 @@ final class NewsDetailViewModel: ObservableObject {
         }
     }
 
-    /// Navigation direction for article navigation
-    enum NavigationDirection {
-        case next
-        case previous
-    }
+    // Using the shared NavigationDirection enum
 
     // MARK: - Public Methods - Content Loading
 
