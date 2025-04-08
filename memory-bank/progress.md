@@ -353,7 +353,18 @@
       - Enhanced legacy operation methods with comprehensive error handling
     - ✅ Fixed Swift 6 actor isolation issues in DatabaseCoordinator integration
     - ✅ Updated MigrationService to use MigrationAwareArticleService
-    - ⬜ Update remaining code references to use MigrationAdapter
+    - ✅ Applied deprecation annotations to SyncManager class and methods:
+      - Added @available(*, deprecated, message: "Use MigrationAdapter instead") to SyncManager class
+      - Added individual deprecation messages to all public methods with specific migration paths
+      - Implemented logDeprecationWarning method for consistent runtime warning messages
+    - ✅ Created forwarding implementation in SyncManager:
+      - Updated all public methods to call their MigrationAdapter counterparts
+      - Fixed appropriate method signatures and return type conversions
+      - Ensured proper error propagation through the forwarding layer
+      - Maintained backward compatibility while encouraging migration
+    - ✅ Fixed closure capture semantics in MigrationService:
+      - Added explicit self references in backgroundTaskID closure captures
+      - Resolved compiler warnings about implicit self capture in closures
     - ⬜ Add comprehensive logging during transition period
     - ⬜ Implement final SyncManager removal
   

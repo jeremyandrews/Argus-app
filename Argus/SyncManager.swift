@@ -90,7 +90,14 @@ extension SyncManager {
     }
 }
 
+@available(*, deprecated, message: "Use MigrationAdapter instead")
 class SyncManager {
+    // MARK: - Deprecation Warning
+    
+    /// Log a deprecation warning for the method that's being called
+    private func logDeprecationWarning(method: String) {
+        AppLogger.sync.warning("⚠️ DEPRECATED: \(method) is deprecated and will be removed in a future update. Use MigrationAdapter or BackgroundTaskManager instead.")
+    }
     // Thread-safe lock for sync operations using an actor
     private actor SyncLockManager {
         private var isSyncing = false
@@ -512,45 +519,21 @@ class SyncManager {
     // DIRECT SERVER TO DATABASE PIPELINE
     // Processes articles directly without intermediate steps
     // Now with update capability for existing articles
+    @available(*, deprecated, message: "Use MigrationAdapter.directProcessArticle instead")
     func directProcessArticle(jsonURL: String) async -> Bool {
-        // Global lock to ensure only one process can handle articles at a time
-        guard Self.acquireProcessingLock() else {
-            AppLogger.sync.debug("⚠️ Article processing already in progress, skipping: \(jsonURL)")
-            return false
-        }
-
-        // Always release the lock when we're done
-        defer {
-            Self.releaseProcessingLock()
-        }
-
-        AppLogger.sync.debug("🔒 DIRECT PROCESSING: \(jsonURL)")
-
-        // Use the DatabaseCoordinator to process the article
-        return await DatabaseCoordinator.shared.processArticle(jsonURL: jsonURL)
+        logDeprecationWarning(method: "directProcessArticle")
+        
+        // Forward call to MigrationAdapter instead
+        return await MigrationAdapter.shared.directProcessArticle(jsonURL: jsonURL)
     }
 
-    // Delegates database maintenance to the DatabaseCoordinator
-    // This is used by background refresh tasks
-    func performScheduledMaintenance(timeLimit _: TimeInterval? = nil) async {
-        guard Self.acquireProcessingLock() else {
-            AppLogger.sync.debug("⚠️ Database maintenance already in progress, skipping")
-            return
-        }
-
-        defer {
-            Self.releaseProcessingLock()
-        }
-
-        AppLogger.sync.debug("===== DATABASE MAINTENANCE STARTING =====")
-        let startTime = Date()
-
-        // Delegate maintenance to DatabaseCoordinator
-        await DatabaseCoordinator.shared.performMaintenance()
-
-        let timeUsed = Date().timeIntervalSince(startTime)
-        AppLogger.sync.debug("Maintenance completed in \(String(format: "%.2f", timeUsed))s")
-        AppLogger.sync.debug("===== DATABASE MAINTENANCE FINISHED =====")
+    // Delegates database maintenance to MigrationAdapter
+    @available(*, deprecated, message: "Use MigrationAdapter.performScheduledMaintenance instead")
+    func performScheduledMaintenance(timeLimit: TimeInterval? = nil) async {
+        logDeprecationWarning(method: "performScheduledMaintenance")
+        
+        // Forward call to MigrationAdapter
+        await MigrationAdapter.shared.performScheduledMaintenance(timeLimit: timeLimit)
     }
 
     // Public compatibility methods that now just perform maintenance
@@ -562,176 +545,40 @@ class SyncManager {
         await performScheduledMaintenance()
     }
 
-    // Registers the app's background tasks with the system for queue processing and server sync.
-    // Sets up handlers for both BGAppRefreshTask (article fetch) and BGProcessingTask (sync).
-    // Includes proper task cancellation handling and scheduling of follow-up tasks.
-    // Schedules initial background tasks after registration.
+    // Registers the app's background tasks with the system
+    @available(*, deprecated, message: "Use BackgroundTaskManager.registerBackgroundTasks instead")
     func registerBackgroundTasks() {
-        // Register article fetch task (for processing queue)
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundFetchIdentifier, using: nil) { task in
-            guard let appRefreshTask = task as? BGAppRefreshTask else { return }
-
-            // Create a cancellable task
-            let processingTask = Task {
-                // First check if the current network state meets the user's requirements
-                let networkAllowed = await self.shouldAllowSync()
-
-                if networkAllowed {
-                    // Use maintenance with a conservative time limit
-                    // BGAppRefreshTask doesn't have a timeRemaining property in this iOS version
-                    await self.performScheduledMaintenance(timeLimit: 25) // 25 seconds is a safe limit
-                    appRefreshTask.setTaskCompleted(success: true)
-                } else {
-                    AppLogger.sync.debug("Background fetch skipped - cellular not allowed by user")
-                    appRefreshTask.setTaskCompleted(success: false)
-                }
-            }
-
-            // Handle task expiration cleanly
-            appRefreshTask.expirationHandler = {
-                processingTask.cancel()
-                AppLogger.sync.debug("Background fetch task expired and was cancelled by the system")
-            }
-
-            // Schedule the next fetch after this completes
-            Task {
-                // Wait for the task to complete without throwing errors
-                _ = await processingTask.value
-
-                await MainActor.run {
-                    self.scheduleBackgroundFetch()
-                }
-            }
-        }
-
-        // Register the sync task (for syncing with server)
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundSyncIdentifier, using: nil) { task in
-            guard let processingTask = task as? BGProcessingTask else { return }
-
-            // Create a cancellable task
-            let syncTask = Task {
-                // Check network conditions before proceeding
-                let networkAllowed = await self.shouldAllowSync()
-
-                if networkAllowed {
-                    await self.sendRecentArticlesToServer()
-                    processingTask.setTaskCompleted(success: true)
-                } else {
-                    AppLogger.sync.debug("Background sync skipped - cellular not allowed by user")
-                    processingTask.setTaskCompleted(success: false)
-                }
-            }
-
-            // Handle task expiration cleanly
-            processingTask.expirationHandler = {
-                syncTask.cancel()
-                AppLogger.sync.debug("Background sync task expired and was cancelled by the system")
-            }
-
-            // Schedule the next sync after this completes
-            Task {
-                // Wait for the task to complete without throwing errors
-                _ = await syncTask.value
-
-                await MainActor.run {
-                    self.scheduleBackgroundSync()
-                }
-            }
-        }
-
-        // Schedule initial tasks - let the system determine when to run them
-        scheduleBackgroundFetch()
-        scheduleBackgroundSync()
-        AppLogger.sync.debug("Background tasks registered: fetch and sync")
+        logDeprecationWarning(method: "registerBackgroundTasks")
+        
+        // Forward call to MigrationAdapter
+        MigrationAdapter.shared.registerBackgroundTasks()
     }
 
-    // Schedules a background app refresh task for processing the article queue.
-    // Dynamically adjusts scheduling delay based on recency of app usage.
-    // Uses BGAppRefreshTaskRequest which has limited configuration options but can run
-    // in more restrictive conditions than processing tasks.
+    // Schedules a background app refresh task
+    @available(*, deprecated, message: "Use BackgroundTaskManager.scheduleBackgroundRefresh instead")
     func scheduleBackgroundFetch() {
-        // For app refresh tasks, we need to use BGAppRefreshTaskRequest
-        let request = BGAppRefreshTaskRequest(identifier: backgroundFetchIdentifier)
-
-        // BGAppRefreshTaskRequest doesn't have network connectivity or power requirements settings
-        // We can only set the earliest begin date for this type of request
-
-        // Adjust the delay based on app usage patterns - longer delay if user just used app
-        let lastActiveTime = UserDefaults.standard.double(forKey: "lastAppActiveTimestamp")
-        let currentTime = Date().timeIntervalSince1970
-        let minutesSinceActive = (currentTime - lastActiveTime) / 60
-
-        // More dynamic scheduling - if recently used, delay more
-        let delayMinutes = minutesSinceActive < 30 ? 15 : 5
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 60 * Double(delayMinutes))
-
-        do {
-            try BGTaskScheduler.shared.submit(request)
-            AppLogger.sync.debug("Background fetch scheduled in approximately \(delayMinutes) minutes")
-        } catch {
-            AppLogger.sync.error("Could not schedule background fetch: \(error)")
-        }
+        logDeprecationWarning(method: "scheduleBackgroundFetch")
+        
+        // Forward call to MigrationAdapter
+        MigrationAdapter.shared.scheduleBackgroundFetch()
     }
 
-    // Schedules a background processing task for syncing with the server.
-    // Dynamically sets power requirements based on queue size and time since last processing.
-    // Ensures sync will happen eventually even if optimal conditions aren't met after 24 hours.
-    // Requires network connectivity but adapts power requirements based on needs.
+    // Schedules a background processing task
+    @available(*, deprecated, message: "Use BackgroundTaskManager.scheduleBackgroundProcessing instead")
     func scheduleBackgroundSync() {
-        let request = BGProcessingTaskRequest(identifier: backgroundSyncIdentifier)
-        request.requiresNetworkConnectivity = true
-
-        // Check cached system metrics for power requirements
-        let pendingCount = UserDefaults.standard.integer(forKey: "articleMaintenanceMetric")
-        let lastMetricUpdate = UserDefaults.standard.double(forKey: "metricLastUpdate")
-        let currentTime = Date().timeIntervalSince1970
-
-        // Only use metrics for power requirements if the data is recent (last 6 hours)
-        if currentTime - lastMetricUpdate < 6 * 60 * 60 {
-            // Require power for heavy processing needs
-            request.requiresExternalPower = pendingCount > 10
-        } else {
-            // If we don't have recent data, be conservative
-            request.requiresExternalPower = false
-        }
-
-        // Add a timeout mechanism - if maintenance hasn't run in 24 hours,
-        // schedule it to run regardless of power state
-        let lastMaintenanceTime = UserDefaults.standard.double(forKey: "lastMaintenanceTime")
-        if currentTime - lastMaintenanceTime > 24 * 60 * 60 {
-            request.requiresExternalPower = false
-        }
-
-        // Schedule with appropriate timing
-        request.earliestBeginDate = Date(timeIntervalSinceNow: pendingCount > 10 ? 900 : 1800) // 15 or 30 mins
-
-        do {
-            try BGTaskScheduler.shared.submit(request)
-            AppLogger.sync.debug("Background sync scheduled with power requirement: \(request.requiresExternalPower)")
-        } catch {
-            AppLogger.sync.error("Could not schedule background sync: \(error)")
-        }
+        logDeprecationWarning(method: "scheduleBackgroundSync")
+        
+        // Forward call to MigrationAdapter
+        MigrationAdapter.shared.scheduleBackgroundSync()
     }
 
-    // Requests expedited background processing when needed.
-    // Creates a minimal-requirements background task request to run as soon as possible.
-    // Used when the system needs to process queue items with higher priority.
+    // Requests expedited background processing
+    @available(*, deprecated, message: "Use BackgroundTaskManager.scheduleBackgroundRefresh instead")
     func requestExpediteBackgroundProcessing() {
-        // Request expedited processing only if truly needed
-        let request = BGProcessingTaskRequest(identifier: backgroundFetchIdentifier)
-        request.requiresNetworkConnectivity = true
-        request.requiresExternalPower = false
-
-        // Consider user cellular preferences
-        let allowCellular = UserDefaults.standard.bool(forKey: "allowCellularSync")
-
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 60) // Minimum 1 minute
-        do {
-            try BGTaskScheduler.shared.submit(request)
-            AppLogger.sync.debug("Expedited processing scheduled (cellular allowed: \(allowCellular))")
-        } catch {
-            AppLogger.sync.error("Could not schedule expedited processing: \(error)")
-        }
+        logDeprecationWarning(method: "requestExpediteBackgroundProcessing")
+        
+        // Forward call to BackgroundTaskManager since MigrationAdapter doesn't have this method
+        BackgroundTaskManager.shared.scheduleBackgroundRefresh()
     }
 
     // MARK: - Deterministic UUID Generation
@@ -928,127 +775,21 @@ class SyncManager {
     // Initiates a user-requested manual sync operation with throttling protection.
     // Prevents excessive sync operations by enforcing a minimum time between manual syncs.
     // Returns a boolean indicating whether the sync was started or skipped due to throttling.
+    @available(*, deprecated, message: "Use MigrationAdapter.manualSync instead")
     func manualSync() async -> Bool {
-        // Only throttle explicit user actions
-        let now = Date()
-        guard now.timeIntervalSince(lastManualSyncTime) > manualSyncThrottle else {
-            AppLogger.sync.debug("Manual sync requested too soon")
-            return false
-        }
-
-        lastManualSyncTime = now
-        await sendRecentArticlesToServer()
-        return true
+        logDeprecationWarning(method: "manualSync")
+        
+        // Forward to MigrationAdapter for future compatibility
+        return await MigrationAdapter.shared.manualSync()
     }
 
-    // Syncs recent article history with the server and retrieves unseen articles.
-    // Uses a flag to prevent concurrent execution of multiple sync operations.
-    // Checks network conditions before proceeding.
-    // Sends recently seen article URLs to the server and processes any unseen articles returned.
-    // Schedules the next background sync regardless of operation outcome.
+    // Syncs recent article history with the server
+    @available(*, deprecated, message: "Use MigrationAdapter.manualSync instead")
     func sendRecentArticlesToServer() async {
-        // Use a background task to prevent UI blocking
-        Task.detached(priority: .utility) {
-            // Try to acquire the sync lock, skip if already syncing
-            if await !self.trySyncLock() {
-                AppLogger.sync.debug("Sync already in progress, skipping")
-                return
-            }
-
-            // Store sync start time for throttling
-            let syncStartTime = Date()
-
-            // Notify UI that sync has started
-            await self.notifySyncStatusChanged(true)
-
-            // Check if we should sync based on network conditions
-            if await !self.shouldAllowSync() {
-                AppLogger.sync.debug("Sync skipped due to network conditions")
-                await self.notifySyncStatusChanged(false)
-
-                // Clean up and return
-                await self.releaseSyncLock()
-                await MainActor.run {
-                    self.lastManualSyncTime = syncStartTime
-                }
-                return
-            }
-
-            AppLogger.sync.debug("Starting server sync...")
-
-            do {
-                // Fetch recent article history
-                let recentArticles = await self.fetchRecentArticles()
-                let jsonUrls = recentArticles.map { $0.json_url }
-
-                // Prepare the API request
-                let url = URL(string: "https://api.arguspulse.com/articles/sync")!
-                let payload = ["seen_articles": jsonUrls]
-
-                // Create a task for the actual network request
-                let syncTask = Task {
-                    do {
-                        // Perform the authenticated request
-                        let data = try await APIClient.shared.performAuthenticatedRequest(to: url, body: payload)
-
-                        // Make sure we weren't cancelled during the request
-                        try Task.checkCancellation()
-
-                        // Parse the response
-                        let serverResponse = try JSONDecoder().decode([String: [String]].self, from: data)
-
-                        // Process any unseen articles the server returned
-                        if let unseenUrls = serverResponse["unseen_articles"], !unseenUrls.isEmpty {
-                            AppLogger.sync.debug("Server returned \(unseenUrls.count) unseen articles")
-
-                            // Process articles in background
-                            await self.processArticlesDetached(urls: unseenUrls)
-
-                            // Schedule maintenance but don't wait for it
-                            self.startMaintenance()
-                        } else {
-                            AppLogger.sync.debug("No unseen articles to process")
-                        }
-
-                        // Sync completed successfully
-                        await self.notifySyncStatusChanged(false)
-
-                    } catch let error as URLError where error.code == .timedOut {
-                        AppLogger.sync.error("Sync request timed out: \(error)")
-                        await self.notifySyncStatusChanged(false, error: error)
-                    } catch {
-                        AppLogger.sync.error("Sync request failed: \(error)")
-                        await self.notifySyncStatusChanged(false, error: error)
-                    }
-                }
-
-                // Add a timeout to ensure we can recover from hangs
-                try await self.withTimeout(of: 60) {
-                    await syncTask.value
-                }
-
-            } catch is CancellationError {
-                AppLogger.sync.debug("Sync operation was cancelled")
-                await self.notifySyncStatusChanged(false)
-            } catch is TimeoutError {
-                AppLogger.sync.error("Sync operation timed out")
-                await self.notifySyncStatusChanged(false, error: TimeoutError())
-            } catch {
-                AppLogger.sync.error("Sync operation failed: \(error)")
-                await self.notifySyncStatusChanged(false, error: error)
-            }
-
-            // Always schedule next background sync before releasing lock
-            await MainActor.run {
-                self.scheduleBackgroundSync()
-            }
-
-            // Always release the lock and update last sync time
-            await self.releaseSyncLock()
-            await MainActor.run {
-                self.lastManualSyncTime = syncStartTime
-            }
-        }
+        logDeprecationWarning(method: "sendRecentArticlesToServer")
+        
+        // Forward to MigrationAdapter.manualSync instead since sendRecentArticlesToServer doesn't exist
+        _ = await MigrationAdapter.shared.manualSync()
     }
 
     // Helper to check if an ID is already used in the database
@@ -1131,79 +872,32 @@ class SyncManager {
         return await DatabaseCoordinator.shared.fetchRecentArticles(since: oneDayAgo)
     }
 
-    // Process articles using the DatabaseCoordinator
+    // Process articles using the MigrationAdapter
+    @available(*, deprecated, message: "Use MigrationAdapter.processArticlesDirectly instead")
     func processArticlesDirectly(urls: [String]) async {
-        AppLogger.sync.debug("Processing \(urls.count) articles using DatabaseCoordinator")
-        let result = await DatabaseCoordinator.shared.processArticles(jsonURLs: urls)
-        AppLogger.sync.debug("Articles processed: \(result.success) succeeded, \(result.failure) failed, \(result.skipped) skipped")
+        logDeprecationWarning(method: "processArticlesDirectly")
+        
+        // Forward call to MigrationAdapter
+        await MigrationAdapter.shared.processArticlesDirectly(urls: urls)
     }
 
-    // Process multiple articles in the background using DatabaseCoordinator's batch processing
+    // Process multiple articles in the background
+    @available(*, deprecated, message: "Use MigrationAdapter.processArticlesDirectly instead")
     private func processArticlesDetached(urls: [String]) async {
-        // Create a single task instead of multiple nested ones for clarity
-        Task.detached(priority: .background) {
-            AppLogger.sync.debug("🔄 Processing \(urls.count) articles directly in background task")
-
-            // No need for our own lock - let DatabaseCoordinator handle all concurrency
-            // This avoids the duplicate lock registries that were causing problems
-
-            // De-duplicate the URLs first to avoid redundant processing attempts
-            let uniqueUrls = Array(Set(urls))
-            if uniqueUrls.count < urls.count {
-                AppLogger.sync.debug("🔍 Removed \(urls.count - uniqueUrls.count) duplicate URLs from processing batch")
-            }
-
-            // Log batch information for debugging
-            if !uniqueUrls.isEmpty {
-                let firstThree = uniqueUrls.prefix(3).map { String($0.suffix(40)) }.joined(separator: ", ")
-                AppLogger.sync.debug("📦 Processing batch: \(uniqueUrls.count) articles - sample: \(firstThree)...")
-            } else {
-                AppLogger.sync.debug("📦 Empty batch, nothing to process")
-                return
-            }
-
-            // Delegate all processing to DatabaseCoordinator in a single transaction
-            // This centralization avoids race conditions and duplication
-            let result = await DatabaseCoordinator.shared.processArticles(jsonURLs: uniqueUrls)
-
-            // Log summary
-            AppLogger.sync.debug("🔄 Batch processing completed: added \(result.success), failed \(result.failure), skipped \(result.skipped)")
-
-            // Only update badge count once after all processing is complete
-            await MainActor.run {
-                NotificationUtils.updateAppBadgeCount()
-
-                // Notify that all processing is complete
-                NotificationCenter.default.post(name: .articleProcessingCompleted, object: nil)
-            }
-        }
+        logDeprecationWarning(method: "processArticlesDetached")
+        
+        // Forward to MigrationAdapter.processArticlesDirectly since processArticlesInBackground doesn't exist
+        await MigrationAdapter.shared.processArticlesDirectly(urls: urls)
     }
 
-    // Process a single article in isolation to prevent UI blocking and conflicts
-    // This implementation fully delegates to the DatabaseCoordinator
-    private func processArticleIsolated(jsonURL: String, container _: ModelContainer? = nil) async -> (created: Int, updated: Int, failed: Int) {
-        AppLogger.sync.debug("🔒 Processing article with DatabaseCoordinator: \(jsonURL)")
-
-        do {
-            // Use withTimeout to ensure the process doesn't hang
-            return try await withTimeout(of: 30) {
-                // Delegate to DatabaseCoordinator for the actual processing
-                let success = await DatabaseCoordinator.shared.processArticle(jsonURL: jsonURL)
-
-                if success {
-                    // Since the DatabaseCoordinator doesn't tell us if it was a create or update,
-                    // we return a generic success. The actual counts will be aggregated elsewhere.
-                    return (1, 0, 0)
-                } else {
-                    return (0, 0, 1)
-                }
-            }
-        } catch is TimeoutError {
-            AppLogger.sync.error("🕒 Article processing timed out: \(jsonURL)")
-            return (0, 0, 1)
-        } catch {
-            AppLogger.sync.error("❌ Unexpected error: \(error.localizedDescription)")
-            return (0, 0, 1)
-        }
+    // Process a single article in isolation
+    @available(*, deprecated, message: "Use MigrationAdapter.directProcessArticle instead")
+    private func processArticleIsolated(jsonURL: String, container: ModelContainer? = nil) async -> (created: Int, updated: Int, failed: Int) {
+        logDeprecationWarning(method: "processArticleIsolated")
+        
+        // Forward to MigrationAdapter.directProcessArticle since processArticleIsolated doesn't exist
+        let success = await MigrationAdapter.shared.directProcessArticle(jsonURL: jsonURL)
+        // Convert the boolean result to the expected tuple return type
+        return success ? (1, 0, 0) : (0, 0, 1)
     }
 }
