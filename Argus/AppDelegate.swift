@@ -837,15 +837,20 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             presented.dismiss(animated: false)
         }
 
-        let detailView = NewsDetailView(
-            notifications: [notification],
-            allNotifications: [notification],
-            currentIndex: 0
+        // Create a view model with the appropriate parameters
+        let viewModel = NewsDetailViewModel(
+            articles: [notification],
+            allArticles: [notification],
+            currentIndex: 0,
+            initiallyExpandedSection: "Summary"
         )
-        .environment(\.modelContext, context)
+
+        // Use the new initializer with the viewModel
+        let detailView = NewsDetailView(viewModel: viewModel)
+            .environment(\.modelContext, context)
 
         let hostingController = UIHostingController(rootView: detailView)
-        hostingController.modalPresentationStyle = .fullScreen
+        hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
         rootVC.present(hostingController, animated: true, completion: nil)
     }
 }

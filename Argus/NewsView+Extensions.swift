@@ -75,11 +75,15 @@ extension NewsView {
         guard let index = viewModel.filteredArticles.firstIndex(where: { $0.id == notification.id }) else {
             return
         }
-        
+
         // Extract formatted content from blobs if available
-        var extractedTitle: NSAttributedString? = nil
-        var extractedBody: NSAttributedString? = nil
-        
+        var extractedTitle: NSAttributedString?
+        var extractedBody: NSAttributedString?
+        var extractedSummary: NSAttributedString?
+
+        // Create ArticleOperations for advanced operations
+        let articleOperations = ArticleOperations()
+
         // Extract title blob if available
         if let titleBlobData = notification.title_blob {
             extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
@@ -87,7 +91,7 @@ extension NewsView {
                 from: titleBlobData
             )
         }
-        
+
         // Extract body blob if available
         if let bodyBlobData = notification.body_blob {
             extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
@@ -95,39 +99,81 @@ extension NewsView {
                 from: bodyBlobData
             )
         }
-        
-        // Create the detail view with preloaded content
-        let detailView = NewsDetailView(
-            notification: notification,
-            preloadedTitle: extractedTitle,
-            preloadedBody: extractedBody,
-            notifications: viewModel.filteredArticles,
-            allNotifications: viewModel.allArticles,
-            currentIndex: index,
-            initiallyExpandedSection: nil
-        )
 
-        // Get modelContext from the shared container
-        let modelContext = ArgusApp.sharedModelContainer.mainContext
+        // Handle summary - if blob exists, extract it; if not, generate it
+        if let summaryBlobData = notification.summary_blob {
+            // Try to extract existing blob
+            extractedSummary = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self,
+                from: summaryBlobData
+            )
 
-        // Create and present the hosting controller with environment
-        let hostingController = UIHostingController(
-            rootView: detailView.environment(\.modelContext, modelContext)
-        )
-        hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
+            if extractedSummary != nil {
+                AppLogger.database.debug("Successfully extracted summary blob for article \(notification.id)")
+            } else {
+                AppLogger.database.error("Failed to extract summary blob for article \(notification.id)")
 
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController
-        {
-            rootViewController.present(hostingController, animated: true)
+                // If extraction failed but blob exists, generate from text
+                if let summaryText = notification.summary, !summaryText.isEmpty {
+                    extractedSummary = getAttributedString(for: .summary, from: notification, createIfMissing: true)
+                    AppLogger.database.debug("Generated fallback summary for article \(notification.id)")
+                }
+            }
+        } else {
+            // No blob exists, generate it if we have text content
+            AppLogger.database.debug("No summary blob found for article \(notification.id), generating one")
+            if let summaryText = notification.summary, !summaryText.isEmpty {
+                extractedSummary = getAttributedString(for: .summary, from: notification, createIfMissing: true)
+                AppLogger.database.debug("Generated new summary for article \(notification.id)")
+            }
         }
 
-        // After presenting the view, use PreloadManager to prepare next few articles
+        // Set up the view model and view asynchronously to handle ArticleModel fetch
         Task {
-            // Use our dedicated PreloadManager to handle preloading
-            if let currentIndex = viewModel.filteredArticles.firstIndex(where: { $0.id == notification.id }) {
-                PreloadManager.shared.preloadArticles(viewModel.filteredArticles, currentIndex: currentIndex)
+            // Get the ArticleModel with context for database operations
+            let articleModel = await articleOperations.getArticleModelWithContext(byId: notification.id)
+
+            // Create a pre-configured ViewModel that will be passed to the NewsDetailView
+            // This is critical for maintaining SwiftData context and ensuring blobs are properly saved
+            let detailViewModel = NewsDetailViewModel(
+                articles: viewModel.filteredArticles,
+                allArticles: viewModel.allArticles,
+                currentIndex: index,
+                initiallyExpandedSection: "Summary",
+                preloadedArticle: notification,
+                preloadedTitle: extractedTitle,
+                preloadedBody: extractedBody,
+                preloadedSummary: extractedSummary,
+                preloadedArticleModel: articleModel,
+                articleOperations: articleOperations
+            )
+
+            // Create the detail view with the pre-configured ViewModel using the new initializer
+            // This ensures the view uses our ViewModel with a valid SwiftData context
+            let detailView = NewsDetailView(viewModel: detailViewModel)
+
+            // Get modelContext from the shared container
+            let modelContext = ArgusApp.sharedModelContainer.mainContext
+
+            // Create and present the hosting controller with environment
+            let hostingController = UIHostingController(
+                rootView: detailView.environment(\.modelContext, modelContext)
+            )
+            hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
+
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = windowScene.windows.first,
+               let rootViewController = window.rootViewController
+            {
+                rootViewController.present(hostingController, animated: true)
+            }
+
+            // After presenting the view, use PreloadManager to prepare next few articles
+            Task {
+                // Use our dedicated PreloadManager to handle preloading
+                if let currentIndex = viewModel.filteredArticles.firstIndex(where: { $0.id == notification.id }) {
+                    PreloadManager.shared.preloadArticles(viewModel.filteredArticles, currentIndex: currentIndex)
+                }
             }
         }
     }

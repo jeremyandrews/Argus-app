@@ -534,16 +534,20 @@ struct NewsView: View {
                 return
             }
 
-            let detailView = NewsDetailView(
-                notifications: filteredNotifications,
-                allNotifications: totalNotifications,
+            // Create a view model with the appropriate parameters
+            let viewModel = NewsDetailViewModel(
+                articles: filteredNotifications,
+                allArticles: totalNotifications,
                 currentIndex: index,
                 initiallyExpandedSection: section
             )
-            .environment(\.modelContext, modelContext)
+
+            // Use the new initializer with the viewModel
+            let detailView = NewsDetailView(viewModel: viewModel)
+                .environment(\.modelContext, modelContext)
 
             let hostingController = UIHostingController(rootView: detailView)
-            hostingController.modalPresentationStyle = .fullScreen
+            hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
 
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let window = windowScene.windows.first,

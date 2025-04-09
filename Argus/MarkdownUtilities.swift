@@ -86,8 +86,24 @@ func markdownToAttributedString(
     textStyle: String,
     customFontSize: CGFloat? = nil
 ) -> NSAttributedString? {
-    guard let markdown = markdown, !markdown.isEmpty else { return nil }
+    guard let markdown = markdown, !markdown.isEmpty else {
+        AppLogger.database.debug("❌ Empty or nil markdown content provided to converter")
+        return nil
+    }
 
+    // Log start of conversion for diagnostics
+    let startTime = Date()
+    let contentPreview = markdown.count > 50 ? String(markdown.prefix(50)) + "..." : markdown
+    AppLogger.database.debug("⚙️ Converting markdown to attributed string (length: \(markdown.count), preview: \"\(contentPreview)\")")
+
+    // Special case: malformed markdown or empty string with just whitespace
+    if markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        AppLogger.database.debug("⚠️ Markdown content contains only whitespace")
+        // Return simple attributed string instead of nil
+        return NSAttributedString(string: markdown)
+    }
+
+    // Create SwiftyMarkdown instance
     let swiftyMarkdown = SwiftyMarkdown(string: markdown)
 
     // Get the preferred font for the text style (supports Dynamic Type)
@@ -140,6 +156,13 @@ func markdownToAttributedString(
     // Generate the attributed string from SwiftyMarkdown
     let attributedString = swiftyMarkdown.attributedString()
 
+    // Validate the attributed string has content
+    if attributedString.length == 0 {
+        AppLogger.database.warning("⚠️ SwiftyMarkdown generated empty attributed string")
+        // Return plain text as fallback
+        return NSAttributedString(string: markdown)
+    }
+
     // Create a mutable copy to add accessibility attributes
     let mutableAttributedString = NSMutableAttributedString(attributedString: attributedString)
     let textStyleKey = NSAttributedString.Key(rawValue: "NSAccessibilityTextStyleStringAttribute")
@@ -149,6 +172,10 @@ func markdownToAttributedString(
         value: textStyle,
         range: NSRange(location: 0, length: mutableAttributedString.length)
     )
+
+    // Log completion time for performance monitoring
+    let conversionTime = Date().timeIntervalSince(startTime)
+    AppLogger.database.debug("✅ Markdown conversion completed in \(String(format: "%.4f", conversionTime))s (result length: \(mutableAttributedString.length))")
 
     return mutableAttributedString
 }
@@ -206,7 +233,7 @@ func getAttributedString(
             do {
                 try notification.setRichText(attributedString, for: field, saveContext: true)
             } catch {
-                print("Error saving rich text for \(field): \(error)")
+                print("Error saving rich text for \(String(describing: field)): \(error)")
             }
             completion?(attributedString)
             return attributedString
@@ -414,6 +441,103 @@ class NotificationData {
         case .additionalInsights:
             return additional_insights_blob
         }
+    }
+
+    /// Get blobs for a specific field - used by the ViewModel
+    /// - Parameter field: The rich text field to get blobs for
+    /// - Returns: An array of blob data, or nil if no blobs are found
+    func getBlobsForField(_ field: RichTextField) -> [Data]? {
+        if let blob = field.getBlob(from: self), !blob.isEmpty {
+            AppLogger.database.debug("📦 Found blob for \(String(describing: field)) (\(blob.count) bytes)")
+            return [blob]
+        }
+        AppLogger.database.debug("⚠️ No blob found for \(String(describing: field))")
+        return nil
+    }
+
+    /// Verifies all blobs in this article and logs their status
+    /// - Returns: True if all blobs are valid, false otherwise
+    func verifyAllBlobs() -> Bool {
+        let fields: [RichTextField] = [
+            .title, .body, .summary, .criticalAnalysis,
+            .logicalFallacies, .sourceAnalysis, .relationToTopic,
+            .additionalInsights,
+        ]
+
+        AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(id):")
+
+        var allValid = true
+        for field in fields {
+            if let blob = field.getBlob(from: self) {
+                do {
+                    if let _ = try NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self,
+                        from: blob
+                    ) {
+                        AppLogger.database.debug("✅ \(String(describing: field)) blob is valid (\(blob.count) bytes)")
+                    } else {
+                        AppLogger.database.error("❌ \(String(describing: field)) blob unarchived to nil")
+                        allValid = false
+                    }
+                } catch {
+                    AppLogger.database.error("❌ \(String(describing: field)) blob failed to unarchive: \(error)")
+                    allValid = false
+                }
+            } else {
+                // Missing blob is not an error - the content may not have been converted yet
+                AppLogger.database.debug("⚪️ No blob exists for \(String(describing: field))")
+            }
+        }
+
+        return allValid
+    }
+
+    /// Regenerates all blobs for this article
+    /// - Parameter force: Whether to force regeneration even if blobs exist
+    /// - Returns: Number of blobs regenerated
+    @MainActor
+    func regenerateAllBlobs(force: Bool = false) -> Int {
+        let fields: [RichTextField] = [
+            .title, .body, .summary, .criticalAnalysis,
+            .logicalFallacies, .sourceAnalysis, .relationToTopic,
+            .additionalInsights,
+        ]
+
+        var regeneratedCount = 0
+
+        for field in fields {
+            // Skip if blob exists and we're not forcing regeneration
+            if !force && field.getBlob(from: self) != nil {
+                continue
+            }
+
+            // Skip if no source text
+            guard let text = field.getMarkdownText(from: self), !text.isEmpty else {
+                continue
+            }
+
+            // Generate attributed string
+            if let attributedString = markdownToAttributedString(text, textStyle: field.textStyle) {
+                do {
+                    try setRichText(attributedString, for: field, saveContext: false)
+                    regeneratedCount += 1
+                } catch {
+                    AppLogger.database.error("❌ Failed to regenerate blob for \(String(describing: field)): \(error)")
+                }
+            }
+        }
+
+        // Save once at the end instead of for each field
+        if regeneratedCount > 0, let context = modelContext {
+            do {
+                try context.save()
+                AppLogger.database.debug("✅ Saved \(regeneratedCount) regenerated blobs")
+            } catch {
+                AppLogger.database.error("❌ Failed to save regenerated blobs: \(error)")
+            }
+        }
+
+        return regeneratedCount
     }
 }
 

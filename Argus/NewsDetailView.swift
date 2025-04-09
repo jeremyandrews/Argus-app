@@ -17,14 +17,9 @@ struct NewsDetailView: View {
 
     // MARK: - UI State Properties
 
-    /// Legacy state properties (will be migrated to ViewModel)
-    @State private var notifications: [NotificationData] = []
-    @State private var allNotifications: [NotificationData] = []
-    @State private var currentIndex: Int = 0
-
     /// Computed property to check if current index is valid
     private var isCurrentIndexValid: Bool {
-        currentIndex >= 0 && currentIndex < notifications.count
+        viewModel.currentIndex >= 0 && viewModel.currentIndex < viewModel.articles.count
     }
 
     /// Access to the model context for database operations
@@ -163,34 +158,14 @@ struct NewsDetailView: View {
 
     // MARK: - Initialization
 
-    init(
-        notification: NotificationData? = nil,
-        preloadedTitle: NSAttributedString? = nil,
-        preloadedBody: NSAttributedString? = nil,
-        notifications: [NotificationData],
-        allNotifications: [NotificationData],
-        currentIndex: Int,
-        initiallyExpandedSection: String? = nil
-    ) {
-        // Create the view model
-        let viewModel = NewsDetailViewModel(
-            articles: notifications,
-            allArticles: allNotifications,
-            currentIndex: currentIndex,
-            initiallyExpandedSection: initiallyExpandedSection,
-            preloadedArticle: notification,
-            preloadedTitle: preloadedTitle,
-            preloadedBody: preloadedBody
-        )
-
-        // Initialize with the view model
+    /// Initializes the view with a pre-configured view model
+    /// This approach ensures that we maintain the SwiftData context throughout
+    init(viewModel: NewsDetailViewModel) {
+        // Initialize with the provided view model
         _viewModel = ObservedObject(initialValue: viewModel)
-        self.initiallyExpandedSection = initiallyExpandedSection
 
-        // Initialize the state properties with the provided values
-        _notifications = State(initialValue: notifications)
-        _allNotifications = State(initialValue: allNotifications)
-        _currentIndex = State(initialValue: currentIndex)
+        // Get the initially expanded section from the view model's state
+        initiallyExpandedSection = viewModel.initiallyExpandedSection
     }
 
     var body: some View {
@@ -245,7 +220,7 @@ struct NewsDetailView: View {
                     expandedSections[section] = true
                 }
             }
-            .onChange(of: notifications) { _, _ in
+            .onChange(of: viewModel.articles) { _, _ in
                 validateAndAdjustIndex()
             }
             .alert("Are you sure you want to delete this article?", isPresented: $showDeleteConfirmation) {
@@ -257,7 +232,7 @@ struct NewsDetailView: View {
             .sheet(isPresented: $isSharePresented) {
                 ShareSelectionView(
                     content: additionalContent,
-                    notification: currentNotification ?? notifications[0],
+                    notification: currentNotification ?? viewModel.articles[0],
                     selectedSections: $selectedSections,
                     isPresented: $isSharePresented
                 )
@@ -470,11 +445,11 @@ struct NewsDetailView: View {
     private func validateAndAdjustIndex() {
         if !isCurrentIndexValid {
             if let targetID = currentNotification?.id,
-               let newIndex = notifications.firstIndex(where: { $0.id == targetID })
+               let newIndex = viewModel.articles.firstIndex(where: { $0.id == targetID })
             {
-                currentIndex = newIndex
+                viewModel.currentIndex = newIndex
             } else {
-                currentIndex = max(0, notifications.count - 1)
+                viewModel.currentIndex = max(0, viewModel.articles.count - 1)
             }
         }
     }
@@ -482,10 +457,10 @@ struct NewsDetailView: View {
     private func tryNavigateToValidArticle() {
         if let currentNotification {
             let currentID = currentNotification.id
-            if let newIndex = notifications.firstIndex(where: {
+            if let newIndex = viewModel.articles.firstIndex(where: {
                 $0.id != currentID && !deletedIDs.contains($0.id)
             }) {
-                currentIndex = newIndex
+                viewModel.currentIndex = newIndex
                 return
             }
         }
@@ -524,8 +499,7 @@ struct NewsDetailView: View {
         // Delegate to view model for navigation using shared NavigationDirection
         viewModel.navigateToArticle(direction: direction)
 
-        // Keep UI state in sync with viewModel
-        currentIndex = viewModel.currentIndex
+        // No need to synchronize anymore since we're using viewModel values directly
 
         // Reset expanded sections - Summary stays expanded by default
         expandedSections = Self.getDefaultExpandedSections()
@@ -614,103 +588,32 @@ struct NewsDetailView: View {
 
     // Fix the loadContentForSection function to properly handle section loading
     private func loadContentForSection(_ section: String) {
-        guard currentNotification != nil else { return }
+        // Simply delegate section loading to the ViewModel
+        // The ViewModel now has improved logging and sequential loading
 
-        // Check if content is already loaded
-        if getAttributedStringForSection(section) != nil {
-            return // Already loaded, nothing to do
-        }
+        // Log that we're requesting content for this section
+        AppLogger.database.debug("NewsDetailView requesting content for section: \(section)")
 
-        // Cancel any existing task for this section
+        // Cancel any existing task
         sectionLoadingTasks[section]?.cancel()
 
-        let field = getRichTextFieldForSection(section)
+        // Directly delegate to ViewModel which now has the improved implementation
+        viewModel.loadContentForSection(section)
 
-        // Create a new task to load this section's content
-        let task = Task { @MainActor in
-            guard let notification = currentNotification else { return }
+        // Create a simple monitoring task to clear local loading state
+        let monitorTask = Task {
+            // Wait for a reasonable time before clearing local loading state
+            try? await Task.sleep(for: .seconds(7))
 
-            // First check if we have a pre-formatted blob for this section
-            var attributedString: NSAttributedString? = nil
-
-            // Try to get content from blob first
-            switch field {
-            case .summary:
-                if let blob = notification.summary_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
+            if !Task.isCancelled {
+                await MainActor.run {
+                    sectionLoadingTasks[section] = nil
                 }
-            case .criticalAnalysis:
-                if let blob = notification.critical_analysis_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            case .logicalFallacies:
-                if let blob = notification.logical_fallacies_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            case .sourceAnalysis:
-                if let blob = notification.source_analysis_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            case .relationToTopic:
-                if let blob = notification.relation_to_topic_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            case .additionalInsights:
-                if let blob = notification.additional_insights_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            default:
-                break
-            }
-
-            // If no blob or couldn't unarchive, generate new content
-            if attributedString == nil && !Task.isCancelled {
-                attributedString = getAttributedString(
-                    for: field,
-                    from: notification,
-                    createIfMissing: true
-                )
-            }
-
-            // If task wasn't cancelled, update UI state
-            if !Task.isCancelled, let attributedString = attributedString {
-                // Store the result in the appropriate property
-                switch field {
-                case .summary:
-                    summaryAttributedString = attributedString
-                case .criticalAnalysis:
-                    criticalAnalysisAttributedString = attributedString
-                case .logicalFallacies:
-                    logicalFallaciesAttributedString = attributedString
-                case .sourceAnalysis:
-                    sourceAnalysisAttributedString = attributedString
-                case .relationToTopic:
-                    cachedContentBySection["Relevance"] = attributedString
-                case .additionalInsights:
-                    cachedContentBySection["Context & Perspective"] = attributedString
-                default:
-                    break
-                }
-
-                // Clear loading state
-                sectionLoadingTasks[section] = nil
             }
         }
 
-        // Store the task so we can cancel it if needed
-        sectionLoadingTasks[section] = task
+        // Store the monitor task
+        sectionLoadingTasks[section] = monitorTask
     }
 
     private func clearSectionContent() {
@@ -725,38 +628,9 @@ struct NewsDetailView: View {
         cachedContentBySection = [:]
     }
 
-    private func getNextValidIndex(direction: NavigationDirection) -> Int? {
-        // In the notifications array, lower indices are newer articles (when sorted by "newest")
-        // So for "next" we actually want to go to older articles (increase index)
-        // And for "previous" we want to go to newer articles (decrease index)
-        var newIndex = direction == .next ? currentIndex + 1 : currentIndex - 1
+    // This function is now handled by the ViewModel and no longer needed
 
-        // Check if the index is valid and not deleted
-        while newIndex >= 0 && newIndex < notifications.count {
-            let candidate = notifications[newIndex]
-            if !deletedIDs.contains(candidate.id) {
-                return newIndex
-            }
-            newIndex += (direction == .next ? 1 : -1)
-        }
-
-        return nil
-    }
-
-    private func moveToNextValidArticle(direction: NavigationDirection) async -> Bool {
-        var newIndex = direction == .next ? currentIndex + 1 : currentIndex - 1
-        while newIndex >= 0 && newIndex < notifications.count {
-            let candidate = notifications[newIndex]
-            if !deletedIDs.contains(candidate.id) {
-                await MainActor.run {
-                    currentIndex = newIndex
-                }
-                return true
-            }
-            newIndex += (direction == .next ? 1 : -1)
-        }
-        return false
-    }
+    // This function is now handled by the ViewModel and no longer needed
 
     private func clearCurrentContent() {
         titleAttributedString = nil
@@ -1011,7 +885,7 @@ struct NewsDetailView: View {
             await viewModel.deleteArticle()
 
             // Navigate to next article or dismiss
-            if currentIndex < notifications.count - 1 {
+            if viewModel.currentIndex < viewModel.articles.count - 1 {
                 navigateToArticle(direction: .next)
             } else {
                 dismiss()
@@ -1564,8 +1438,6 @@ struct NewsDetailView: View {
                                 ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
                                     SimilarArticleRow(
                                         articleDict: article,
-                                        notifications: $notifications,
-                                        currentIndex: $currentIndex,
                                         isLastItem: index == similarArticles.count - 1
                                     )
                                 }
@@ -1675,34 +1547,26 @@ struct NewsDetailView: View {
     }
 
     private func loadInitialMinimalContent() {
-        // Load just the basics for the current notification (if it’s valid)
-        guard let n = currentNotification else { return }
+        // Only proceed if we have a notification
+        guard let _ = currentNotification else { return }
+
+        // Log the loading attempt
+        AppLogger.database.debug("Loading initial content for article opening")
+
+        // Ensure the Summary section is expanded
+        expandedSections["Summary"] = true
+
+        // Load minimal content via ViewModel (title and body)
         Task {
-            // Only load title/body if they weren't preloaded
-            if titleAttributedString == nil {
-                let newTitle = getAttributedString(for: .title, from: n)
-                await MainActor.run {
-                    titleAttributedString = newTitle
-                }
-            }
-
-            if bodyAttributedString == nil {
-                let newBody = getAttributedString(for: .body, from: n)
-                await MainActor.run {
-                    bodyAttributedString = newBody
-                }
-            }
-
-            // If “Summary” is open by default, do that in background:
-            if expandedSections["Summary"] == true {
-                let newSummary = getAttributedString(for: .summary, from: n, createIfMissing: true)
-
-                // Update the UI on the main actor:
-                await MainActor.run {
-                    summaryAttributedString = newSummary
-                }
-            }
+            await viewModel.loadMinimalContent()
         }
+
+        // Force load the Summary section via ViewModel - this is critical
+        // This line directly uses the ViewModel's enhanced loading mechanism with timeout/blob handling
+        loadContentForSection("Summary")
+
+        // Log that we've explicitly loaded the Summary section
+        AppLogger.database.debug("Summary section explicitly loaded for initial view")
     }
 
     struct LazyLoadingContentView<Content: View>: View {
@@ -1716,6 +1580,8 @@ struct NewsDetailView: View {
         @State private var loadedAttributedString: NSAttributedString?
         @State private var isLoading = true
         @State private var loadTask: Task<Void, Never>? = nil
+        @State private var loadStartTime = Date()
+        @State private var retryCount = 0
 
         var body: some View {
             Group {
@@ -1724,27 +1590,50 @@ struct NewsDetailView: View {
                     content(attributedString)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if isLoading {
-                    // Loading placeholder
+                    // Show loading with elapsed time if taking too long
                     VStack {
                         ProgressView()
-                        Text("Loading \(placeholder)...")
-                            .font(.callout)
-                            .italic()
-                            .foregroundColor(.secondary)
+                            .id(retryCount) // Force refresh of spinner when retrying
+
+                        // Show elapsed time after 1 second
+                        if Date().timeIntervalSince(loadStartTime) > 1.0 {
+                            Text("Loading \(placeholder)... (\(Int(Date().timeIntervalSince(loadStartTime)))s)")
+                                .font(.callout)
+                                .italic()
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Loading \(placeholder)...")
+                                .font(.callout)
+                                .italic()
+                                .foregroundColor(.secondary)
+                        }
                     }
+                    .frame(minHeight: 50) // Ensure consistent size to prevent layout shifts
                     .padding(.vertical, 10)
                     .onAppear {
+                        loadStartTime = Date()
                         loadContent()
                     }
                     .onDisappear {
                         loadTask?.cancel()
                     }
                 } else {
-                    // Fallback if loading fails
-                    Text("Unable to format \(placeholder)")
+                    // Fallback with retry button if loading fails
+                    Button {
+                        // Reset state and retry loading
+                        isLoading = true
+                        loadStartTime = Date()
+                        retryCount += 1
+                        loadContent()
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Unable to load \(placeholder). Tap to retry.")
+                        }
                         .font(.callout)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.red)
                         .padding(.top, 6)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1754,6 +1643,10 @@ struct NewsDetailView: View {
             // Cancel any previous task
             loadTask?.cancel()
 
+            // Track start time for diagnostics
+            let startTime = Date()
+            AppLogger.database.debug("LazyLoadingContentView: Loading content for \(getFieldNameFor(field))")
+
             // Only load if we don't already have the content
             if loadedAttributedString != nil {
                 isLoading = false
@@ -1762,35 +1655,69 @@ struct NewsDetailView: View {
 
             // Use a MainActor-constrained task to handle NSAttributedString
             loadTask = Task { @MainActor in
-                // Since we're a nested struct within NewsDetailView, we need to use custom implementation
-                // to handle the customFontSize parameter which isn't available in the parent's method
-                let attributedString: NSAttributedString?
+                // Try to get content from blob first
+                var loadedFromBlob = false
+                var attributedString: NSAttributedString? = nil
 
-                if let textContent = getTextContentFor(field, from: notification) {
-                    attributedString = markdownToAttributedString(
-                        textContent,
-                        textStyle: "UIFontTextStyleBody",
-                        customFontSize: fontSize
-                    )
-                } else if true { // createIfMissing is hardcoded to true here
-                    let fieldName = getFieldNameFor(field)
-                    let placeholder = "No \(fieldName) content available."
-                    attributedString = markdownToAttributedString(
-                        placeholder,
-                        textStyle: "UIFontTextStyleBody",
-                        customFontSize: fontSize
-                    )
-                } else {
-                    attributedString = nil
+                // Check if we can get this from a blob
+                if let blobs = notification.getBlobsForField(field), let blob = blobs.first {
+                    do {
+                        attributedString = try NSKeyedUnarchiver.unarchivedObject(
+                            ofClass: NSAttributedString.self,
+                            from: blob
+                        )
+                        loadedFromBlob = attributedString != nil
+
+                        if loadedFromBlob {
+                            AppLogger.database.debug("LazyLoadingContentView: Loaded \(getFieldNameFor(field)) from blob")
+                        }
+                    } catch {
+                        AppLogger.database.error("LazyLoadingContentView: Failed to unarchive blob: \(error)")
+                    }
                 }
 
-                // Check if the task was cancelled
-                if Task.isCancelled { return }
+                // If blob failed, generate from markdown
+                if attributedString == nil && !Task.isCancelled {
+                    let textContent = getTextContentFor(field, from: notification)
 
-                self.loadedAttributedString = attributedString
-                self.isLoading = false
-                if let attributedString = attributedString {
-                    onLoad?(attributedString)
+                    if let content = textContent, !content.isEmpty {
+                        attributedString = markdownToAttributedString(
+                            content,
+                            textStyle: "UIFontTextStyleBody",
+                            customFontSize: fontSize
+                        )
+
+                        if attributedString != nil {
+                            AppLogger.database.debug("LazyLoadingContentView: Generated \(getFieldNameFor(field)) from markdown")
+                        }
+                    } else {
+                        // Create placeholder content if needed
+                        let fieldName = getFieldNameFor(field)
+                        let placeholder = "No \(fieldName) content available."
+                        attributedString = markdownToAttributedString(
+                            placeholder,
+                            textStyle: "UIFontTextStyleBody",
+                            customFontSize: fontSize
+                        )
+                    }
+                }
+
+                // Update UI immediately when content is available
+                if !Task.isCancelled {
+                    // Update our state
+                    self.loadedAttributedString = attributedString
+                    self.isLoading = false
+
+                    // Log completion
+                    let loadTime = Date().timeIntervalSince(startTime)
+                    if let _ = attributedString {
+                        AppLogger.database.debug("LazyLoadingContentView: Completed loading \(getFieldNameFor(field)) in \(loadTime) seconds")
+                        if let callback = onLoad, let content = attributedString {
+                            callback(content)
+                        }
+                    } else {
+                        AppLogger.database.error("LazyLoadingContentView: Failed to load \(getFieldNameFor(field)) after \(loadTime) seconds")
+                    }
                 }
             }
         }
@@ -2078,8 +2005,9 @@ struct NewsDetailView: View {
 
 struct SimilarArticleRow: View {
     let articleDict: [String: Any]
-    @Binding var notifications: [NotificationData]
-    @Binding var currentIndex: Int
+    // Using the view model directly to get articles and set current index
+    // rather than binding to local variables that don't exist anymore
+    @State private var viewModelForRow: NewsDetailViewModel? = nil
     var isLastItem: Bool = false // Add this parameter
 
     @Environment(\.modelContext) private var modelContext
@@ -2159,11 +2087,15 @@ struct SimilarArticleRow: View {
             selectedNotification = nil
         }) {
             if let notification = selectedNotification {
-                NewsDetailView(
-                    notifications: [notification],
-                    allNotifications: [notification],
-                    currentIndex: 0
+                // Create a view model with the article
+                let articleViewModel = NewsDetailViewModel(
+                    articles: [notification],
+                    allArticles: [notification],
+                    currentIndex: 0,
+                    initiallyExpandedSection: "Summary"
                 )
+                // Use the new initializer with the view model
+                NewsDetailView(viewModel: articleViewModel)
             }
         }
         .onAppear {

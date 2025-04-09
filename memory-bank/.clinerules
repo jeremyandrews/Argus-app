@@ -139,10 +139,62 @@ This file captures important patterns, preferences, and project intelligence tha
   ```
 - Use Swift's TaskGroup for concurrent processing while controlling maximum concurrency
 
-### NSCache Usage
+### NSCache Usage and Thread Safety
 - NSCache is not Sendable - avoid directly accessing actor-isolated NSCache properties from closures
 - Instead, read values from caches at the beginning of functions, then use locals in closures
 - Update caches after transaction completion, not within transaction blocks
+- For caching services (like ArticleService), implement comprehensive thread safety:
+  - Use dedicated serial dispatch queue for all cache operations:
+    ```swift
+    private let cacheQueue = DispatchQueue(label: "com.argus.articleservice.cache")
+    ```
+  - Make read operations synchronous on the queue to ensure data consistency:
+    ```swift
+    func checkCache(for key: String) -> [SomeType]? {
+        return cacheQueue.sync {
+            // Access cache state safely here
+            if let result = cache.object(forKey: key as NSString) as? [SomeType] {
+                return result
+            }
+            return nil
+        }
+    }
+    ```
+  - Make write operations asynchronous for better performance:
+    ```swift
+    func cacheResults(_ results: [SomeType], for key: String) {
+        cacheQueue.async {
+            // Update cache state safely here
+            self.cache.setObject(results as NSArray, forKey: key as NSString)
+            self.lastCacheUpdate = Date()
+            self.cacheKeys.insert(key)
+        }
+    }
+    ```
+  - Create helper methods for safer cache state access:
+    ```swift
+    private func withSafeCache<T>(_ operation: @escaping () -> T) -> T {
+        return cacheQueue.sync {
+            return operation()
+        }
+    }
+    
+    private func hasCacheKey(_ key: String) -> Bool {
+        return cacheQueue.sync {
+            return self.cacheKeys.contains(key)
+        }
+    }
+    ```
+  - For async methods that need to call cache operations, use withCheckedContinuation:
+    ```swift
+    // Example: clearCache needs to be called from an async method
+    await withCheckedContinuation { continuation in
+        clearCache()  // This runs asynchronously on the cacheQueue
+        continuation.resume()
+    }
+    ```
+  - Add comprehensive logging for cache operations to diagnose issues
+  - Add clear thread-safety documentation to class and method comments
 
 ### Actor Initialization and Self Capture
 - Never capture self in a task or closure before all properties are initialized
@@ -592,36 +644,194 @@ This file captures important patterns, preferences, and project intelligence tha
 - Ensure background tasks are properly scheduled and managed
 - Implement proper push notification handling with async/await
 
+## Article Section Loading Best Practices
+
+### Sequential Loading Process
+- Implement a three-phase loading approach for article section content:
+  ```swift
+  // PHASE 1: BLOB LOADING (fastest path)
+  let blobs = article.getBlobsForField(field)
+  if let blob = blobs?.first {
+      do {
+          let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+              ofClass: NSAttributedString.self,
+              from: blob
+          )
+          if let content = attributedString {
+              // Use blob content immediately
+              return content
+          }
+      } catch {
+          AppLogger.database.error("Error unarchiving blob: \(error)")
+      }
+  }
+  
+  // PHASE 2: RICH TEXT GENERATION (only if blob loading fails)
+  do {
+      let attributedString = try await withTimeout(duration: .seconds(3)) {
+          let textContent = self.getTextContentForField(field, from: article)
+          return self.articleOperations.getAttributedContent(
+              for: field,
+              from: article,
+              createIfMissing: true
+          )
+      }
+      if let content = attributedString {
+          return content
+      }
+  } catch {
+      AppLogger.database.error("Error during rich text generation: \(error)")
+  }
+  
+  // PHASE 3: PLAIN TEXT FALLBACK (when all else fails)
+  if let rawText = getTextContentForField(field, from: article), !rawText.isEmpty {
+      return NSAttributedString(
+          string: rawText,
+          attributes: [
+              .font: UIFont.preferredFont(forTextStyle: .body),
+              .foregroundColor: UIColor.label
+          ]
+      )
+  }
+  ```
+
+### Comprehensive Logging for Section Loading
+- Add detailed phase-based logging to track content loading:
+  ```swift
+  AppLogger.database.debug("🔍 SECTION LOAD START: \(section) for article \(article.id)")
+  
+  // Log blob check timing
+  let blobStart = Date()
+  let blobs = article.getBlobsForField(field)
+  let blobCheckTime = Date().timeIntervalSince(blobStart)
+  AppLogger.database.debug("⏱️ Blob check took \(String(format: "%.4f", blobCheckTime))s, hasBlob: \(blobs?.first != nil)")
+  
+  // Log extraction timing
+  let extractStart = Date()
+  let attributedString = try NSKeyedUnarchiver.unarchivedObject(...)
+  let extractTime = Date().timeIntervalSince(extractStart)
+  AppLogger.database.debug("⏱️ Extraction took \(String(format: "%.4f", extractTime))s")
+  
+  // Log generation timing
+  let genStart = Date()
+  let result = getAttributedContent(...)
+  let genTime = Date().timeIntervalSince(genStart)
+  AppLogger.database.debug("⏱️ Generation took \(String(format: "%.4f", genTime))s")
+  
+  // Log total time
+  let totalTime = Date().timeIntervalSince(startTime)
+  AppLogger.database.debug("✅ SECTION LOAD SUCCESS via METHOD in \(String(format: "%.4f", totalTime))s")
+  ```
+
+### User Experience During Loading
+- Always provide loading status indicators for long operations:
+  ```swift
+  // Show temporary conversion status
+  @MainActor
+  private func provideTempContent(_ section: String, _ field: RichTextField, _ message: String) {
+      // Create a temporary attributed string to show status
+      let tempString = NSAttributedString(
+          string: message,
+          attributes: [
+              .font: UIFont.italicSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize),
+              .foregroundColor: UIColor.secondaryLabel
+          ]
+      )
+      
+      // Store in the appropriate property and notify UI
+      sectionAttributedStrings[section] = tempString
+      objectWillChange.send()
+  }
+  
+  // When starting rich text generation
+  await MainActor.run {
+      provideTempContent(section, field, "Converting markdown to rich text...")
+  }
+  ```
+
+### Diagnostic Content Logging
+- Add content diagnostics when generation fails:
+  ```swift
+  private func logGenerationDetails(_ field: RichTextField, _ article: NotificationData) {
+      // Get text content to analyze
+      let textContent = getTextContentForField(field, from: article)
+      
+      // Log basic details
+      AppLogger.database.debug("📊 Generation Diagnostic:")
+      AppLogger.database.debug("- Field: \(String(describing: field))")
+      AppLogger.database.debug("- Has content: \(textContent != nil)")
+      AppLogger.database.debug("- Content length: \(textContent?.count ?? 0)")
+      AppLogger.database.debug("- Article ID: \(article.id)")
+      AppLogger.database.debug("- JSON URL: \(article.json_url)")
+      
+      // Log content sample if available
+      if let content = textContent, !content.isEmpty {
+          let sampleLength = min(150, content.count)
+          let sample = String(content.prefix(sampleLength))
+          AppLogger.database.debug("📝 Content sample: \"\(sample)\"...")
+      }
+  }
+  ```
+
+### Robust Timeout Handling
+- Use Swift's structured concurrency with timeouts:
+  ```swift
+  private func withTimeout<T>(duration: Duration, operation: @escaping () async throws -> T) async throws -> T {
+      return try await withThrowingTaskGroup(of: T.self) { group in
+          // Add the actual operation
+          group.addTask {
+              return try await operation()
+          }
+          
+          // Add a timeout task
+          group.addTask {
+              try await Task.sleep(for: duration)
+              throw TimeoutError()
+          }
+          
+          // Return the first completed result or throw
+          guard let result = try await group.next() else {
+              throw TimeoutError()
+          }
+          
+          // Cancel any remaining tasks
+          group.cancelAll()
+          
+          return result
+      }
+  }
+  ```
+
+### Swift Type Safety for Logging
+- Handle Swift 6 type-safety requirements in logging:
+  ```swift
+  // Avoid ambiguous type expression errors with explicit conversion:
+  AppLogger.database.debug("Field: \(String(describing: field))")
+  
+  // Avoid nil coalescing on non-optional types:
+  // WRONG:
+  AppLogger.database.debug("JSON URL: \(article.json_url ?? "none")")
+  // CORRECT:
+  AppLogger.database.debug("JSON URL: \(article.json_url)")
+  
+  // Break multi-line strings into individual log statements:
+  // WRONG:
+  AppLogger.database.debug("""
+  Multi-line debug info:
+  Line 1: \(value1)
+  Line 2: \(value2)
+  """)
+  // CORRECT:
+  AppLogger.database.debug("Multi-line debug info:")
+  AppLogger.database.debug("Line 1: \(value1)")
+  AppLogger.database.debug("Line 2: \(value2)")
+  ```
+
 ## Known Challenges
 - UI becomes jittery during sync operations - will be addressed with MVVM refactoring
 - Duplicate content issues occur during synchronization - will be resolved by SwiftData's unique constraints
 - Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - will be eliminated with proper async/await implementation
 - SwiftData context access issues can cause EXC_BAD_ACCESS crashes - will be addressed by using SwiftData's native context management instead of custom DatabaseCoordinator
-- **Article formatting issues during chevron navigation** - When navigating between articles using the chevron buttons:
-  - Title and body formatting is lost (rich text not displayed)
-  - Sections like "Argus Engine Stats" and "Related Articles" don't appear
-  - Previously converted sections are re-converted each time viewed
-  
-  **Failed Fix Attempts**:
-  - Creating shared NavigationDirection enum in NavigationTypes.swift
-  - Removing duplicate enum definitions in NewsDetailViewModel and NewsDetailView
-  - Fixing unreachable catch block in NewsDetailViewModel.navigateToArticle
-  - Addressing property access issues by modifying viewModel's article property instead of read-only computed property
-  - Adding safeguards to restore the previous article if navigation fails
-  
-  **Potential Root Causes to Investigate**:
-  - Blob data extraction timing issues - UI may render before blob data is fully extracted
-  - ArticleOperations.getCompleteArticle() might not load all required data
-  - ArticleModelAdapter may not be properly transferring blob data during model conversion
-  - State reset sequence during navigation may be clearing key properties prematurely
-  - Timing issues between when titleAttributedString/bodyAttributedString are cleared and regenerated
-  
-  **Debugging Strategy**:
-  - Add extensive logging around blob data extraction and validation
-  - Trace the complete data flow during navigation (compare direct loading vs. chevron navigation)
-  - Create a sequence diagram of all state changes during navigation
-  - Check if blobs exist in the database but are not being extracted properly
-  - Investigate if unarchiving from NSKeyedUnarchiver is failing silently
 
 ## Argus API Server Endpoints and Behavior
 

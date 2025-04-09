@@ -625,4 +625,56 @@ final class NewsViewModel: ObservableObject {
             return 0
         }
     }
+
+    /// Diagnoses and repairs rich text blob issues in articles
+    /// - Parameters:
+    ///   - articleId: Optional article ID to diagnose a specific article, or nil for all articles
+    ///   - forceRegenerate: Whether to force regeneration of all blobs, even if they seem valid
+    ///   - limit: Optional limit on the number of articles to process
+    /// - Returns: A diagnostic summary
+    func diagnoseAndRepairRichTextBlobs(
+        articleId: UUID? = nil,
+        forceRegenerate: Bool = false,
+        limit: Int? = nil
+    ) async -> String {
+        do {
+            isLoading = true
+
+            // Access the ArticleService directly since blob diagnostics are implemented there
+            let articleService = ArticleService.shared
+
+            // Run the diagnostic
+            let (diagnosed, repaired, details) = try await articleService.diagnoseAndRepairRichTextBlobs(
+                articleId: articleId,
+                forceRegenerate: forceRegenerate,
+                limit: limit
+            )
+
+            // Generate a summary
+            let summary = """
+            Rich Text Blob Diagnostic Results:
+            - Articles diagnosed: \(diagnosed)
+            - Articles repaired: \(repaired)
+
+            Details:
+            \(details)
+            """
+
+            AppLogger.database.debug("Completed blob diagnostics: \(diagnosed) diagnosed, \(repaired) repaired")
+
+            isLoading = false
+
+            // Refresh if repairs were made
+            if repaired > 0 {
+                await refreshArticles()
+            }
+
+            return summary
+        } catch {
+            isLoading = false
+            self.error = error
+            AppLogger.database.error("Error diagnosing rich text blobs: \(error)")
+            return "Error during blob diagnostics: \(error.localizedDescription)"
+        }
+    }
 }

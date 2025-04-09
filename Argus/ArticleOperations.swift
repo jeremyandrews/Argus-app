@@ -117,6 +117,89 @@ final class ArticleOperations {
         return try await articleService.fetchArticle(byId: id)
     }
 
+    /// Ensures we have an article with model context for blob operations
+    /// - Parameter article: The potentially detached article
+    /// - Returns: An article with valid model context, or nil if unavailable
+    func getArticleWithContext(article: NotificationData) async -> NotificationData? {
+        // If article already has context, use it
+        if article.modelContext != nil {
+            return article
+        }
+
+        // Try to fetch a fresh copy from the database
+        return await getCompleteArticle(byId: article.id)
+    }
+
+    /// Gets the original ArticleModel with SwiftData context for direct persistence operations
+    /// - Parameter id: The unique identifier of the article
+    /// - Returns: The ArticleModel with a valid context if found, nil otherwise
+    func getArticleModelWithContext(byId id: UUID) async -> ArticleModel? {
+        do {
+            // Use the existing articleService to fetch the ArticleModel directly
+            let context = ModelContext(SwiftDataContainer.shared.container)
+            let fetchDescriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { $0.id == id }
+            )
+
+            let articleModels = try context.fetch(fetchDescriptor)
+
+            if let model = articleModels.first {
+                AppLogger.database.debug("✅ Found ArticleModel with valid context for ID: \(id)")
+                return model
+            } else {
+                AppLogger.database.error("❌ Failed to find ArticleModel for ID: \(id)")
+                return nil
+            }
+        } catch {
+            AppLogger.database.error("❌ Error fetching ArticleModel: \(error)")
+            return nil
+        }
+    }
+
+    /// Saves blob data to an ArticleModel
+    /// - Parameters:
+    ///   - field: The field to save blob for
+    ///   - blobData: The blob data to save
+    ///   - articleModel: The ArticleModel to update
+    /// - Returns: True if save was successful
+    @MainActor
+    func saveBlobToDatabase(field: RichTextField, blobData: Data, articleModel: ArticleModel) -> Bool {
+        // Set the blob on the ArticleModel using field-specific properties
+        switch field {
+        case .title:
+            articleModel.titleBlob = blobData
+        case .body:
+            articleModel.bodyBlob = blobData
+        case .summary:
+            articleModel.summaryBlob = blobData
+        case .criticalAnalysis:
+            articleModel.criticalAnalysisBlob = blobData
+        case .logicalFallacies:
+            articleModel.logicalFallaciesBlob = blobData
+        case .sourceAnalysis:
+            articleModel.sourceAnalysisBlob = blobData
+        case .relationToTopic:
+            articleModel.relationToTopicBlob = blobData
+        case .additionalInsights:
+            articleModel.additionalInsightsBlob = blobData
+        }
+
+        // Save the context
+        if let context = articleModel.modelContext {
+            do {
+                try context.save()
+                AppLogger.database.debug("✅ Saved blob for \(String(describing: field)) to database (\(blobData.count) bytes)")
+                return true
+            } catch {
+                AppLogger.database.error("❌ Failed to save blob to database: \(error)")
+                return false
+            }
+        } else {
+            AppLogger.database.error("❌ ArticleModel has no context, cannot save")
+            return false
+        }
+    }
+
     // MARK: - Rich Text Operations
 
     /// Gets or generates an attributed string for a specific field of an article
@@ -131,8 +214,78 @@ final class ArticleOperations {
         from article: NotificationData,
         createIfMissing: Bool = true
     ) -> NSAttributedString? {
-        // Direct call since we're already on MainActor
-        return getAttributedString(for: field, from: article, createIfMissing: createIfMissing)
+        // Enhanced implementation with better blob handling
+
+        // Step 1: Try to get from existing blob
+        if let blobData = field.getBlob(from: article), !blobData.isEmpty {
+            do {
+                if let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+                    ofClass: NSAttributedString.self,
+                    from: blobData
+                ) {
+                    AppLogger.database.debug("✅ Retrieved attributed string from blob for \(String(describing: field))")
+                    return attributedString
+                } else {
+                    AppLogger.database.warning("⚠️ Blob unarchived to nil for \(String(describing: field)), will regenerate")
+                    // Fall through to regeneration
+                }
+            } catch {
+                AppLogger.database.error("❌ Failed to unarchive blob for \(String(describing: field)): \(error)")
+                // Fall through to regeneration
+            }
+        }
+
+        // Step 2: Generate from markdown if needed
+        if createIfMissing {
+            let markdownText = getMarkdownTextForField(field, from: article)
+
+            guard let markdownText = markdownText, !markdownText.isEmpty else {
+                AppLogger.database.debug("⚠️ No markdown text for \(String(describing: field))")
+                return nil
+            }
+
+            AppLogger.database.debug("⚙️ Generating attributed string for \(String(describing: field)) (length: \(markdownText.count))")
+
+            // Generate attributed string
+            if let attributedString = markdownToAttributedString(
+                markdownText,
+                textStyle: field.textStyle
+            ) {
+                // Save as blob for future use
+                do {
+                    let blobData = try NSKeyedArchiver.archivedData(
+                        withRootObject: attributedString,
+                        requiringSecureCoding: false
+                    )
+
+                    // Set blob on the article
+                    field.setBlob(blobData, on: article)
+
+                    // Save context if possible
+                    if let context = article.modelContext {
+                        try context.save()
+                        AppLogger.database.debug("✅ Saved blob for \(String(describing: field)) (\(blobData.count) bytes)")
+
+                        // Verify blob was saved
+                        if let savedBlob = field.getBlob(from: article) {
+                            AppLogger.database.debug("✅ Verified blob save: \(savedBlob.count) bytes")
+                        } else {
+                            AppLogger.database.warning("⚠️ Blob verification failed for \(String(describing: field))")
+                        }
+                    } else {
+                        AppLogger.database.warning("⚠️ Article has no model context, blob not saved")
+                    }
+                } catch {
+                    AppLogger.database.error("❌ Failed to save blob for \(String(describing: field)): \(error)")
+                }
+
+                return attributedString
+            } else {
+                AppLogger.database.error("❌ Failed to generate attributed string for \(String(describing: field))")
+            }
+        }
+
+        return nil
     }
 
     /// Generates or retrieves rich text content for all text-based fields of an article
@@ -325,4 +478,34 @@ final class ArticleOperations {
     func cleanupDuplicateArticles() async throws -> Int {
         return try await articleService.removeDuplicateArticles()
     }
+
+    // MARK: - Rich Text Helper Methods
+
+    /// Gets the markdown text for a specific field
+    /// - Parameters:
+    ///   - field: The rich text field
+    ///   - article: The article to get the text from
+    /// - Returns: The markdown text if available, nil otherwise
+    private func getMarkdownTextForField(_ field: RichTextField, from article: NotificationData) -> String? {
+        switch field {
+        case .title:
+            return article.title
+        case .body:
+            return article.body
+        case .summary:
+            return article.summary
+        case .criticalAnalysis:
+            return article.critical_analysis
+        case .logicalFallacies:
+            return article.logical_fallacies
+        case .sourceAnalysis:
+            return article.source_analysis
+        case .relationToTopic:
+            return article.relation_to_topic
+        case .additionalInsights:
+            return article.additional_insights
+        }
+    }
 }
+
+// NOTE: RichTextField extensions are now defined in MarkdownUtilities.swift

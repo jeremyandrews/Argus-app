@@ -11,7 +11,13 @@ final class NewsDetailViewModel: ObservableObject {
     /// Subscriptions for observing UserDefaults changes
     private var userDefaultsSubscriptions = Set<AnyCancellable>()
 
+    /// The database model corresponding to the current article (for persistence operations)
+    private var currentArticleModel: ArticleModel?
+
     // MARK: - Published Properties
+
+    /// The initially expanded section, if any
+    let initiallyExpandedSection: String?
 
     /// The currently displayed article
     @Published var currentArticle: NotificationData?
@@ -102,11 +108,16 @@ final class NewsDetailViewModel: ObservableObject {
         preloadedArticle: NotificationData? = nil,
         preloadedTitle: NSAttributedString? = nil,
         preloadedBody: NSAttributedString? = nil,
+        preloadedSummary: NSAttributedString? = nil,
+        preloadedArticleModel: ArticleModel? = nil,
         articleOperations: ArticleOperations = ArticleOperations()
     ) {
         // Apply uniqueness to prevent duplicate IDs in collections
         let uniqueArticles = articles.uniqued()
         let uniqueAllArticles = allArticles.uniqued()
+
+        // Store the initially expanded section
+        self.initiallyExpandedSection = initiallyExpandedSection
 
         self.articles = uniqueArticles
         self.allArticles = uniqueAllArticles
@@ -122,6 +133,7 @@ final class NewsDetailViewModel: ObservableObject {
 
         titleAttributedString = preloadedTitle
         bodyAttributedString = preloadedBody
+        summaryAttributedString = preloadedSummary
 
         // Set initial expanded sections
         if let section = initiallyExpandedSection {
@@ -132,6 +144,9 @@ final class NewsDetailViewModel: ObservableObject {
         if expandedSections["Summary"] == nil {
             expandedSections["Summary"] = true
         }
+
+        // Store the preloaded ArticleModel if provided
+        currentArticleModel = preloadedArticleModel
 
         // Setup observers for settings changes
         setupUserDefaultsObservers()
@@ -206,6 +221,9 @@ final class NewsDetailViewModel: ObservableObject {
         // This ensures the view always has content even while loading better content
         currentArticle = targetArticle
 
+        // Reset the ArticleModel reference - we'll fetch a fresh one
+        currentArticleModel = nil
+
         // Reset expanded sections
         expandedSections = Self.getDefaultExpandedSections()
 
@@ -224,6 +242,27 @@ final class NewsDetailViewModel: ObservableObject {
 
                 // Log for debugging with more context
                 AppLogger.database.debug("Navigating from index \(oldIndex) to \(nextIndex) (article ID: \(nextArticleId))")
+
+                // CRITICAL CHANGE: Get the ArticleModel directly for database operations
+                let dbModel = await articleOperations.getArticleModelWithContext(byId: nextArticleId)
+
+                // Store the ArticleModel for future blob saving operations
+                await MainActor.run {
+                    self.currentArticleModel = dbModel
+                }
+
+                // If we have the model, log its state
+                if let model = dbModel {
+                    AppLogger.database.debug("""
+                    Retrieved ArticleModel with ID: \(model.id)
+                    - Has context: \(model.modelContext != nil)
+                    - Has title blob: \(model.titleBlob != nil)
+                    - Has body blob: \(model.bodyBlob != nil)
+                    - Has summary blob: \(model.summaryBlob != nil)
+                    """)
+                } else {
+                    AppLogger.database.warning("⚠️ Could not retrieve ArticleModel for ID: \(nextArticleId)")
+                }
 
                 // Try to get complete article from service with all blobs
                 if let completeArticle = await articleOperations.getCompleteArticle(byId: nextArticleId) {
@@ -392,55 +431,448 @@ final class NewsDetailViewModel: ObservableObject {
 
     /// Loads content for a specific section
     /// - Parameter section: The section to load content for
-    func loadContentForSection(_ section: String) {
+    @MainActor
+    func loadContentForSection(_ section: String, retryCount: Int = 0) {
         guard let article = currentArticle else { return }
 
-        // Check if content is already loaded
+        // Log start of loading process with article ID for traceability
+        AppLogger.database.debug("🔍 SECTION LOAD START: \(section) for article \(article.id) (retry: \(retryCount))")
+
+        // Already loaded check (return immediately if content exists)
         if getAttributedStringForSection(section) != nil {
-            return // Already loaded, nothing to do
+            AppLogger.database.debug("✅ SECTION ALREADY LOADED: \(section) - using cached content")
+            return
         }
 
-        // Cancel any existing task for this section
+        // Cancel existing task if any
         sectionLoadingTasks[section]?.cancel()
 
         let field = getRichTextFieldForSection(section)
+        objectWillChange.send() // Notify UI of pending update
 
-        // Create a new task to load this section's content
-        let task = Task {
-            let attributedString = articleOperations.getAttributedContent(
-                for: field,
-                from: article,
-                createIfMissing: true
-            )
+        // Create task with strict sequential loading logic
+        let task = Task(priority: .userInitiated) {
+            let startTime = Date()
 
-            // If task wasn't cancelled and we got content, update the appropriate property
-            if !Task.isCancelled, let attributedString = attributedString {
-                // Store the result in the appropriate property
-                switch field {
-                case .summary:
-                    summaryAttributedString = attributedString
-                case .criticalAnalysis:
-                    criticalAnalysisAttributedString = attributedString
-                case .logicalFallacies:
-                    logicalFallaciesAttributedString = attributedString
-                case .sourceAnalysis:
-                    sourceAnalysisAttributedString = attributedString
-                case .relationToTopic:
-                    cachedContentBySection["Relevance"] = attributedString
-                case .additionalInsights:
-                    cachedContentBySection["Context & Perspective"] = attributedString
-                default:
-                    // For other sections, cache by section name
-                    cachedContentBySection[section] = attributedString
+            // PHASE 1: BLOB LOADING - Try to get from database
+            AppLogger.database.debug("⚙️ PHASE 1: Checking for blob in database for \(section)")
+            let blobStart = Date()
+
+            // Verify the article is actually stored in the database with ID
+            if article.modelContext == nil {
+                AppLogger.database.warning("⚠️ Article \(article.id) has no model context - not saved to database")
+            }
+
+            // Check if blob exists in database with detailed logging
+            let blobs = article.getBlobsForField(field)
+            let blobCheckTime = Date().timeIntervalSince(blobStart)
+            let hasBlob = blobs?.first != nil
+            let blobSize = blobs?.first?.count ?? 0
+
+            AppLogger.database.debug("⏱️ Blob check took \(String(format: "%.4f", blobCheckTime))s, hasBlob: \(hasBlob), size: \(blobSize) bytes")
+
+            // If blob exists, try to load it
+            if hasBlob, let blob = blobs?.first {
+                AppLogger.database.debug("📦 Blob found (\(blob.count) bytes), attempting to unarchive")
+
+                do {
+                    let unarchiveStart = Date()
+                    let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self,
+                        from: blob
+                    )
+
+                    let unarchiveTime = Date().timeIntervalSince(unarchiveStart)
+                    AppLogger.database.debug("⏱️ Blob unarchive took \(String(format: "%.4f", unarchiveTime))s")
+
+                    if let content = attributedString, !Task.isCancelled {
+                        // BLOB LOADING SUCCESS - Update UI immediately
+                        await MainActor.run {
+                            updateSectionContent(section, field, content)
+                        }
+
+                        let totalTime = Date().timeIntervalSince(startTime)
+                        AppLogger.database.debug("✅ SECTION LOAD SUCCESS: \(section) via BLOB in \(String(format: "%.4f", totalTime))s")
+                        return // Exit if blob loaded successfully
+                    } else {
+                        AppLogger.database.warning("⚠️ Blob existed but unarchived to nil for \(section), will force regenerate")
+
+                        // Delete invalid blob and regenerate
+                        await MainActor.run {
+                            field.setBlob(nil, on: article)
+                            try? article.modelContext?.save()
+                        }
+                    }
+                } catch {
+                    AppLogger.database.error("❌ ERROR unarchiving blob: \(error.localizedDescription), will force regenerate")
+
+                    // Delete corrupt blob and regenerate
+                    await MainActor.run {
+                        field.setBlob(nil, on: article)
+                        try? article.modelContext?.save()
+                    }
+                }
+            }
+
+            // PHASE 2: RICH TEXT GENERATION - If blob loading failed
+            if !Task.isCancelled {
+                AppLogger.database.debug("⚙️ PHASE 2: Blob loading failed, attempting rich text generation for \(section)")
+
+                // Update UI to show generation state
+                await MainActor.run {
+                    provideTempContent(section, field, "Converting markdown to rich text...")
                 }
 
-                // Clear loading state
-                sectionLoadingTasks[section] = nil
+                let generationStart = Date()
+                let textContent = getTextContentForField(field, from: article)
+                AppLogger.database.debug("📝 Raw text content length: \(textContent?.count ?? 0)")
+
+                do {
+                    // Try to generate rich text from markdown with a 5 second timeout (increased from 3s)
+                    let attributedString = try await withTimeout(duration: .seconds(5)) {
+                        // Get text content again inside the timeout to ensure we have it
+                        guard let textContent = self.getTextContentForField(field, from: article),
+                              !textContent.isEmpty
+                        else {
+                            AppLogger.database.error("❌ No text content for \(section)")
+                            return nil as NSAttributedString?
+                        }
+
+                        // Generate attributed string directly here - we're already on the MainActor
+                        // so we don't need to use MainActor.run
+                        let attrString = markdownToAttributedString(
+                            textContent,
+                            textStyle: "UIFontTextStyleBody"
+                        )
+
+                        // We're inside a timeout function - just return the string and handle saving outside
+                        return attrString
+                    }
+
+                    // Now that we're outside the timeout function, save the blob if we have a valid string
+                    if let attrString = attributedString {
+                        do {
+                            // Archive the string to data
+                            let blobData = try NSKeyedArchiver.archivedData(
+                                withRootObject: attrString,
+                                requiringSecureCoding: false
+                            )
+
+                            // Set the blob directly on the original article for immediate display
+                            field.setBlob(blobData, on: article)
+
+                            // CRITICAL CHANGE: Save blob to the database through ArticleModel
+                            var savedToDb = false
+                            if let articleModel = self.currentArticleModel {
+                                savedToDb = articleOperations.saveBlobToDatabase(
+                                    field: field,
+                                    blobData: blobData,
+                                    articleModel: articleModel
+                                )
+
+                                if savedToDb {
+                                    AppLogger.database.debug("✅ Successfully saved blob to database model")
+                                } else {
+                                    AppLogger.database.warning("⚠️ Failed to save blob to database model")
+                                }
+                            } else {
+                                // If we don't have the ArticleModel, try to get it now
+                                AppLogger.database.debug("⚠️ No ArticleModel available, attempting to fetch it")
+                                if let freshModel = await articleOperations.getArticleModelWithContext(byId: article.id) {
+                                    // Store for future use
+                                    await MainActor.run {
+                                        self.currentArticleModel = freshModel
+                                    }
+
+                                    // Try to save to this fresh model
+                                    savedToDb = articleOperations.saveBlobToDatabase(
+                                        field: field,
+                                        blobData: blobData,
+                                        articleModel: freshModel
+                                    )
+
+                                    if savedToDb {
+                                        AppLogger.database.debug("✅ Successfully saved blob to freshly fetched database model")
+                                    } else {
+                                        AppLogger.database.warning("⚠️ Failed to save blob to freshly fetched database model")
+                                    }
+                                } else {
+                                    AppLogger.database.error("❌ Could not find ArticleModel for blob saving")
+                                }
+                            }
+
+                            // Still log status in all cases
+                            if savedToDb {
+                                AppLogger.database.debug("✅ Blob saved to database (\(blobData.count) bytes)")
+                            } else {
+                                AppLogger.database.warning("⚠️ Blob available only in memory: \(blobData.count) bytes")
+                            }
+                        } catch {
+                            AppLogger.database.error("❌ Failed to save blob: \(error)")
+                        }
+                    }
+
+                    let generationTime = Date().timeIntervalSince(generationStart)
+                    AppLogger.database.debug("⏱️ Rich text generation took \(String(format: "%.4f", generationTime))s")
+
+                    if !Task.isCancelled, let content = attributedString {
+                        // RICH TEXT GENERATION SUCCESS - Update UI
+                        await MainActor.run {
+                            updateSectionContent(section, field, content)
+                        }
+
+                        let totalTime = Date().timeIntervalSince(startTime)
+                        AppLogger.database.debug("✅ SECTION LOAD SUCCESS: \(section) via GENERATION in \(String(format: "%.4f", totalTime))s")
+                        return // Exit if generation succeeded
+                    } else {
+                        AppLogger.database.error("❌ Generated attributedString was nil for \(section)")
+                    }
+                } catch _ as TimeoutError {
+                    AppLogger.database.error("⏰ TIMEOUT during rich text generation for \(section) after 5s")
+                    logGenerationDetails(field, article) // Log details about the content
+
+                    // If we've tried multiple times, fall back to plain text
+                    if retryCount >= 1 {
+                        AppLogger.database.error("❌ Giving up after \(retryCount) retries")
+                    } else {
+                        // Try once more after a short delay
+                        AppLogger.database.debug("🔄 Will retry rich text generation after delay")
+                        if !Task.isCancelled {
+                            try? await Task.sleep(for: .seconds(0.5))
+
+                            await MainActor.run {
+                                // Only retry if task wasn't cancelled during delay
+                                if !Task.isCancelled {
+                                    loadContentForSection(section, retryCount: retryCount + 1)
+                                }
+                            }
+                            return
+                        }
+                    }
+                } catch {
+                    AppLogger.database.error("❌ ERROR during rich text generation: \(error.localizedDescription)")
+                }
+            }
+
+            // If we got here, both blob loading and rich text generation failed
+
+            // PHASE 3: PLAIN TEXT FALLBACK - Only if both previous methods failed
+            if !Task.isCancelled {
+                AppLogger.database.debug("⚙️ PHASE 3: Both blob and rich text failed, falling back to plain text for \(section)")
+
+                // Create a simple attributed string with plain text
+                if let rawText = getTextContentForField(field, from: article), !rawText.isEmpty {
+                    let plainStart = Date()
+
+                    // Create basic attributed string with system font (very simple, should be fast)
+                    let plainAttrString = NSAttributedString(
+                        string: rawText,
+                        attributes: [
+                            .font: UIFont.preferredFont(forTextStyle: .body),
+                            .foregroundColor: UIColor.label,
+                        ]
+                    )
+
+                    let plainTime = Date().timeIntervalSince(plainStart)
+                    AppLogger.database.debug("⏱️ Plain text formatting took \(String(format: "%.4f", plainTime))s")
+
+                    // Update UI with plain text
+                    await MainActor.run {
+                        updateSectionContent(section, field, plainAttrString)
+                    }
+
+                    let totalTime = Date().timeIntervalSince(startTime)
+                    AppLogger.database.debug("⚠️ SECTION LOAD FALLBACK: \(section) via PLAIN TEXT in \(String(format: "%.4f", totalTime))s")
+                } else {
+                    // If even the raw text is missing, show error message
+                    await MainActor.run {
+                        provideFallbackContent(section, field)
+                    }
+
+                    AppLogger.database.error("❌ SECTION LOAD FAILED: No content available for \(section)")
+                }
             }
         }
 
-        // Store the task so we can cancel it if needed
+        // Store the task for potential cancellation
         sectionLoadingTasks[section] = task
+    }
+
+    /// Updates the content for a section
+    /// - Parameters:
+    ///   - section: The section to update
+    ///   - field: The rich text field for the section
+    ///   - content: The content to set
+    @MainActor
+    private func updateSectionContent(_ section: String, _ field: RichTextField, _ content: NSAttributedString) {
+        // Store in appropriate property
+        switch field {
+        case .summary:
+            summaryAttributedString = content
+        case .criticalAnalysis:
+            criticalAnalysisAttributedString = content
+        case .logicalFallacies:
+            logicalFallaciesAttributedString = content
+        case .sourceAnalysis:
+            sourceAnalysisAttributedString = content
+        case .relationToTopic:
+            cachedContentBySection["Relevance"] = content
+        case .additionalInsights:
+            cachedContentBySection["Context & Perspective"] = content
+        default:
+            cachedContentBySection[section] = content
+        }
+
+        // Force UI refresh
+        objectWillChange.send()
+
+        // Clear loading state
+        sectionLoadingTasks[section] = nil
+    }
+
+    /// Provides fallback content when loading fails
+    /// - Parameters:
+    ///   - section: The section that failed to load
+    ///   - field: The rich text field for the section
+    @MainActor
+    private func provideFallbackContent(_ section: String, _ field: RichTextField) {
+        let fallbackString = NSAttributedString(
+            string: "Unable to load content. Tap to retry.",
+            attributes: [.foregroundColor: UIColor.systemRed]
+        )
+
+        // Store the fallback in the appropriate property
+        switch field {
+        case .summary:
+            summaryAttributedString = fallbackString
+        case .criticalAnalysis:
+            criticalAnalysisAttributedString = fallbackString
+        case .logicalFallacies:
+            logicalFallaciesAttributedString = fallbackString
+        case .sourceAnalysis:
+            sourceAnalysisAttributedString = fallbackString
+        case .relationToTopic:
+            cachedContentBySection["Relevance"] = fallbackString
+        case .additionalInsights:
+            cachedContentBySection["Context & Perspective"] = fallbackString
+        default:
+            cachedContentBySection[section] = fallbackString
+        }
+
+        // Force UI refresh
+        objectWillChange.send()
+
+        // Clear loading state
+        sectionLoadingTasks[section] = nil
+    }
+
+    /// Helper function to add timeout to async operations
+    private func withTimeout<T>(duration: Duration, operation: @escaping () async throws -> T) async throws -> T {
+        return try await withThrowingTaskGroup(of: T.self) { group in
+            // Add the actual operation
+            group.addTask {
+                try await operation()
+            }
+
+            // Add a timeout task
+            group.addTask {
+                try await Task.sleep(for: duration)
+                throw TimeoutError()
+            }
+
+            // Return the first completed result or throw
+            guard let result = try await group.next() else {
+                throw TimeoutError()
+            }
+
+            // Cancel any remaining tasks
+            group.cancelAll()
+
+            return result
+        }
+    }
+
+    /// Error type for timeout operations
+    private struct TimeoutError: Error {
+        var localizedDescription: String {
+            return "Operation timed out"
+        }
+    }
+
+    // Add this helper method for debugging generation issues
+    private func logGenerationDetails(_ field: RichTextField, _ article: NotificationData) {
+        // Log more details about content to help diagnose issues
+        let textContent = getTextContentForField(field, from: article)
+
+        AppLogger.database.debug("📊 Generation Diagnostic:")
+        AppLogger.database.debug("- Field: \(String(describing: field))")
+        AppLogger.database.debug("- Has content: \(textContent != nil)")
+        AppLogger.database.debug("- Content length: \(textContent?.count ?? 0)")
+        AppLogger.database.debug("- Article ID: \(article.id)")
+        AppLogger.database.debug("- JSON URL: \(article.json_url)")
+
+        // Log first 150 chars of content as a sample
+        if let content = textContent, !content.isEmpty {
+            let sampleLength = min(150, content.count)
+            let sample = String(content.prefix(sampleLength))
+            AppLogger.database.debug("📝 Content sample: \"\(sample)\"...")
+        }
+    }
+
+    // Add this helper method to show temporary conversion state
+    @MainActor
+    private func provideTempContent(_ section: String, _ field: RichTextField, _ message: String) {
+        // Create a temporary attributed string to show status
+        let tempString = NSAttributedString(
+            string: message,
+            attributes: [
+                .font: UIFont.italicSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize),
+                .foregroundColor: UIColor.secondaryLabel,
+            ]
+        )
+
+        // Store in the appropriate property
+        switch field {
+        case .summary:
+            summaryAttributedString = tempString
+        case .criticalAnalysis:
+            criticalAnalysisAttributedString = tempString
+        case .logicalFallacies:
+            logicalFallaciesAttributedString = tempString
+        case .sourceAnalysis:
+            sourceAnalysisAttributedString = tempString
+        case .relationToTopic:
+            cachedContentBySection["Relevance"] = tempString
+        case .additionalInsights:
+            cachedContentBySection["Context & Perspective"] = tempString
+        default:
+            cachedContentBySection[section] = tempString
+        }
+
+        // Notify UI of change
+        objectWillChange.send()
+    }
+
+    // Helper to get text content for a specific field from an article
+    private func getTextContentForField(_ field: RichTextField, from article: NotificationData) -> String? {
+        switch field {
+        case .title:
+            return article.title
+        case .body:
+            return article.body
+        case .summary:
+            return article.summary
+        case .criticalAnalysis:
+            return article.critical_analysis
+        case .logicalFallacies:
+            return article.logical_fallacies
+        case .sourceAnalysis:
+            return article.source_analysis
+        case .relationToTopic:
+            return article.relation_to_topic
+        case .additionalInsights:
+            return article.additional_insights
+        }
     }
 
     /// Generates all rich text content for an article
@@ -546,6 +978,12 @@ final class NewsDetailViewModel: ObservableObject {
         // This ensures that the database state is consistent
         if !article.isViewed {
             try await articleOperations.toggleReadStatus(for: article)
+
+            // Ensure the ArticleModel is also updated
+            if let model = currentArticleModel, !model.isViewed {
+                model.isViewed = true
+                try model.modelContext?.save()
+            }
         } else {
             // Even though it's already viewed, make sure UI is updated
             // This helps ensure consistent UI state between opened articles and navigated articles
@@ -583,6 +1021,22 @@ final class NewsDetailViewModel: ObservableObject {
     }
 
     // MARK: - Private Methods
+
+    /// Verifies if an article blob was actually saved to the database
+    /// - Parameters:
+    ///   - field: The field to check
+    ///   - articleId: The ID of the article
+    /// - Returns: Boolean indicating if the blob exists in the database
+    private func verifyBlobInDatabase(field: RichTextField, articleId: UUID) async -> Bool {
+        // Try to fetch the article fresh from the database
+        if let freshArticle = await articleOperations.getCompleteArticle(byId: articleId) {
+            // Check if the blob exists
+            if let blob = field.getBlob(from: freshArticle), !blob.isEmpty {
+                return true
+            }
+        }
+        return false
+    }
 
     /// Gets the attributed string for a section if it exists
     /// - Parameter section: The section to get content for
@@ -695,3 +1149,8 @@ final class NewsDetailViewModel: ObservableObject {
         ]
     }
 }
+
+// MARK: - NotificationData Blob Access
+
+// NOTE: This implementation uses the NotificationData.getBlobsForField method from MarkdownUtilities.swift
+// The implementation there includes additional logging and validation that we rely on

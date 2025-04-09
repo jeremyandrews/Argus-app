@@ -3,6 +3,8 @@ import SwiftData
 import SwiftUI
 
 /// Implementation of the ArticleServiceProtocol that provides CRUD operations and sync functionality
+/// Thread safety: This class uses a serial dispatch queue for all cache operations. All methods
+/// that read or modify the cache state are properly synchronized.
 final class ArticleService: ArticleServiceProtocol {
     // Singleton instance for easy access
     static let shared = ArticleService()
@@ -16,6 +18,9 @@ final class ArticleService: ArticleServiceProtocol {
     private let cacheExpiration: TimeInterval = 60 // 1 minute
     private var lastCacheUpdate = Date.distantPast
     private var cacheKeys = Set<String>()
+
+    // Serial queue for thread-safe cache operations
+    private let cacheQueue = DispatchQueue(label: "com.argus.articleservice.cache")
 
     // Active tasks tracking
     private var activeSyncTask: Task<Void, Never>?
@@ -130,15 +135,37 @@ final class ArticleService: ArticleServiceProtocol {
                 let hasEngineStats = articleModel.engineStats != nil
                 let hasSimilarArticles = articleModel.similarArticles != nil
 
-                AppLogger.database.debug("Fetched ArticleModel \(articleModel.id): Has engine stats: \(hasEngineStats), Has similar articles: \(hasSimilarArticles)")
+                // Check for blobs
+                let hasTitleBlob = articleModel.titleBlob != nil
+                let hasBodyBlob = articleModel.bodyBlob != nil
+                let hasSummaryBlob = articleModel.summaryBlob != nil
+
+                AppLogger.database.debug("""
+                Fetched ArticleModel \(articleModel.id):
+                - Has engine stats: \(hasEngineStats)
+                - Has similar articles: \(hasSimilarArticles)
+                - Has title blob: \(hasTitleBlob)
+                - Has body blob: \(hasBodyBlob)
+                - Has summary blob: \(hasSummaryBlob)
+                """)
 
                 let notificationData = NotificationData.from(articleModel: articleModel)
 
-                // Verify converted data has the fields
+                // Verify converted data has the fields and model context
+                let hasModelContext = notificationData.modelContext != nil
                 let hasEngineStatsConverted = notificationData.engine_stats != nil
                 let hasSimilarArticlesConverted = notificationData.similar_articles != nil
+                let hasTitleBlobConverted = notificationData.title_blob != nil
+                let hasBodyBlobConverted = notificationData.body_blob != nil
 
-                AppLogger.database.debug("Converted to NotificationData: Has engine stats: \(hasEngineStatsConverted), Has similar articles: \(hasSimilarArticlesConverted)")
+                AppLogger.database.debug("""
+                Converted to NotificationData:
+                - Has model context: \(hasModelContext)
+                - Has engine stats: \(hasEngineStatsConverted)
+                - Has similar articles: \(hasSimilarArticlesConverted)
+                - Has title blob: \(hasTitleBlobConverted)
+                - Has body blob: \(hasBodyBlobConverted)
+                """)
 
                 return notificationData
             }
@@ -229,8 +256,11 @@ final class ArticleService: ArticleServiceProtocol {
             // Save the changes
             try context.save()
 
-            // Clear cache since article state has changed
-            clearCache()
+            // Clear cache safely since article state has changed
+            await withCheckedContinuation { continuation in
+                clearCache() // This now runs on cacheQueue
+                continuation.resume()
+            }
 
             // Update badge count
             await NotificationUtils.updateAppBadgeCount()
@@ -275,8 +305,11 @@ final class ArticleService: ArticleServiceProtocol {
             // Save the changes
             try context.save()
 
-            // Clear cache since article state has changed
-            clearCache()
+            // Clear cache safely since article state has changed
+            await withCheckedContinuation { continuation in
+                clearCache() // This now runs on cacheQueue
+                continuation.resume()
+            }
 
             // Post notification for views to update
             await MainActor.run {
@@ -317,8 +350,11 @@ final class ArticleService: ArticleServiceProtocol {
             // Save the changes
             try context.save()
 
-            // Clear cache since articles have changed
-            clearCache()
+            // Clear cache safely since articles have changed
+            await withCheckedContinuation { continuation in
+                clearCache() // This now runs on cacheQueue
+                continuation.resume()
+            }
 
             // Update badge count
             await NotificationUtils.updateAppBadgeCount()
@@ -404,8 +440,11 @@ final class ArticleService: ArticleServiceProtocol {
             // Calculate duration
             let duration = Date().timeIntervalSince(startTime)
 
-            // Clear cache as we have new data
-            clearCache()
+            // Clear cache safely as we have new data
+            await withCheckedContinuation { continuation in
+                clearCache() // This now runs on cacheQueue
+                continuation.resume()
+            }
 
             // Return the summary
             return SyncResultSummary(
@@ -473,6 +512,101 @@ final class ArticleService: ArticleServiceProtocol {
         // Generate the basic rich text for immediate display
         _ = getAttributedString(for: .title, from: article, createIfMissing: true)
         _ = getAttributedString(for: .body, from: article, createIfMissing: true)
+    }
+
+    /// Diagnoses and repairs rich text blob issues in articles
+    /// - Parameters:
+    ///   - articleId: Optional article ID to diagnose a specific article, or nil for all articles
+    ///   - forceRegenerate: Whether to force regeneration of all blobs, even if they seem valid
+    ///   - limit: Optional limit on the number of articles to process
+    /// - Returns: A summary of diagnostics and repairs performed
+    @MainActor
+    func diagnoseAndRepairRichTextBlobs(
+        articleId: UUID? = nil,
+        forceRegenerate: Bool = false,
+        limit: Int? = nil
+    ) async throws -> (diagnosed: Int, repaired: Int, details: String) {
+        // Log start of operation
+        AppLogger.database.debug("🔍 Starting rich text blob diagnosis\(articleId != nil ? " for article \(articleId!)" : " for all articles")")
+
+        // Create fetch descriptor for ArticleModel
+        var fetchDescriptor: FetchDescriptor<ArticleModel>
+
+        if let id = articleId {
+            // Fetch specific article
+            fetchDescriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { $0.id == id }
+            )
+        } else {
+            // Fetch all articles, optionally limited
+            fetchDescriptor = FetchDescriptor<ArticleModel>()
+
+            if let limit = limit {
+                fetchDescriptor.fetchLimit = limit
+            }
+
+            // Sort by date for consistent results
+            fetchDescriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
+        }
+
+        // Execute the fetch
+        let context = ModelContext(modelContainer)
+        let articleModels = try context.fetch(fetchDescriptor)
+
+        if articleModels.isEmpty {
+            AppLogger.database.debug("❌ No articles found to diagnose")
+            return (0, 0, "No articles found to diagnose")
+        }
+
+        AppLogger.database.debug("📊 Found \(articleModels.count) articles to diagnose")
+
+        // Track statistics
+        var diagnosedCount = 0
+        var repairedCount = 0
+        var detailsLog = ""
+
+        // Process each article
+        for articleModel in articleModels {
+            diagnosedCount += 1
+
+            // Convert to NotificationData for diagnostic access
+            let notificationData = NotificationData.from(articleModel: articleModel)
+
+            // Check if blob verification is needed
+            let verified = notificationData.verifyAllBlobs()
+
+            // Add to details log
+            detailsLog += "Article \(articleModel.id): "
+
+            if !verified || forceRegenerate {
+                // Regenerate blobs if needed or forced
+                if !verified {
+                    detailsLog += "Found invalid blobs. "
+                } else {
+                    detailsLog += "Force regenerating blobs. "
+                }
+
+                // Regenerate blobs directly on ArticleModel
+                let regeneratedCount = articleModel.regenerateMissingBlobs()
+
+                if regeneratedCount > 0 {
+                    repairedCount += 1
+                    detailsLog += "Regenerated \(regeneratedCount) blobs.\n"
+
+                    // Save the changes
+                    try context.save()
+                } else {
+                    detailsLog += "No blobs needed regeneration.\n"
+                }
+            } else {
+                detailsLog += "All blobs valid. No action needed.\n"
+            }
+        }
+
+        // Log completion
+        AppLogger.database.debug("✅ Blob diagnosis complete: \(diagnosedCount) articles diagnosed, \(repairedCount) articles repaired")
+
+        return (diagnosedCount, repairedCount, detailsLog)
     }
 
     /// Generates rich text content for an article field
@@ -588,8 +722,11 @@ final class ArticleService: ArticleServiceProtocol {
         // Save changes
         try context.save()
 
-        // Clear cache as we have new data
-        clearCache()
+        // Clear cache safely as we have new data
+        await withCheckedContinuation { continuation in
+            clearCache() // This now runs on cacheQueue
+            continuation.resume()
+        }
 
         // Return count of new articles
         return addedCount
@@ -646,8 +783,11 @@ final class ArticleService: ArticleServiceProtocol {
         // Save changes
         try context.save()
 
-        // Clear cache
-        clearCache()
+        // Clear cache safely
+        await withCheckedContinuation { continuation in
+            clearCache() // This now runs on cacheQueue
+            continuation.resume()
+        }
 
         AppLogger.database.info("Removed \(removedCount) duplicate articles")
 
@@ -683,6 +823,33 @@ final class ArticleService: ArticleServiceProtocol {
 
     // MARK: - Cache Management
 
+    // Helper methods for safe cache access
+    private func hasCacheKey(_ key: String) -> Bool {
+        return cacheQueue.sync {
+            self.cacheKeys.contains(key)
+        }
+    }
+
+    private func cacheSize() -> Int {
+        return cacheQueue.sync {
+            self.cacheKeys.count
+        }
+    }
+
+    private func isCacheExpired() -> Bool {
+        return cacheQueue.sync {
+            let now = Date()
+            return now.timeIntervalSince(self.lastCacheUpdate) > self.cacheExpiration
+        }
+    }
+
+    // Safe method for general cache operations
+    private func withSafeCache<T>(_ operation: @escaping () -> T) -> T {
+        return cacheQueue.sync {
+            operation()
+        }
+    }
+
     private func createCacheKey(
         topic: String?,
         isRead: Bool?,
@@ -699,30 +866,58 @@ final class ArticleService: ArticleServiceProtocol {
     }
 
     private func checkCache(for key: String) -> [NotificationData]? {
-        // Check if cache is valid (not expired)
-        let now = Date()
-        if now.timeIntervalSince(lastCacheUpdate) > cacheExpiration {
-            clearCache()
+        return cacheQueue.sync {
+            // Check if cache is valid (not expired)
+            let now = Date()
+            if now.timeIntervalSince(self.lastCacheUpdate) > self.cacheExpiration {
+                self.doClearCache() // Use a private implementation for synchronous clearing
+                return nil
+            }
+
+            // Check if we have this key in cache
+            if let cachedArray = self.cache.object(forKey: key as NSString) as? [NotificationData] {
+                ModernizationLogger.log(.debug, component: .articleService,
+                                        message: "Cache hit for key: \(key)")
+                return cachedArray
+            }
+
+            ModernizationLogger.log(.debug, component: .articleService,
+                                    message: "Cache miss for key: \(key)")
             return nil
         }
-
-        // Check if we have this key in cache
-        if let cachedArray = cache.object(forKey: key as NSString) as? [NotificationData] {
-            return cachedArray
-        }
-
-        return nil
     }
 
     private func cacheResults(_ results: [NotificationData], for key: String) {
-        cache.setObject(results as NSArray, forKey: key as NSString)
-        cacheKeys.insert(key)
-        lastCacheUpdate = Date()
+        cacheQueue.async {
+            // Log before accessing cacheKeys
+            ModernizationLogger.log(.debug, component: .articleService,
+                                    message: "Caching results for key: \(key)")
+
+            self.cache.setObject(results as NSArray, forKey: key as NSString)
+            self.cacheKeys.insert(key) // This is where the crash was happening
+            self.lastCacheUpdate = Date()
+
+            ModernizationLogger.log(.debug, component: .articleService,
+                                    message: "Cache updated, keys count: \(self.cacheKeys.count)")
+        }
     }
 
     private func clearCache() {
+        cacheQueue.async {
+            self.doClearCache()
+        }
+    }
+
+    // Private implementation for synchronous clearing
+    private func doClearCache() {
+        ModernizationLogger.log(.debug, component: .articleService,
+                                message: "Clearing cache with \(cacheKeys.count) keys")
+
         cache.removeAllObjects()
         cacheKeys.removeAll()
         lastCacheUpdate = Date.distantPast
+
+        ModernizationLogger.log(.debug, component: .articleService,
+                                message: "Cache cleared")
     }
 }
