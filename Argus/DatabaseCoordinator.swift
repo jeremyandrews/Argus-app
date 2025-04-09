@@ -648,7 +648,6 @@ actor DatabaseCoordinator {
                 pub_date: articleJSON.pubDate ?? date,
                 isViewed: false,
                 isBookmarked: false,
-                isArchived: false,
                 sources_quality: articleJSON.sourcesQuality,
                 argument_quality: articleJSON.argumentQuality,
                 source_type: articleJSON.sourceType,
@@ -794,7 +793,7 @@ actor DatabaseCoordinator {
         // Don't override user-specific flags
         // article.isViewed remains unchanged
         // article.isBookmarked remains unchanged
-        // article.isArchived remains unchanged
+        // Archive functionality removed
 
         // Update quality indicators
         article.sources_quality = data.sourcesQuality
@@ -822,13 +821,11 @@ actor DatabaseCoordinator {
     ///   - topic: The topic to filter by, or "All" for all topics
     ///   - showUnreadOnly: Whether to show only unread articles
     ///   - showBookmarkedOnly: Whether to show only bookmarked articles
-    ///   - showArchivedContent: Whether to show archived content
     /// - Returns: Array of filtered notifications
     func fetchArticlesForTopic(
         _ topic: String,
         showUnreadOnly: Bool,
-        showBookmarkedOnly: Bool,
-        showArchivedContent: Bool
+        showBookmarkedOnly: Bool
     ) async -> [NotificationData] {
         // Use a transaction that returns the result array directly
         let results = try? await performTransaction { _, context in
@@ -872,20 +869,7 @@ actor DatabaseCoordinator {
                 }
             }
 
-            // 4. Apply archived filter if needed
-            if !showArchivedContent {
-                let notArchivedPredicate = #Predicate<NotificationData> { article in
-                    !article.isArchived
-                }
-
-                if let existingPredicate = predicate {
-                    predicate = #Predicate<NotificationData> { article in
-                        existingPredicate.evaluate(article) && notArchivedPredicate.evaluate(article)
-                    }
-                } else {
-                    predicate = notArchivedPredicate
-                }
-            }
+            // Archive filter removed
 
             // Create the fetch descriptor with our optimized predicate
             let descriptor = FetchDescriptor<NotificationData>(

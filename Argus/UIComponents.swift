@@ -174,22 +174,7 @@ struct RichTextView: UIViewRepresentable {
 
 // MARK: - Visual Label Components
 
-struct ArchivedPill: View {
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "archivebox.fill")
-                .font(.caption2)
-            Text("Archived")
-                .font(.caption2)
-                .bold()
-        }
-        .foregroundColor(.primary)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(Color(uiColor: .systemOrange).opacity(0.3))
-        .cornerRadius(8)
-    }
-}
+// ArchivedPill removed - Archive functionality has been deprecated
 
 struct TopicPill: View {
     let topic: String

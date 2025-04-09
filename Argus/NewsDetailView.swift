@@ -339,12 +339,6 @@ struct NewsDetailView: View {
 
             Spacer()
 
-            toolbarButton(icon: currentNotification?.isArchived ?? false ? "tray.and.arrow.up.fill" : "archivebox", label: "Archive") {
-                toggleArchive()
-            }
-
-            Spacer()
-
             toolbarButton(icon: "trash", label: "Delete", isDestructive: true) {
                 showDeleteConfirmation = true
             }
@@ -386,8 +380,6 @@ struct NewsDetailView: View {
             return notification.isViewed ? .primary : Color.blue.opacity(0.6)
         case "Bookmark":
             return notification.isBookmarked ? .blue : .primary
-        case "Archive":
-            return notification.isArchived ? .orange : .primary
         default:
             return .primary
         }
@@ -784,14 +776,11 @@ struct NewsDetailView: View {
     // In articleHeaderStyle computed property
     private var articleHeaderStyle: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Topic pill + "Archived" pill
+            // Topic pill
             HStack(spacing: 8) {
                 if let n = currentNotification {
                     if let topic = n.topic, !topic.isEmpty {
                         TopicPill(topic: topic)
-                    }
-                    if n.isArchived {
-                        ArchivedPill()
                     }
                 }
                 Spacer()
@@ -1012,22 +1001,7 @@ struct NewsDetailView: View {
         }
     }
 
-    private func toggleArchive() {
-        Task {
-            await viewModel.toggleArchive()
-
-            // Check if we need to dismiss or navigate after archiving
-            if let article = viewModel.currentArticle, article.isArchived {
-                if currentIndex < notifications.count - 1 {
-                    // Navigate to next article if possible
-                    navigateToArticle(direction: .next)
-                } else {
-                    // Dismiss if this was the last article
-                    dismiss()
-                }
-            }
-        }
-    }
+    // Archive functionality removed
 
     private func deleteNotification() {
         Task {
@@ -1952,15 +1926,11 @@ struct NewsDetailView: View {
 
     private func updateArticleHeaderStyle() -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Existing topic pill + "Archived" pill code
+            // Topic pill only
             HStack(spacing: 8) {
                 if let notification = currentNotification {
                     if let topic = notification.topic, !topic.isEmpty {
                         TopicPill(topic: topic)
-                    }
-
-                    if notification.isArchived {
-                        ArchivedPill()
                     }
                 }
             }

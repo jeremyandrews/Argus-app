@@ -1,10 +1,15 @@
 import Foundation
 import SwiftData
 import SwiftUI
+import Combine
 
 /// ViewModel for the NewsDetailView that manages article display, navigation, and operations
 @MainActor
 final class NewsDetailViewModel: ObservableObject {
+    // MARK: - Subscriptions for Settings Changes
+    
+    /// Subscriptions for observing UserDefaults changes
+    private var userDefaultsSubscriptions = Set<AnyCancellable>()
     // MARK: - Published Properties
 
     /// The currently displayed article
@@ -126,6 +131,38 @@ final class NewsDetailViewModel: ObservableObject {
         if expandedSections["Summary"] == nil {
             expandedSections["Summary"] = true
         }
+        
+        // Setup observers for settings changes
+        setupUserDefaultsObservers()
+    }
+    
+    deinit {
+        // Clean up subscriptions
+        userDefaultsSubscriptions.forEach { $0.cancel() }
+        userDefaultsSubscriptions.removeAll()
+    }
+    
+    // MARK: - Settings Observers
+    
+    /// Sets up observers for relevant UserDefaults changes
+    private func setupUserDefaultsObservers() {
+        let defaults = UserDefaults.standard
+        
+        // Observe any settings that might affect the detail view
+        // For example, if there are reader preferences that affect how articles are displayed
+        
+        // Example: Monitor useReaderMode setting for potential preview section behavior
+        defaults.publisher(for: \.useReaderMode)
+            .removeDuplicates(by: { first, second in
+                // Custom equality check to avoid compiler warning
+                return String(describing: first) == String(describing: second)
+            })
+            .sink { _ in
+                // Refresh any UI or state that depends on this setting
+                // For future implementation if needed
+                // Note: No need to capture self if not using it in the closure
+            }
+            .store(in: &userDefaultsSubscriptions)
     }
 
     // MARK: - Public Methods - Navigation
@@ -370,25 +407,7 @@ final class NewsDetailViewModel: ObservableObject {
         }
     }
 
-    /// Toggles the archived status of the current article
-    func toggleArchive() async {
-        guard let article = currentArticle else { return }
-
-        do {
-            let wasArchived = article.isArchived
-            try await articleOperations.toggleArchive(for: article)
-
-            // Navigate to next article if this one was archived
-            if !wasArchived {
-                if currentIndex < articles.count - 1 {
-                    navigateToArticle(direction: .next)
-                }
-            }
-        } catch {
-            self.error = error
-            AppLogger.database.error("Error toggling archive status: \(error)")
-        }
-    }
+    // Archive functionality removed
 
     /// Deletes the current article
     func deleteArticle() async {

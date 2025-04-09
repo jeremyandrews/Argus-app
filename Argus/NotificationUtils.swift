@@ -73,7 +73,7 @@ class NotificationUtils {
         // Use DatabaseCoordinator for thread-safe database access
         let unviewedCount = await DatabaseCoordinator.shared.countArticles(
             matching: #Predicate<NotificationData> { article in
-                !article.isViewed && !article.isArchived
+                !article.isViewed
             }
         )
 

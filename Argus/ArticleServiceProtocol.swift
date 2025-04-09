@@ -82,13 +82,9 @@ protocol ArticleServiceProtocol {
     ///   - id: The unique identifier of the article
     ///   - isBookmarked: New bookmarked status
     func markArticle(id: UUID, asBookmarked isBookmarked: Bool) async throws
-
-    /// Updates the archived status of an article
-    /// - Parameters:
-    ///   - id: The unique identifier of the article
-    ///   - isArchived: New archived status
-    func markArticle(id: UUID, asArchived isArchived: Bool) async throws
-
+    
+    // Archive functionality removed
+    
     /// Deletes an article
     /// - Parameter id: The unique identifier of the article to delete
     func deleteArticle(id: UUID) async throws
@@ -105,6 +101,10 @@ protocol ArticleServiceProtocol {
     /// Performs a full background synchronization
     /// - Returns: Result summary with counts of added, updated, and deleted articles
     func performBackgroundSync() async throws -> SyncResultSummary
+    
+    /// Removes duplicate articles from the database, keeping only the newest version of each article
+    /// - Returns: The number of duplicate articles removed
+    func removeDuplicateArticles() async throws -> Int
 
     // MARK: - Rich Text Operations
 

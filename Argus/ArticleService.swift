@@ -78,15 +78,9 @@ final class ArticleService: ArticleServiceProtocol {
             }
         }
 
-        // Archived status predicate
-        if let isArchived = isArchived {
-            let archivedPredicate = #Predicate<ArticleModel> { $0.isArchived == isArchived }
-            if let existingPredicate = predicate {
-                predicate = #Predicate<ArticleModel> { existingPredicate.evaluate($0) && archivedPredicate.evaluate($0) }
-            } else {
-                predicate = archivedPredicate
-            }
-        }
+        // Archive functionality removed
+        // Since isArchived property no longer exists in ArticleModel, we don't need to filter on it
+        // We kept the parameter in the API for backward compatibility
 
         // Create fetch descriptor for ArticleModel
         var fetchDescriptor = FetchDescriptor<ArticleModel>(predicate: predicate)
@@ -299,54 +293,7 @@ final class ArticleService: ArticleServiceProtocol {
         }
     }
 
-    func markArticle(id: UUID, asArchived isArchived: Bool) async throws {
-        // Find the ArticleModel by ID
-        let fetchDescriptor = FetchDescriptor<ArticleModel>(
-            predicate: #Predicate<ArticleModel> { $0.id == id }
-        )
-
-        do {
-            let context = ModelContext(modelContainer)
-            let articleModels = try context.fetch(fetchDescriptor)
-
-            guard let articleInContext = articleModels.first else {
-                throw ArticleServiceError.articleNotFound
-            }
-
-            // Only proceed if the state is actually changing
-            if articleInContext.isArchived == isArchived {
-                return
-            }
-
-            // Update the property
-            articleInContext.isArchived = isArchived
-
-            // Save the changes
-            try context.save()
-
-            // Clear cache since article state has changed
-            clearCache()
-
-            // Post notification for views to update
-            await MainActor.run {
-                NotificationCenter.default.post(
-                    name: Notification.Name("ArticleArchived"),
-                    object: nil,
-                    userInfo: ["articleID": id, "isArchived": isArchived]
-                )
-            }
-
-            // Remove notification from system if article is archived
-            if isArchived {
-                // AppDelegate's method is actor-isolated, so we need to await it
-                await AppDelegate().removeNotificationIfExists(jsonURL: articleInContext.jsonURL)
-            }
-
-        } catch {
-            AppLogger.database.error("Error marking article as archived: \(error)")
-            throw ArticleServiceError.databaseError(underlyingError: error)
-        }
-    }
+    // Archive functionality removed
 
     func deleteArticle(id: UUID) async throws {
         do {
@@ -574,16 +521,19 @@ final class ArticleService: ArticleServiceProtocol {
         var addedCount = 0
 
         for article in articles {
-            // Check if we already have this article by jsonURL
-            // We must extract primitive values to avoid type comparison issues in predicates
+            // Extract the jsonURL for checking duplicates
             let jsonURLString = article.jsonURL
-
-            // Use manual fetch and filtering to avoid predicate compilation issues
-            let descriptor = FetchDescriptor<ArticleModel>()
-            let allArticles = try context.fetch(descriptor)
-
-            // Find any existing articles with this jsonURL
-            let existingArticles = allArticles.filter { $0.jsonURL == jsonURLString }
+            
+            // Skip articles with empty jsonURL
+            guard !jsonURLString.isEmpty else {
+                AppLogger.database.warning("Skipping article with empty jsonURL")
+                continue
+            }
+            
+            // Efficiently check for duplicates using a direct predicate query
+            let existingArticlePredicate = #Predicate<ArticleModel> { $0.jsonURL == jsonURLString }
+            let existingArticleDescriptor = FetchDescriptor<ArticleModel>(predicate: existingArticlePredicate)
+            let existingArticles = try context.fetch(existingArticleDescriptor)
 
             if existingArticles.isEmpty {
                 // Create a new ArticleModel
@@ -602,7 +552,6 @@ final class ArticleService: ArticleServiceProtocol {
                     topic: article.topic,
                     isViewed: false,
                     isBookmarked: false,
-                    isArchived: false,
                     sourcesQuality: article.sourcesQuality,
                     argumentQuality: article.argumentQuality,
                     sourceType: article.sourceType,
@@ -628,6 +577,9 @@ final class ArticleService: ArticleServiceProtocol {
 
                 addedCount += 1
             } else {
+                // Log that we're skipping a duplicate
+                AppLogger.database.debug("Skipping duplicate article with jsonURL: \(jsonURLString)")
+                
                 // We already have this article - update any missing fields if needed
                 // This could be expanded to update specific fields that might change
             }
@@ -642,6 +594,65 @@ final class ArticleService: ArticleServiceProtocol {
         // Return count of new articles
         return addedCount
     }
+    
+    /// Removes duplicate articles from the database, keeping only the newest version of each article
+    /// - Returns: The number of duplicate articles removed
+    func removeDuplicateArticles() async throws -> Int {
+        AppLogger.database.info("Starting duplicate article cleanup...")
+        let context = ModelContext(modelContainer)
+        var removedCount = 0
+        
+        // Get all articles
+        let fetchDescriptor = FetchDescriptor<ArticleModel>()
+        let allArticles = try context.fetch(fetchDescriptor)
+        
+        AppLogger.database.info("Analyzing \(allArticles.count) articles for duplicates")
+        
+        // Group by jsonURL
+        var articlesByURL: [String: [ArticleModel]] = [:]
+        for article in allArticles {
+            if !article.jsonURL.isEmpty {
+                var articles = articlesByURL[article.jsonURL] ?? []
+                articles.append(article)
+                articlesByURL[article.jsonURL] = articles
+            }
+        }
+        
+        // Count duplicates
+        var duplicateCount = 0
+        for (_, articles) in articlesByURL {
+            if articles.count > 1 {
+                duplicateCount += articles.count - 1
+            }
+        }
+        
+        AppLogger.database.info("Found \(duplicateCount) duplicate articles to remove")
+        
+        // Keep only the newest of each duplicate set
+        for (jsonURL, articles) in articlesByURL {
+            if articles.count > 1 {
+                // Sort by addedDate, newest first
+                let sortedArticles = articles.sorted { ($0.addedDate) > ($1.addedDate) }
+                
+                // Keep the first one (newest), delete the rest
+                AppLogger.database.debug("Removing \(articles.count - 1) duplicates for article with jsonURL: \(jsonURL)")
+                for i in 1..<sortedArticles.count {
+                    context.delete(sortedArticles[i])
+                    removedCount += 1
+                }
+            }
+        }
+        
+        // Save changes
+        try context.save()
+        
+        // Clear cache
+        clearCache()
+        
+        AppLogger.database.info("Removed \(removedCount) duplicate articles")
+        
+        return removedCount
+    }
 
     // MARK: - Cache Management
 
@@ -654,7 +665,8 @@ final class ArticleService: ArticleServiceProtocol {
         let topicPart = topic ?? "all"
         let readPart = isRead == nil ? "any" : (isRead! ? "read" : "unread")
         let bookmarkPart = isBookmarked == nil ? "any" : (isBookmarked! ? "bookmarked" : "notBookmarked")
-        let archivedPart = isArchived == nil ? "any" : (isArchived! ? "archived" : "notArchived")
+        // Archive functionality removed - parameter kept for API compatibility
+        let archivedPart = "any"
 
         return "\(topicPart)_\(readPart)_\(bookmarkPart)_\(archivedPart)"
     }

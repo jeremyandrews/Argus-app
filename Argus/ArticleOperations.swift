@@ -44,15 +44,7 @@ final class ArticleOperations {
         return newBookmarkStatus
     }
 
-    /// Toggles the archived status of an article
-    /// - Parameter article: The article to toggle the archived status for
-    /// - Returns: Boolean indicating the new archived state
-    @discardableResult
-    func toggleArchive(for article: NotificationData) async throws -> Bool {
-        let newArchivedStatus = !article.isArchived
-        try await articleService.markArticle(id: article.id, asArchived: newArchivedStatus)
-        return newArchivedStatus
-    }
+    // Archive functionality removed
 
     /// Deletes an article
     /// - Parameter article: The article to delete
@@ -89,21 +81,19 @@ final class ArticleOperations {
     ///   - topic: Optional topic to filter by
     ///   - showUnreadOnly: Whether to show only unread articles
     ///   - showBookmarkedOnly: Whether to show only bookmarked articles
-    ///   - showArchivedContent: Whether to show archived content
     ///   - limit: Maximum number of articles to return
     /// - Returns: Array of articles matching the criteria
     func fetchArticles(
         topic: String?,
         showUnreadOnly: Bool,
         showBookmarkedOnly: Bool,
-        showArchivedContent: Bool,
         limit: Int? = nil
     ) async throws -> [NotificationData] {
         return try await articleService.fetchArticles(
             topic: topic != "All" ? topic : nil,
             isRead: showUnreadOnly ? false : nil,
             isBookmarked: showBookmarkedOnly ? true : nil,
-            isArchived: !showArchivedContent ? false : nil,
+            isArchived: nil, // Archive functionality removed
             limit: limit,
             offset: nil
         )
@@ -297,27 +287,7 @@ final class ArticleOperations {
         return updatedCount
     }
 
-    /// Marks multiple articles as archived or unarchived
-    /// - Parameters:
-    ///   - articleIds: IDs of articles to update
-    ///   - isArchived: Whether to mark articles as archived or unarchived
-    /// - Returns: Number of articles successfully updated
-    @discardableResult
-    func markArticles(ids articleIds: [UUID], asArchived isArchived: Bool) async -> Int {
-        var updatedCount = 0
-
-        for id in articleIds {
-            do {
-                try await articleService.markArticle(id: id, asArchived: isArchived)
-                updatedCount += 1
-            } catch {
-                AppLogger.database.error("Failed to mark article \(id) as \(isArchived ? "archived" : "unarchived"): \(error)")
-                // Continue with other articles even if one fails
-            }
-        }
-
-        return updatedCount
-    }
+    // Archive batch operation removed
 
     /// Deletes multiple articles
     /// - Parameter articleIds: IDs of articles to delete
@@ -337,5 +307,11 @@ final class ArticleOperations {
         }
 
         return deletedCount
+    }
+    
+    /// Removes duplicate articles from the database
+    /// - Returns: Number of duplicates removed
+    func cleanupDuplicateArticles() async throws -> Int {
+        return try await articleService.removeDuplicateArticles()
     }
 }

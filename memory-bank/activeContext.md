@@ -9,8 +9,74 @@
 - **Migration System Refinement**: Converting from temporary to production migration mode with one-time execution
 - **API Connectivity**: Implementing graceful degradation patterns for API connectivity issues
 - **Duplicate Implementation Removal**: Removing dual-implementation pattern for syncing and displaying content by simplifying MigrationAwareArticleService
+- **Settings Functionality**: Fixing issues with settings updates not being observed by view models
 
 ## Recent Changes
+
+- **Implemented Modern Settings Observation** (Completed):
+  - Fixed display preferences in Settings not affecting the NewsView and NodeDetailView:
+    - Created dedicated UserDefaultsExtensions.swift for standardized settings access
+    - Implemented Combine-based observation of UserDefaults changes in ViewModels
+    - Standardized "date" as the default grouping style across components
+    - Enhanced NewsViewModel to handle immediate UI updates when settings change
+    - Enhanced NewsDetailViewModel for settings observation infrastructure
+    - Added proper memory management with subscription cancellation in deinit
+  - Added typed key constants to avoid stringly-typed programming
+  - Implemented computed properties for all relevant UserDefaults settings
+  - Used modern iOS 18+ patterns with Combine publishers for reactive settings updates
+  - Achieved real-time UI updates in response to settings changes without app restart
+  - Fixed inconsistency between SettingsView and NewsViewModel default values
+
+- **Investigated App Badge Issues** (In Progress):
+  - Found potential issues with the Show Unread Count on App Icon setting:
+    - NotificationUtils.swift does check the showBadge preference correctly
+    - Badge update system has debounce logic that might affect immediate updates
+    - The issues might be related to when the badge update gets triggered
+    - Despite correct code paths, toggle switch might not be immediately reflected
+  - Further investigation needed:
+    - Verify badge count updates are properly triggered on all app lifecycle events
+    - Check if debounce timer (0.5 seconds) is too aggressive, potentially missing updates
+    - Investigate if system badge permissions might be affecting functionality
+    - Review interaction between SettingsView and direct NotificationUtils calls
+
+- **Investigated Missing Engine Stats and Related Articles Issues** (In Progress):
+  - Found clues about chevron navigation issues:
+    - Diagnostic logging in ArticleService.swift shows awareness of potential missing fields
+    - Debug checks show that engine_stats and similar_articles might exist in database 
+      but not be properly transferred during conversion between models
+    - NavigationTypes.swift implementation appears correct with shared enum
+    - The NavigationDirection enums are used consistently in the codebase
+  - Potential issue areas:
+    - ArticleModelAdapter conversion between SwiftData ArticleModel and legacy NotificationData
+    - Data handling during NewsDetailViewModel.navigateToArticle method execution
+    - Potential disconnect between what's in the database and what's loaded during navigation
+    - Loading sequence might not preserve all fields when navigating between articles
+  - Further investigation needed:
+    - Trace complete data flow during chevron navigation
+    - Add more diagnostic logging around model conversion
+    - Verify complete article loading during navigation includes all required fields
+
+- **Removed Archive Functionality** (Completed):
+  - Removed the archive concept completely from the codebase:
+    - Removed `toggleArchive` function from ArticleOperations.swift
+    - Updated `fetchArticles` method to remove archive parameters 
+    - Removed archive batch operations from ArticleOperations.swift
+    - Removed `markArticle(id:asArchived:)` method from ArticleService.swift
+    - Removed `markArticle(id:asArchived:)` method from MigrationAwareArticleService.swift
+    - Removed archive-related UI comments from view files
+    - Maintained backward compatibility with two-part strategy:
+      - Kept `isArchived` property in legacy `NotificationData` model for database compatibility with existing installations
+      - Omitted `isArchived` property from new `ArticleModel` (SwiftData model) as the concept is removed
+      - ArticleModelAdapter converts between models, with isArchived always set to false
+      - During migration, isArchived status is effectively discarded (not migrated to new model)
+      - All parameters/methods accepting isArchived keep it for API compatibility but ignore the value in processing
+  - Benefits:
+    - Simplified article lifecycle to just read/unread and bookmarked/unbookmarked
+    - Improved UX by removing a confusing concept
+    - Reduced code complexity and maintenance burden
+    - Streamlined UI with clearer state management
+    - Eliminated potential bugs from ambiguous article states
+    - Preserved compatibility with existing installations
 
 - **Fixed API Sync Error by Optimizing seen_articles List** (Completed):
   - Fixed critical sync timeout issue in APIClient:
@@ -213,6 +279,16 @@
   - Fixed race condition between database updates and UI rendering for read status
   - Ensured consistent behavior between direct article viewing and chevron navigation
 
+- **Fixed Duplicate Articles Issue** (Completed):
+  - Identified causes of duplicate articles appearing after interrupted syncs
+  - Improved article deduplication logic in ArticleService with efficient targeted database queries
+  - Added removeDuplicateArticles() method to handle cleanup of existing duplicates
+  - Implemented smart evaluation of which duplicate to keep (preferring bookmarked, with rich text, etc.)
+  - Added automatic cleanup whenever the app enters foreground using applicationWillEnterForeground
+  - Added manual cleanup option in Settings > Development section
+  - Fixed MigrationAwareArticleService protocol conformance
+  - Enhanced logging for duplicate removal process
+
 - **Fixed Chevron Color and Article Read Status in NewsDetailView** (Completed):
   - Restored blue color for clickable navigation chevrons that had reverted to the default primary color
   - Fixed article read status updating by properly implementing the markAsViewed() method to use the ViewModel's async method
@@ -383,6 +459,13 @@ Based on the log analysis, we're implementing a multi-step plan to address these
   - Maintain reset capability for testing purposes
   - Improve performance by eliminating unnecessary repeated migrations
 
+### Step 5: Settings Functionality Improvements
+- Implement modern UserDefaults observation:
+  - Create dedicated settings extension for standardized access
+  - Add Combine-based reactive updates
+  - Standardize default values across components
+  - Ensure proper memory management for observers
+
 ## Legacy Code Removal Special Considerations
 
 - **Migration Protection Strategy**:
@@ -487,125 +570,3 @@ Based on the log analysis, we're implementing a multi-step plan to address these
    
    - **Phase 4: DatabaseCoordinator Transition**
      - Create MigrationAwareArticleService that supports both models
-     - Implement migration-preserving path for persistent data
-     - Ensure proper data flow through migration coordinator
-     - Update all database access to use MigrationAwareArticleService
-     - Move one-time migration responsibility to startup sequence
-     - Reduce DatabaseCoordinator to minimal implementation
-     - Add version detection to support existing users
-   
-   - **Phase 5: Final Verification**
-     - Comprehensive testing of all app functionality
-     - Performance analysis to verify improved responsiveness
-     - Memory usage validation with Instruments
-     - Migration path verification (fresh install vs. upgrade)
-     - Verify proper cleanup of legacy components
-
-## Legacy Code Removal Special Considerations
-
-- **Migration Protection Strategy**:
-  - Migration system must be preserved as dozens of users will take weeks to upgrade
-  - Implement one-time migration at startup with improved visual feedback
-  - Use version detection to determine if migration is necessary
-  - Maintain migration coordinator as isolated module with minimal dependencies
-  - Create versioned migration path for transitioning from legacy to modern code
-  - Add robust error handling for migration failures
-
-- **Critical Implementation Paths**:
-  - Current implementation uses MigrationCoordinator as the entry point
-  - Must preserve the coordinator pattern while removing unnecessary dependencies
-  - Keep the modal UI to prevent user interaction during migration
-  - Maintain migration state persistence to handle app termination
-  - Ensure recovery mechanisms for interrupted migrations
-  - Verify full database integrity after migration completes
-
-- **Transition Timeline**:
-  - Migration system must remain functional for at least 8 weeks
-  - After sufficient user base has upgraded, we can remove migration code entirely
-  - Self-contained architecture of migration module will facilitate future removal
-  - Final app update can safely remove migration components after transition period
-
-## Active Decisions and Considerations
-- **Architectural Approach**: 
-  - Three-tier architecture with shared business logic:
-    - Data Layer: ArticleService (API + SwiftData)
-    - Business Logic Layer: ArticleOperations (shared functionality)
-    - View Models: NewsViewModel and NewsDetailViewModel (view-specific logic)
-  - MVVM pattern with shared components for code reuse between views
-  - SwiftData selected for modern persistence with Swift-native syntax
-  - Swift concurrency (async/await) for improved readability and performance
-  - Adapter pattern to bridge between ArticleModel and NotificationData during transition
-
-- **Migration Strategy**: 
-  - Phased implementation to ensure continuous app functionality
-  - Testing each phase thoroughly before moving to next
-  - Keeping compatibility with existing systems during transition
-  - Using adapters to maintain compatibility with existing UI while modernizing data layer
-
-- **Performance Focus**: 
-  - Implementing optimized database access patterns from the start
-  - Ensuring background processes don't impact UI responsiveness
-  - Planning for efficient memory usage with proper task management
-
-## Current Challenges
-- Coordinating the transition from current architecture to MVVM+SwiftData
-- Ensuring data integrity during migration to SwiftData
-- Managing complexity of background task implementation
-- Maintaining offline functionality throughout the modernization process
-- Implementing application-level uniqueness checks to replace schema-level constraints
-- Preparing for future cross-device syncing with CloudKit
-- Maintaining data consistency between old and new databases during the transition period
-- Improving user perception during automatic migration at app startup with better visual feedback
-- Preparing for future removal of migration code once all users have been migrated
-- Resolving data model mismatches between different components during modernization
-
-## Performance Insights
-- **SwiftData Batch Processing**: Testing confirms SwiftData's ability to efficiently handle batched article creation in background contexts. Batching operations (creating 5-10 articles at once) with intermediate saves provides significant performance benefits.
-- **Background Processing**: Moving database operations off the main thread using Task.detached eliminates UI jitter and improves perceived performance.
-- **Scaling Considerations**: Performance metrics suggest that handling hundreds of articles in real-world syncing is feasible with proper implementation patterns.
-- **Concurrency Management**: Using Swift actor isolation and proper MainActor boundaries ensures thread safety while maintaining performance.
-- **Adapter Pattern Overhead**: Converting between ArticleModel and NotificationData adds minimal overhead while providing better maintainability during transition.
-
-## Recent Feedback
-- Need for improved UI performance, especially during sync operations
-- Concerns about duplicate content that should be addressed in new architecture
-- Requests for more consistent error handling and recovery mechanisms
-- Report of no articles showing despite database containing content due to container mismatch
-
-## Recent Architectural Decisions
-
-- **Data Model Adapter Pattern**:
-  - Implemented ArticleModelAdapter to bridge between ArticleModel and NotificationData
-  - Decoupled UI layer from database implementation details
-  - Allows for gradual transition from legacy model to new SwiftData model
-  - Provides clean conversion between model types without UI changes
-  - Will eventually be phased out when UI is fully migrated to ArticleModel
-
-- **Shared Components Architecture**:
-  - Implemented three-tier architecture to enable code sharing:
-    1. **ArticleService (Data Layer)**: API + SwiftData operations
-    2. **ArticleOperations (Business Logic)**: Shared operations for article management
-    3. **ViewModels (View-Specific Logic)**: NewsViewModel and NewsDetailViewModel
-  - Common operations extracted to ArticleOperations:
-    - Toggle read/bookmarked/archived status
-    - Article deletion
-    - Rich text processing
-    - Batch operations
-  - Benefits: Reduced duplication, improved maintainability, consistent behavior
-
-## Immediate Priorities
-1. ✅ Implement persistent storage for SwiftData testing
-2. ✅ Complete migration testing with persistent storage
-3. ✅ Improve migration UI with animation and remove non-functional buttons
-4. ✅ Begin refactoring APIClient to use async/await
-5. ✅ Implement application-level uniqueness validation logic
-6. ✅ Create ArticleServiceProtocol for dependency injection and testing
-7. ✅ Implement ArticleOperations for shared business logic
-8. ✅ Develop NewsViewModel using ArticleOperations
-9. ✅ Develop NewsDetailViewModel using ArticleOperations
-10. ✅ Refactor NewsView to use NewsViewModel
-11. ✅ Create ArticleModelAdapter to connect SwiftData Test and main app containers
-12. ✅ Refactor NewsDetailView to use NewsDetailViewModel
-13. ✅ Implement Modern Background Tasks
-14. ✅ Remove dual-implementation pattern in MigrationAwareArticleService
-15. 🔶 Investigate deeper issues with Missing Argus Engine Stats during navigation

@@ -339,12 +339,6 @@ class MigrationService: ObservableObject {
             wasUpdated = true
         }
 
-        // Check and update isArchived state
-        if article.isArchived != notification.isArchived {
-            article.isArchived = notification.isArchived
-            wasUpdated = true
-        }
-
         // Only log if we actually made changes
         if wasUpdated {
             AppLogger.database.debug("Updated state for article ID \(article.id)")
@@ -402,7 +396,6 @@ class MigrationService: ObservableObject {
             topic: notification.topic,
             isViewed: notification.isViewed,
             isBookmarked: notification.isBookmarked,
-            isArchived: notification.isArchived,
             sourcesQuality: notification.sources_quality,
             argumentQuality: notification.argument_quality,
             sourceType: notification.source_type,

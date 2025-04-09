@@ -610,10 +610,7 @@ struct ArgusApp: App {
                 label: "Bookmarked notifications"
             )
 
-            let _ = safeCount(
-                FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isArchived }),
-                label: "Archived notifications"
-            )
+            // Archive feature removed
 
             // Only attempt cleanup stats if auto-delete is enabled
             let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
@@ -623,8 +620,7 @@ struct ArgusApp: App {
                     FetchDescriptor<NotificationData>(
                         predicate: #Predicate { notification in
                             notification.date < cutoffDate &&
-                                !notification.isBookmarked &&
-                                !notification.isArchived
+                                !notification.isBookmarked
                         }
                     ),
                     label: "Notifications eligible for cleanup"

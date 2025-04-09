@@ -109,11 +109,7 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         try await articleService.markArticle(id: id, asBookmarked: isBookmarked)
     }
 
-    @available(*, deprecated, message: "Use ArticleService.shared directly instead")
-    func markArticle(id: UUID, asArchived isArchived: Bool) async throws {
-        // Simply forward to the regular article service - no more legacy database updates
-        try await articleService.markArticle(id: id, asArchived: isArchived)
-    }
+    // Archive functionality removed
 
     @available(*, deprecated, message: "Use ArticleService.shared directly instead")
     func deleteArticle(id: UUID) async throws {
@@ -145,6 +141,13 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
     ) async throws -> NSAttributedString? {
         // Delegate to the main ArticleService implementation
         try await articleService.generateRichTextContent(for: articleId, field: field)
+    }
+    
+    /// Removes duplicate articles from the database
+    /// - Returns: The number of duplicate articles removed
+    func removeDuplicateArticles() async throws -> Int {
+        // Forward to the main ArticleService implementation
+        try await articleService.removeDuplicateArticles()
     }
 
     // MARK: - Migration-Specific Methods
@@ -280,10 +283,7 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
                 if let boolValue = value as? Bool {
                     notification.isBookmarked = boolValue
                 }
-            case "isArchived":
-                if let boolValue = value as? Bool {
-                    notification.isArchived = boolValue
-                }
+            // Archive functionality removed
             default:
                 break
             }

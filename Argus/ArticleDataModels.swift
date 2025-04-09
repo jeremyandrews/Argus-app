@@ -51,12 +51,11 @@ final class ArticleModel {
     /// Whether the user has viewed this article
     var isViewed: Bool = false
 
-    /// Whether the user has bookmarked this article
+    /// Whether the user has bookmarked this article 
     var isBookmarked: Bool = false
-
-    /// Whether the article has been archived
-    var isArchived: Bool = false
-
+    
+    // Archive functionality removed
+    
     // MARK: - Quality Indicators
 
     /// Quality score for the sources used in the article (1-10)
@@ -146,7 +145,6 @@ final class ArticleModel {
         topic: String? = nil,
         isViewed: Bool = false,
         isBookmarked: Bool = false,
-        isArchived: Bool = false,
         sourcesQuality: Int? = nil,
         argumentQuality: Int? = nil,
         sourceType: String? = nil,
@@ -181,7 +179,7 @@ final class ArticleModel {
         self.topic = topic
         self.isViewed = isViewed
         self.isBookmarked = isBookmarked
-        self.isArchived = isArchived
+        // isArchived parameter ignored (feature removed)
         self.sourcesQuality = sourcesQuality
         self.argumentQuality = argumentQuality
         self.sourceType = sourceType

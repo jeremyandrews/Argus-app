@@ -22,7 +22,7 @@ extension NotificationData {
             pub_date: articleModel.publishDate,
             isViewed: articleModel.isViewed,
             isBookmarked: articleModel.isBookmarked,
-            isArchived: articleModel.isArchived,
+            isArchived: false, // Archive functionality removed - always false
             sources_quality: articleModel.sourcesQuality,
             argument_quality: articleModel.argumentQuality,
             source_type: articleModel.sourceType,

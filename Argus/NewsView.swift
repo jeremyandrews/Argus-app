@@ -44,14 +44,14 @@ struct NewsView: View {
 
     /// Determines if any filter is active
     private var isAnyFilterActive: Bool {
-        viewModel.showUnreadOnly || viewModel.showBookmarkedOnly || viewModel.showArchivedContent
+        viewModel.showUnreadOnly || viewModel.showBookmarkedOnly
     }
 
     /// List of topics to show in topic bar
     private var visibleTopics: [String] {
         // Get unique topics from allArticles (which already match all non-topic filters)
-        // No need to filter further since allArticles is already filtered by showUnreadOnly,
-        // showBookmarkedOnly, and showArchivedContent in the ViewModel
+        // No need to filter further since allArticles is already filtered by showUnreadOnly
+        // and showBookmarkedOnly in the ViewModel
         let topics = Set(viewModel.allArticles.compactMap { $0.topic })
         return ["All"] + topics.sorted()
     }
@@ -128,11 +128,6 @@ struct NewsView: View {
                     }
                 }
                 // Notification handling
-                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleArchived"))) { _ in
-                    Task {
-                        await viewModel.refreshArticles()
-                    }
-                }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleViewed"))) { _ in
                     Task {
                         await viewModel.refreshArticles()
@@ -328,13 +323,10 @@ struct NewsView: View {
         var body: some View {
             // Remove GeometryReader which might be causing sizing issues
             VStack(alignment: .leading, spacing: 8) {
-                // Topic and Archive pills
+                // Topic pill
                 HStack(spacing: 8) {
                     if let topic = notification.topic, !topic.isEmpty {
                         TopicPill(topic: topic)
-                    }
-                    if notification.isArchived {
-                        ArchivedPill()
                     }
                     Spacer()
                 }
@@ -634,9 +626,6 @@ struct NewsView: View {
             if let topic = notification.topic, !topic.isEmpty {
                 TopicPill(topic: topic)
             }
-            if notification.isArchived {
-                ArchivedPill()
-            }
             Spacer()
             BookmarkButton(notification: notification)
         }
@@ -755,10 +744,6 @@ struct NewsView: View {
                 showBookmarkedOnly: Binding(
                     get: { viewModel.showBookmarkedOnly },
                     set: { viewModel.showBookmarkedOnly = $0 }
-                ),
-                showArchivedContent: Binding(
-                    get: { viewModel.showArchivedContent },
-                    set: { viewModel.showArchivedContent = $0 }
                 )
             )
             .frame(height: filterViewHeight)
@@ -795,13 +780,6 @@ struct NewsView: View {
                 label: "Bookmark"
             ) {
                 performActionOnSelection { toggleBookmark($0) }
-            }
-            Spacer()
-            toolbarButton(
-                icon: "archivebox",
-                label: "Archive"
-            ) {
-                performActionOnSelection { toggleArchive($0) }
             }
             Spacer()
             toolbarButton(
@@ -881,8 +859,7 @@ struct NewsView: View {
             let articles = await DatabaseCoordinator.shared.fetchArticlesForTopic(
                 newTopic,
                 showUnreadOnly: viewModel.showUnreadOnly,
-                showBookmarkedOnly: viewModel.showBookmarkedOnly,
-                showArchivedContent: viewModel.showArchivedContent
+                showBookmarkedOnly: viewModel.showBookmarkedOnly
             )
 
             // If we got fresh data from the database, update the UI
@@ -976,12 +953,6 @@ struct NewsView: View {
         }
     }
 
-    private func toggleArchive(_ notification: NotificationData) {
-        Task {
-            await viewModel.toggleArchive(for: notification)
-        }
-    }
-
     private func performActionOnSelection(action: (NotificationData) -> Void) {
         if !viewModel.selectedArticleIds.isEmpty {
             // For complex operations that aren't directly supported by viewModel batch operations,
@@ -1015,10 +986,9 @@ struct NewsView: View {
 
     private func filterNotificationsWithCurrentSettings(_ notifications: [NotificationData]) -> [NotificationData] {
         return notifications.filter { note in
-            let archivedCondition = viewModel.showArchivedContent || !note.isArchived
             let unreadCondition = !viewModel.showUnreadOnly || !note.isViewed
             let bookmarkedCondition = !viewModel.showBookmarkedOnly || note.isBookmarked
-            return archivedCondition && unreadCondition && bookmarkedCondition
+            return unreadCondition && bookmarkedCondition
         }
     }
 
@@ -1062,11 +1032,6 @@ struct NewsView: View {
             } else if viewModel.showBookmarkedOnly {
                 message += "You are filtering to show only Bookmarked articles."
             }
-            if !viewModel.showArchivedContent {
-                message += "\n\nYou can enable the 'Show archived' filter to show articles you archived earlier."
-            }
-        } else if !viewModel.showArchivedContent && viewModel.allArticles.contains(where: { $0.isArchived }) {
-            message += "\n\nYou can enable the 'Show archived' filter to show articles you archived earlier."
         }
         return message
     }
@@ -1084,7 +1049,6 @@ struct NewsView: View {
 struct FilterView: View {
     @Binding var showUnreadOnly: Bool
     @Binding var showBookmarkedOnly: Bool
-    @Binding var showArchivedContent: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -1093,7 +1057,6 @@ struct FilterView: View {
                 .padding(.top)
             Toggle("Only unread", isOn: $showUnreadOnly)
             Toggle("Only bookmarked", isOn: $showBookmarkedOnly)
-            Toggle("Show archived", isOn: $showArchivedContent)
         }
         .padding()
         .background(Color(UIColor.systemBackground))

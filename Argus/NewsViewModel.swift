@@ -6,6 +6,10 @@ import SwiftUI
 /// ViewModel for the NewsView that manages article listing, filtering, and operations
 @MainActor
 final class NewsViewModel: ObservableObject {
+    // MARK: - Subscriptions for Settings Changes
+    
+    /// Subscriptions for observing UserDefaults changes
+    private var userDefaultsSubscriptions = Set<AnyCancellable>()
     // MARK: - Published Properties
 
     /// Articles currently displayed in the view
@@ -42,9 +46,6 @@ final class NewsViewModel: ObservableObject {
 
     /// Flag indicating if only bookmarked articles should be shown
     @Published var showBookmarkedOnly: Bool = false
-
-    /// Flag indicating if archived articles should be shown
-    @Published var showArchivedContent: Bool = false
 
     /// The current sort order
     @Published var sortOrder: String = "newest"
@@ -101,6 +102,15 @@ final class NewsViewModel: ObservableObject {
 
         // Load subscriptions
         loadSubscriptions()
+        
+        // Setup observers for settings changes
+        setupUserDefaultsObservers()
+    }
+    
+    deinit {
+        // Clean up subscriptions
+        userDefaultsSubscriptions.forEach { $0.cancel() }
+        userDefaultsSubscriptions.removeAll()
     }
 
     // MARK: - Public Methods - Data Loading
@@ -119,8 +129,7 @@ final class NewsViewModel: ObservableObject {
             let allArticlesWithoutTopicFilter = try await articleOperations.fetchArticles(
                 topic: "All", // This fetches articles for all topics
                 showUnreadOnly: showUnreadOnly,
-                showBookmarkedOnly: showBookmarkedOnly,
-                showArchivedContent: showArchivedContent
+                showBookmarkedOnly: showBookmarkedOnly
             )
 
             // Update allArticles for topic bar generation
@@ -132,8 +141,7 @@ final class NewsViewModel: ObservableObject {
                 let topicFilteredArticles = try await articleOperations.fetchArticles(
                     topic: selectedTopic,
                     showUnreadOnly: showUnreadOnly,
-                    showBookmarkedOnly: showBookmarkedOnly,
-                    showArchivedContent: showArchivedContent
+                    showBookmarkedOnly: showBookmarkedOnly
                 )
 
                 // Update filteredArticles with the topic-filtered articles
@@ -184,7 +192,6 @@ final class NewsViewModel: ObservableObject {
                 topic: selectedTopic,
                 showUnreadOnly: showUnreadOnly,
                 showBookmarkedOnly: showBookmarkedOnly,
-                showArchivedContent: showArchivedContent,
                 limit: pageSize
             )
 
@@ -264,15 +271,13 @@ final class NewsViewModel: ObservableObject {
         }
     }
 
-    /// Applies filters for read status, bookmarked status, and archived status
+    /// Applies filters for read status and bookmarked status
     /// - Parameters:
     ///   - showUnreadOnly: Whether to show only unread articles
     ///   - showBookmarkedOnly: Whether to show only bookmarked articles
-    ///   - showArchivedContent: Whether to show archived content
     func applyFilters(
         showUnreadOnly: Bool? = nil,
-        showBookmarkedOnly: Bool? = nil,
-        showArchivedContent: Bool? = nil
+        showBookmarkedOnly: Bool? = nil
     ) async {
         // Update filter values if provided
         if let showUnreadOnly = showUnreadOnly {
@@ -281,10 +286,6 @@ final class NewsViewModel: ObservableObject {
 
         if let showBookmarkedOnly = showBookmarkedOnly {
             self.showBookmarkedOnly = showBookmarkedOnly
-        }
-
-        if let showArchivedContent = showArchivedContent {
-            self.showArchivedContent = showArchivedContent
         }
 
         // Save filter preferences
@@ -360,26 +361,6 @@ final class NewsViewModel: ObservableObject {
         }
     }
 
-    /// Toggles the archived status of an article
-    /// - Parameter article: The article to toggle
-    func toggleArchive(for article: NotificationData) async {
-        do {
-            // Use shared operation
-            try await articleOperations.toggleArchive(for: article)
-
-            // If showing archived content is off, we need to refresh
-            if !showArchivedContent {
-                await refreshArticles()
-            } else {
-                // Just update grouping
-                await updateGroupedArticles()
-            }
-        } catch {
-            self.error = error
-            AppLogger.database.error("Error toggling archive status: \(error)")
-        }
-    }
-
     /// Deletes an article
     /// - Parameter article: The article to delete
     func deleteArticle(_ article: NotificationData) async {
@@ -411,10 +392,6 @@ final class NewsViewModel: ObservableObject {
             _ = await articleOperations.markArticles(ids: Array(selectedArticleIds), asBookmarked: true)
         case .unbookmark:
             _ = await articleOperations.markArticles(ids: Array(selectedArticleIds), asBookmarked: false)
-        case .archive:
-            _ = await articleOperations.markArticles(ids: Array(selectedArticleIds), asArchived: true)
-        case .unarchive:
-            _ = await articleOperations.markArticles(ids: Array(selectedArticleIds), asArchived: false)
         case .delete:
             _ = await articleOperations.deleteArticles(ids: Array(selectedArticleIds))
         }
@@ -432,8 +409,6 @@ final class NewsViewModel: ObservableObject {
         case markAsUnread
         case bookmark
         case unbookmark
-        case archive
-        case unarchive
         case delete
     }
 
@@ -493,22 +468,92 @@ final class NewsViewModel: ObservableObject {
 
     /// Loads user preferences from UserDefaults
     private func loadUserPreferences() {
-        showUnreadOnly = UserDefaults.standard.bool(forKey: "showUnreadOnly")
-        showBookmarkedOnly = UserDefaults.standard.bool(forKey: "showBookmarkedOnly")
-        showArchivedContent = UserDefaults.standard.bool(forKey: "showArchivedContent")
-        sortOrder = UserDefaults.standard.string(forKey: "sortOrder") ?? "newest"
-        groupingStyle = UserDefaults.standard.string(forKey: "groupingStyle") ?? "none"
-        selectedTopic = UserDefaults.standard.string(forKey: "selectedTopic") ?? "All"
+        // Use our standardized UserDefaults extensions
+        let defaults = UserDefaults.standard
+        showUnreadOnly = defaults.showUnreadOnly
+        showBookmarkedOnly = defaults.showBookmarkedOnly
+        sortOrder = defaults.sortOrder
+        groupingStyle = defaults.groupingStyle // Now uses "date" as default
+        selectedTopic = defaults.selectedTopic
+    }
+    
+    /// Sets up observers for UserDefaults changes
+    private func setupUserDefaultsObservers() {
+        let defaults = UserDefaults.standard
+        
+        // Observe sortOrder changes
+        defaults.publisher(for: \.sortOrder)
+            .removeDuplicates(by: { first, second in
+                // Custom equality check to avoid compiler warning
+                return String(describing: first) == String(describing: second)
+            })
+            .sink { [weak self] newValue in
+                guard let self = self, self.sortOrder != newValue else { return }
+                
+                Task { @MainActor in
+                    self.sortOrder = newValue
+                    await self.updateGroupedArticles()
+                }
+            }
+            .store(in: &userDefaultsSubscriptions)
+        
+        // Observe groupingStyle changes
+        defaults.publisher(for: \.groupingStyle)
+            .removeDuplicates(by: { first, second in
+                // Custom equality check to avoid compiler warning
+                return String(describing: first) == String(describing: second)
+            })
+            .sink { [weak self] newValue in
+                guard let self = self, self.groupingStyle != newValue else { return }
+                
+                Task { @MainActor in
+                    self.groupingStyle = newValue
+                    await self.updateGroupedArticles()
+                }
+            }
+            .store(in: &userDefaultsSubscriptions)
+            
+        // Observe showUnreadOnly changes
+        defaults.publisher(for: \.showUnreadOnly)
+            .removeDuplicates(by: { first, second in
+                // Custom equality check to avoid compiler warning
+                return String(describing: first) == String(describing: second)
+            })
+            .sink { [weak self] newValue in
+                guard let self = self, self.showUnreadOnly != newValue else { return }
+                
+                Task { @MainActor in
+                    self.showUnreadOnly = newValue
+                    await self.refreshArticles()
+                }
+            }
+            .store(in: &userDefaultsSubscriptions)
+            
+        // Observe showBookmarkedOnly changes
+        defaults.publisher(for: \.showBookmarkedOnly)
+            .removeDuplicates(by: { first, second in
+                // Custom equality check to avoid compiler warning
+                return String(describing: first) == String(describing: second)
+            })
+            .sink { [weak self] newValue in
+                guard let self = self, self.showBookmarkedOnly != newValue else { return }
+                
+                Task { @MainActor in
+                    self.showBookmarkedOnly = newValue
+                    await self.refreshArticles()
+                }
+            }
+            .store(in: &userDefaultsSubscriptions)
     }
 
     /// Saves user preferences to UserDefaults
     private func saveUserPreferences() {
-        UserDefaults.standard.set(showUnreadOnly, forKey: "showUnreadOnly")
-        UserDefaults.standard.set(showBookmarkedOnly, forKey: "showBookmarkedOnly")
-        UserDefaults.standard.set(showArchivedContent, forKey: "showArchivedContent")
-        UserDefaults.standard.set(sortOrder, forKey: "sortOrder")
-        UserDefaults.standard.set(groupingStyle, forKey: "groupingStyle")
-        UserDefaults.standard.set(selectedTopic, forKey: "selectedTopic")
+        let defaults = UserDefaults.standard
+        defaults.showUnreadOnly = showUnreadOnly
+        defaults.showBookmarkedOnly = showBookmarkedOnly
+        defaults.sortOrder = sortOrder
+        defaults.groupingStyle = groupingStyle
+        defaults.selectedTopic = selectedTopic
     }
 
     // MARK: - Additional Methods for the View
@@ -558,5 +603,25 @@ final class NewsViewModel: ObservableObject {
     /// The batch size for pagination
     var batchSize: Int {
         return pageSize
+    }
+    
+    /// Removes duplicate articles from the database
+    /// - Returns: Number of duplicates removed
+    func removeDuplicateArticles() async -> Int {
+        do {
+            isLoading = true
+            let removedCount = try await articleOperations.cleanupDuplicateArticles()
+            isLoading = false
+            
+            // Refresh the UI after cleanup
+            await refreshArticles()
+            
+            return removedCount
+        } catch {
+            isLoading = false
+            self.error = error
+            AppLogger.database.error("Error removing duplicate articles: \(error)")
+            return 0
+        }
     }
 }

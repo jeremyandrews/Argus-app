@@ -216,6 +216,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
         }
     }
+    
+    /// Standard application delegate method called when app will enter foreground
+    func applicationWillEnterForeground(_ application: UIApplication) {
+        // Auto-cleanup duplicates when app comes to foreground
+        Task {
+            do {
+                let removedCount = try await ArticleService.shared.removeDuplicateArticles()
+                if removedCount > 0 {
+                    AppLogger.app.info("Auto-cleanup: Removed \(removedCount) duplicate articles on app foreground")
+                }
+            } catch {
+                AppLogger.app.error("Error during automatic duplicate cleanup: \(error)")
+            }
+        }
+    }
 
     private func verifyDatabaseIndexes() {
         do {
@@ -359,8 +374,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                         FetchDescriptor<NotificationData>(
                             predicate: #Predicate { notification in
                                 notification.date < cutoffDate &&
-                                    !notification.isBookmarked &&
-                                    !notification.isArchived
+                                    !notification.isBookmarked
                             }
                         )
                     )
@@ -620,9 +634,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             if a.isBookmarked != b.isBookmarked {
                 return a.isBookmarked
             }
-            if a.isArchived != b.isArchived {
-                return a.isArchived
-            }
             if a.isViewed != b.isViewed {
                 return !a.isViewed
             }
@@ -741,7 +752,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 pub_date: Date(),
                 isViewed: false,
                 isBookmarked: true,
-                isArchived: false,
                 sources_quality: 3,
                 argument_quality: 4,
                 source_type: "News",

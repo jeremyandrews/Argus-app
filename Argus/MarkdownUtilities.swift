@@ -253,7 +253,7 @@ class NotificationData {
     @Attribute var body: String = ""
     @Attribute var isViewed: Bool = false
     @Attribute var isBookmarked: Bool = false
-    @Attribute var isArchived: Bool = false
+    @Attribute var isArchived: Bool = false // Archive functionality removed - keeping property for backward compatibility
     // @Attribute(.unique) var json_url: String = ""
     @Attribute var json_url: String = ""
     @Attribute var article_url: String? = nil

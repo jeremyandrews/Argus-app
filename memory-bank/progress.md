@@ -3,7 +3,7 @@
 ## Current Status
 **Overall Status**: Beta - Core functionality implemented with known issues
 **Development Phase**: Architecture Modernization - Migration Simplification Phase
-**Last Updated**: April 8, 2025
+**Last Updated**: April 9, 2025
 
 ## What Works
 
@@ -33,6 +33,19 @@
   - Quality indicators are functional
 
 ## What's In Progress
+
+- ✅ **Settings Functionality Fixes**
+  - Fixed display preferences in Settings not affecting NewsView or NodeDetailView
+  - Implemented UserDefaultsExtensions.swift for standardized access to settings
+  - Created Combine-based observation in ViewModels for real-time settings updates
+  - Standardized default values across components ("date" as default grouping style)
+  - Added proper memory management for subscriptions
+
+- 🔶 **Settings Issue Investigation** (In Progress)
+  - Investigating App Badge (Show Unread Count on App Icon) functionality
+  - Investigating Navigation issues with missing Engine Stats and Related Articles during chevron navigation
+  - Verified correct code paths but behavior doesn't match expectations
+  - Adding diagnostic logging to track data flow
 
 - ✅ **MVVM Architecture Implementation**
   - Shared components architecture implemented (ArticleServiceProtocol, ArticleService, ArticleOperations)
@@ -71,6 +84,28 @@
   - Batch operations with proper error handling to prevent partial updates
 
 ## Recently Completed
+
+- ✅ **Removed Archive Functionality** (Completed):
+  - Removed the archive concept completely from the codebase:
+    - Removed `toggleArchive` function from ArticleOperations.swift
+    - Updated `fetchArticles` method in ArticleOperations.swift to remove archive parameters
+    - Removed archive batch operation from ArticleOperations.swift
+    - Removed `markArticle(id:asArchived:)` method from ArticleService.swift
+    - Removed `markArticle(id:asArchived:)` method from MigrationAwareArticleService.swift
+    - Added comments in affected files indicating that archive functionality was removed
+    - Implemented backward compatibility with two-part strategy:
+      - Kept `isArchived` property in legacy `NotificationData` model for database compatibility with existing installations
+      - Omitted `isArchived` property from new `ArticleModel` (SwiftData model) as the concept is removed going forward
+      - ArticleModelAdapter always sets isArchived to false when converting between models
+      - During migration, isArchived status is effectively discarded (not migrated to new model)
+      - All methods accepting isArchived parameter keep it for API compatibility but ignore it in processing
+    - Removed all archive-related UI code comments from view files
+  - This simplifies the article lifecycle and user interface by:
+    - Reducing the number of article states to just read/unread and bookmarked/unbookmarked
+    - Simplifying filtering options in the NewsView
+    - Creating a more intuitive user experience by removing confusing conceptual overlap
+    - Streamlining database operations by removing a now-unnecessary flag
+    - Ensuring compatibility with existing user databases
 
 - ✅ **Fixed API Sync Error by Optimizing seen_articles List** (Completed):
   - Fixed critical timeout issue by improving how the client reports seen articles to the server:
@@ -546,6 +581,11 @@
    - Status: Addressed by implementing application-level uniqueness validation
    - Priority: Medium
 
+8. **Duplicate Articles** 
+   - Same articles appearing multiple times in the news feed
+   - Status: Resolved by implementing automatic duplicate removal on app foreground and manual cleanup option
+   - Priority: High (Resolved)
+
 4. **Data Migration UI Issues**
    - ✅ Improved dark mode readability with proper system color adaption
    - ✅ Fixed cancel button functionality in migration overlay
@@ -558,6 +598,21 @@
    - SwiftData Test and main app were using different containers
    - Status: Resolved by implementing ArticleModelAdapter and updating ArticleService
    - Priority: High (Resolved)
+
+9. **Display Preferences Settings Not Working** 
+   - Display preferences set in Settings view not affecting NewsView
+   - Status: Resolved by implementing modern settings observation pattern
+   - Priority: High (Resolved)
+   
+10. **Missing Detail View Sections During Navigation**
+   - When navigating with chevrons, "Argus Engine Stats" and "Related Articles" sections don't appear
+   - Status: Investigating issue with model conversion during navigation
+   - Priority: Medium
+
+11. **App Badge Setting Not Working**
+   - Enabling/disabling "Show Unread Count on App Icon" doesn't reliably update badge
+   - Status: Investigating issue with badge update timing and triggers
+   - Priority: Low
 
 ## Testing Status
 
