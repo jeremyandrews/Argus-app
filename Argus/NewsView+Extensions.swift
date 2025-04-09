@@ -75,9 +75,32 @@ extension NewsView {
         guard let index = viewModel.filteredArticles.firstIndex(where: { $0.id == notification.id }) else {
             return
         }
-
-        // Create the detail view
+        
+        // Extract formatted content from blobs if available
+        var extractedTitle: NSAttributedString? = nil
+        var extractedBody: NSAttributedString? = nil
+        
+        // Extract title blob if available
+        if let titleBlobData = notification.title_blob {
+            extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self,
+                from: titleBlobData
+            )
+        }
+        
+        // Extract body blob if available
+        if let bodyBlobData = notification.body_blob {
+            extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self,
+                from: bodyBlobData
+            )
+        }
+        
+        // Create the detail view with preloaded content
         let detailView = NewsDetailView(
+            notification: notification,
+            preloadedTitle: extractedTitle,
+            preloadedBody: extractedBody,
             notifications: viewModel.filteredArticles,
             allNotifications: viewModel.allArticles,
             currentIndex: index,

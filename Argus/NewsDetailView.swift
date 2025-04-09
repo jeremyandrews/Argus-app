@@ -516,42 +516,22 @@ struct NewsDetailView: View {
         }
         sectionLoadingTasks = [:]
 
-        // Store the current article ID for logging
-        let currentID = currentNotification?.id
-
         // Log navigation action for debugging
         if let currentArticle = currentNotification {
             AppLogger.database.debug("NewsDetailView - Navigating from article ID: \(currentArticle.id), direction: \(direction == .next ? "next" : "previous")")
         }
 
-        // CRITICAL: Capture the current article before navigation to ensure we always have content
-        let oldArticle = currentNotification
-
         // Delegate to view model for navigation using shared NavigationDirection
         viewModel.navigateToArticle(direction: direction)
 
-        // Keep UI state in sync with viewModel but ensure we have an article
+        // Keep UI state in sync with viewModel
         currentIndex = viewModel.currentIndex
-
-        // Important: We'll leave the current notification until we get view model updates
-        // This prevents empty state during transition
-
-        // Update attributed strings from viewModel immediately if available
-        titleAttributedString = viewModel.titleAttributedString
-        bodyAttributedString = viewModel.bodyAttributedString
-
-        // Reset other cached content that will be reloaded as needed
-        summaryAttributedString = viewModel.summaryAttributedString
-        criticalAnalysisAttributedString = nil
-        logicalFallaciesAttributedString = nil
-        sourceAnalysisAttributedString = nil
-        cachedContentBySection = [:]
 
         // Reset expanded sections - Summary stays expanded by default
         expandedSections = Self.getDefaultExpandedSections()
 
         // Force refresh UI
-        contentTransitionID = UUID()
+        contentTransitionID = viewModel.contentTransitionID
         scrollToTopTrigger = UUID()
 
         // Now update with the new article if available
@@ -569,7 +549,7 @@ struct NewsDetailView: View {
             let hasBodyBlob = newArticle.body_blob != nil
 
             AppLogger.database.debug("""
-            NewsDetailView - After navigation from \(currentID?.uuidString ?? "unknown") to article ID: \(newArticle.id)
+            NewsDetailView - After navigation to article ID: \(newArticle.id)
             - Has title blob: \(hasTitleBlob)
             - Has body blob: \(hasBodyBlob)
             - Has engine stats: \(hasEngineStats)
@@ -583,18 +563,9 @@ struct NewsDetailView: View {
                 }
             }
         } else {
-            // If we somehow don't have an article after navigation, restore the previous one
-            // This is a safety measure to prevent the view from auto-closing
-            if viewModel.currentArticle == nil, let oldArticle = oldArticle {
-                // Set the article in the viewModel, not the computed property
-                // Use Task to handle the operation asynchronously
-                Task {
-                    viewModel.currentArticle = oldArticle
-                    AppLogger.database.error("NewsDetailView - No article after navigation, restored previous article")
-                    // Attempt to load minimal content for the restored article
-                    loadInitialMinimalContent()
-                }
-            }
+            // If we somehow don't have an article after navigation, log error
+            // This is just a safety check that should never happen in normal operation
+            AppLogger.database.error("NewsDetailView - No article after navigation")
         }
     }
 
@@ -821,7 +792,7 @@ struct NewsDetailView: View {
             if let n = currentNotification {
                 // Title - use rich text if available, otherwise fall back to plain text
                 Group {
-                    if let titleAttrString = titleAttributedString {
+                    if let titleAttrString = viewModel.titleAttributedString {
                         NonSelectableRichTextView(attributedString: titleAttrString)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -844,7 +815,7 @@ struct NewsDetailView: View {
 
                 // Body - use rich text if available, otherwise fall back to plain text
                 Group {
-                    if let bodyAttrString = bodyAttributedString {
+                    if let bodyAttrString = viewModel.bodyAttributedString {
                         NonSelectableRichTextView(attributedString: bodyAttrString)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundColor(.secondary)
@@ -1432,13 +1403,7 @@ struct NewsDetailView: View {
 
     // Helper function to get cached attributed string for a section
     private func getAttributedStringForSection(_ section: String) -> NSAttributedString? {
-        switch section {
-        case "Summary": return summaryAttributedString
-        case "Critical Analysis": return criticalAnalysisAttributedString
-        case "Logical Fallacies": return logicalFallaciesAttributedString
-        case "Source Analysis": return sourceAnalysisAttributedString
-        default: return cachedContentBySection[section]
-        }
+        return viewModel.getAttributedStringForSection(section)
     }
 
     // Helper function to check if section content is being loaded

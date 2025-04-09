@@ -210,7 +210,7 @@ final class NewsDetailViewModel: ObservableObject {
         expandedSections = Self.getDefaultExpandedSections()
 
         // Force refresh UI to show the transition
-        contentTransitionID = UUID()
+        contentTransitionID = UUID() // Generate a new transition ID to ensure UI updates properly
         scrollToTopTrigger = UUID()
 
         // Reset attributed strings but don't regenerate yet
@@ -274,13 +274,13 @@ final class NewsDetailViewModel: ObservableObject {
                             articles[index] = completeArticle
                         }
 
-                        // Apply extracted blob data
+                        // Apply extracted blob data - critical for formatted display
                         titleAttributedString = extractedTitle
                         bodyAttributedString = extractedBody
                         summaryAttributedString = extractedSummary
 
                         // Force refresh with the complete article
-                        contentTransitionID = UUID()
+                        contentTransitionID = UUID() // Ensure the view updates with new content
                     }
 
                     // Mark as viewed after we have the article

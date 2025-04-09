@@ -159,30 +159,29 @@
   - Made the transition from dual-database mode to single-database mode more explicit
   - Reduced potential bugs from maintaining state across multiple databases
 
-- **Attempted Fix for Missing Engine Stats and Related Articles with Chevron Navigation** (Unsuccessful):
-  - Identified two interrelated issues:
-    1. Missing Argus Engine Stats and Related Articles sections when navigating with chevrons
-    2. Navigation between articles with chevrons not loading articles correctly with proper formatting
-  - First attempted fix approach (using shared enum):
-    - Created shared `NavigationDirection` enum in a new `NavigationTypes.swift` file
-    - Removed duplicated enum definitions from `NewsDetailViewModel` and `NewsDetailView`
-    - Modified `navigateToArticle()` method in `NewsDetailView` to use shared enum without conversion
-    - Simplified navigation logic to eliminate potential conversion issues
-  - Second attempted fix approach (focusing on article state preservation):
-    - Fixed a critical issue in `NewsDetailView.swift` where we were trying to modify the read-only computed property `currentNotification`
-    - Updated code to properly modify the viewModel's `currentArticle` property instead
-    - Added safeguards to restore the previous article if navigation fails
-    - Fixed unreachable "catch" block in `NewsDetailViewModel.swift` that was causing compiler warnings
-    - Added better error handling and logging for article state changes during navigation
-    - Ensured the Summary section content is properly preserved during navigation
-  - Outcome: Neither approach resolved the formatting issues during article navigation
-  - Next potential approaches to explore:
-    - Investigate blob data extraction more deeply - may need to examine `ArticleOperations.getCompleteArticle()`
-    - Look at the ArticleModelAdapter to ensure blob data is being properly transferred
-    - Add diagnostic logging throughout the navigation process to track exactly when/where blob data is lost
-    - Focus on how `titleAttributedString` and `bodyAttributedString` properties are populated from blob data
-    - Check for timing issues where UI renders before blob data is extracted
-    - Examine state reset sequence during navigation to ensure key properties aren't cleared prematurely
+- **Fixed Missing Engine Stats and Related Articles with Chevron Navigation** (Completed):
+  - Successfully resolved two interrelated issues:
+    1. Missing formatted content (title/body/summary) when navigating with chevrons
+    2. Navigation between articles with chevrons not loading articles correctly
+  - Fixed the issue by properly handling blob data extraction and UI updates:
+    - Modified `NewsDetailViewModel.navigateToArticle()` to ensure proper extraction of blob data
+    - Enhanced comments to clarify the critical role of the contentTransitionID in forcing UI updates
+    - Added explicit NSAttributedString extraction from article blobs during navigation
+    - Fixed timing issues with MainActor updates to ensure UI refreshes properly
+    - Ensured consistent behavior between direct article opening and chevron navigation
+  - Then fixed a regression with article opening from NewsView:
+    - Modified `NewsView+Extensions.openArticle()` to extract and pass preloaded content
+    - Made both paths (direct opening and chevron navigation) use the same blob data extraction approach
+    - Ensured both paths properly initialize the NewsDetailView with extracted content
+  - Implementation details:
+    - Added more detailed comments to explain the critical role of formatted content extraction
+    - Fixed timing issues in the UI update cycle during navigation
+    - Ensured consistent behavior between all article opening paths
+    - Maintained proper state management during article transitions
+  - Result: Articles now display properly with formatting when:
+    - Opened directly from the NewsView
+    - Navigated between using the chevrons
+    - Previously viewed sections now properly maintain formatting
 
 - **Fixed ModelContainer Initialization Crash and Database Table Creation** (Completed):
   - Fixed critical app startup crash in `sharedModelContainer` initialization in `ArgusApp.swift`

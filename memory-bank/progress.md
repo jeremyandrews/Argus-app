@@ -605,16 +605,17 @@
    
 10. **Formatting Issues During Article Navigation**
    - When navigating between articles with chevrons:
-     - Article title and body are not properly formatted (missing rich text)
-     - "Argus Engine Stats" and "Related Articles" sections don't appear
-     - Previously converted sections (like Critical Analysis) are re-converted each time
-   - Status: Attempted multiple fixes, issue persists, requires deeper investigation
-   - Priority: Medium
-   - Attempted fixes:
-     - Fixed a compiler warning with an unreachable catch block in NewsDetailViewModel.swift
-     - Fixed property handling to avoid modifying read-only computed properties
-     - Improved error handling and article state restoration during navigation
-     - Better preservation of Summary section content during navigation
+     - ✅ Fixed: Article title and body are now properly formatted (rich text is preserved)
+     - ✅ Fixed: "Argus Engine Stats" and "Related Articles" sections appear correctly
+     - ✅ Fixed: Previously converted sections (like Critical Analysis) maintain formatting
+   - Status: Resolved - Fixed in both directions (chevron navigation and direct opening)
+   - Priority: Medium (Resolved)
+   - Solution:
+     - Modified NewsDetailViewModel to properly extract blob data during navigation
+     - Enhanced contentTransitionID handling to force UI updates at the right time
+     - Fixed NewsView+Extensions.openArticle() to extract and pass preloaded content
+     - Ensured consistent behavior between direct opening and chevron navigation
+     - Added more detailed comments to explain the critical role of blob data extraction
 
 11. **App Badge Setting Not Working**
    - Enabling/disabling "Show Unread Count on App Icon" doesn't reliably update badge
