@@ -142,7 +142,7 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         // Delegate to the main ArticleService implementation
         try await articleService.generateRichTextContent(for: articleId, field: field)
     }
-    
+
     /// Removes duplicate articles from the database
     /// - Returns: The number of duplicate articles removed
     func removeDuplicateArticles() async throws -> Int {

@@ -1,15 +1,16 @@
+import Combine
 import Foundation
 import SwiftData
 import SwiftUI
-import Combine
 
 /// ViewModel for the NewsDetailView that manages article display, navigation, and operations
 @MainActor
 final class NewsDetailViewModel: ObservableObject {
     // MARK: - Subscriptions for Settings Changes
-    
+
     /// Subscriptions for observing UserDefaults changes
     private var userDefaultsSubscriptions = Set<AnyCancellable>()
+
     // MARK: - Published Properties
 
     /// The currently displayed article
@@ -131,31 +132,31 @@ final class NewsDetailViewModel: ObservableObject {
         if expandedSections["Summary"] == nil {
             expandedSections["Summary"] = true
         }
-        
+
         // Setup observers for settings changes
         setupUserDefaultsObservers()
     }
-    
+
     deinit {
         // Clean up subscriptions
         userDefaultsSubscriptions.forEach { $0.cancel() }
         userDefaultsSubscriptions.removeAll()
     }
-    
+
     // MARK: - Settings Observers
-    
+
     /// Sets up observers for relevant UserDefaults changes
     private func setupUserDefaultsObservers() {
         let defaults = UserDefaults.standard
-        
+
         // Observe any settings that might affect the detail view
         // For example, if there are reader preferences that affect how articles are displayed
-        
+
         // Example: Monitor useReaderMode setting for potential preview section behavior
         defaults.publisher(for: \.useReaderMode)
             .removeDuplicates(by: { first, second in
                 // Custom equality check to avoid compiler warning
-                return String(describing: first) == String(describing: second)
+                String(describing: first) == String(describing: second)
             })
             .sink { _ in
                 // Refresh any UI or state that depends on this setting
@@ -180,70 +181,168 @@ final class NewsDetailViewModel: ObservableObject {
             return
         }
 
-        // Get the article from the array first
-        let nextArticleId = articles[nextIndex].id
+        // Get the article - important to keep this until we load the new one
+        let targetArticle = articles[nextIndex]
+        let nextArticleId = targetArticle.id
 
-        // Set loading state
-        isLoadingNextArticle = true
+        // Save current index to log the change
+        let oldIndex = currentIndex
 
-        // First update the index to ensure UI is responsive
+        // Create a timer to show loading indicator only if operation takes too long
+        let loadingTimerTask = Task {
+            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            if !Task.isCancelled {
+                await MainActor.run {
+                    isLoadingNextArticle = true
+                }
+            }
+        }
+
+        // Update the index but DON'T clear the current article yet
+        // This ensures the view always has an article to display
         currentIndex = nextIndex
 
-        // Use the current article temporarily while we load the complete one
-        let tempArticle = articles[nextIndex]
-        currentArticle = tempArticle
-
-        // Reset rich text content
-        clearRichTextContent()
+        // CRITICAL: Update currentArticle immediately with basic version
+        // This ensures the view always has content even while loading better content
+        currentArticle = targetArticle
 
         // Reset expanded sections
         expandedSections = Self.getDefaultExpandedSections()
 
-        // Force refresh
+        // Force refresh UI to show the transition
         contentTransitionID = UUID()
         scrollToTopTrigger = UUID()
 
-        // Fetch the complete article from the database by ID
-        Task {
-            // First try to mark as viewed
-            try? await markAsViewed()
+        // Reset attributed strings but don't regenerate yet
+        clearRichTextContent()
 
-            // Log for debugging
-            AppLogger.database.debug("Navigating to article with ID: \(nextArticleId)")
+        // Fetch and display the article - use a high priority task
+        Task(priority: .userInitiated) {
+            do {
+                // Start timing for diagnostics
+                let startTime = Date()
 
-            // Get complete article from service or use the one we have
-            if let completeArticle = await articleOperations.getCompleteArticle(byId: nextArticleId) {
-                // Log for diagnostic purposes
-                let hasEngineStats = completeArticle.engine_stats != nil
-                let hasSimilarArticles = completeArticle.similar_articles != nil
-                AppLogger.database.debug("Got complete article. Has engine stats: \(hasEngineStats), has similar articles: \(hasSimilarArticles)")
+                // Log for debugging with more context
+                AppLogger.database.debug("Navigating from index \(oldIndex) to \(nextIndex) (article ID: \(nextArticleId))")
 
-                // Update with the complete article that has all fields
-                await MainActor.run {
-                    currentArticle = completeArticle
-                    // Update our local article in the array too if needed
-                    if !hasEngineStats || !hasSimilarArticles {
+                // Try to get complete article from service with all blobs
+                if let completeArticle = await articleOperations.getCompleteArticle(byId: nextArticleId) {
+                    // Log for diagnostic purposes
+                    let hasTitleBlob = completeArticle.title_blob != nil
+                    let hasBodyBlob = completeArticle.body_blob != nil
+                    let hasSummaryBlob = completeArticle.summary_blob != nil
+
+                    AppLogger.database.debug("""
+                    Got complete article. Has title blob: \(hasTitleBlob), 
+                    has body blob: \(hasBodyBlob), has summary blob: \(hasSummaryBlob)
+                    """)
+
+                    // Immediately extract and use blobs - this is critical for formatting
+                    var extractedTitle: NSAttributedString? = nil
+                    var extractedBody: NSAttributedString? = nil
+                    var extractedSummary: NSAttributedString? = nil
+
+                    // Extract formatted content synchronously from blobs
+                    if let titleBlobData = completeArticle.title_blob {
+                        extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
+                            ofClass: NSAttributedString.self,
+                            from: titleBlobData
+                        )
+                    }
+
+                    if let bodyBlobData = completeArticle.body_blob {
+                        extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
+                            ofClass: NSAttributedString.self,
+                            from: bodyBlobData
+                        )
+                    }
+
+                    if let summaryBlobData = completeArticle.summary_blob {
+                        extractedSummary = try? NSKeyedUnarchiver.unarchivedObject(
+                            ofClass: NSAttributedString.self,
+                            from: summaryBlobData
+                        )
+                    }
+
+                    // Now update the UI with all data at once
+                    await MainActor.run {
+                        // Update the model with complete article
+                        currentArticle = completeArticle
+
+                        // Update our local article in the array too
                         if let index = articles.firstIndex(where: { $0.id == completeArticle.id }) {
                             articles[index] = completeArticle
                         }
+
+                        // Apply extracted blob data
+                        titleAttributedString = extractedTitle
+                        bodyAttributedString = extractedBody
+                        summaryAttributedString = extractedSummary
+
+                        // Force refresh with the complete article
+                        contentTransitionID = UUID()
                     }
-                    // Force another refresh with the complete article
-                    contentTransitionID = UUID()
+
+                    // Mark as viewed after we have the article
+                    try? await markAsViewed()
+
+                    // Now generate any missing content if needed
+                    if titleAttributedString == nil || bodyAttributedString == nil {
+                        await loadMinimalContent()
+                        AppLogger.database.debug("Generated missing title/body content for article \(nextArticleId)")
+                    }
+
+                    // Generate summary if needed - Summary is expanded by default
+                    if expandedSections["Summary"] == true && summaryAttributedString == nil {
+                        loadContentForSection("Summary")
+                        AppLogger.database.debug("Generated missing summary content for article \(nextArticleId)")
+                    }
+
+                    // Log timing for diagnostics
+                    let loadTime = Date().timeIntervalSince(startTime)
+                    AppLogger.database.debug("Article \(nextArticleId) loaded in \(loadTime) seconds")
+                } else {
+                    AppLogger.database.error("Failed to get complete article with ID: \(nextArticleId)")
+
+                    // Even if we fail to get the complete article, we still have the basic one
+                    await MainActor.run {
+                        // Make sure the article is still set (from earlier)
+                        if currentArticle == nil {
+                            currentArticle = targetArticle
+                        }
+                        // Force refresh with available article
+                        contentTransitionID = UUID()
+                    }
+
+                    // Always generate content for what we have
+                    await loadMinimalContent()
+                    AppLogger.database.debug("Generated minimal content for article \(nextArticleId) (fallback mode)")
+
+                    if expandedSections["Summary"] == true {
+                        loadContentForSection("Summary")
+                    }
                 }
-            } else {
-                AppLogger.database.error("Failed to get complete article with ID: \(nextArticleId)")
             }
 
-            // Load the minimal content needed for the header
-            await loadMinimalContent()
+            // Final safety check outside any error handling
+            // Ensure we always have an article to display
+            if currentArticle == nil {
+                await MainActor.run {
+                    currentArticle = targetArticle
+                    AppLogger.database.error("No article after navigation, restored fallback article")
+                }
 
-            // Load summary if it's expanded
-            if expandedSections["Summary"] == true {
-                loadContentForSection("Summary")
+                // Generate content for what we have as a fallback
+                await loadMinimalContent()
             }
 
-            // Clear loading state
-            isLoadingNextArticle = false
+            // Cancel the loading timer task if it's still running
+            loadingTimerTask.cancel()
+
+            // Always clear loading state at the end
+            await MainActor.run {
+                isLoadingNextArticle = false
+            }
         }
     }
 
@@ -268,18 +367,25 @@ final class NewsDetailViewModel: ObservableObject {
     func loadMinimalContent() async {
         guard let article = currentArticle else { return }
 
+        // Log what's available for debugging
+        let hasTitleBlob = article.title_blob != nil
+        let hasBodyBlob = article.body_blob != nil
+        AppLogger.database.debug("loadMinimalContent: Title blob exists: \(hasTitleBlob), Body blob exists: \(hasBodyBlob)")
+
         // Title and body are required for header display
         if titleAttributedString == nil {
             titleAttributedString = articleOperations.getAttributedContent(
                 for: .title,
-                from: article
+                from: article,
+                createIfMissing: true
             )
         }
 
         if bodyAttributedString == nil {
             bodyAttributedString = articleOperations.getAttributedContent(
                 for: .body,
-                from: article
+                from: article,
+                createIfMissing: true
             )
         }
     }

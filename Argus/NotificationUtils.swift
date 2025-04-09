@@ -66,7 +66,7 @@ class NotificationUtils {
     @MainActor
     private static func performBadgeUpdate() async {
         updateScheduled = false
-        
+
         // Check notification permissions first
         guard await hasNotificationPermission() else {
             AppLogger.ui.warning("Cannot update badge: notification permission not granted")
@@ -85,10 +85,10 @@ class NotificationUtils {
         do {
             // Use ArticleService to query ArticleModel instead of DatabaseCoordinator with NotificationData
             let unviewedCount = try await ArticleService.shared.countUnviewedArticles()
-            
+
             // Log the query result for diagnostics
             AppLogger.database.debug("Badge count query returned \(unviewedCount) unviewed articles")
-            
+
             // Only update if the count actually changed
             if unviewedCount != cachedUnviewedCount {
                 await setBadgeCount(unviewedCount)

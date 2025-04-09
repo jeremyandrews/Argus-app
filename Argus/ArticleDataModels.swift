@@ -51,11 +51,11 @@ final class ArticleModel {
     /// Whether the user has viewed this article
     var isViewed: Bool = false
 
-    /// Whether the user has bookmarked this article 
+    /// Whether the user has bookmarked this article
     var isBookmarked: Bool = false
-    
+
     // Archive functionality removed
-    
+
     // MARK: - Quality Indicators
 
     /// Quality score for the sources used in the article (1-10)

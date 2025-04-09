@@ -523,13 +523,13 @@ final class ArticleService: ArticleServiceProtocol {
         for article in articles {
             // Extract the jsonURL for checking duplicates
             let jsonURLString = article.jsonURL
-            
+
             // Skip articles with empty jsonURL
             guard !jsonURLString.isEmpty else {
                 AppLogger.database.warning("Skipping article with empty jsonURL")
                 continue
             }
-            
+
             // Efficiently check for duplicates using a direct predicate query
             let existingArticlePredicate = #Predicate<ArticleModel> { $0.jsonURL == jsonURLString }
             let existingArticleDescriptor = FetchDescriptor<ArticleModel>(predicate: existingArticlePredicate)
@@ -579,7 +579,7 @@ final class ArticleService: ArticleServiceProtocol {
             } else {
                 // Log that we're skipping a duplicate
                 AppLogger.database.debug("Skipping duplicate article with jsonURL: \(jsonURLString)")
-                
+
                 // We already have this article - update any missing fields if needed
                 // This could be expanded to update specific fields that might change
             }
@@ -594,20 +594,20 @@ final class ArticleService: ArticleServiceProtocol {
         // Return count of new articles
         return addedCount
     }
-    
+
     /// Removes duplicate articles from the database, keeping only the newest version of each article
     /// - Returns: The number of duplicate articles removed
     func removeDuplicateArticles() async throws -> Int {
         AppLogger.database.info("Starting duplicate article cleanup...")
         let context = ModelContext(modelContainer)
         var removedCount = 0
-        
+
         // Get all articles
         let fetchDescriptor = FetchDescriptor<ArticleModel>()
         let allArticles = try context.fetch(fetchDescriptor)
-        
+
         AppLogger.database.info("Analyzing \(allArticles.count) articles for duplicates")
-        
+
         // Group by jsonURL
         var articlesByURL: [String: [ArticleModel]] = [:]
         for article in allArticles {
@@ -617,7 +617,7 @@ final class ArticleService: ArticleServiceProtocol {
                 articlesByURL[article.jsonURL] = articles
             }
         }
-        
+
         // Count duplicates
         var duplicateCount = 0
         for (_, articles) in articlesByURL {
@@ -625,35 +625,35 @@ final class ArticleService: ArticleServiceProtocol {
                 duplicateCount += articles.count - 1
             }
         }
-        
+
         AppLogger.database.info("Found \(duplicateCount) duplicate articles to remove")
-        
+
         // Keep only the newest of each duplicate set
         for (jsonURL, articles) in articlesByURL {
             if articles.count > 1 {
                 // Sort by addedDate, newest first
                 let sortedArticles = articles.sorted { ($0.addedDate) > ($1.addedDate) }
-                
+
                 // Keep the first one (newest), delete the rest
                 AppLogger.database.debug("Removing \(articles.count - 1) duplicates for article with jsonURL: \(jsonURL)")
-                for i in 1..<sortedArticles.count {
+                for i in 1 ..< sortedArticles.count {
                     context.delete(sortedArticles[i])
                     removedCount += 1
                 }
             }
         }
-        
+
         // Save changes
         try context.save()
-        
+
         // Clear cache
         clearCache()
-        
+
         AppLogger.database.info("Removed \(removedCount) duplicate articles")
-        
+
         return removedCount
     }
-    
+
     /// Counts the number of unviewed articles in the database
     /// - Returns: The count of unviewed articles
     @MainActor
@@ -668,15 +668,15 @@ final class ArticleService: ArticleServiceProtocol {
                     !article.isViewed
                 }
             )
-            
+
             // Fetch count with detailed logging
             let count = try context.fetchCount(descriptor)
-            ModernizationLogger.log(.debug, component: .articleService, 
-                message: "Fetched unviewed article count: \(count)")
+            ModernizationLogger.log(.debug, component: .articleService,
+                                    message: "Fetched unviewed article count: \(count)")
             return count
         } catch {
-            ModernizationLogger.log(.error, component: .articleService, 
-                message: "Error fetching unviewed article count: \(error.localizedDescription)")
+            ModernizationLogger.log(.error, component: .articleService,
+                                    message: "Error fetching unviewed article count: \(error.localizedDescription)")
             throw ArticleServiceError.databaseError(underlyingError: error)
         }
     }
@@ -687,7 +687,7 @@ final class ArticleService: ArticleServiceProtocol {
         topic: String?,
         isRead: Bool?,
         isBookmarked: Bool?,
-        isArchived: Bool?
+        isArchived _: Bool?
     ) -> String {
         let topicPart = topic ?? "all"
         let readPart = isRead == nil ? "any" : (isRead! ? "read" : "unread")

@@ -516,52 +516,84 @@ struct NewsDetailView: View {
         }
         sectionLoadingTasks = [:]
 
+        // Store the current article ID for logging
+        let currentID = currentNotification?.id
+
         // Log navigation action for debugging
         if let currentArticle = currentNotification {
-            AppLogger.database.debug("Navigating from article ID: \(currentArticle.id), direction: \(direction == .next ? "next" : "previous")")
-
-            // Log current article's JSON fields for debugging
-            let hasEngineStats = currentArticle.engine_stats != nil
-            let hasSimilarArticles = currentArticle.similar_articles != nil
-            AppLogger.database.debug("Current article before navigation - Has engine stats: \(hasEngineStats), Has similar articles: \(hasSimilarArticles)")
+            AppLogger.database.debug("NewsDetailView - Navigating from article ID: \(currentArticle.id), direction: \(direction == .next ? "next" : "previous")")
         }
+
+        // CRITICAL: Capture the current article before navigation to ensure we always have content
+        let oldArticle = currentNotification
 
         // Delegate to view model for navigation using shared NavigationDirection
         viewModel.navigateToArticle(direction: direction)
 
-        // Keep UI state in sync with viewModel
+        // Keep UI state in sync with viewModel but ensure we have an article
         currentIndex = viewModel.currentIndex
 
-        // Reset our cached content
+        // Important: We'll leave the current notification until we get view model updates
+        // This prevents empty state during transition
+
+        // Update attributed strings from viewModel immediately if available
         titleAttributedString = viewModel.titleAttributedString
         bodyAttributedString = viewModel.bodyAttributedString
-        summaryAttributedString = nil
+
+        // Reset other cached content that will be reloaded as needed
+        summaryAttributedString = viewModel.summaryAttributedString
         criticalAnalysisAttributedString = nil
         logicalFallaciesAttributedString = nil
         sourceAnalysisAttributedString = nil
         cachedContentBySection = [:]
 
-        // Reset expanded sections
+        // Reset expanded sections - Summary stays expanded by default
         expandedSections = Self.getDefaultExpandedSections()
 
-        // Force refresh
+        // Force refresh UI
         contentTransitionID = UUID()
         scrollToTopTrigger = UUID()
 
-        // Explicitly mark the article as viewed after navigation
-        markAsViewed()
+        // Now update with the new article if available
+        if let newArticle = viewModel.currentArticle {
+            // No need to set the article - currentNotification is computed from viewModel.currentArticle
+            // But we do make sure our UI state is updated
 
-        // Log the current state after navigation
-        if let article = currentNotification {
-            let hasEngineStats = article.engine_stats != nil
-            let hasSimilarArticles = article.similar_articles != nil
-            AppLogger.database.debug("After navigation to article ID: \(article.id) - Has engine stats: \(hasEngineStats), Has similar articles: \(hasSimilarArticles)")
-        }
+            // Explicitly mark as viewed
+            markAsViewed()
 
-        // Load the Summary if it's expanded
-        if expandedSections["Summary"] == true {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                self.loadContentForSection("Summary")
+            // Log the new article state
+            let hasEngineStats = newArticle.engine_stats != nil
+            let hasSimilarArticles = newArticle.similar_articles != nil
+            let hasTitleBlob = newArticle.title_blob != nil
+            let hasBodyBlob = newArticle.body_blob != nil
+
+            AppLogger.database.debug("""
+            NewsDetailView - After navigation from \(currentID?.uuidString ?? "unknown") to article ID: \(newArticle.id)
+            - Has title blob: \(hasTitleBlob)
+            - Has body blob: \(hasBodyBlob)
+            - Has engine stats: \(hasEngineStats)
+            - Has similar articles: \(hasSimilarArticles)
+            """)
+
+            // Load the Summary if it's expanded - with slight delay to allow UI to refresh
+            if expandedSections["Summary"] == true {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.loadContentForSection("Summary")
+                }
+            }
+        } else {
+            // If we somehow don't have an article after navigation, restore the previous one
+            // This is a safety measure to prevent the view from auto-closing
+            if viewModel.currentArticle == nil, let oldArticle = oldArticle {
+                // Set the article in the viewModel, not the computed property
+                // Use Task to handle the operation asynchronously
+                Task {
+                    viewModel.currentArticle = oldArticle
+                    AppLogger.database.error("NewsDetailView - No article after navigation, restored previous article")
+                    // Attempt to load minimal content for the restored article
+                    loadInitialMinimalContent()
+                }
             }
         }
     }

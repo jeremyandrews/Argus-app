@@ -222,34 +222,34 @@ class APIClient {
             // Get access to the SwiftData container
             let container = SwiftDataContainer.shared.container
             let context = ModelContext(container)
-            
+
             // Calculate timestamp from 12 hours ago
             let twelveHoursAgo = Calendar.current.date(byAdding: .hour, value: -12, to: Date()) ?? Date()
-            
+
             // Create a fetch descriptor for ArticleModel to get recently added articles
             let descriptor = FetchDescriptor<ArticleModel>(
                 predicate: #Predicate { $0.addedDate >= twelveHoursAgo }
             )
-            
+
             // Fetch articles from the last 12 hours
             let recentArticles = try context.fetch(descriptor)
-            
+
             // Extract the jsonURL values (skip empty ones)
             let seenArticleURLs = recentArticles.compactMap { $0.jsonURL.isEmpty ? nil : $0.jsonURL }
-            
+
             ModernizationLogger.log(.info, component: .apiClient,
-                                  message: "Syncing with \(seenArticleURLs.count) articles from last 12 hours")
-            
+                                    message: "Syncing with \(seenArticleURLs.count) articles from last 12 hours")
+
             // If we have too many, limit to avoid excessive payload size
             let limitedURLs = seenArticleURLs.count > 200 ? Array(seenArticleURLs.prefix(200)) : seenArticleURLs
-            
+
             // Use these URLs as our seen_articles list
             return try await syncArticles(seenArticles: limitedURLs, allowRetries: allowRetries)
         } catch {
             AppLogger.api.error("Error fetching article URLs from database: \(error)")
             ModernizationLogger.log(.warning, component: .apiClient,
-                                  message: "Database query failed, falling back to empty seen_articles list")
-            
+                                    message: "Database query failed, falling back to empty seen_articles list")
+
             // Fall back to empty list if database query fails
             return try await syncArticles(seenArticles: [], allowRetries: allowRetries)
         }

@@ -7,9 +7,10 @@ import SwiftUI
 @MainActor
 final class NewsViewModel: ObservableObject {
     // MARK: - Subscriptions for Settings Changes
-    
+
     /// Subscriptions for observing UserDefaults changes
     private var userDefaultsSubscriptions = Set<AnyCancellable>()
+
     // MARK: - Published Properties
 
     /// Articles currently displayed in the view
@@ -102,11 +103,11 @@ final class NewsViewModel: ObservableObject {
 
         // Load subscriptions
         loadSubscriptions()
-        
+
         // Setup observers for settings changes
         setupUserDefaultsObservers()
     }
-    
+
     deinit {
         // Clean up subscriptions
         userDefaultsSubscriptions.forEach { $0.cancel() }
@@ -476,68 +477,68 @@ final class NewsViewModel: ObservableObject {
         groupingStyle = defaults.groupingStyle // Now uses "date" as default
         selectedTopic = defaults.selectedTopic
     }
-    
+
     /// Sets up observers for UserDefaults changes
     private func setupUserDefaultsObservers() {
         let defaults = UserDefaults.standard
-        
+
         // Observe sortOrder changes
         defaults.publisher(for: \.sortOrder)
             .removeDuplicates(by: { first, second in
                 // Custom equality check to avoid compiler warning
-                return String(describing: first) == String(describing: second)
+                String(describing: first) == String(describing: second)
             })
             .sink { [weak self] newValue in
                 guard let self = self, self.sortOrder != newValue else { return }
-                
+
                 Task { @MainActor in
                     self.sortOrder = newValue
                     await self.updateGroupedArticles()
                 }
             }
             .store(in: &userDefaultsSubscriptions)
-        
+
         // Observe groupingStyle changes
         defaults.publisher(for: \.groupingStyle)
             .removeDuplicates(by: { first, second in
                 // Custom equality check to avoid compiler warning
-                return String(describing: first) == String(describing: second)
+                String(describing: first) == String(describing: second)
             })
             .sink { [weak self] newValue in
                 guard let self = self, self.groupingStyle != newValue else { return }
-                
+
                 Task { @MainActor in
                     self.groupingStyle = newValue
                     await self.updateGroupedArticles()
                 }
             }
             .store(in: &userDefaultsSubscriptions)
-            
+
         // Observe showUnreadOnly changes
         defaults.publisher(for: \.showUnreadOnly)
             .removeDuplicates(by: { first, second in
                 // Custom equality check to avoid compiler warning
-                return String(describing: first) == String(describing: second)
+                String(describing: first) == String(describing: second)
             })
             .sink { [weak self] newValue in
                 guard let self = self, self.showUnreadOnly != newValue else { return }
-                
+
                 Task { @MainActor in
                     self.showUnreadOnly = newValue
                     await self.refreshArticles()
                 }
             }
             .store(in: &userDefaultsSubscriptions)
-            
+
         // Observe showBookmarkedOnly changes
         defaults.publisher(for: \.showBookmarkedOnly)
             .removeDuplicates(by: { first, second in
                 // Custom equality check to avoid compiler warning
-                return String(describing: first) == String(describing: second)
+                String(describing: first) == String(describing: second)
             })
             .sink { [weak self] newValue in
                 guard let self = self, self.showBookmarkedOnly != newValue else { return }
-                
+
                 Task { @MainActor in
                     self.showBookmarkedOnly = newValue
                     await self.refreshArticles()
@@ -604,7 +605,7 @@ final class NewsViewModel: ObservableObject {
     var batchSize: Int {
         return pageSize
     }
-    
+
     /// Removes duplicate articles from the database
     /// - Returns: Number of duplicates removed
     func removeDuplicateArticles() async -> Int {
@@ -612,10 +613,10 @@ final class NewsViewModel: ObservableObject {
             isLoading = true
             let removedCount = try await articleOperations.cleanupDuplicateArticles()
             isLoading = false
-            
+
             // Refresh the UI after cleanup
             await refreshArticles()
-            
+
             return removedCount
         } catch {
             isLoading = false

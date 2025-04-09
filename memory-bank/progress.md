@@ -603,10 +603,18 @@
    - Status: Resolved by implementing modern settings observation pattern
    - Priority: High (Resolved)
    
-10. **Missing Detail View Sections During Navigation**
-   - When navigating with chevrons, "Argus Engine Stats" and "Related Articles" sections don't appear
-   - Status: Investigating issue with model conversion during navigation
+10. **Formatting Issues During Article Navigation**
+   - When navigating between articles with chevrons:
+     - Article title and body are not properly formatted (missing rich text)
+     - "Argus Engine Stats" and "Related Articles" sections don't appear
+     - Previously converted sections (like Critical Analysis) are re-converted each time
+   - Status: Attempted multiple fixes, issue persists, requires deeper investigation
    - Priority: Medium
+   - Attempted fixes:
+     - Fixed a compiler warning with an unreachable catch block in NewsDetailViewModel.swift
+     - Fixed property handling to avoid modifying read-only computed properties
+     - Improved error handling and article state restoration during navigation
+     - Better preservation of Summary section content during navigation
 
 11. **App Badge Setting Not Working**
    - Enabling/disabling "Show Unread Count on App Icon" doesn't reliably update badge

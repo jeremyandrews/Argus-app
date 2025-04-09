@@ -597,6 +597,31 @@ This file captures important patterns, preferences, and project intelligence tha
 - Duplicate content issues occur during synchronization - will be resolved by SwiftData's unique constraints
 - Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - will be eliminated with proper async/await implementation
 - SwiftData context access issues can cause EXC_BAD_ACCESS crashes - will be addressed by using SwiftData's native context management instead of custom DatabaseCoordinator
+- **Article formatting issues during chevron navigation** - When navigating between articles using the chevron buttons:
+  - Title and body formatting is lost (rich text not displayed)
+  - Sections like "Argus Engine Stats" and "Related Articles" don't appear
+  - Previously converted sections are re-converted each time viewed
+  
+  **Failed Fix Attempts**:
+  - Creating shared NavigationDirection enum in NavigationTypes.swift
+  - Removing duplicate enum definitions in NewsDetailViewModel and NewsDetailView
+  - Fixing unreachable catch block in NewsDetailViewModel.navigateToArticle
+  - Addressing property access issues by modifying viewModel's article property instead of read-only computed property
+  - Adding safeguards to restore the previous article if navigation fails
+  
+  **Potential Root Causes to Investigate**:
+  - Blob data extraction timing issues - UI may render before blob data is fully extracted
+  - ArticleOperations.getCompleteArticle() might not load all required data
+  - ArticleModelAdapter may not be properly transferring blob data during model conversion
+  - State reset sequence during navigation may be clearing key properties prematurely
+  - Timing issues between when titleAttributedString/bodyAttributedString are cleared and regenerated
+  
+  **Debugging Strategy**:
+  - Add extensive logging around blob data extraction and validation
+  - Trace the complete data flow during navigation (compare direct loading vs. chevron navigation)
+  - Create a sequence diagram of all state changes during navigation
+  - Check if blobs exist in the database but are not being extracted properly
+  - Investigate if unarchiving from NSKeyedUnarchiver is failing silently
 
 ## Argus API Server Endpoints and Behavior
 

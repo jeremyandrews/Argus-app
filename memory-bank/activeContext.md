@@ -162,19 +162,27 @@
 - **Attempted Fix for Missing Engine Stats and Related Articles with Chevron Navigation** (Unsuccessful):
   - Identified two interrelated issues:
     1. Missing Argus Engine Stats and Related Articles sections when navigating with chevrons
-    2. Navigation between articles with chevrons not loading articles correctly
-  - Attempted fix approach:
+    2. Navigation between articles with chevrons not loading articles correctly with proper formatting
+  - First attempted fix approach (using shared enum):
     - Created shared `NavigationDirection` enum in a new `NavigationTypes.swift` file
     - Removed duplicated enum definitions from `NewsDetailViewModel` and `NewsDetailView`
     - Modified `navigateToArticle()` method in `NewsDetailView` to use shared enum without conversion
     - Simplified navigation logic to eliminate potential conversion issues
-  - Outcome: The implemented changes did not resolve either issue
+  - Second attempted fix approach (focusing on article state preservation):
+    - Fixed a critical issue in `NewsDetailView.swift` where we were trying to modify the read-only computed property `currentNotification`
+    - Updated code to properly modify the viewModel's `currentArticle` property instead
+    - Added safeguards to restore the previous article if navigation fails
+    - Fixed unreachable "catch" block in `NewsDetailViewModel.swift` that was causing compiler warnings
+    - Added better error handling and logging for article state changes during navigation
+    - Ensured the Summary section content is properly preserved during navigation
+  - Outcome: Neither approach resolved the formatting issues during article navigation
   - Next potential approaches to explore:
-    - Investigate data loading sequence in the navigation method more deeply
-    - Check if the issue is in the data transfer rather than in enum conversion
-    - Verify blob data handling and section rendering logic after navigation
-    - Examine differences between direct article loading vs. navigation loading paths
-    - Check for potential concurrency issues with task cancellation during navigation
+    - Investigate blob data extraction more deeply - may need to examine `ArticleOperations.getCompleteArticle()`
+    - Look at the ArticleModelAdapter to ensure blob data is being properly transferred
+    - Add diagnostic logging throughout the navigation process to track exactly when/where blob data is lost
+    - Focus on how `titleAttributedString` and `bodyAttributedString` properties are populated from blob data
+    - Check for timing issues where UI renders before blob data is extracted
+    - Examine state reset sequence during navigation to ensure key properties aren't cleared prematurely
 
 - **Fixed ModelContainer Initialization Crash and Database Table Creation** (Completed):
   - Fixed critical app startup crash in `sharedModelContainer` initialization in `ArgusApp.swift`

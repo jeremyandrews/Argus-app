@@ -164,7 +164,7 @@ struct SettingsView: View {
                             }
                         }
                         .foregroundColor(.primary)
-                        
+
                         Button(action: {
                             Task {
                                 let viewModel = NewsViewModel()
@@ -172,12 +172,13 @@ struct SettingsView: View {
                                 // Show alert with results
                                 let message = "Successfully removed \(removedCount) duplicate articles."
                                 #if os(iOS)
-                                let alert = UIAlertController(title: "Cleanup Complete", message: message, preferredStyle: .alert)
-                                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                                   let rootViewController = windowScene.windows.first?.rootViewController {
-                                    rootViewController.present(alert, animated: true)
-                                }
+                                    let alert = UIAlertController(title: "Cleanup Complete", message: message, preferredStyle: .alert)
+                                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                       let rootViewController = windowScene.windows.first?.rootViewController
+                                    {
+                                        rootViewController.present(alert, animated: true)
+                                    }
                                 #endif
                             }
                         }) {

@@ -62,9 +62,20 @@ final class ArticleOperations {
 
             // Log for debugging
             if let article = article {
+                let hasTitleBlob = article.title_blob != nil
+                let hasBodyBlob = article.body_blob != nil
+                let hasSummaryBlob = article.summary_blob != nil
                 let hasEngineStats = article.engine_stats != nil
                 let hasSimilarArticles = article.similar_articles != nil
-                AppLogger.database.debug("Fetched article \(id): Engine stats: \(hasEngineStats), Similar articles: \(hasSimilarArticles)")
+
+                AppLogger.database.debug("""
+                Fetched article \(id):
+                - Title blob: \(hasTitleBlob)
+                - Body blob: \(hasBodyBlob)
+                - Summary blob: \(hasSummaryBlob)
+                - Engine stats: \(hasEngineStats)
+                - Similar articles: \(hasSimilarArticles)
+                """)
             }
 
             return article
@@ -308,7 +319,7 @@ final class ArticleOperations {
 
         return deletedCount
     }
-    
+
     /// Removes duplicate articles from the database
     /// - Returns: Number of duplicates removed
     func cleanupDuplicateArticles() async throws -> Int {
