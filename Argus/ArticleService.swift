@@ -653,6 +653,33 @@ final class ArticleService: ArticleServiceProtocol {
         
         return removedCount
     }
+    
+    /// Counts the number of unviewed articles in the database
+    /// - Returns: The count of unviewed articles
+    @MainActor
+    func countUnviewedArticles() async throws -> Int {
+        do {
+            let container = SwiftDataContainer.shared.container
+            let context = container.mainContext
+
+            // Create a fetch descriptor for ArticleModel with predicate for !isViewed
+            let descriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { article in
+                    !article.isViewed
+                }
+            )
+            
+            // Fetch count with detailed logging
+            let count = try context.fetchCount(descriptor)
+            ModernizationLogger.log(.debug, component: .articleService, 
+                message: "Fetched unviewed article count: \(count)")
+            return count
+        } catch {
+            ModernizationLogger.log(.error, component: .articleService, 
+                message: "Error fetching unviewed article count: \(error.localizedDescription)")
+            throw ArticleServiceError.databaseError(underlyingError: error)
+        }
+    }
 
     // MARK: - Cache Management
 

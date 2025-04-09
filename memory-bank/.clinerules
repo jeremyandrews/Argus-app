@@ -221,6 +221,94 @@ This file captures important patterns, preferences, and project intelligence tha
 - Avoid context.save() inside complex asynchronous operations that might cause EXC_BAD_ACCESS
 - When DatabaseCoordinator methods fail with context issues, catch the error and use established filtering methods
 
+### SwiftData and Main Actor Patterns
+- Always add @MainActor annotation to methods that access SwiftData contexts:
+  ```swift
+  // WRONG: Missing @MainActor annotation
+  func countUnviewedArticles() async throws -> Int {
+      let context = container.mainContext // This will fail in Swift 6
+      let count = try context.fetchCount(descriptor)
+      return count
+  }
+  
+  // CORRECT: With @MainActor annotation
+  @MainActor
+  func countUnviewedArticles() async throws -> Int {
+      let context = container.mainContext // This is now safe
+      let count = try context.fetchCount(descriptor)
+      return count
+  }
+  ```
+- Never use await when accessing main actor-isolated properties from @MainActor-annotated code:
+  ```swift
+  // WRONG: Using await in @MainActor-annotated method
+  @MainActor
+  func getContext() async -> ModelContext {
+      let context = await container.mainContext // This will fail in Swift 6
+      return context
+  }
+  
+  // CORRECT: Direct access in @MainActor-annotated method
+  @MainActor
+  func getContext() -> ModelContext {
+      let context = container.mainContext // This is correct
+      return context
+  }
+  ```
+- Ensure proper error handling in all database operations:
+  ```swift
+  @MainActor
+  func countUnviewedArticles() async throws -> Int {
+      do {
+          let context = container.mainContext
+          let descriptor = FetchDescriptor<ArticleModel>(
+              predicate: #Predicate<ArticleModel> { !$0.isViewed }
+          )
+          
+          let count = try context.fetchCount(descriptor)
+          ModernizationLogger.log(.debug, component: .articleService, 
+              message: "Fetched unviewed article count: \(count)")
+          return count
+      } catch {
+          ModernizationLogger.log(.error, component: .articleService, 
+              message: "Error fetching unviewed articles: \(error)")
+          throw ArticleServiceError.databaseError(error)
+      }
+  }
+  ```
+- Query the correct database model when models have been migrated:
+  ```swift
+  // WRONG: Querying legacy model after migration
+  let descriptor = FetchDescriptor<NotificationData>(
+      predicate: #Predicate<NotificationData> { !$0.isViewed }
+  )
+  
+  // CORRECT: Querying current model
+  let descriptor = FetchDescriptor<ArticleModel>(
+      predicate: #Predicate<ArticleModel> { !$0.isViewed }
+  )
+  ```
+- Always check permissions before attempting operations that require them:
+  ```swift
+  // For notification permissions
+  @MainActor
+  private static func hasNotificationPermission() async -> Bool {
+      let settings = await UNUserNotificationCenter.current().notificationSettings()
+      return settings.authorizationStatus == .authorized
+  }
+  
+  @MainActor
+  private static func performBadgeUpdate() async {
+      // Check permission first
+      guard await hasNotificationPermission() else {
+          AppLogger.ui.warning("Cannot update badge: notification permission not granted")
+          return
+      }
+      
+      // Proceed with badge update
+  }
+  ```
+
 ## Modernization Strategy
 
 ### Three-Tier Architecture Pattern

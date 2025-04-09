@@ -27,17 +27,33 @@
   - Achieved real-time UI updates in response to settings changes without app restart
   - Fixed inconsistency between SettingsView and NewsViewModel default values
 
-- **Investigated App Badge Issues** (In Progress):
-  - Found potential issues with the Show Unread Count on App Icon setting:
-    - NotificationUtils.swift does check the showBadge preference correctly
-    - Badge update system has debounce logic that might affect immediate updates
-    - The issues might be related to when the badge update gets triggered
-    - Despite correct code paths, toggle switch might not be immediately reflected
-  - Further investigation needed:
-    - Verify badge count updates are properly triggered on all app lifecycle events
-    - Check if debounce timer (0.5 seconds) is too aggressive, potentially missing updates
-    - Investigate if system badge permissions might be affecting functionality
-    - Review interaction between SettingsView and direct NotificationUtils calls
+- **Fixed App Badge Count Issues** (Completed):
+  - Resolved issues with the app badge not showing unread count:
+    - Fixed database model mismatch:
+      - Changed NotificationUtils to query ArticleModel through ArticleService instead of querying legacy NotificationData model
+      - Created new `countUnviewedArticles()` method in ArticleService that uses the correct SwiftData model
+      - Added comprehensive error handling and logging to track badge count numbers
+    - Added notification permission check:
+      - Created `hasNotificationPermission()` method to verify if user has granted notification permissions
+      - Added guard clause to prevent badge updates when permissions aren't granted
+      - Implemented warning logs when permissions are missing to aid in debugging
+    - Fixed Swift 6 concurrency issues:
+      - Added @MainActor annotation to countUnviewedArticles() to properly isolate SwiftData context access
+      - Properly accessed SwiftData context from the main actor without crossing actor boundaries
+      - Removed await from main actor-isolated property that would have violated Swift 6 sendability rules
+    - Improved logging with correct components:
+      - Used articleService component instead of non-existent database component in ModernizationLogger
+      - Added detailed logging at each step of the badge update process
+    - Previous fixes (still relevant):
+      - Fixed API methods from previous update: `UNUserNotificationCenter.setBadgeCount(count, withCompletionHandler:)`
+      - Maintained proper debounce logic to prevent excessive badge updates
+      - Ensured updates happen at all required lifecycle events
+  - Key lessons for future development:
+    - Always add @MainActor annotation when accessing SwiftData contexts in methods
+    - Never use await when accessing main actor-isolated properties from @MainActor-annotated code
+    - Always check notification permissions before attempting to update badges
+    - Query the correct database model when models have been migrated
+    - Use comprehensive error handling and logging when working with system APIs
 
 - **Investigated Missing Engine Stats and Related Articles Issues** (In Progress):
   - Found clues about chevron navigation issues:

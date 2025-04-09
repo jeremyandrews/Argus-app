@@ -523,7 +523,6 @@
 
 ### Future Migration Plans
 - 🔲 **Switch to Production Migration Mode**
-  - Move from temporary mode (migration on each start) to production mode (one-time migration)
   - Remove dependency on old database after all users have migrated
   - Remove migration code completely from the codebase
 
