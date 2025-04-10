@@ -29,7 +29,7 @@ class PreloadManager {
     }
 
     // Preload a batch of articles that will likely be viewed soon
-    func preloadArticles(_ articles: [NotificationData], currentIndex: Int) {
+    func preloadArticles(_ articles: [ArticleModel], currentIndex: Int) {
         // Cancel any existing preload task
         preloadTask?.cancel()
 
@@ -55,7 +55,24 @@ class PreloadManager {
                 // Mark as preloaded
                 await markAsPreloaded(article.id)
 
-                // Schedule processing
+                // Use ArticleOperations to process blob generation
+                let operations = ArticleOperations()
+
+                // Get article with context for proper blob persistence
+                if let articleWithContext = await operations.getArticleModelWithContext(byId: article.id) {
+                    // Generate blobs for key fields - must run on MainActor since this involves UI components
+                    await MainActor.run {
+                        // These operations must run on the main actor since they involve NSAttributedString
+                        _ = operations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
+                        _ = operations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
+                    }
+
+                    AppLogger.database.debug("✅ Preloaded blobs for article \(article.id)")
+                } else {
+                    AppLogger.database.warning("⚠️ Could not preload article \(article.id) - context not available")
+                }
+
+                // Schedule processing through the queue manager as a fallback
                 await ProcessingQueueManager.shared.scheduleProcessing(for: article.id)
 
                 // Small delay between articles

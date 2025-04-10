@@ -21,7 +21,7 @@ final class ArticleOperations {
     /// - Parameter article: The article to toggle the read status for
     /// - Returns: Boolean indicating the new read state
     @discardableResult
-    func toggleReadStatus(for article: NotificationData) async throws -> Bool {
+    func toggleReadStatus(for article: ArticleModel) async throws -> Bool {
         let newReadStatus = !article.isViewed
         try await articleService.markArticle(id: article.id, asRead: newReadStatus)
 
@@ -31,6 +31,7 @@ final class ArticleOperations {
             article.isViewed = newReadStatus
         }
 
+        AppLogger.database.debug("✅ Toggled read status to \(newReadStatus) for article \(article.id)")
         return newReadStatus
     }
 
@@ -38,9 +39,16 @@ final class ArticleOperations {
     /// - Parameter article: The article to toggle the bookmarked status for
     /// - Returns: Boolean indicating the new bookmarked state
     @discardableResult
-    func toggleBookmark(for article: NotificationData) async throws -> Bool {
+    func toggleBookmark(for article: ArticleModel) async throws -> Bool {
         let newBookmarkStatus = !article.isBookmarked
         try await articleService.markArticle(id: article.id, asBookmarked: newBookmarkStatus)
+
+        // Ensure UI state is updated immediately
+        await MainActor.run {
+            article.isBookmarked = newBookmarkStatus
+        }
+
+        AppLogger.database.debug("✅ Toggled bookmark status to \(newBookmarkStatus) for article \(article.id)")
         return newBookmarkStatus
     }
 
@@ -48,37 +56,39 @@ final class ArticleOperations {
 
     /// Deletes an article
     /// - Parameter article: The article to delete
-    func deleteArticle(_ article: NotificationData) async throws {
+    func deleteArticle(_ article: ArticleModel) async throws {
         try await articleService.deleteArticle(id: article.id)
+        AppLogger.database.debug("✅ Deleted article \(article.id)")
     }
 
     /// Fetches a complete article by ID, ensuring all fields are loaded
     /// - Parameter id: The article ID to fetch
     /// - Returns: The complete article, or nil if not found
-    func getCompleteArticle(byId id: UUID) async -> NotificationData? {
+    @MainActor
+    func getCompleteArticle(byId id: UUID) async -> ArticleModel? {
         do {
-            // Fetch the article using ArticleService to ensure all fields are loaded
-            let article = try await articleService.fetchArticle(byId: id)
+            // Get the article model directly using the context
+            let model = await getArticleModelWithContext(byId: id)
 
             // Log for debugging
-            if let article = article {
-                let hasTitleBlob = article.title_blob != nil
-                let hasBodyBlob = article.body_blob != nil
-                let hasSummaryBlob = article.summary_blob != nil
-                let hasEngineStats = article.engine_stats != nil
-                let hasSimilarArticles = article.similar_articles != nil
+            if let model = model {
+                let hasTitleBlob = model.titleBlob != nil
+                let hasBodyBlob = model.bodyBlob != nil
+                let hasSummaryBlob = model.summaryBlob != nil
+                let hasEngineStats = model.engineStats != nil
+                let hasSimilarArticles = model.similarArticles != nil
 
                 AppLogger.database.debug("""
-                Fetched article \(id):
+                Fetched complete ArticleModel \(id):
                 - Title blob: \(hasTitleBlob)
                 - Body blob: \(hasBodyBlob)
                 - Summary blob: \(hasSummaryBlob)
-                - Engine stats: \(hasEngineStats)
-                - Similar articles: \(hasSimilarArticles)
+                - Engine stats: \(hasEngineStats != nil)
+                - Similar articles: \(hasSimilarArticles != nil)
                 """)
             }
 
-            return article
+            return model
         } catch {
             AppLogger.database.error("Error fetching complete article: \(error)")
             return nil
@@ -94,66 +104,143 @@ final class ArticleOperations {
     ///   - showBookmarkedOnly: Whether to show only bookmarked articles
     ///   - limit: Maximum number of articles to return
     /// - Returns: Array of articles matching the criteria
+    @MainActor
     func fetchArticles(
         topic: String?,
         showUnreadOnly: Bool,
         showBookmarkedOnly: Bool,
         limit: Int? = nil
-    ) async throws -> [NotificationData] {
-        return try await articleService.fetchArticles(
-            topic: topic != "All" ? topic : nil,
-            isRead: showUnreadOnly ? false : nil,
-            isBookmarked: showBookmarkedOnly ? true : nil,
-            isArchived: nil, // Archive functionality removed
-            limit: limit,
-            offset: nil
-        )
+    ) async throws -> [ArticleModel] {
+        let container = SwiftDataContainer.shared.container
+        let context = container.mainContext
+
+        var predicate: Predicate<ArticleModel>?
+
+        // Build the predicate based on filters
+        var conditions: [Predicate<ArticleModel>] = []
+
+        // Topic filter
+        if let topic = topic, topic != "All" {
+            conditions.append(#Predicate<ArticleModel> { $0.topic == topic })
+        }
+
+        // Read status filter
+        if showUnreadOnly {
+            conditions.append(#Predicate<ArticleModel> { !$0.isViewed })
+        }
+
+        // Bookmark filter
+        if showBookmarkedOnly {
+            conditions.append(#Predicate<ArticleModel> { $0.isBookmarked })
+        }
+
+        // Combine conditions
+        if !conditions.isEmpty {
+            if conditions.count == 1 {
+                predicate = conditions[0]
+            } else {
+                // Combine with AND
+                predicate = conditions.reduce(into: conditions[0]) { result, condition in
+                    result = result && condition
+                }
+            }
+        }
+
+        // Create the fetch descriptor
+        var descriptor = FetchDescriptor<ArticleModel>()
+        if let predicate = predicate {
+            descriptor.predicate = predicate
+        }
+
+        // Sort by date (newest first)
+        descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
+
+        // Apply limit if needed
+        if let limit = limit {
+            descriptor.fetchLimit = limit
+        }
+
+        do {
+            let articles = try context.fetch(descriptor)
+            AppLogger.database.debug("✅ Fetched \(articles.count) articles with filters")
+            return articles
+        } catch {
+            AppLogger.database.error("❌ Error fetching articles: \(error)")
+            throw error
+        }
     }
 
     /// Fetches a specific article by ID
     /// - Parameter id: The unique identifier of the article
     /// - Returns: The article if found, nil otherwise
-    func fetchArticle(byId id: UUID) async throws -> NotificationData? {
-        return try await articleService.fetchArticle(byId: id)
-    }
-
-    /// Ensures we have an article with model context for blob operations
-    /// - Parameter article: The potentially detached article
-    /// - Returns: An article with valid model context, or nil if unavailable
-    func getArticleWithContext(article: NotificationData) async -> NotificationData? {
-        // If article already has context, use it
-        if article.modelContext != nil {
-            return article
-        }
-
-        // Try to fetch a fresh copy from the database
-        return await getCompleteArticle(byId: article.id)
+    @MainActor
+    func fetchArticle(byId id: UUID) async throws -> ArticleModel? {
+        return await getArticleModelWithContext(byId: id)
     }
 
     /// Gets the original ArticleModel with SwiftData context for direct persistence operations
     /// - Parameter id: The unique identifier of the article
     /// - Returns: The ArticleModel with a valid context if found, nil otherwise
+    @MainActor
     func getArticleModelWithContext(byId id: UUID) async -> ArticleModel? {
+        // Access the container directly since it's already a non-optional
+        let container = SwiftDataContainer.shared.container
+
+        AppLogger.database.debug("🔍 Getting ArticleModel with context for ID: \(id)")
+        AppLogger.database.debug("🔍 Container: \(String(describing: container))")
+
         do {
-            // Use the existing articleService to fetch the ArticleModel directly
-            let context = ModelContext(SwiftDataContainer.shared.container)
-            let fetchDescriptor = FetchDescriptor<ArticleModel>(
+            // First try with main context
+            let descriptor = FetchDescriptor<ArticleModel>(
                 predicate: #Predicate<ArticleModel> { $0.id == id }
             )
 
-            let articleModels = try context.fetch(fetchDescriptor)
+            // Get article from main context
+            let context = container.mainContext
+            let results = try context.fetch(descriptor)
 
-            if let model = articleModels.first {
-                AppLogger.database.debug("✅ Found ArticleModel with valid context for ID: \(id)")
-                return model
-            } else {
-                AppLogger.database.error("❌ Failed to find ArticleModel for ID: \(id)")
-                return nil
+            if let model = results.first {
+                if model.modelContext != nil {
+                    AppLogger.database.debug("✅ Found ArticleModel with context for ID: \(id)")
+                    return model
+                } else {
+                    AppLogger.database.warning("⚠️ Found ArticleModel but it has no context")
+                }
+            }
+
+            // If not found or no context, try with a fresh context
+            let newContext = ModelContext(container)
+            let newResults = try newContext.fetch(descriptor)
+
+            if let newModel = newResults.first {
+                AppLogger.database.debug("✅ Found ArticleModel with fresh context for ID: \(id)")
+                return newModel
             }
         } catch {
             AppLogger.database.error("❌ Error fetching ArticleModel: \(error)")
-            return nil
         }
+
+        AppLogger.database.error("❌ Could not find ArticleModel with context for ID: \(id)")
+        return nil
+    }
+
+    /// Gets the ArticleModel with context, previously handled by ArticleModelAdapter
+    /// - Parameter id: The article ID to fetch
+    /// - Returns: A tuple containing the ArticleModel and the database model with context
+    @MainActor
+    func getArticleWithContext(id: UUID) async -> (ArticleModel?, ArticleModel?) {
+        // We now simply return the same model twice since we're using ArticleModel directly
+        let model = await getArticleModelWithContext(byId: id)
+
+        if let model = model {
+            AppLogger.database.debug("✅ getArticleWithContext: Retrieved ArticleModel with id: \(id)")
+            // Return the same model twice - this maintains backward compatibility with code
+            // that expected a tuple of (NotificationData, ArticleModel)
+            return (model, model)
+        }
+
+        AppLogger.database.error("❌ getArticleWithContext: Failed to retrieve ArticleModel with id: \(id)")
+        return (nil, nil)
     }
 
     /// Saves blob data to an ArticleModel
@@ -164,38 +251,70 @@ final class ArticleOperations {
     /// - Returns: True if save was successful
     @MainActor
     func saveBlobToDatabase(field: RichTextField, blobData: Data, articleModel: ArticleModel) -> Bool {
-        // Set the blob on the ArticleModel using field-specific properties
-        switch field {
-        case .title:
-            articleModel.titleBlob = blobData
-        case .body:
-            articleModel.bodyBlob = blobData
-        case .summary:
-            articleModel.summaryBlob = blobData
-        case .criticalAnalysis:
-            articleModel.criticalAnalysisBlob = blobData
-        case .logicalFallacies:
-            articleModel.logicalFallaciesBlob = blobData
-        case .sourceAnalysis:
-            articleModel.sourceAnalysisBlob = blobData
-        case .relationToTopic:
-            articleModel.relationToTopicBlob = blobData
-        case .additionalInsights:
-            articleModel.additionalInsightsBlob = blobData
+        guard let context = articleModel.modelContext else {
+            AppLogger.database.error("❌ ArticleModel has no context for saving")
+            return false
         }
 
+        // Get human-readable field name for better logging
+        let fieldName = SectionNaming.nameForField(field)
+
+        // Set the blob on the ArticleModel
+        field.setBlob(blobData, on: articleModel)
+
         // Save the context
-        if let context = articleModel.modelContext {
-            do {
-                try context.save()
-                AppLogger.database.debug("✅ Saved blob for \(String(describing: field)) to database (\(blobData.count) bytes)")
+        do {
+            try context.save()
+
+            // Verify the blob was set correctly by reading it back
+            let blobSet = verifyBlobSetProperly(field: field, articleModel: articleModel, expectedSize: blobData.count)
+
+            if blobSet {
+                AppLogger.database.debug("✅ Saved \(fieldName) blob to database (\(blobData.count) bytes) - verified")
                 return true
-            } catch {
-                AppLogger.database.error("❌ Failed to save blob to database: \(error)")
+            } else {
+                AppLogger.database.warning("⚠️ Save appeared successful but blob verification failed for \(fieldName)")
                 return false
             }
-        } else {
-            AppLogger.database.error("❌ ArticleModel has no context, cannot save")
+        } catch {
+            AppLogger.database.error("❌ Error saving \(fieldName) blob: \(error)")
+            return false
+        }
+    }
+
+    /// Verifies that a blob was properly set on the ArticleModel
+    /// - Parameters:
+    ///   - field: The field to verify
+    ///   - articleModel: The ArticleModel to check
+    ///   - expectedSize: The expected size of the blob
+    /// - Returns: True if the blob is present and has the expected size
+    private func verifyBlobSetProperly(field: RichTextField, articleModel: ArticleModel, expectedSize: Int) -> Bool {
+        let fieldName = SectionNaming.nameForField(field)
+        let blob = field.getBlob(from: articleModel)
+
+        guard let blobData = blob, !blobData.isEmpty else {
+            AppLogger.database.warning("⚠️ \(fieldName) blob verification failed - blob is nil or empty")
+            return false
+        }
+
+        if blobData.count != expectedSize {
+            AppLogger.database.warning("⚠️ \(fieldName) blob size mismatch - expected \(expectedSize), got \(blobData.count)")
+            return false
+        }
+
+        // Try to unarchive to verify it's a valid attributed string
+        do {
+            if let attributedString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blobData),
+               attributedString.length > 0
+            {
+                AppLogger.database.debug("✅ \(fieldName) blob contains valid attributed string")
+                return true
+            } else {
+                AppLogger.database.warning("⚠️ \(fieldName) blob unarchived to nil or empty string")
+                return false
+            }
+        } catch {
+            AppLogger.database.error("❌ \(fieldName) blob unarchive error: \(error)")
             return false
         }
     }
@@ -211,7 +330,7 @@ final class ArticleOperations {
     @MainActor
     func getAttributedContent(
         for field: RichTextField,
-        from article: NotificationData,
+        from article: ArticleModel,
         createIfMissing: Bool = true
     ) -> NSAttributedString? {
         // Enhanced implementation with better blob handling
@@ -237,7 +356,7 @@ final class ArticleOperations {
 
         // Step 2: Generate from markdown if needed
         if createIfMissing {
-            let markdownText = getMarkdownTextForField(field, from: article)
+            let markdownText = field.getMarkdownText(from: article)
 
             guard let markdownText = markdownText, !markdownText.isEmpty else {
                 AppLogger.database.debug("⚠️ No markdown text for \(String(describing: field))")
@@ -252,33 +371,7 @@ final class ArticleOperations {
                 textStyle: field.textStyle
             ) {
                 // Save as blob for future use
-                do {
-                    let blobData = try NSKeyedArchiver.archivedData(
-                        withRootObject: attributedString,
-                        requiringSecureCoding: false
-                    )
-
-                    // Set blob on the article
-                    field.setBlob(blobData, on: article)
-
-                    // Save context if possible
-                    if let context = article.modelContext {
-                        try context.save()
-                        AppLogger.database.debug("✅ Saved blob for \(String(describing: field)) (\(blobData.count) bytes)")
-
-                        // Verify blob was saved
-                        if let savedBlob = field.getBlob(from: article) {
-                            AppLogger.database.debug("✅ Verified blob save: \(savedBlob.count) bytes")
-                        } else {
-                            AppLogger.database.warning("⚠️ Blob verification failed for \(String(describing: field))")
-                        }
-                    } else {
-                        AppLogger.database.warning("⚠️ Article has no model context, blob not saved")
-                    }
-                } catch {
-                    AppLogger.database.error("❌ Failed to save blob for \(String(describing: field)): \(error)")
-                }
-
+                saveAttributedString(attributedString, for: field, in: article)
                 return attributedString
             } else {
                 AppLogger.database.error("❌ Failed to generate attributed string for \(String(describing: field))")
@@ -292,7 +385,7 @@ final class ArticleOperations {
     /// - Parameter article: The article to generate rich text content for
     /// - Returns: A dictionary mapping field names to generated NSAttributedString instances
     @MainActor
-    func generateAllRichTextContent(for article: NotificationData) -> [RichTextField: NSAttributedString] {
+    func generateAllRichTextContent(for article: ArticleModel) -> [RichTextField: NSAttributedString] {
         var results: [RichTextField: NSAttributedString] = [:]
 
         // Generate for all rich text fields
@@ -344,10 +437,10 @@ final class ArticleOperations {
     ///   - sortOrder: The sort order to use within groups
     /// - Returns: An array of grouped articles with keys
     func groupArticles(
-        _ articles: [NotificationData],
+        _ articles: [ArticleModel],
         by groupingStyle: String,
         sortOrder: String
-    ) async -> [(key: String, notifications: [NotificationData])] {
+    ) async -> [(key: String, articles: [ArticleModel])] {
         return await Task.detached(priority: .userInitiated) {
             // First, sort the articles according to the sort order
             let sortedArticles = self.sortArticles(articles, by: sortOrder)
@@ -356,14 +449,14 @@ final class ArticleOperations {
             switch groupingStyle {
             case "date":
                 let groupedByDay = Dictionary(grouping: sortedArticles) {
-                    Calendar.current.startOfDay(for: $0.pub_date ?? $0.date)
+                    Calendar.current.startOfDay(for: $0.publishDate)
                 }
 
                 let sortedDayKeys = groupedByDay.keys.sorted { $0 > $1 }
                 return sortedDayKeys.map { day in
                     let displayKey = day.formatted(date: .abbreviated, time: .omitted)
-                    let notifications = groupedByDay[day] ?? []
-                    return (key: displayKey, notifications: notifications)
+                    let articles = groupedByDay[day] ?? []
+                    return (key: displayKey, articles: articles)
                 }
 
             case "topic":
@@ -372,7 +465,7 @@ final class ArticleOperations {
                 }
 
                 return groupedByTopic.map {
-                    (key: $0.key, notifications: $0.value)
+                    (key: $0.key, articles: $0.value)
                 }.sorted { $0.key < $1.key }
 
             default: // "none"
@@ -387,20 +480,20 @@ final class ArticleOperations {
     ///   - sortOrder: The sort order to use
     /// - Returns: A sorted array of articles
     func sortArticles(
-        _ articles: [NotificationData],
+        _ articles: [ArticleModel],
         by sortOrder: String
-    ) -> [NotificationData] {
+    ) -> [ArticleModel] {
         return articles.sorted { a, b in
             switch sortOrder {
             case "oldest":
-                return (a.pub_date ?? a.date) < (b.pub_date ?? b.date)
+                return a.publishDate < b.publishDate
             case "bookmarked":
                 if a.isBookmarked != b.isBookmarked {
                     return a.isBookmarked
                 }
-                return (a.pub_date ?? a.date) > (b.pub_date ?? b.date)
+                return a.publishDate > b.publishDate
             default: // "newest"
-                return (a.pub_date ?? a.date) > (b.pub_date ?? b.date)
+                return a.publishDate > b.publishDate
             }
         }
     }
@@ -479,33 +572,128 @@ final class ArticleOperations {
         return try await articleService.removeDuplicateArticles()
     }
 
-    // MARK: - Rich Text Helper Methods
-
-    /// Gets the markdown text for a specific field
+    /// Centralized method to load content for a section with proper context management
     /// - Parameters:
-    ///   - field: The rich text field
-    ///   - article: The article to get the text from
-    /// - Returns: The markdown text if available, nil otherwise
-    private func getMarkdownTextForField(_ field: RichTextField, from article: NotificationData) -> String? {
-        switch field {
-        case .title:
-            return article.title
-        case .body:
-            return article.body
-        case .summary:
-            return article.summary
-        case .criticalAnalysis:
-            return article.critical_analysis
-        case .logicalFallacies:
-            return article.logical_fallacies
-        case .sourceAnalysis:
-            return article.source_analysis
-        case .relationToTopic:
-            return article.relation_to_topic
-        case .additionalInsights:
-            return article.additional_insights
+    ///   - section: The section name to load
+    ///   - articleId: The ID of the article
+    /// - Returns: The attributed string for the section, or nil if unavailable
+    @MainActor
+    func loadContentForSection(section: String, articleId: UUID) async -> NSAttributedString? {
+        AppLogger.database.debug("🔄 CENTRALIZED SECTION LOAD: \(section) for article \(articleId)")
+        AppLogger.database.debug("🔄 Container: \(String(describing: SwiftDataContainer.shared.container))")
+
+        // Get the article model with context directly - no more dual model approach
+        guard let model = await getArticleModelWithContext(byId: articleId) else {
+            AppLogger.database.error("❌ Could not retrieve article with ID: \(articleId)")
+            return nil
         }
+
+        // Get the field enum from section name
+        let field = SectionNaming.fieldForSection(section)
+
+        // PHASE 1: Try to load from blob
+        if let blob = field.getBlob(from: model), !blob.isEmpty {
+            do {
+                let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+                    ofClass: NSAttributedString.self,
+                    from: blob
+                )
+
+                if let content = attributedString {
+                    AppLogger.database.debug("✅ LOADED FROM BLOB: \(section) - \(blob.count) bytes")
+                    return content
+                }
+            } catch {
+                AppLogger.database.error("❌ BLOB ERROR: \(section) - \(error.localizedDescription)")
+            }
+        }
+
+        // PHASE 2: Generate from markdown
+        let markdownText = field.getMarkdownText(from: model)
+
+        guard let text = markdownText, !text.isEmpty else {
+            AppLogger.database.warning("⚠️ NO TEXT: \(section) - No source text available")
+            return nil
+        }
+
+        // Generate attributed string from markdown
+        if let attributedString = markdownToAttributedString(text, textStyle: field.textStyle) {
+            AppLogger.database.debug("⚙️ GENERATED: \(section) - Created attributed string")
+
+            // Create blob data and save to the ArticleModel
+            do {
+                let blobData = try NSKeyedArchiver.archivedData(
+                    withRootObject: attributedString,
+                    requiringSecureCoding: false
+                )
+
+                // Save directly to the model
+                let saved = saveBlobToDatabase(field: field, blobData: blobData, articleModel: model)
+                AppLogger.database.debug("✅ SAVED TO MODEL: \(section) - \(saved ? "Success" : "Failed")")
+
+                if !saved {
+                    // Last resort - try to get a fresh model and save there
+                    if let freshModel = await getArticleModelWithContext(byId: articleId) {
+                        let freshSaved = saveBlobToDatabase(field: field, blobData: blobData, articleModel: freshModel)
+                        AppLogger.database.debug("✅ SAVED TO FRESH MODEL: \(section) - \(freshSaved ? "Success" : "Failed")")
+                    } else {
+                        AppLogger.database.warning("⚠️ SAVE FAILED: \(section) - No valid context found for blob storage")
+                    }
+                }
+            } catch {
+                AppLogger.database.error("❌ BLOB CREATION ERROR: \(section) - \(error.localizedDescription)")
+            }
+
+            return attributedString
+        }
+
+        AppLogger.database.error("❌ GENERATION FAILED: \(section) - Could not create attributed string")
+        return nil
+    }
+
+    // MARK: - Verification
+
+    /// Adds comprehensive verification for blob storage
+    /// - Parameters:
+    ///   - field: The field to verify
+    ///   - articleId: The article ID to verify for
+    func verifyBlobStorage(field: RichTextField, articleId: UUID) async {
+        @MainActor
+        func verifyWithArticle(_ article: ArticleModel?) {
+            guard let article = article else {
+                AppLogger.database.error("⚠️ VERIFICATION FAILED: Could not retrieve article model for ID: \(articleId)")
+                return
+            }
+
+            let fieldName = SectionNaming.nameForField(field)
+
+            // Check container and context
+            AppLogger.database.debug("🔍 VERIFICATION: Using container: \(String(describing: SwiftDataContainer.shared.container))")
+            AppLogger.database.debug("🔍 VERIFICATION: Article has context: \(article.modelContext != nil)")
+
+            // Check if blob exists in ArticleModel
+            let blob = field.getBlob(from: article)
+
+            if let blob = blob, !blob.isEmpty {
+                AppLogger.database.debug("✅ VERIFICATION: \(fieldName) blob exists in ArticleModel with size: \(blob.count) bytes")
+
+                // Try to unarchive to verify content
+                do {
+                    if let attributedString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob) {
+                        AppLogger.database.debug("✅ VERIFICATION: \(fieldName) blob contains valid attributed string with length: \(attributedString.length)")
+                    } else {
+                        AppLogger.database.warning("⚠️ VERIFICATION: \(fieldName) blob unarchived to nil")
+                    }
+                } catch {
+                    AppLogger.database.error("❌ VERIFICATION: \(fieldName) blob unarchive error: \(error)")
+                }
+            } else {
+                AppLogger.database.warning("⚠️ VERIFICATION: \(fieldName) blob does not exist in ArticleModel")
+            }
+        }
+
+        // Get article with context to verify
+        let model = await getArticleModelWithContext(byId: articleId)
+        await verifyWithArticle(model)
     }
 }
-
-// NOTE: RichTextField extensions are now defined in MarkdownUtilities.swift

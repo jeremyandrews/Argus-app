@@ -43,7 +43,7 @@ struct NewsDetailView: View {
             )
         } else if createIfMissing {
             // If we should create missing content, use placeholder text
-            let fieldName = fieldNameFor(field)
+            let fieldName = SectionNaming.nameForField(field).lowercased()
             let placeholder = "No \(fieldName) content available."
             return markdownToAttributedString(
                 placeholder,
@@ -52,28 +52,6 @@ struct NewsDetailView: View {
             )
         }
         return nil
-    }
-
-    /// Converts a RichTextField enum to a human-readable field name
-    private func fieldNameFor(_ field: RichTextField) -> String {
-        switch field {
-        case .title:
-            return "title"
-        case .body:
-            return "body"
-        case .summary:
-            return "summary"
-        case .criticalAnalysis:
-            return "critical analysis"
-        case .logicalFallacies:
-            return "logical fallacies"
-        case .sourceAnalysis:
-            return "source analysis"
-        case .relationToTopic:
-            return "relevance"
-        case .additionalInsights:
-            return "context & perspective"
-        }
     }
 
     /// Gets the text content for a specific rich text field
@@ -587,12 +565,17 @@ struct NewsDetailView: View {
     }
 
     // Fix the loadContentForSection function to properly handle section loading
+    // Function removed - using SectionNaming.normalizedKey directly at call sites
+
     private func loadContentForSection(_ section: String) {
         // Simply delegate section loading to the ViewModel
         // The ViewModel now has improved logging and sequential loading
 
+        // Get normalized key for better diagnostics
+        let normalizedKey = SectionNaming.normalizedKey(section)
+
         // Log that we're requesting content for this section
-        AppLogger.database.debug("NewsDetailView requesting content for section: \(section)")
+        AppLogger.database.debug("NewsDetailView requesting content for section: \(section) (key: \(normalizedKey))")
 
         // Cancel any existing task
         sectionLoadingTasks[section]?.cancel()
@@ -1386,10 +1369,7 @@ struct NewsDetailView: View {
                 attributedString: criticalAnalysisAttributedString,
                 isLoading: isSectionLoading(section.header)
             )
-            .onAppear {
-                // Ensure content is loaded when this section appears
-                loadContentForSection("Critical Analysis")
-            }
+            // Removed onAppear handler - content loading now only triggered by section expansion
 
         // MARK: - Logical Fallacies
 
@@ -1399,9 +1379,7 @@ struct NewsDetailView: View {
                 attributedString: logicalFallaciesAttributedString,
                 isLoading: isSectionLoading(section.header)
             )
-            .onAppear {
-                loadContentForSection("Logical Fallacies")
-            }
+            // Removed onAppear handler - content loading now only triggered by section expansion
 
         // MARK: - Relevance
 
@@ -1411,9 +1389,7 @@ struct NewsDetailView: View {
                 attributedString: cachedContentBySection["Relevance"],
                 isLoading: isSectionLoading(section.header)
             )
-            .onAppear {
-                loadContentForSection("Relevance")
-            }
+            // Removed onAppear handler - content loading now only triggered by section expansion
 
         // MARK: - Context & Perspective
 
@@ -1423,9 +1399,7 @@ struct NewsDetailView: View {
                 attributedString: cachedContentBySection["Context & Perspective"],
                 isLoading: isSectionLoading(section.header)
             )
-            .onAppear {
-                loadContentForSection("Context & Perspective")
-            }
+            // Removed onAppear handler - content loading now only triggered by section expansion
 
         // MARK: - Related Articles
 
@@ -1548,25 +1522,29 @@ struct NewsDetailView: View {
 
     private func loadInitialMinimalContent() {
         // Only proceed if we have a notification
-        guard let _ = currentNotification else { return }
+        guard let article = currentNotification else { return }
 
         // Log the loading attempt
-        AppLogger.database.debug("Loading initial content for article opening")
+        AppLogger.database.debug("Loading initial content for article ID: \(article.id)")
 
         // Ensure the Summary section is expanded
         expandedSections["Summary"] = true
 
-        // Load minimal content via ViewModel (title and body)
+        // Load minimal content (title and body) via ViewModel
         Task {
+            // Let the viewModel handle loading using our unified context approach
             await viewModel.loadMinimalContent()
+
+            // Log minimal content load completion
+            AppLogger.database.debug("✅ Minimal content loaded for article ID: \(article.id)")
+
+            // After minimal content is loaded, force load the Summary section
+            // This ensures proper context preservation via the centralized mechanism
+            loadContentForSection("Summary")
+
+            // Log that we've explicitly loaded the Summary section
+            AppLogger.database.debug("✅ Summary section load triggered for initial view")
         }
-
-        // Force load the Summary section via ViewModel - this is critical
-        // This line directly uses the ViewModel's enhanced loading mechanism with timeout/blob handling
-        loadContentForSection("Summary")
-
-        // Log that we've explicitly loaded the Summary section
-        AppLogger.database.debug("Summary section explicitly loaded for initial view")
     }
 
     struct LazyLoadingContentView<Content: View>: View {
@@ -1645,7 +1623,7 @@ struct NewsDetailView: View {
 
             // Track start time for diagnostics
             let startTime = Date()
-            AppLogger.database.debug("LazyLoadingContentView: Loading content for \(getFieldNameFor(field))")
+            AppLogger.database.debug("LazyLoadingContentView: Loading content for \(SectionNaming.nameForField(field).lowercased())")
 
             // Only load if we don't already have the content
             if loadedAttributedString != nil {
@@ -1669,7 +1647,7 @@ struct NewsDetailView: View {
                         loadedFromBlob = attributedString != nil
 
                         if loadedFromBlob {
-                            AppLogger.database.debug("LazyLoadingContentView: Loaded \(getFieldNameFor(field)) from blob")
+                            AppLogger.database.debug("LazyLoadingContentView: Loaded \(SectionNaming.nameForField(field).lowercased()) from blob")
                         }
                     } catch {
                         AppLogger.database.error("LazyLoadingContentView: Failed to unarchive blob: \(error)")
@@ -1688,11 +1666,11 @@ struct NewsDetailView: View {
                         )
 
                         if attributedString != nil {
-                            AppLogger.database.debug("LazyLoadingContentView: Generated \(getFieldNameFor(field)) from markdown")
+                            AppLogger.database.debug("LazyLoadingContentView: Generated \(SectionNaming.nameForField(field).lowercased()) from markdown")
                         }
                     } else {
                         // Create placeholder content if needed
-                        let fieldName = getFieldNameFor(field)
+                        let fieldName = SectionNaming.nameForField(field).lowercased()
                         let placeholder = "No \(fieldName) content available."
                         attributedString = markdownToAttributedString(
                             placeholder,
@@ -1711,12 +1689,12 @@ struct NewsDetailView: View {
                     // Log completion
                     let loadTime = Date().timeIntervalSince(startTime)
                     if let _ = attributedString {
-                        AppLogger.database.debug("LazyLoadingContentView: Completed loading \(getFieldNameFor(field)) in \(loadTime) seconds")
+                        AppLogger.database.debug("LazyLoadingContentView: Completed loading \(SectionNaming.nameForField(field).lowercased()) in \(loadTime) seconds")
                         if let callback = onLoad, let content = attributedString {
                             callback(content)
                         }
                     } else {
-                        AppLogger.database.error("LazyLoadingContentView: Failed to load \(getFieldNameFor(field)) after \(loadTime) seconds")
+                        AppLogger.database.error("LazyLoadingContentView: Failed to load \(SectionNaming.nameForField(field).lowercased()) after \(loadTime) seconds")
                     }
                 }
             }
@@ -1744,41 +1722,10 @@ struct NewsDetailView: View {
             }
         }
 
-        // Helper function to convert enum to readable string
-        private func getFieldNameFor(_ field: RichTextField) -> String {
-            switch field {
-            case .title:
-                return "title"
-            case .body:
-                return "body"
-            case .summary:
-                return "summary"
-            case .criticalAnalysis:
-                return "critical analysis"
-            case .logicalFallacies:
-                return "logical fallacies"
-            case .sourceAnalysis:
-                return "source analysis"
-            case .relationToTopic:
-                return "relevance"
-            case .additionalInsights:
-                return "context & perspective"
-            }
-        }
+        // Function removed - using SectionNaming.nameForField directly at call sites
     }
 
-    // This explicitly maps section names to field types, addressing potential mismatches
-    private func getRichTextFieldForSection(_ header: String) -> RichTextField {
-        switch header {
-        case "Summary": return .summary
-        case "Critical Analysis": return .criticalAnalysis
-        case "Logical Fallacies": return .logicalFallacies
-        case "Source Analysis": return .sourceAnalysis
-        case "Relevance": return .relationToTopic
-        case "Context & Perspective": return .additionalInsights
-        default: return .body
-        }
-    }
+    // Function removed - using SectionNaming.fieldForSection directly at call sites
 
     private func loadRelatedArticles() {
         // Only load if we haven't already loaded the content

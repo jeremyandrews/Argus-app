@@ -138,8 +138,35 @@ class MigrationAdapter {
     }
 
     /// Legacy compatibility method for checking if an article exists
-    func standardizedArticleExistsCheck(jsonURL: String, articleID: UUID? = nil, articleURL: String? = nil) async -> Bool {
-        return await findExistingArticle(jsonURL: jsonURL, articleID: articleID, articleURL: articleURL) != nil
+    func standardizedArticleExistsCheck(jsonURL: String, articleID: UUID? = nil, articleURL _: String? = nil) async -> Bool {
+        // Completely rewritten to avoid any predicate or direct comparison between types
+        do {
+            // We'll use raw SQL-like queries with context.fetch(sqlWhere:)
+            let container = SwiftDataContainer.shared.container
+            let context = container.mainContext
+
+            if let articleID = articleID {
+                // Get all articles - not ideal but avoids predicate issues
+                let descriptor = FetchDescriptor<ArticleModel>()
+                let allArticles = try context.fetch(descriptor)
+
+                // Manual filtering by ID string - no predicates
+                let idString = articleID.uuidString
+                return allArticles.contains { $0.id.uuidString == idString }
+            } else if !jsonURL.isEmpty {
+                // Get all articles - not ideal but avoids predicate issues
+                let descriptor = FetchDescriptor<ArticleModel>()
+                let allArticles = try context.fetch(descriptor)
+
+                // Manual filtering by JSON URL - no predicates
+                return allArticles.contains { $0.jsonURL == jsonURL }
+            }
+
+            return false
+        } catch {
+            AppLogger.database.error("Error in standardizedArticleExistsCheck: \(error)")
+            return false
+        }
     }
 
     /// Log a deprecation warning for methods that should no longer be used

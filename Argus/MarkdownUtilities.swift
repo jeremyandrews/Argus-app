@@ -15,6 +15,49 @@ enum RichTextField {
     case additionalInsights
 }
 
+// Centralized section naming system to ensure consistency
+public enum SectionNaming {
+    /// Converts a section name to the corresponding RichTextField enum
+    static func fieldForSection(_ section: String) -> RichTextField {
+        switch section {
+        case "Summary": return .summary
+        case "Critical Analysis": return .criticalAnalysis
+        case "Logical Fallacies": return .logicalFallacies
+        case "Source Analysis": return .sourceAnalysis
+        case "Relevance": return .relationToTopic
+        case "Context & Perspective": return .additionalInsights
+        default: return .body
+        }
+    }
+
+    /// Converts a RichTextField enum to a human-readable section name
+    static func nameForField(_ field: RichTextField) -> String {
+        switch field {
+        case .title: return "Title"
+        case .body: return "Body"
+        case .summary: return "Summary"
+        case .criticalAnalysis: return "Critical Analysis"
+        case .logicalFallacies: return "Logical Fallacies"
+        case .sourceAnalysis: return "Source Analysis"
+        case .relationToTopic: return "Relevance"
+        case .additionalInsights: return "Context & Perspective"
+        }
+    }
+
+    /// Normalizes a section name to a database field key
+    static func normalizedKey(_ section: String) -> String {
+        switch section {
+        case "Summary": return "summary"
+        case "Critical Analysis": return "criticalAnalysis"
+        case "Logical Fallacies": return "logicalFallacies"
+        case "Source Analysis": return "sourceAnalysis"
+        case "Relevance": return "relationToTopic"
+        case "Context & Perspective": return "additionalInsights"
+        default: return section.lowercased()
+        }
+    }
+}
+
 // Defines text configuration for each field type
 extension RichTextField {
     var textStyle: String {
@@ -28,7 +71,61 @@ extension RichTextField {
         }
     }
 
-    // Gets the markdown text for this field from an object
+    // MARK: - ArticleModel Extensions (Primary Usage)
+
+    // Gets the markdown text for this field from an ArticleModel
+    func getMarkdownText(from article: ArticleModel) -> String? {
+        switch self {
+        case .title: return article.title
+        case .body: return article.body
+        case .summary: return article.summary
+        case .criticalAnalysis: return article.criticalAnalysis
+        case .logicalFallacies: return article.logicalFallacies
+        case .sourceAnalysis: return article.sourceAnalysis
+        case .relationToTopic: return article.relationToTopic
+        case .additionalInsights: return article.additionalInsights
+        }
+    }
+
+    // Gets the blob data for this field from an ArticleModel
+    func getBlob(from article: ArticleModel) -> Data? {
+        switch self {
+        case .title: return article.titleBlob
+        case .body: return article.bodyBlob
+        case .summary: return article.summaryBlob
+        case .criticalAnalysis: return article.criticalAnalysisBlob
+        case .logicalFallacies: return article.logicalFallaciesBlob
+        case .sourceAnalysis: return article.sourceAnalysisBlob
+        case .relationToTopic: return article.relationToTopicBlob
+        case .additionalInsights: return article.additionalInsightsBlob
+        }
+    }
+
+    // Sets the blob data for this field on an ArticleModel
+    func setBlob(_ data: Data?, on article: ArticleModel) {
+        switch self {
+        case .title:
+            article.titleBlob = data
+        case .body:
+            article.bodyBlob = data
+        case .summary:
+            article.summaryBlob = data
+        case .criticalAnalysis:
+            article.criticalAnalysisBlob = data
+        case .logicalFallacies:
+            article.logicalFallaciesBlob = data
+        case .sourceAnalysis:
+            article.sourceAnalysisBlob = data
+        case .relationToTopic:
+            article.relationToTopicBlob = data
+        case .additionalInsights:
+            article.additionalInsightsBlob = data
+        }
+    }
+
+    // MARK: - Legacy NotificationData Extensions (Only For Migration)
+
+    // Gets the markdown text for this field from a NotificationData
     func getMarkdownText(from notification: NotificationData) -> String? {
         switch self {
         case .title: return notification.title
@@ -42,7 +139,7 @@ extension RichTextField {
         }
     }
 
-    // Gets the blob data for this field from an object
+    // Gets the blob data for this field from a NotificationData
     func getBlob(from notification: NotificationData) -> Data? {
         switch self {
         case .title: return notification.title_blob
@@ -56,9 +153,8 @@ extension RichTextField {
         }
     }
 
-    // Sets the blob data for this field on an object
+    // Sets the blob data for this field on a NotificationData
     func setBlob(_ data: Data?, on notification: NotificationData) {
-        // Just set the blob directly, without forcing DispatchQueue.main
         switch self {
         case .title:
             notification.title_blob = data
@@ -180,25 +276,27 @@ func markdownToAttributedString(
     return mutableAttributedString
 }
 
-/// Primary function to get an attributed string for any field
-/// This is the main function you should use everywhere in the app
+// MARK: - Primary ArticleModel Functions
+
+/// Primary function to get an attributed string for any field from an ArticleModel
+/// This is the main function to use throughout the app
 @MainActor
 func getAttributedString(
     for field: RichTextField,
-    from notification: NotificationData,
+    from article: ArticleModel,
     createIfMissing: Bool = true,
     customFontSize: CGFloat? = nil,
     completion: ((NSAttributedString?) -> Void)? = nil
 ) -> NSAttributedString? {
     // First check if the source text exists for this field
-    let markdownText = field.getMarkdownText(from: notification)
+    let markdownText = field.getMarkdownText(from: article)
     guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
         completion?(nil)
         return nil
     }
 
     // Try to use existing blob data if available
-    if let blobData = field.getBlob(from: notification),
+    if let blobData = field.getBlob(from: article),
        let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
            ofClass: NSAttributedString.self,
            from: blobData
@@ -223,18 +321,40 @@ func getAttributedString(
 
     // If no blob or failed to load, create fresh if requested
     if createIfMissing {
-        // Now always on main thread thanks to @MainActor
+        // Generate the attributed string
         let attributedString = markdownToAttributedString(
             unwrappedText,
             textStyle: field.textStyle,
             customFontSize: customFontSize
         )
+
         if let attributedString = attributedString {
+            // Archive to data
             do {
-                try notification.setRichText(attributedString, for: field, saveContext: true)
+                let blobData = try NSKeyedArchiver.archivedData(
+                    withRootObject: attributedString,
+                    requiringSecureCoding: false
+                )
+
+                // Set the blob on the article model
+                field.setBlob(blobData, on: article)
+
+                // Save the context if possible - we can't use the @ModelActor actor pattern here
+                // so we get the context directly from the article
+                if let context = article.modelContext {
+                    do {
+                        try context.save()
+                        AppLogger.database.debug("✅ Saved blob for \(String(describing: field)) to ArticleModel (\(blobData.count) bytes)")
+                    } catch {
+                        AppLogger.database.error("❌ Failed to save context for \(String(describing: field)) blob: \(error)")
+                    }
+                } else {
+                    AppLogger.database.warning("⚠️ ArticleModel has no context to save blob for \(String(describing: field))")
+                }
             } catch {
-                print("Error saving rich text for \(String(describing: field)): \(error)")
+                AppLogger.database.error("❌ Failed to create blob data for \(String(describing: field)): \(error)")
             }
+
             completion?(attributedString)
             return attributedString
         }
@@ -244,79 +364,190 @@ func getAttributedString(
     return nil
 }
 
-/// Save an attributed string as a blob
+// MARK: - Helper functions for ArticleModel
+
+/// Save an attributed string as a blob to an ArticleModel
+@MainActor
 func saveAttributedString(
     _ attributedString: NSAttributedString,
     for field: RichTextField,
-    in notification: NotificationData
+    in article: ArticleModel
 ) -> Bool {
-    // Use the model's built-in method
+    // Archive to data
     do {
-        // Ensure we're on the main thread
-        if Thread.isMainThread {
-            try notification.setRichText(attributedString, for: field, saveContext: true)
+        let blobData = try NSKeyedArchiver.archivedData(
+            withRootObject: attributedString,
+            requiringSecureCoding: false
+        )
+
+        // Set the blob on the article model
+        field.setBlob(blobData, on: article)
+
+        // Save the context if possible
+        if let context = article.modelContext {
+            try context.save()
+            AppLogger.database.debug("✅ Saved blob for \(String(describing: field)) to ArticleModel (\(blobData.count) bytes)")
+            return true
         } else {
-            // Dispatch to main thread
-            DispatchQueue.main.async {
-                do {
-                    try notification.setRichText(attributedString, for: field, saveContext: true)
-                } catch {
-                    AppLogger.database.error("Error saving rich text on background thread: \(error)")
-                }
-            }
+            AppLogger.database.warning("⚠️ ArticleModel has no context to save blob for \(String(describing: field))")
+            return false
         }
-        return true
     } catch {
-        AppLogger.database.error("Error saving rich text: \(error)")
+        AppLogger.database.error("❌ Failed to save blob for \(String(describing: field)): \(error)")
         return false
     }
 }
 
-@Model
+/// Get blobs for a specific field in an ArticleModel
+/// - Parameters:
+///   - field: The rich text field to get blobs for
+///   - article: The ArticleModel to get blobs from
+/// - Returns: An array of blob data, or nil if no blobs are found
+func getBlobsForField(_ field: RichTextField, from article: ArticleModel) -> [Data]? {
+    let fieldName = SectionNaming.nameForField(field)
+    let normalizedKey = SectionNaming.normalizedKey(fieldName)
+
+    if let blob = field.getBlob(from: article), !blob.isEmpty {
+        AppLogger.database.debug("📦 Found blob for \(fieldName) (normalized key: \(normalizedKey)) (\(blob.count) bytes)")
+        return [blob]
+    }
+    AppLogger.database.debug("⚠️ No blob found for \(fieldName) (normalized key: \(normalizedKey))")
+    return nil
+}
+
+/// Verifies all blobs in an ArticleModel and logs their status
+/// - Parameter article: The ArticleModel to verify blobs for
+/// - Returns: True if all blobs are valid, false otherwise
+func verifyAllBlobs(in article: ArticleModel) -> Bool {
+    let fields: [RichTextField] = [
+        .title, .body, .summary, .criticalAnalysis,
+        .logicalFallacies, .sourceAnalysis, .relationToTopic,
+        .additionalInsights,
+    ]
+
+    AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(article.id):")
+
+    var allValid = true
+    for field in fields {
+        // Use human-readable name for better logs
+        let fieldName = SectionNaming.nameForField(field)
+        let normalizedKey = SectionNaming.normalizedKey(fieldName)
+
+        if let blob = field.getBlob(from: article) {
+            do {
+                if let _ = try NSKeyedUnarchiver.unarchivedObject(
+                    ofClass: NSAttributedString.self,
+                    from: blob
+                ) {
+                    AppLogger.database.debug("✅ \(fieldName) blob is valid (\(blob.count) bytes)")
+                } else {
+                    AppLogger.database.error("❌ \(fieldName) blob unarchived to nil")
+                    allValid = false
+                }
+            } catch {
+                AppLogger.database.error("❌ \(fieldName) blob failed to unarchive: \(error)")
+                allValid = false
+            }
+        } else {
+            // Missing blob is not an error - the content may not have been converted yet
+            AppLogger.database.debug("⚪️ No blob exists for \(fieldName) (normalized key: \(normalizedKey))")
+        }
+    }
+
+    return allValid
+}
+
+/// Regenerates all blobs for an ArticleModel
+/// - Parameters:
+///   - article: The ArticleModel to regenerate blobs for
+///   - force: Whether to force regeneration even if blobs exist
+/// - Returns: Number of blobs regenerated
+@MainActor
+func regenerateAllBlobs(for article: ArticleModel, force: Bool = false) -> Int {
+    let fields: [RichTextField] = [
+        .title, .body, .summary, .criticalAnalysis,
+        .logicalFallacies, .sourceAnalysis, .relationToTopic,
+        .additionalInsights,
+    ]
+
+    var regeneratedCount = 0
+
+    for field in fields {
+        // Skip if blob exists and we're not forcing regeneration
+        if !force && field.getBlob(from: article) != nil {
+            continue
+        }
+
+        // Skip if no source text
+        guard let text = field.getMarkdownText(from: article), !text.isEmpty else {
+            continue
+        }
+
+        // Generate attributed string
+        if let attributedString = markdownToAttributedString(text, textStyle: field.textStyle) {
+            if saveAttributedString(attributedString, for: field, in: article) {
+                regeneratedCount += 1
+            }
+        }
+    }
+
+    if regeneratedCount > 0 {
+        AppLogger.database.debug("✅ Regenerated \(regeneratedCount) blobs for article \(article.id)")
+    }
+
+    return regeneratedCount
+}
+
+// MARK: - Legacy NotificationData Implementation for Migration ONLY
+
+/// Legacy class that should ONLY be used during migration
+/// This is NOT a SwiftData model anymore - do not use it for persistence
 class NotificationData {
-    @Attribute var id: UUID = UUID()
-    @Attribute var date: Date = Date()
-    @Attribute var title: String = ""
-    @Attribute var body: String = ""
-    @Attribute var isViewed: Bool = false
-    @Attribute var isBookmarked: Bool = false
-    @Attribute var isArchived: Bool = false // Archive functionality removed - keeping property for backward compatibility
-    // @Attribute(.unique) var json_url: String = ""
-    @Attribute var json_url: String = ""
-    @Attribute var article_url: String? = nil
-    @Attribute var topic: String?
-    @Attribute var article_title: String = ""
-    @Attribute var affected: String = ""
-    @Attribute var domain: String?
-    @Attribute var pub_date: Date?
+    var id: UUID = .init()
+    var date: Date = .init()
+    var title: String = ""
+    var body: String = ""
+    var isViewed: Bool = false
+    var isBookmarked: Bool = false
+    var isArchived: Bool = false // Archive functionality removed - keeping property for backward compatibility
+    var json_url: String = ""
+    var article_url: String?
+    var topic: String?
+    var article_title: String = ""
+    var affected: String = ""
+    var domain: String?
+    var pub_date: Date?
 
     // New fields for analytics and content
-    @Attribute var sources_quality: Int?
-    @Attribute var argument_quality: Int?
-    @Attribute var source_type: String?
-    @Attribute var quality: Int?
+    var sources_quality: Int?
+    var argument_quality: Int?
+    var source_type: String?
+    var quality: Int?
 
     // Text fields for source content
-    @Attribute var summary: String?
-    @Attribute var critical_analysis: String?
-    @Attribute var logical_fallacies: String?
-    @Attribute var source_analysis: String?
-    @Attribute var relation_to_topic: String?
-    @Attribute var additional_insights: String?
+    var summary: String?
+    var critical_analysis: String?
+    var logical_fallacies: String?
+    var source_analysis: String?
+    var relation_to_topic: String?
+    var additional_insights: String?
 
     // BLOB fields for rich text versions
-    @Attribute var title_blob: Data?
-    @Attribute var body_blob: Data?
-    @Attribute var summary_blob: Data?
-    @Attribute var critical_analysis_blob: Data?
-    @Attribute var logical_fallacies_blob: Data?
-    @Attribute var source_analysis_blob: Data?
-    @Attribute var relation_to_topic_blob: Data?
-    @Attribute var additional_insights_blob: Data?
+    var title_blob: Data?
+    var body_blob: Data?
+    var summary_blob: Data?
+    var critical_analysis_blob: Data?
+    var logical_fallacies_blob: Data?
+    var source_analysis_blob: Data?
+    var relation_to_topic_blob: Data?
+    var additional_insights_blob: Data?
 
     // Engine statistics and similar articles stored as JSON strings
-    @Attribute var engine_stats: String?
-    @Attribute var similar_articles: String?
+    var engine_stats: String?
+    var similar_articles: String?
+
+    // Now a regular property for backward compatibility during migration only
+    var modelContext: Any?
 
     init(
         id: UUID = UUID(),
@@ -390,7 +621,7 @@ class NotificationData {
         self.similar_articles = similar_articles
     }
 
-    // Convenience methods to convert between NSAttributedString and Data
+    // Legacy convenience methods for compatibility during migration ONLY
 
     func setRichText(_ attributedString: NSAttributedString, for field: RichTextField,
                      saveContext: Bool = true) throws
@@ -416,42 +647,25 @@ class NotificationData {
             additional_insights_blob = data
         }
 
-        // Save the context if requested and we can access it
-        if saveContext, let modelContext = modelContext {
-            try modelContext.save()
+        // No context saving anymore since this is not a SwiftData model
+        if saveContext {
+            // Log that we're not actually saving
+            AppLogger.database.debug("ℹ️ NotificationData setRichText called with saveContext=true, but this is not a SwiftData model anymore")
         }
     }
 
-    private func getBlobData(for field: RichTextField) -> Data? {
-        switch field {
-        case .title:
-            return title_blob
-        case .body:
-            return body_blob
-        case .summary:
-            return summary_blob
-        case .criticalAnalysis:
-            return critical_analysis_blob
-        case .logicalFallacies:
-            return logical_fallacies_blob
-        case .sourceAnalysis:
-            return source_analysis_blob
-        case .relationToTopic:
-            return relation_to_topic_blob
-        case .additionalInsights:
-            return additional_insights_blob
-        }
-    }
-
-    /// Get blobs for a specific field - used by the ViewModel
+    /// Get blobs for a specific field - streamlined for direct field access
     /// - Parameter field: The rich text field to get blobs for
     /// - Returns: An array of blob data, or nil if no blobs are found
     func getBlobsForField(_ field: RichTextField) -> [Data]? {
+        let fieldName = SectionNaming.nameForField(field)
+        let normalizedKey = SectionNaming.normalizedKey(fieldName)
+
         if let blob = field.getBlob(from: self), !blob.isEmpty {
-            AppLogger.database.debug("📦 Found blob for \(String(describing: field)) (\(blob.count) bytes)")
+            AppLogger.database.debug("📦 Found blob for \(fieldName) (normalized key: \(normalizedKey)) (\(blob.count) bytes)")
             return [blob]
         }
-        AppLogger.database.debug("⚠️ No blob found for \(String(describing: field))")
+        AppLogger.database.debug("⚠️ No blob found for \(fieldName) (normalized key: \(normalizedKey))")
         return nil
     }
 
@@ -468,95 +682,40 @@ class NotificationData {
 
         var allValid = true
         for field in fields {
+            // Use human-readable name for better logs
+            let fieldName = SectionNaming.nameForField(field)
+            let normalizedKey = SectionNaming.normalizedKey(fieldName)
+
             if let blob = field.getBlob(from: self) {
                 do {
                     if let _ = try NSKeyedUnarchiver.unarchivedObject(
                         ofClass: NSAttributedString.self,
                         from: blob
                     ) {
-                        AppLogger.database.debug("✅ \(String(describing: field)) blob is valid (\(blob.count) bytes)")
+                        AppLogger.database.debug("✅ \(fieldName) blob is valid (\(blob.count) bytes)")
                     } else {
-                        AppLogger.database.error("❌ \(String(describing: field)) blob unarchived to nil")
+                        AppLogger.database.error("❌ \(fieldName) blob unarchived to nil")
                         allValid = false
                     }
                 } catch {
-                    AppLogger.database.error("❌ \(String(describing: field)) blob failed to unarchive: \(error)")
+                    AppLogger.database.error("❌ \(fieldName) blob failed to unarchive: \(error)")
                     allValid = false
                 }
             } else {
                 // Missing blob is not an error - the content may not have been converted yet
-                AppLogger.database.debug("⚪️ No blob exists for \(String(describing: field))")
+                AppLogger.database.debug("⚪️ No blob exists for \(fieldName) (normalized key: \(normalizedKey))")
             }
         }
 
         return allValid
     }
-
-    /// Regenerates all blobs for this article
-    /// - Parameter force: Whether to force regeneration even if blobs exist
-    /// - Returns: Number of blobs regenerated
-    @MainActor
-    func regenerateAllBlobs(force: Bool = false) -> Int {
-        let fields: [RichTextField] = [
-            .title, .body, .summary, .criticalAnalysis,
-            .logicalFallacies, .sourceAnalysis, .relationToTopic,
-            .additionalInsights,
-        ]
-
-        var regeneratedCount = 0
-
-        for field in fields {
-            // Skip if blob exists and we're not forcing regeneration
-            if !force && field.getBlob(from: self) != nil {
-                continue
-            }
-
-            // Skip if no source text
-            guard let text = field.getMarkdownText(from: self), !text.isEmpty else {
-                continue
-            }
-
-            // Generate attributed string
-            if let attributedString = markdownToAttributedString(text, textStyle: field.textStyle) {
-                do {
-                    try setRichText(attributedString, for: field, saveContext: false)
-                    regeneratedCount += 1
-                } catch {
-                    AppLogger.database.error("❌ Failed to regenerate blob for \(String(describing: field)): \(error)")
-                }
-            }
-        }
-
-        // Save once at the end instead of for each field
-        if regeneratedCount > 0, let context = modelContext {
-            do {
-                try context.save()
-                AppLogger.database.debug("✅ Saved \(regeneratedCount) regenerated blobs")
-            } catch {
-                AppLogger.database.error("❌ Failed to save regenerated blobs: \(error)")
-            }
-        }
-
-        return regeneratedCount
-    }
 }
 
-// Extension to provide computed property for effective date
+// Legacy extension for migration compatibility only
 extension NotificationData {
     var effectiveDate: Date {
         return pub_date ?? date
     }
 }
 
-@Model
-class SeenArticle {
-    @Attribute var id: UUID = UUID()
-    @Attribute var json_url: String = ""
-    @Attribute var date: Date = Date()
-
-    init(id: UUID, json_url: String, date: Date) {
-        self.id = id
-        self.json_url = json_url
-        self.date = date
-    }
-}
+// Legacy SeenArticle definition now moved to MigrationService

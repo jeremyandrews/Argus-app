@@ -71,13 +71,12 @@ class SwiftDataContainer {
         // Initialize request coordinator
         requestCoordinator = CloudKitRequestCoordinator(containerIdentifier: cloudKitContainerIdentifier)
 
-        // Create a schema with ALL required models for migration
+        // Create a schema with only the new models plus legacy SeenArticle for migration
         let schema = Schema([
-            // Legacy models needed for migration
-            NotificationData.self,
+            // Legacy model needed for migration only
             SeenArticle.self,
 
-            // New SwiftData models
+            // New SwiftData models - our primary schema
             ArticleModel.self,
             SeenArticleModel.self,
             TopicModel.self,

@@ -281,3 +281,111 @@ enum TopicPriority: String, Codable, CaseIterable {
 
 // Migration utilities will be implemented in a later phase
 // when NotificationData is properly defined and accessible
+
+// MARK: - API Compatibility Extensions
+
+/// Typealias for backward compatibility
+typealias SeenArticle = SeenArticleModel
+// Note: NotificationData is defined in MarkdownUtilities.swift as a legacy class for migration
+
+/// SeenArticle compatibility extension to make SeenArticleModel work with existing APIs
+extension SeenArticleModel {
+    /// The json_url property of the seen article (renamed to match SeenArticle)
+    var json_url: String {
+        get { return jsonURL }
+        set { jsonURL = newValue }
+    }
+}
+
+/// NotificationData compatibility extension to make ArticleModel work with existing APIs
+extension ArticleModel {
+    /// The json_url property of the notification data (renamed to match NotificationData)
+    var json_url: String {
+        get { return jsonURL }
+        set { jsonURL = newValue }
+    }
+
+    /// The article_url property of the notification data (renamed to match NotificationData)
+    var article_url: String? {
+        get { return url }
+        set { url = newValue }
+    }
+
+    /// The article_title property of the notification data (renamed to match NotificationData)
+    var article_title: String {
+        get { return articleTitle }
+        set { articleTitle = newValue }
+    }
+
+    /// The pub_date property of the notification data (renamed to match NotificationData)
+    var pub_date: Date {
+        get { return publishDate }
+        set { publishDate = newValue }
+    }
+
+    /// The date property of the notification data (renamed to match NotificationData)
+    var date: Date {
+        get { return addedDate }
+        set { addedDate = newValue }
+    }
+
+    /// The sources_quality property of the notification data (renamed to match NotificationData)
+    var sources_quality: Int? {
+        get { return sourcesQuality }
+        set { sourcesQuality = newValue }
+    }
+
+    /// The argument_quality property of the notification data (renamed to match NotificationData)
+    var argument_quality: Int? {
+        get { return argumentQuality }
+        set { argumentQuality = newValue }
+    }
+
+    /// The source_type property of the notification data (renamed to match NotificationData)
+    var source_type: String? {
+        get { return sourceType }
+        set { sourceType = newValue }
+    }
+
+    /// The source_analysis property of the notification data (renamed to match NotificationData)
+    var source_analysis: String? {
+        get { return sourceAnalysis }
+        set { sourceAnalysis = newValue }
+    }
+
+    /// The critical_analysis property of the notification data (renamed to match NotificationData)
+    var critical_analysis: String? {
+        get { return criticalAnalysis }
+        set { criticalAnalysis = newValue }
+    }
+
+    /// The logical_fallacies property of the notification data (renamed to match NotificationData)
+    var logical_fallacies: String? {
+        get { return logicalFallacies }
+        set { logicalFallacies = newValue }
+    }
+
+    /// The relation_to_topic property of the notification data (renamed to match NotificationData)
+    var relation_to_topic: String? {
+        get { return relationToTopic }
+        set { relationToTopic = newValue }
+    }
+
+    /// The additional_insights property of the notification data (renamed to match NotificationData)
+    var additional_insights: String? {
+        get { return additionalInsights }
+        set { additionalInsights = newValue }
+    }
+
+    /// The engine_stats property of the notification data (renamed to match NotificationData)
+    var engine_stats: String? {
+        get { return engineStats }
+        set { engineStats = newValue }
+    }
+
+    /// The similar_articles property of the notification data (renamed to match NotificationData)
+    var similar_articles: String? {
+        get { return similarArticles }
+        set { similarArticles = newValue }
+    }
+}

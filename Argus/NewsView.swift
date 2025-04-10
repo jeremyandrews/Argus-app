@@ -19,7 +19,7 @@ struct NewsView: View {
     @State private var isFilterViewPresented: Bool = false
     @State private var filterViewHeight: CGFloat = 200
     @State private var showDeleteConfirmation = false
-    @State private var articleToDelete: NotificationData?
+    @State private var articleToDelete: ArticleModel?
     @State var isActivelyScrolling: Bool = false
     @State private var scrollIdleTimer: Task<Void, Never>? = nil
     @State private var scrollProxy: ScrollViewProxy?
@@ -86,27 +86,27 @@ struct NewsView: View {
                         ForEach(viewModel.groupedArticles, id: \.key) { group in
                             if !group.key.isEmpty {
                                 Section(header: Text(group.key)) {
-                                    ForEach(group.notifications.uniqued(), id: \.id) { notification in
-                                        NotificationRow(
-                                            notification: notification,
+                                    ForEach(group.articles.uniqued(), id: \.id) { article in
+                                        ArticleRow(
+                                            article: article,
                                             editMode: editMode,
-                                            selectedNotificationIDs: $viewModel.selectedArticleIds
+                                            selectedArticleIDs: $viewModel.selectedArticleIds
                                         )
                                         .onAppear {
-                                            loadMoreNotificationsIfNeeded(currentItem: notification)
+                                            loadMoreArticlesIfNeeded(currentItem: article)
                                         }
                                     }
                                 }
                             } else {
                                 // Single group with no header
-                                ForEach(group.notifications.uniqued(), id: \.id) { notification in
-                                    NotificationRow(
-                                        notification: notification,
+                                ForEach(group.articles.uniqued(), id: \.id) { article in
+                                    ArticleRow(
+                                        article: article,
                                         editMode: editMode,
-                                        selectedNotificationIDs: $viewModel.selectedArticleIds
+                                        selectedArticleIDs: $viewModel.selectedArticleIds
                                     )
                                     .onAppear {
-                                        loadMoreNotificationsIfNeeded(currentItem: notification)
+                                        loadMoreArticlesIfNeeded(currentItem: article)
                                     }
                                 }
                             }
@@ -311,11 +311,11 @@ struct NewsView: View {
 
     // MARK: - Row building
 
-    private struct NotificationContentView: View {
-        let notification: NotificationData
+    private struct ArticleContentView: View {
+        let article: ArticleModel
         let modelContext: ModelContext
-        let filteredNotifications: [NotificationData]
-        let totalNotifications: [NotificationData]
+        let filteredArticles: [ArticleModel]
+        let totalArticles: [ArticleModel]
         @State private var titleAttributedString: NSAttributedString?
         @State private var bodyAttributedString: NSAttributedString?
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -325,7 +325,7 @@ struct NewsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 // Topic pill
                 HStack(spacing: 8) {
-                    if let topic = notification.topic, !topic.isEmpty {
+                    if let topic = article.topic, !topic.isEmpty {
                         TopicPill(topic: topic)
                     }
                     Spacer()
@@ -337,15 +337,15 @@ struct NewsView: View {
                         // Remove fixed height constraint
                         AccessibleAttributedText(attributedString: attributedTitle)
                     } else {
-                        Text(notification.title)
+                        Text(article.title ?? "")
                             .font(.headline)
                             .multilineTextAlignment(.leading)
                     }
                 }
-                .fontWeight(notification.isViewed ? .regular : .bold)
+                .fontWeight(article.isViewed ? .regular : .bold)
 
                 // Publication Date
-                if let pubDate = notification.pub_date {
+                if let pubDate = article.publishDate {
                     Text(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
                         .font(.footnote)
                         .foregroundColor(.secondary)
@@ -357,7 +357,7 @@ struct NewsView: View {
                         // Remove fixed height constraint
                         AccessibleAttributedText(attributedString: attributedBody)
                     } else {
-                        Text(notification.body)
+                        Text(article.body ?? "")
                             .font(.body)
                             .multilineTextAlignment(.leading)
                             .lineLimit(3)
@@ -366,21 +366,21 @@ struct NewsView: View {
                 .foregroundColor(.secondary)
 
                 // Affected
-                if !notification.affected.isEmpty {
-                    Text(notification.affected)
+                if !article.affected.isEmpty {
+                    Text(article.affected)
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
                 }
 
                 // Domain
-                if let domain = notification.domain, !domain.isEmpty {
+                if let domain = article.domain, !domain.isEmpty {
                     DomainView(
                         domain: domain,
-                        notification: notification,
+                        article: article,
                         modelContext: modelContext,
-                        filteredNotifications: filteredNotifications,
-                        totalNotifications: totalNotifications
+                        filteredArticles: filteredArticles,
+                        totalArticles: totalArticles
                     )
                 }
             }
@@ -393,13 +393,13 @@ struct NewsView: View {
             // Use the new markdown utilities to get attributed strings
             titleAttributedString = getAttributedString(
                 for: .title,
-                from: notification,
+                from: article,
                 createIfMissing: true
             )
 
             bodyAttributedString = getAttributedString(
                 for: .body,
-                from: notification,
+                from: article,
                 createIfMissing: true
             )
         }
@@ -407,10 +407,10 @@ struct NewsView: View {
 
     private struct DomainView: View {
         let domain: String
-        let notification: NotificationData
+        let article: ArticleModel
         let modelContext: ModelContext
-        let filteredNotifications: [NotificationData]
-        let totalNotifications: [NotificationData]
+        let filteredArticles: [ArticleModel]
+        let totalArticles: [ArticleModel]
         @State private var isLoading = false
         @State private var loadError: Error? = nil
         @State private var hasFetchedMetadata = false
@@ -420,12 +420,12 @@ struct NewsView: View {
                 // Use the shared DomainSourceView component
                 DomainSourceView(
                     domain: domain,
-                    sourceType: notification.source_type,
+                    sourceType: article.sourceType,
                     onTap: {
                         // Only load full content when user taps on the domain
-                        if notification.sources_quality == nil,
-                           notification.argument_quality == nil,
-                           notification.source_type == nil
+                        if article.sourcesQuality == nil,
+                           article.argumentQuality == nil,
+                           article.sourceType == nil
                         {
                             loadFullContent()
                         } else {
@@ -437,15 +437,15 @@ struct NewsView: View {
                     }
                 )
 
-                if notification.sources_quality != nil ||
-                    notification.argument_quality != nil ||
-                    notification.source_type != nil
+                if article.sourcesQuality != nil ||
+                    article.argumentQuality != nil ||
+                    article.sourceType != nil
                 {
                     // Use local data since it's already available
                     QualityBadges(
-                        sourcesQuality: notification.sources_quality,
-                        argumentQuality: notification.argument_quality,
-                        sourceType: notification.source_type,
+                        sourcesQuality: article.sourcesQuality,
+                        argumentQuality: article.argumentQuality,
+                        sourceType: article.sourceType,
                         scrollToSection: .constant(nil),
                         onBadgeTap: { section in
                             navigateToDetailView(section: section)
@@ -467,11 +467,11 @@ struct NewsView: View {
                 }
             }
             .onAppear {
-                // Check if we've already tried to fetch metadata for this notification
+                // Check if we've already tried to fetch metadata for this article
                 if !hasFetchedMetadata &&
-                    notification.sources_quality == nil &&
-                    notification.argument_quality == nil &&
-                    notification.source_type == nil
+                    article.sourcesQuality == nil &&
+                    article.argumentQuality == nil &&
+                    article.sourceType == nil
                 {
                     // Query database for metadata instead of making a network request
                     fetchLocalMetadataOnly()
@@ -485,21 +485,16 @@ struct NewsView: View {
 
             // Only query the local database to see if we have any metadata already stored
             Task {
-                // Check if there's any metadata in the database for this notification ID
+                // Check if there's any metadata in the database for this article ID
                 // without making a network request
                 do {
-                    // Query the database for this notification by ID to ensure we have the latest data
-                    // Using string-based predicate to avoid macro expansion issues
-                    let descriptor = FetchDescriptor<NotificationData>()
-
-                    // Perform a simple fetch and filter manually
-                    let allNotifications = try modelContext.fetch(descriptor)
-                    if let updatedNotification = allNotifications.first(where: { $0.id == notification.id }) {
-                        // If database has metadata that our current reference doesn't, update our view
+                    // Get a fresh copy of the article to see if it has metadata
+                    let articleOperations = ArticleOperations()
+                    if let updatedArticle = await articleOperations.getArticleModelWithContext(byId: article.id) {
                         await MainActor.run {
-                            if updatedNotification.sources_quality != nil ||
-                                updatedNotification.argument_quality != nil ||
-                                updatedNotification.source_type != nil
+                            if updatedArticle.sourcesQuality != nil ||
+                                updatedArticle.argumentQuality != nil ||
+                                updatedArticle.sourceType != nil
                             {
                                 // No need to trigger loadFullContent as the database already has the metadata
                                 // Just force a view refresh with the latest data
@@ -517,9 +512,13 @@ struct NewsView: View {
 
             isLoading = true
             Task {
-                // Generate rich text content for the fields based on what's currently available
-                _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
-                _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+                // Access the article with context
+                let articleOperations = ArticleOperations()
+                if let articleWithContext = await articleOperations.getArticleModelWithContext(byId: article.id) {
+                    // Generate rich text content for the fields based on what's currently available
+                    _ = articleOperations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
+                    _ = articleOperations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
+                }
 
                 // Update UI state
                 await MainActor.run {
@@ -530,14 +529,14 @@ struct NewsView: View {
         }
 
         private func navigateToDetailView(section: String) {
-            guard let index = filteredNotifications.firstIndex(where: { $0.id == notification.id }) else {
+            guard let index = filteredArticles.firstIndex(where: { $0.id == article.id }) else {
                 return
             }
 
             // Create a view model with the appropriate parameters
             let viewModel = NewsDetailViewModel(
-                articles: filteredNotifications,
-                allArticles: totalNotifications,
+                articles: filteredArticles,
+                allArticles: totalArticles,
                 currentIndex: index,
                 initiallyExpandedSection: section
             )
@@ -558,44 +557,44 @@ struct NewsView: View {
         }
     }
 
-    private func NotificationRow(
-        notification: NotificationData,
+    private func ArticleRow(
+        article: ArticleModel,
         editMode: Binding<EditMode>?,
-        selectedNotificationIDs: Binding<Set<NotificationData.ID>>
+        selectedArticleIDs: Binding<Set<ArticleModel.ID>>
     ) -> some View {
         // Create a local state to track the animation
-        let isUnread = !notification.isViewed
+        let isUnread = !article.isViewed
 
         return VStack(alignment: .leading, spacing: 10) {
             // Top row
-            headerRow(notification)
+            headerRow(article)
 
             // Title
-            titleView(notification)
+            titleView(article)
 
             // Publication Date
-            publicationDateView(notification)
+            publicationDateView(article)
 
             // Summary
-            summaryContent(notification)
+            summaryContent(article)
 
             // Affected Field
-            affectedFieldView(notification)
+            affectedFieldView(article)
 
             // Domain
-            domainView(notification)
+            domainView(article)
 
             // Quality Badges
-            badgesView(notification)
+            badgesView(article)
         }
         .padding()
         .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
         .cornerRadius(10)
-        .id(notification.id)
+        .id(article.id)
         .onLongPressGesture {
             withAnimation {
                 editMode?.wrappedValue = .active
-                selectedNotificationIDs.wrappedValue.insert(notification.id)
+                selectedArticleIDs.wrappedValue.insert(article.id)
             }
         }
         .gesture(
@@ -605,38 +604,36 @@ struct NewsView: View {
                     switch result {
                     case .first:
                         // This is the double‐tap case
-                        toggleReadStatus(notification)
+                        toggleReadStatus(article)
                     case .second:
                         // This is the single‐tap case
-                        openArticle(notification)
+                        openArticle(article)
                     }
                 }
         )
         .onAppear {
-            loadMoreNotificationsIfNeeded(currentItem: notification)
+            loadMoreArticlesIfNeeded(currentItem: article)
 
-            // If the blob doesn't exist yet, generate and save it on the main thread
-            if notification.body_blob == nil {
-                Task {
-                    generateBodyBlob(notificationID: notification.id)
-                }
+            // If the blob doesn't exist yet, generate and save it
+            Task {
+                await viewModel.generateBodyBlobIfNeeded(articleID: article.id)
             }
         }
     }
 
     // Helper functions for each part of the row
-    private func headerRow(_ notification: NotificationData) -> some View {
+    private func headerRow(_ article: ArticleModel) -> some View {
         HStack(spacing: 8) {
-            if let topic = notification.topic, !topic.isEmpty {
+            if let topic = article.topic, !topic.isEmpty {
                 TopicPill(topic: topic)
             }
             Spacer()
-            BookmarkButton(notification: notification)
+            BookmarkButton(article: article)
         }
     }
 
-    private func titleView(_ notification: NotificationData) -> some View {
-        Text(notification.title)
+    private func titleView(_ article: ArticleModel) -> some View {
+        Text(article.title ?? "")
             .font(.headline)
             .lineLimit(3)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -650,9 +647,9 @@ struct NewsView: View {
         return formatter
     }()
 
-    private func publicationDateView(_ notification: NotificationData) -> some View {
+    private func publicationDateView(_ article: ArticleModel) -> some View {
         Group {
-            if let pubDate = notification.pub_date {
+            if let pubDate = article.publishDate {
                 Text(dateFormatter.string(from: pubDate))
                     .font(.footnote)
                     .foregroundColor(.secondary)
@@ -661,23 +658,49 @@ struct NewsView: View {
         }
     }
 
-    // Load summaryContent from NewsView+Extensions.swift
-
-    // Load affectedFieldView from NewsView+Extensions.swift
-
-    private func domainView(_ notification: NotificationData) -> some View {
+    // Summary content from extensions
+    private func summaryContent(_ article: ArticleModel) -> some View {
         Group {
-            if let domain = notification.domain, !domain.isEmpty {
+            if let summary = article.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .lineLimit(3)
+                    .padding(.top, 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.disabled)
+            }
+        }
+    }
+
+    // Affected field from extensions
+    private func affectedFieldView(_ article: ArticleModel) -> some View {
+        Group {
+            if !article.affected.isEmpty {
+                Text(article.affected)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                    .padding(.top, 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.disabled)
+            }
+        }
+    }
+
+    private func domainView(_ article: ArticleModel) -> some View {
+        Group {
+            if let domain = article.domain, !domain.isEmpty {
                 DomainSourceView(
                     domain: domain,
-                    sourceType: notification.source_type,
+                    sourceType: article.sourceType,
                     onTap: {
                         // We'll just use the default tap behavior here like before
-                        openArticle(notification)
+                        openArticle(article)
                     },
                     onSourceTap: {
                         // Also open the article when source type is tapped
-                        openArticle(notification)
+                        openArticle(article)
                     }
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -687,9 +710,18 @@ struct NewsView: View {
         }
     }
 
-    private func badgesView(_ notification: NotificationData) -> some View {
+    private func badgesView(_ article: ArticleModel) -> some View {
         HStack {
-            LazyLoadingQualityBadges(notification: notification)
+            // Show quality badges directly
+            QualityBadges(
+                sourcesQuality: article.sourcesQuality,
+                argumentQuality: article.argumentQuality,
+                sourceType: article.sourceType,
+                scrollToSection: .constant(nil),
+                onBadgeTap: { _ in
+                    openArticle(article)
+                }
+            )
         }
         .padding(.top, 5)
     }
@@ -719,12 +751,12 @@ struct NewsView: View {
     }
 
     // Simplified bookmark icon on the trailing side
-    private func BookmarkButton(notification: NotificationData) -> some View {
+    private func BookmarkButton(article: ArticleModel) -> some View {
         Button {
-            toggleBookmark(notification)
+            toggleBookmark(article)
         } label: {
-            Image(systemName: notification.isBookmarked ? "bookmark.fill" : "bookmark")
-                .foregroundColor(notification.isBookmarked ? .blue : .gray)
+            Image(systemName: article.isBookmarked ? "bookmark.fill" : "bookmark")
+                .foregroundColor(article.isBookmarked ? .blue : .gray)
         }
         .buttonStyle(.plain)
     }
@@ -776,7 +808,7 @@ struct NewsView: View {
                 icon: "envelope.badge",
                 label: "Toggle Read"
             ) {
-                performActionOnSelection { $0.isViewed.toggle() }
+                performActionOnSelection { toggleReadStatus($0) }
             }
             Spacer()
             toolbarButton(
@@ -836,81 +868,28 @@ struct NewsView: View {
 
     // MARK: - Logic / Helpers
 
-    // Fast path for topic switching using shared database manager
-    @MainActor
-    private func updateTopicFromCache(newTopic: String, previousTopic _: String) {
-        // First check if we have this topic in the cache for immediate feedback
-        if isCacheValid && notificationsCache.keys.contains(newTopic) {
-            // Show instant UI update from cache
-            let cachedTopicData = notificationsCache[newTopic] ?? []
-            let filtered = filterNotificationsWithCurrentSettings(cachedTopicData)
-
-            // Update UI immediately with cached data
-            Task(priority: .userInitiated) {
-                let updatedGrouping = await createGroupedNotifications(filtered)
-
-                await MainActor.run {
-                    self.filteredNotifications = filtered
-                    self.sortedAndGroupedNotifications = updatedGrouping
-                }
-            }
-        }
-
-        // Then use the optimized DatabaseCoordinator to get fresh data
-        // even if we had cached data, we refresh to ensure accuracy
-        Task(priority: isCacheValid ? .background : .userInitiated) {
-            // Use the new optimized database method
-            let articles = await DatabaseCoordinator.shared.fetchArticlesForTopic(
-                newTopic,
-                showUnreadOnly: viewModel.showUnreadOnly,
-                showBookmarkedOnly: viewModel.showBookmarkedOnly
-            )
-
-            // If we got fresh data from the database, update the UI
-            if !articles.isEmpty {
-                let updatedGrouping = await createGroupedNotifications(articles)
-
-                await MainActor.run {
-                    // Update the UI with the fresh data
-                    self.filteredNotifications = articles
-                    self.sortedAndGroupedNotifications = updatedGrouping
-
-                    // Update cache with the fresh data
-                    self.notificationsCache[newTopic] = articles
-                    self.lastCacheUpdate = Date()
-                    self.isCacheValid = true
-                }
-            } else if !isCacheValid || !notificationsCache.keys.contains(newTopic) {
-                // Only fall back to traditional method if we don't have cached data
-                await MainActor.run {
-                    updateFilteredNotifications(force: true)
-                }
-            }
-        }
-    }
-
-    private func handleTapGesture(for notification: NotificationData) {
+    private func handleTapGesture(for article: ArticleModel) {
         // If in Edit mode, toggle selection
         if editMode?.wrappedValue == .active {
             withAnimation {
-                if viewModel.selectedArticleIds.contains(notification.id) {
-                    viewModel.selectedArticleIds.remove(notification.id)
+                if viewModel.selectedArticleIds.contains(article.id) {
+                    viewModel.selectedArticleIds.remove(article.id)
                 } else {
-                    viewModel.selectedArticleIds.insert(notification.id)
+                    viewModel.selectedArticleIds.insert(article.id)
                 }
             }
         } else {
             // Otherwise, open article
-            openArticle(notification)
+            openArticle(article)
         }
     }
 
-    private func handleLongPressGesture(for notification: NotificationData) {
+    private func handleLongPressGesture(for article: ArticleModel) {
         // Long-press triggers Edit mode and selects the row
         withAnimation {
             if editMode?.wrappedValue == .inactive {
                 editMode?.wrappedValue = .active
-                viewModel.selectedArticleIds.insert(notification.id)
+                viewModel.selectedArticleIds.insert(article.id)
             }
         }
     }
@@ -923,9 +902,9 @@ struct NewsView: View {
         }
     }
 
-    private func deleteNotification(_ notification: NotificationData) {
+    private func deleteArticle(_ article: ArticleModel) {
         Task {
-            await viewModel.deleteArticle(notification)
+            await viewModel.deleteArticle(article)
 
             // Update app badge count
             NotificationUtils.updateAppBadgeCount()
@@ -935,7 +914,7 @@ struct NewsView: View {
         }
     }
 
-    private func deleteSelectedNotifications() {
+    private func deleteSelectedArticles() {
         withAnimation {
             Task {
                 await viewModel.performBatchOperation(.delete)
@@ -945,126 +924,14 @@ struct NewsView: View {
         }
     }
 
-    private func toggleReadStatus(_ notification: NotificationData) {
+    private func toggleReadStatus(_ article: ArticleModel) {
         Task {
-            await viewModel.toggleReadStatus(for: notification)
+            await viewModel.toggleReadStatus(for: article)
         }
     }
 
-    private func toggleBookmark(_ notification: NotificationData) {
+    private func toggleBookmark(_ article: ArticleModel) {
         Task {
-            await viewModel.toggleBookmark(for: notification)
+            await viewModel.toggleBookmark(for: article)
         }
     }
-
-    private func performActionOnSelection(action: (NotificationData) -> Void) {
-        if !viewModel.selectedArticleIds.isEmpty {
-            // For complex operations that aren't directly supported by viewModel batch operations,
-            // we apply the action to each selected article
-            for id in viewModel.selectedArticleIds {
-                if let notification = viewModel.filteredArticles.first(where: { $0.id == id }) {
-                    action(notification)
-                }
-            }
-
-            // Reset selection state
-            withAnimation {
-                editMode?.wrappedValue = .inactive
-                viewModel.selectedArticleIds.removeAll()
-            }
-        }
-    }
-
-    // Load openArticle, generateBodyBlob, and loadMoreNotificationsIfNeeded from NewsView+Extensions.swift
-
-    @MainActor
-    private func updateFilteredNotifications(force: Bool = false) {
-        Task {
-            await viewModel.updateFilteredArticles(
-                isBackgroundUpdate: false,
-                force: force,
-                isActivelyScrolling: isActivelyScrolling
-            )
-        }
-    }
-
-    private func filterNotificationsWithCurrentSettings(_ notifications: [NotificationData]) -> [NotificationData] {
-        return notifications.filter { note in
-            let unreadCondition = !viewModel.showUnreadOnly || !note.isViewed
-            let bookmarkedCondition = !viewModel.showBookmarkedOnly || note.isBookmarked
-            return unreadCondition && bookmarkedCondition
-        }
-    }
-
-    private func createGroupedNotifications(_ notifications: [NotificationData]) async -> [(key: String, notifications: [NotificationData])] {
-        return await Task.detached(priority: .userInitiated) {
-            // Group notifications
-            switch await viewModel.groupingStyle {
-            case "date":
-                let groupedByDay = Dictionary(grouping: notifications) {
-                    Calendar.current.startOfDay(for: $0.pub_date ?? $0.date)
-                }
-                let sortedDayKeys = groupedByDay.keys.sorted { $0 > $1 }
-                return sortedDayKeys.map { day in
-                    let displayKey = day.formatted(date: .abbreviated, time: .omitted)
-                    let notifications = groupedByDay[day] ?? []
-                    return (key: displayKey, notifications: notifications)
-                }
-            case "topic":
-                let groupedByTopic = Dictionary(grouping: notifications) { $0.topic ?? "Uncategorized" }
-                return groupedByTopic.map {
-                    (key: $0.key, notifications: $0.value)
-                }.sorted { $0.key < $1.key }
-            default:
-                return [("", notifications)]
-            }
-        }.value
-    }
-
-    private func getEmptyStateMessage() -> String {
-        let activeSubscriptions = viewModel.subscriptions.filter { $0.value.isSubscribed }.keys.sorted()
-        if activeSubscriptions.isEmpty {
-            return "You are not currently subscribed to any topics. Click 'Subscriptions' below."
-        }
-        var message = "Please be patient, news will arrive automatically. You do not need to leave this application open.\n\nYou are currently subscribed to: \(activeSubscriptions.joined(separator: ", "))."
-        if isAnyFilterActive {
-            message += "\n\n"
-            if viewModel.showUnreadOnly && viewModel.showBookmarkedOnly {
-                message += "You are filtering to show only Unread articles that have also been Bookmarked."
-            } else if viewModel.showUnreadOnly {
-                message += "You are filtering to show only Unread articles."
-            } else if viewModel.showBookmarkedOnly {
-                message += "You are filtering to show only Bookmarked articles."
-            }
-        }
-        return message
-    }
-
-    // Private properties needed for caching
-    @State private var notificationsCache: [String: [NotificationData]] = [:]
-    @State private var lastCacheUpdate = Date.distantPast
-    @State private var isCacheValid = false
-    @State private var filteredNotifications: [NotificationData] = []
-    @State private var sortedAndGroupedNotifications: [(key: String, notifications: [NotificationData])] = []
-}
-
-// MARK: - FilterView
-
-struct FilterView: View {
-    @Binding var showUnreadOnly: Bool
-    @Binding var showBookmarkedOnly: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Filters")
-                .font(.headline)
-                .padding(.top)
-            Toggle("Only unread", isOn: $showUnreadOnly)
-            Toggle("Only bookmarked", isOn: $showBookmarkedOnly)
-        }
-        .padding()
-        .background(Color(UIColor.systemBackground))
-        .cornerRadius(15, corners: [.topLeft, .topRight])
-        .shadow(radius: 10)
-    }
-}

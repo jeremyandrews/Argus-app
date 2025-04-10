@@ -18,23 +18,26 @@ extension NewsView {
 
             // Process the article
             Task { @MainActor in
-                // Get the notification from the main context
-                let descriptor = FetchDescriptor<NotificationData>(
-                    predicate: #Predicate<NotificationData> { $0.id == articleID }
+                // Get the article from the main context
+                let descriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { $0.id == articleID }
                 )
 
-                // Get the main context - it's not optional
-                let mainContext = ArgusApp.sharedModelContainer.mainContext
+                // Get the main context from SwiftDataContainer
+                let mainContext = SwiftDataContainer.shared.container.mainContext
 
-                // Try to fetch the notification
-                guard let notification = try? mainContext.fetch(descriptor).first else {
-                    AppLogger.database.error("Failed to fetch notification \(articleID) for markdown processing")
+                // Try to fetch the article
+                guard let article = try? mainContext.fetch(descriptor).first else {
+                    AppLogger.database.error("Failed to fetch article \(articleID) for markdown processing")
                     return
                 }
 
+                // Create operations instance for blob generation
+                let operations = ArticleOperations()
+
                 // Generate the blobs on the main thread (required for UI components)
-                let titleBlob = getAttributedString(for: .title, from: notification, createIfMissing: true)
-                let bodyBlob = getAttributedString(for: .body, from: notification, createIfMissing: true)
+                let titleBlob = operations.getAttributedContent(for: .title, from: article, createIfMissing: true)
+                let bodyBlob = operations.getAttributedContent(for: .body, from: article, createIfMissing: true)
 
                 // Log the result
                 if titleBlob != nil && bodyBlob != nil {
@@ -55,24 +58,17 @@ extension NewsView {
         AppLogger.database.debug("Markdown processing observer set up")
     }
 
-    // Updated function to generate blobs using ViewModel
-    func generateBodyBlob(notificationID: UUID) {
-        Task {
-            await viewModel.generateBodyBlobIfNeeded(notificationID: notificationID)
-        }
-    }
-
     // Enhanced openArticle method that uses ViewModel for data operations
-    func openArticle(_ notification: NotificationData) {
+    func openArticle(_ article: ArticleModel) {
         guard !isActivelyScrolling else { return }
 
         // Use the view model to mark as read
         Task {
-            await viewModel.openArticle(notification)
+            await viewModel.openArticle(article)
         }
 
-        // Find the index of the notification
-        guard let index = viewModel.filteredArticles.firstIndex(where: { $0.id == notification.id }) else {
+        // Find the index of the article
+        guard let index = viewModel.filteredArticles.firstIndex(where: { $0.id == article.id }) else {
             return
         }
 
@@ -85,7 +81,7 @@ extension NewsView {
         let articleOperations = ArticleOperations()
 
         // Extract title blob if available
-        if let titleBlobData = notification.title_blob {
+        if let titleBlobData = article.titleBlob {
             extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
                 ofClass: NSAttributedString.self,
                 from: titleBlobData
@@ -93,7 +89,7 @@ extension NewsView {
         }
 
         // Extract body blob if available
-        if let bodyBlobData = notification.body_blob {
+        if let bodyBlobData = article.bodyBlob {
             extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
                 ofClass: NSAttributedString.self,
                 from: bodyBlobData
@@ -101,7 +97,7 @@ extension NewsView {
         }
 
         // Handle summary - if blob exists, extract it; if not, generate it
-        if let summaryBlobData = notification.summary_blob {
+        if let summaryBlobData = article.summaryBlob {
             // Try to extract existing blob
             extractedSummary = try? NSKeyedUnarchiver.unarchivedObject(
                 ofClass: NSAttributedString.self,
@@ -109,29 +105,43 @@ extension NewsView {
             )
 
             if extractedSummary != nil {
-                AppLogger.database.debug("Successfully extracted summary blob for article \(notification.id)")
+                AppLogger.database.debug("Successfully extracted summary blob for article \(article.id)")
             } else {
-                AppLogger.database.error("Failed to extract summary blob for article \(notification.id)")
+                AppLogger.database.error("Failed to extract summary blob for article \(article.id)")
 
                 // If extraction failed but blob exists, generate from text
-                if let summaryText = notification.summary, !summaryText.isEmpty {
-                    extractedSummary = getAttributedString(for: .summary, from: notification, createIfMissing: true)
-                    AppLogger.database.debug("Generated fallback summary for article \(notification.id)")
+                if let summaryText = article.summary, !summaryText.isEmpty {
+                    // Must be called on MainActor since it involves NSAttributedString
+                    await MainActor.run {
+                        extractedSummary = articleOperations.getAttributedContent(for: .summary, from: article, createIfMissing: true)
+                    }
+                    AppLogger.database.debug("Generated fallback summary for article \(article.id)")
                 }
             }
         } else {
             // No blob exists, generate it if we have text content
-            AppLogger.database.debug("No summary blob found for article \(notification.id), generating one")
-            if let summaryText = notification.summary, !summaryText.isEmpty {
-                extractedSummary = getAttributedString(for: .summary, from: notification, createIfMissing: true)
-                AppLogger.database.debug("Generated new summary for article \(notification.id)")
+            AppLogger.database.debug("No summary blob found for article \(article.id), generating one")
+            if let summaryText = article.summary, !summaryText.isEmpty {
+                // Must be called on MainActor since it involves NSAttributedString
+                await MainActor.run {
+                    extractedSummary = articleOperations.getAttributedContent(for: .summary, from: article, createIfMissing: true)
+                }
+                AppLogger.database.debug("Generated new summary for article \(article.id)")
             }
         }
 
-        // Set up the view model and view asynchronously to handle ArticleModel fetch
+        // Set up the view model and view asynchronously to handle context fetch
         Task {
-            // Get the ArticleModel with context for database operations
-            let articleModel = await articleOperations.getArticleModelWithContext(byId: notification.id)
+            // Get article with context for persistence operations
+            let articleWithContext = await articleOperations.getArticleModelWithContext(byId: article.id)
+
+            // Log the context status
+            if let articleWithContext = articleWithContext {
+                AppLogger.database.debug("✅ Retrieved article with context for ID: \(article.id)")
+                AppLogger.database.debug("✅ Context valid: \(articleWithContext.modelContext != nil)")
+            } else {
+                AppLogger.database.warning("⚠️ Could not retrieve article with context for ID: \(article.id)")
+            }
 
             // Create a pre-configured ViewModel that will be passed to the NewsDetailView
             // This is critical for maintaining SwiftData context and ensuring blobs are properly saved
@@ -140,11 +150,10 @@ extension NewsView {
                 allArticles: viewModel.allArticles,
                 currentIndex: index,
                 initiallyExpandedSection: "Summary",
-                preloadedArticle: notification,
+                preloadedArticle: articleWithContext ?? article,
                 preloadedTitle: extractedTitle,
                 preloadedBody: extractedBody,
                 preloadedSummary: extractedSummary,
-                preloadedArticleModel: articleModel,
                 articleOperations: articleOperations
             )
 
@@ -153,7 +162,7 @@ extension NewsView {
             let detailView = NewsDetailView(viewModel: detailViewModel)
 
             // Get modelContext from the shared container
-            let modelContext = ArgusApp.sharedModelContainer.mainContext
+            let modelContext = SwiftDataContainer.shared.container.mainContext
 
             // Create and present the hosting controller with environment
             let hostingController = UIHostingController(
@@ -171,15 +180,15 @@ extension NewsView {
             // After presenting the view, use PreloadManager to prepare next few articles
             Task {
                 // Use our dedicated PreloadManager to handle preloading
-                if let currentIndex = viewModel.filteredArticles.firstIndex(where: { $0.id == notification.id }) {
+                if let currentIndex = viewModel.filteredArticles.firstIndex(where: { $0.id == article.id }) {
                     PreloadManager.shared.preloadArticles(viewModel.filteredArticles, currentIndex: currentIndex)
                 }
             }
         }
     }
 
-    // Enhanced loadMoreNotificationsIfNeeded using ViewModel for pagination
-    func loadMoreNotificationsIfNeeded(currentItem: NotificationData) {
+    // Enhanced loadMoreArticlesIfNeeded using ViewModel for pagination
+    func loadMoreArticlesIfNeeded(currentItem: ArticleModel) {
         // Check if we're approaching the end of the list using ViewModel data
         guard let index = viewModel.filteredArticles.firstIndex(where: { $0.id == currentItem.id }),
               index >= viewModel.filteredArticles.count - 5,
@@ -194,14 +203,14 @@ extension NewsView {
             await viewModel.loadMoreArticles()
         }
 
-        // Also check if the notification needs body blob processing
+        // Also check if the article needs body blob processing
         Task {
             // Check if processing is needed
-            let needsProcessing = currentItem.body_blob == nil
+            let needsProcessing = currentItem.bodyBlob == nil
 
             if needsProcessing {
                 // Process the current item with high priority via ViewModel
-                await viewModel.generateBodyBlobIfNeeded(notificationID: currentItem.id)
+                await viewModel.generateBodyBlobIfNeeded(articleID: currentItem.id)
             }
         }
 
@@ -213,61 +222,41 @@ extension NewsView {
         }
     }
 
-    // Implementation of the affected field view that was moved from NewsView.swift
-    func affectedFieldView(_ notification: NotificationData) -> some View {
-        return Group {
-            if !notification.affected.isEmpty {
-                Text(notification.affected)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 3)
-                    .textSelection(.disabled)
+    // Implementation of the empty state message
+    func getEmptyStateMessage() -> String {
+        let activeSubscriptions = viewModel.subscriptions.filter { $0.value.isSubscribed }.keys.sorted()
+        if activeSubscriptions.isEmpty {
+            return "You are not currently subscribed to any topics. Click 'Subscriptions' below."
+        }
+        var message = "Please be patient, news will arrive automatically. You do not need to leave this application open.\n\nYou are currently subscribed to: \(activeSubscriptions.joined(separator: ", "))."
+        if isAnyFilterActive {
+            message += "\n\n"
+            if viewModel.showUnreadOnly && viewModel.showBookmarkedOnly {
+                message += "You are filtering to show only Unread articles that have also been Bookmarked."
+            } else if viewModel.showUnreadOnly {
+                message += "You are filtering to show only Unread articles."
+            } else if viewModel.showBookmarkedOnly {
+                message += "You are filtering to show only Bookmarked articles."
             }
         }
+        return message
     }
 
-    // Improved summary view that keeps content visible while processing
-    func summaryContent(_ notification: NotificationData) -> some View {
-        // State to avoid triggering multiple processing requests
-        let needsProcessing = !notification.body.isEmpty && notification.body_blob == nil
-
-        return ZStack(alignment: .bottomTrailing) {
-            // Always show the content - either rich text or plain text
-            Group {
-                if let bodyBlob = notification.body_blob,
-                   let attributedBody = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
-                {
-                    NonSelectableRichTextView(attributedString: attributedBody, lineLimit: 3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(notification.body.isEmpty ? "(Error: missing data)" : notification.body)
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(3)
-                        .textSelection(.disabled)
+    // Perform action on multiple selected articles
+    func performActionOnSelection(action: (ArticleModel) -> Void) {
+        if !viewModel.selectedArticleIds.isEmpty {
+            // For complex operations that aren't directly supported by viewModel batch operations,
+            // we apply the action to each selected article
+            for id in viewModel.selectedArticleIds {
+                if let article = viewModel.filteredArticles.first(where: { $0.id == id }) {
+                    action(article)
                 }
             }
 
-            // Show processing indicator as an overlay if needed - not replacing content
-            if needsProcessing {
-                HStack(spacing: 4) {
-                    Text("Formatting...")
-                        .font(.caption2)
-                        .foregroundColor(.gray)
-                        .padding(.trailing, 4)
-                }
-                .padding(4)
-                .background(Color(UIColor.systemBackground).opacity(0.7))
-                .cornerRadius(4)
-                .onAppear {
-                    // Schedule processing on appear, but don't block UI
-                    Task {
-                        generateBodyBlob(notificationID: notification.id)
-                    }
-                }
+            // Reset selection state
+            withAnimation {
+                editMode?.wrappedValue = .inactive
+                viewModel.selectedArticleIds.removeAll()
             }
         }
     }

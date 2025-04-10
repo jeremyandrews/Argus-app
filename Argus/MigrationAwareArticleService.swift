@@ -75,7 +75,8 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         limit: Int?,
         offset: Int?
     ) async throws -> [NotificationData] {
-        try await articleService.fetchArticles(
+        // Simply pass through to the underlying service
+        return try await articleService.fetchArticles(
             topic: topic,
             isRead: isRead,
             isBookmarked: isBookmarked,
@@ -86,15 +87,18 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
     }
 
     func fetchArticle(byId id: UUID) async throws -> NotificationData? {
-        try await articleService.fetchArticle(byId: id)
+        // Simply pass through to the underlying service
+        return try await articleService.fetchArticle(byId: id)
     }
 
     func fetchArticle(byJsonURL jsonURL: String) async throws -> NotificationData? {
-        try await articleService.fetchArticle(byJsonURL: jsonURL)
+        // Simply pass through to the underlying service
+        return try await articleService.fetchArticle(byJsonURL: jsonURL)
     }
 
     func searchArticles(queryText: String, limit: Int?) async throws -> [NotificationData] {
-        try await articleService.searchArticles(queryText: queryText, limit: limit)
+        // Simply pass through to the underlying service
+        return try await articleService.searchArticles(queryText: queryText, limit: limit)
     }
 
     @available(*, deprecated, message: "Use ArticleService.shared directly instead")
@@ -163,13 +167,13 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
     }
 
     /// Fetch articles from legacy system for migration
-    func fetchArticlesFromLegacySystem() async -> [NotificationData] {
+    func fetchArticlesFromLegacySystem() async -> [ArticleModel] {
         do {
             // Get the initialized coordinator
             let coordinator = try await getInitializedCoordinator()
 
             return try await coordinator.performTransaction { _, context in
-                let descriptor = FetchDescriptor<NotificationData>()
+                let descriptor = FetchDescriptor<ArticleModel>()
                 return try context.fetch(descriptor)
             }
         } catch {
@@ -179,8 +183,31 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
     }
 
     /// Find legacy article by ID or JSON URL
-    func findLegacyArticle(id: UUID, jsonURL: String) async -> NotificationData? {
-        return await migrationAdapter.findExistingArticle(jsonURL: jsonURL, articleID: id)
+    func findLegacyArticle(id: UUID, jsonURL: String) async -> ArticleModel? {
+        // Get the NotificationData from the adapter
+        let notificationData = await migrationAdapter.findExistingArticle(jsonURL: jsonURL, articleID: id)
+
+        if let notificationData = notificationData {
+            // Convert to ArticleModel by fetching all articles and manually filtering
+            let context = SwiftDataContainer.shared.container.mainContext
+
+            do {
+                // Get all articles (inefficient but avoids predicate type issues)
+                let descriptor = FetchDescriptor<ArticleModel>()
+                let allArticles = try context.fetch(descriptor)
+
+                // Find the matching article by comparing id strings to avoid type issues
+                let targetIdString = notificationData.id.uuidString
+
+                return allArticles.first { article in
+                    article.id.uuidString == targetIdString || article.jsonURL == jsonURL
+                }
+            } catch {
+                AppLogger.database.error("Error in findLegacyArticle: \(error)")
+            }
+        }
+
+        return nil
     }
 
     /// Check if article exists in legacy system
@@ -264,12 +291,13 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         let coordinator = try await getInitializedCoordinator()
 
         try await coordinator.performTransaction { _, context in
-            // Find the article in the legacy database
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate { $0.id == id }
-            )
+            // Get all articles and find the one we want by string comparison
+            let descriptor = FetchDescriptor<ArticleModel>()
+            let allArticles = try context.fetch(descriptor)
 
-            guard let notification = try context.fetch(descriptor).first else {
+            // Find the article with matching ID
+            let targetIdString = id.uuidString
+            guard let article = allArticles.first(where: { $0.id.uuidString == targetIdString }) else {
                 return // Not in legacy system, no update needed
             }
 
@@ -277,11 +305,11 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
             switch field {
             case "isViewed":
                 if let boolValue = value as? Bool {
-                    notification.isViewed = boolValue
+                    article.isViewed = boolValue
                 }
             case "isBookmarked":
                 if let boolValue = value as? Bool {
-                    notification.isBookmarked = boolValue
+                    article.isBookmarked = boolValue
                 }
             // Archive functionality removed
             default:
@@ -296,14 +324,18 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         let coordinator = try await getInitializedCoordinator()
 
         try await coordinator.performTransaction { _, context in
-            // Find and delete the article in the legacy database
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate { $0.id == id }
-            )
+            // Get all articles and find the one we want by string comparison
+            let descriptor = FetchDescriptor<ArticleModel>()
+            let allArticles = try context.fetch(descriptor)
 
-            if let notification = try context.fetch(descriptor).first {
-                context.delete(notification)
+            // Find the article with matching ID
+            let targetIdString = id.uuidString
+            guard let article = allArticles.first(where: { $0.id.uuidString == targetIdString }) else {
+                return // Article not found
             }
+
+            // Delete the article
+            context.delete(article)
         }
     }
 }

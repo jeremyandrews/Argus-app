@@ -34,16 +34,16 @@ class ProcessingQueueManager {
 
     // Add an article to the processing queue - thread-safe using MainActor
     @MainActor
-    func scheduleProcessing(for notificationID: UUID) {
+    func scheduleProcessing(for articleID: UUID) {
         // Don't schedule if already processing
-        if processingIDs.contains(notificationID) {
+        if processingIDs.contains(articleID) {
             return
         }
 
         // Add to pending queue
-        if !pendingArticles.contains(notificationID) {
-            pendingArticles.append(notificationID)
-            AppLogger.database.debug("Scheduled article \(notificationID) for markdown processing")
+        if !pendingArticles.contains(articleID) {
+            pendingArticles.append(articleID)
+            AppLogger.database.debug("Scheduled article \(articleID) for markdown processing")
         }
 
         // Start batch processing if needed
@@ -114,10 +114,10 @@ class ProcessingQueueManager {
         processingIDs.remove(id)
     }
 
-    // Process a single article - delegates to DatabaseCoordinator for the actual processing
+    // Process a single article - delegates to component with access to ArticleModel and markdown utilities
     @MainActor
     private func processArticle(_ id: UUID) async {
-        // Post a notification that will be handled by a component with access to the markdown utilities
+        // Post a notification that will be handled by NewsView+Extensions with access to the markdown utilities
         NotificationCenter.default.post(
             name: Notification.Name("ProcessMarkdownForArticle"),
             object: nil,

@@ -14,13 +14,13 @@ final class NewsViewModel: ObservableObject {
     // MARK: - Published Properties
 
     /// Articles currently displayed in the view
-    @Published var filteredArticles: [NotificationData] = []
+    @Published var filteredArticles: [ArticleModel] = []
 
     /// All articles loaded from the database (may be more than what's displayed)
-    @Published var allArticles: [NotificationData] = []
+    @Published var allArticles: [ArticleModel] = []
 
     /// Grouped articles for display in sections
-    @Published var groupedArticles: [(key: String, notifications: [NotificationData])] = []
+    @Published var groupedArticles: [(key: String, articles: [ArticleModel])] = []
 
     /// Set of selected article IDs when in edit mode
     @Published var selectedArticleIds: Set<UUID> = []
@@ -72,7 +72,7 @@ final class NewsViewModel: ObservableObject {
     private var filterChangeDebouncer: Task<Void, Never>? = nil
 
     /// Cache of articles by topic for quick topic switching
-    private var articleCache: [String: [NotificationData]] = [:]
+    private var articleCache: [String: [ArticleModel]] = [:]
 
     /// Timestamp of the last cache update
     private var lastCacheUpdate = Date.distantPast
@@ -106,6 +106,8 @@ final class NewsViewModel: ObservableObject {
 
         // Setup observers for settings changes
         setupUserDefaultsObservers()
+
+        AppLogger.database.debug("NewsViewModel initialized with container: \(String(describing: SwiftDataContainer.shared.container))")
     }
 
     deinit {
@@ -159,15 +161,17 @@ final class NewsViewModel: ObservableObject {
             updateArticleCache(filteredArticles)
 
             // Reset pagination state
-            lastLoadedDate = filteredArticles.last?.pub_date ?? filteredArticles.last?.date
+            lastLoadedDate = filteredArticles.last?.publishDate
             hasMoreContent = filteredArticles.count >= pageSize
 
             // Clear loading state
             isLoading = false
+
+            AppLogger.database.debug("✅ Refreshed articles: loaded \(filteredArticles.count) articles")
         } catch {
             self.error = error
             isLoading = false
-            AppLogger.database.error("Error refreshing articles: \(error)")
+            AppLogger.database.error("❌ Error refreshing articles: \(error)")
         }
     }
 
@@ -210,7 +214,7 @@ final class NewsViewModel: ObservableObject {
                 filteredArticles.append(contentsOf: filteredNextPageArticles)
 
                 // Update last loaded date
-                lastLoadedDate = nextPageArticles.last?.pub_date ?? nextPageArticles.last?.date
+                lastLoadedDate = nextPageArticles.last?.publishDate
 
                 // Update grouping
                 await updateGroupedArticles()
@@ -244,10 +248,11 @@ final class NewsViewModel: ObservableObject {
             }
 
             isLoading = false
+            AppLogger.database.debug("✅ Synced with server: added \(addedCount) articles")
         } catch {
             isLoading = false
             self.error = error
-            AppLogger.database.error("Error syncing with server: \(error)")
+            AppLogger.database.error("❌ Error syncing with server: \(error)")
         }
     }
 
@@ -261,6 +266,8 @@ final class NewsViewModel: ObservableObject {
 
         // Update the topic filter
         selectedTopic = topic
+
+        AppLogger.database.debug("Applying topic filter: \(topic)")
 
         // Try to use cache for immediate response
         if tryLoadFromCache(topic: topic) {
@@ -324,7 +331,7 @@ final class NewsViewModel: ObservableObject {
 
     /// Toggles the read status of an article
     /// - Parameter article: The article to toggle
-    func toggleReadStatus(for article: NotificationData) async {
+    func toggleReadStatus(for article: ArticleModel) async {
         do {
             // Use shared operation
             try await articleOperations.toggleReadStatus(for: article)
@@ -336,15 +343,17 @@ final class NewsViewModel: ObservableObject {
                 // Just update grouping
                 await updateGroupedArticles()
             }
+
+            AppLogger.database.debug("✅ Toggled read status for article \(article.id)")
         } catch {
             self.error = error
-            AppLogger.database.error("Error toggling read status: \(error)")
+            AppLogger.database.error("❌ Error toggling read status: \(error)")
         }
     }
 
     /// Toggles the bookmarked status of an article
     /// - Parameter article: The article to toggle
-    func toggleBookmark(for article: NotificationData) async {
+    func toggleBookmark(for article: ArticleModel) async {
         do {
             // Use shared operation
             try await articleOperations.toggleBookmark(for: article)
@@ -356,24 +365,28 @@ final class NewsViewModel: ObservableObject {
                 // Just update grouping
                 await updateGroupedArticles()
             }
+
+            AppLogger.database.debug("✅ Toggled bookmark status for article \(article.id)")
         } catch {
             self.error = error
-            AppLogger.database.error("Error toggling bookmark status: \(error)")
+            AppLogger.database.error("❌ Error toggling bookmark status: \(error)")
         }
     }
 
     /// Deletes an article
     /// - Parameter article: The article to delete
-    func deleteArticle(_ article: NotificationData) async {
+    func deleteArticle(_ article: ArticleModel) async {
         do {
             // Use shared operation
             try await articleOperations.deleteArticle(article)
 
             // Refresh the article list
             await refreshArticles()
+
+            AppLogger.database.debug("✅ Deleted article \(article.id)")
         } catch {
             self.error = error
-            AppLogger.database.error("Error deleting article: \(error)")
+            AppLogger.database.error("❌ Error deleting article: \(error)")
         }
     }
 
@@ -444,7 +457,7 @@ final class NewsViewModel: ObservableObject {
 
     /// Updates the article cache with new articles
     /// - Parameter articles: The articles to cache
-    private func updateArticleCache(_ articles: [NotificationData]) {
+    private func updateArticleCache(_ articles: [ArticleModel]) {
         // Update cache for current topic
         articleCache[selectedTopic] = articles
 
@@ -560,7 +573,7 @@ final class NewsViewModel: ObservableObject {
     // MARK: - Additional Methods for the View
 
     /// Opens the article in the detail view
-    func openArticle(_ article: NotificationData) async {
+    func openArticle(_ article: ArticleModel) async {
         // Mark the article as viewed
         if !article.isViewed {
             // Use markArticles with array of one ID
@@ -572,10 +585,10 @@ final class NewsViewModel: ObservableObject {
     }
 
     /// Generates a blob for an article body if needed
-    func generateBodyBlobIfNeeded(notificationID: UUID) async {
-        // Find the article in our collections
-        if let article = allArticles.first(where: { $0.id == notificationID }) {
-            if article.body_blob == nil {
+    func generateBodyBlobIfNeeded(articleID: UUID) async {
+        // Access the article directly from SwiftData
+        if let article = await articleOperations.getArticleModelWithContext(byId: articleID) {
+            if article.bodyBlob == nil {
                 // Use the rich text generation capabilities
                 // Since this needs to run on the main actor for UI work
                 await MainActor.run {
@@ -676,5 +689,19 @@ final class NewsViewModel: ObservableObject {
             AppLogger.database.error("Error diagnosing rich text blobs: \(error)")
             return "Error during blob diagnostics: \(error.localizedDescription)"
         }
+    }
+
+    /// Gets an attributed string for a specific field of an article
+    @MainActor
+    func getAttributedContent(
+        for field: RichTextField,
+        from article: ArticleModel,
+        createIfMissing: Bool = true
+    ) -> NSAttributedString? {
+        return articleOperations.getAttributedContent(
+            for: field,
+            from: article,
+            createIfMissing: createIfMissing
+        )
     }
 }

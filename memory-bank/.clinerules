@@ -827,11 +827,58 @@ This file captures important patterns, preferences, and project intelligence tha
   AppLogger.database.debug("Line 2: \(value2)")
   ```
 
+## Code Duplication Issues and Method Redeclaration
+
+### Avoiding Duplicate Method Implementations
+- Carefully scan both the current file and any newly added files for method signatures before adding new functions:
+  ```swift
+  // WRONG: Adding a duplicate method with same signature
+  private func verifyBlobInDatabase(field: RichTextField, articleId: UUID) async -> Bool {
+      // Implementation A
+  }
+  
+  // Same file, later section
+  private func verifyBlobInDatabase(field: RichTextField, articleId: UUID) async -> Bool {
+      // Implementation B  
+  }
+  ```
+- When implementing fixes that modify existing methods, always:
+  1. Use `grep` or code search to find all instances of the method name across files
+  2. Check the class/struct implementation for existing versions of the method
+  3. If adding enhanced verification, modify the existing method rather than creating a duplicate
+  4. Review file for semantic duplication (methods with different names but same purpose)
+- When multiple implementations of similar functionality exist:
+  - Keep the most robust, complete implementation
+  - Consolidate any unique features from other implementations into the kept version
+  - Document the consolidated changes in commit messages
+  - Include validation and error checking from all implementations
+
+### Thorough File Review Process
+- Before modifying a file, review it completely to understand its structure and existing methods:
+  - Scan for existing methods matching the same purpose
+  - Look for similarly named methods that might cause confusion
+  - Check for helper methods related to the functionality you're modifying
+- Use IDE navigation features to find all declarations and references before adding new methods
+- When importing code from external sources or other parts of the project, verify it doesn't duplicate existing functionality
+- Add comprehensive documentation to explain why certain implementation approaches were chosen
+
+### Swift Compiler Duplicate Declaration Errors
+- Swift error `Invalid redeclaration of '...'` indicates a method with the same signature exists:
+  ```
+  /path/to/file.swift:1146:18 Invalid redeclaration of 'verifyBlobInDatabase(field:articleId:)'
+  ```
+- When encountering this error:
+  1. Use grep or Find in Files to locate all occurrences: `grep "func methodName" path/to/files/*swift`
+  2. Compare implementations to determine which is most complete
+  3. Remove the duplicate and consolidate any unique functionality into the kept version
+  4. Review call sites to ensure they use the correct implementation
+
 ## Known Challenges
 - UI becomes jittery during sync operations - will be addressed with MVVM refactoring
 - Duplicate content issues occur during synchronization - will be resolved by SwiftData's unique constraints
 - Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - will be eliminated with proper async/await implementation
 - SwiftData context access issues can cause EXC_BAD_ACCESS crashes - will be addressed by using SwiftData's native context management instead of custom DatabaseCoordinator
+- Code duplication can cause compile errors or unexpected behavior - resolved by thorough file review and proper refactoring
 
 ## Argus API Server Endpoints and Behavior
 

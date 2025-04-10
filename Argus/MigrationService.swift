@@ -408,17 +408,40 @@ class MigrationService: ObservableObject {
             additionalInsights: notification.additional_insights,
             engineStats: notification.engine_stats,
             similarArticles: notification.similar_articles,
-            titleBlob: notification.title_blob,
-            bodyBlob: notification.body_blob,
-            summaryBlob: notification.summary_blob,
-            criticalAnalysisBlob: notification.critical_analysis_blob,
-            logicalFallaciesBlob: notification.logical_fallacies_blob,
-            sourceAnalysisBlob: notification.source_analysis_blob,
-            relationToTopicBlob: notification.relation_to_topic_blob,
-            additionalInsightsBlob: notification.additional_insights_blob
+            titleBlob: validateBlob(notification.title_blob, name: "title"),
+            bodyBlob: validateBlob(notification.body_blob, name: "body"),
+            summaryBlob: validateBlob(notification.summary_blob, name: "summary"),
+            criticalAnalysisBlob: validateBlob(notification.critical_analysis_blob, name: "critical_analysis"),
+            logicalFallaciesBlob: validateBlob(notification.logical_fallacies_blob, name: "logical_fallacies"),
+            sourceAnalysisBlob: validateBlob(notification.source_analysis_blob, name: "source_analysis"),
+            relationToTopicBlob: validateBlob(notification.relation_to_topic_blob, name: "relation_to_topic"),
+            additionalInsightsBlob: validateBlob(notification.additional_insights_blob, name: "additional_insights")
         )
 
         return article
+    }
+
+    /// Validates a blob to ensure it's usable
+    private func validateBlob(_ blob: Data?, name: String) -> Data? {
+        guard let blob = blob, !blob.isEmpty else {
+            return nil
+        }
+
+        do {
+            if let _ = try NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self,
+                from: blob
+            ) {
+                AppLogger.database.debug("✅ Valid \(name) blob migrated: \(blob.count) bytes")
+                return blob
+            } else {
+                AppLogger.database.warning("⚠️ \(name) blob unarchived to nil during migration, discarding")
+                return nil
+            }
+        } catch {
+            AppLogger.database.error("❌ Invalid \(name) blob during migration: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Extract topics from notifications and create TopicModels
