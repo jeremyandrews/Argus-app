@@ -344,6 +344,43 @@
       - Success message: `✅ Blob saved to database (11551 bytes)`
     - CloudKit is properly syncing the blobs to iCloud:
       - Log shows successful record creation: `<CKRecord: 0x10fa16280>`
+      - Log shows modified blob fields: `"CD_criticalAnalysisBlob", "CD_titleBlob", "CD_bodyBlob"`
+      - Log confirms CloudKit export success: `CoreData: warning: CoreData+CloudKit: Finished export`
+    - However, there are still some issues that need further investigation:
+      - Error remains for some articles: `⚠️ Article 2F1B3CEA-BE44-4F30-944E-E0115CB334F7 has no model context - not saved to database`
+      - This suggests some article instances are still being created without a proper model context
+      - Interestingly, even with this error, the system recovers: `⚙️ PHASE 2: Blob loading failed, attempting rich text generation for Critical Analysis`
+  - Future investigation needed:
+    - Trace complete context propagation path to ensure no article instances miss getting a SwiftData context
+    - Verify ArticleModel creation in NewsDetailViewModel is always capturing model context
+    - Review all places in the app that create NotificationData objects to ensure they maintain context
+    - Add more robust fallback mechanisms for cases where context is missing
+    - Enhance logging around context assignment to pinpoint exactly where we're losing it
+
+- **Diagnosed Rich Text Blob Storage Architectural Limitations** (In Progress):
+  - Implemented partial fixes for rich text blobs not being saved to database:
+    - Root cause identified: Architectural disconnect between models and view initialization flow
+    - Primary issue: NotificationData objects lose SwiftData model context when converted from ArticleModel
+    - Log evidence: `⚠️ Article 0B3B3CC6-9536-48D8-88EC-485152E8738E has no model context - not saved to database`
+    - Core architectural conflict: NewsDetailView creates its own ViewModel internally, ignoring externally created ViewModel
+  - Implemented a two-model synchronization approach:
+    - Added `getArticleModelWithContext(byId:)` to ArticleOperations to retrieve intact database model
+    - Added `saveBlobToDatabase(field:blobData:articleModel:)` method for direct database blob storage
+    - Added support in NewsDetailViewModel for tracking and using ArticleModel alongside NotificationData
+    - Modified NewsView+Extensions to fetch and prepare ArticleModel when opening articles
+    - Fixed string interpolation compiler errors with RichTextField enum
+    - Added comprehensive logging for blob saving operations
+  - Current state and limitations:
+    - Log shows successful ArticleModel fetch: `✅ Found ArticleModel with valid context for ID: 0B3B3CC6-9536-48D8-88EC-485152E8738E`
+    - Log shows successful blob saving: `✅ Successfully saved blob to database model`
+    - Blobs exist in database but aren't loaded between sessions due to architectural disconnect
+    - Fundamental issue: NewsDetailView initializer creates its own ViewModel instead of using our pre-configured one
+  - Architectural resolution requires:
+    - Modifying NewsDetailView to accept a pre-configured ViewModel rather than creating its own
+    - Or adding a secondary initializer to NewsDetailView that accepts a ViewModel directly 
+    - Better adherence to MVVM by creating ViewModels at a higher level and injecting them into views
+  - Created diagnostic tool (blob-diagnostic.swift) to analyze and verify database state
+  - Learned valuable architectural insights about SwiftData context propagation:
     - Model context is lost when converting between models, requiring explicit context preservation
     - Using the right model for each operation is critical for database persistence
     - Nested view creation can cause dependency injection issues with ViewModels
