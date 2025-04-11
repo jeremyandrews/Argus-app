@@ -167,7 +167,7 @@ final class NewsViewModel: ObservableObject {
             // Clear loading state
             isLoading = false
 
-            AppLogger.database.debug("✅ Refreshed articles: loaded \(filteredArticles.count) articles")
+            AppLogger.database.debug("✅ Refreshed articles: loaded \(self.filteredArticles.count) articles")
         } catch {
             self.error = error
             isLoading = false

@@ -724,7 +724,7 @@ class NotificationData {
             .additionalInsights,
         ]
 
-        AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(id):")
+        AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(self.id):")
 
         var allValid = true
         for field in fields {
