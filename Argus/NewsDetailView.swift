@@ -563,23 +563,54 @@ struct NewsDetailView: View {
         // Cancel any existing task
         sectionLoadingTasks[section]?.cancel()
 
-        // Directly delegate to ViewModel which now has the improved implementation
-        viewModel.loadContentForSection(section)
-
-        // Create a simple monitoring task to clear local loading state
-        let monitorTask = Task {
-            // Wait for a reasonable time before clearing local loading state
-            try? await Task.sleep(for: .seconds(7))
-
+        // Create a task that will handle loading and state management
+        let loadingTask = Task {
+            // First mark this section as loading in our local state
+            await MainActor.run {
+                sectionLoadingTasks[section] = Task {}  // Just a placeholder task to indicate loading
+            }
+            
+            // Delegate to ViewModel which handles the actual loading and persistence
+            viewModel.loadContentForSection(section)
+            
+            // Check if content is available after a short delay (give time for loading)
+            try? await Task.sleep(for: .seconds(0.5))
+            
+            // Monitor loading until either content is available or timeout occurs
+            let startTime = Date()
+            let timeout = 10.0 // seconds
+            
+            while !Task.isCancelled {
+                if Date().timeIntervalSince(startTime) > timeout {
+                    // Timeout occurred, stop monitoring
+                    break
+                }
+                
+                // Check if content is now available
+                let hasContent = await MainActor.run {
+                    return viewModel.getAttributedStringForSection(section) != nil
+                }
+                
+                if hasContent {
+                    // Content loaded successfully
+                    break
+                }
+                
+                // Wait before checking again
+                try? await Task.sleep(for: .seconds(0.5))
+            }
+            
+            // Update loading state only if this task wasn't cancelled
             if !Task.isCancelled {
                 await MainActor.run {
+                    // Clear loading state
                     sectionLoadingTasks[section] = nil
                 }
             }
         }
 
-        // Store the monitor task
-        sectionLoadingTasks[section] = monitorTask
+        // Store the loading task
+        sectionLoadingTasks[section] = loadingTask
     }
 
     private func clearSectionContent() {
@@ -1211,28 +1242,25 @@ struct NewsDetailView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                 } else {
-                    // Fallback for plain text - NO ANIMATIONS
-                    let rawContent = section.content as? String ?? "No content available"
-                    if let formattedContent = markdownToAttributedString(rawContent, textStyle: "UIFontTextStyleBody") {
-                        // Try to format the content on the fly if regular text display failed
-                        NonSelectableRichTextView(attributedString: formattedContent)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 4)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 6)
-                            .padding(.bottom, 2)
-                            .textSelection(.enabled)
-                    } else {
-                        // Last resort fallback to plain text
+                    // IMPROVEMENT: Never regenerate blobs on-the-fly, show fallback UI instead
+                    // The previous code was causing blob regeneration even though a blob exists
+                    VStack(spacing: 8) {
+                        Text("Unable to display formatted content")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            
+                        // Last resort display of raw content without conversion
+                        let rawContent = section.content as? String ?? "No content available"
                         Text(rawContent)
                             .font(.callout)
-                            .padding(.top, 6)
                             .lineSpacing(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
                 }
             }
         }
@@ -1240,7 +1268,13 @@ struct NewsDetailView: View {
 
     // Helper function to get cached attributed string for a section
     private func getAttributedStringForSection(_ section: String) -> NSAttributedString? {
-        return viewModel.getAttributedStringForSection(section)
+        let cachedContent = viewModel.getAttributedStringForSection(section)
+        
+        if cachedContent == nil && !isSectionLoading(section) {
+            AppLogger.database.warning("⚠️ View requested cached content for \(section) but it was nil despite being reported as loaded")
+        }
+        
+        return cachedContent
     }
 
     // Helper function to check if section content is being loaded
@@ -1278,7 +1312,7 @@ struct NewsDetailView: View {
         case "Summary":
             SectionContentView(
                 section: section,
-                attributedString: summaryAttributedString,
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
 
@@ -1330,7 +1364,7 @@ struct NewsDetailView: View {
                 if let sourceData = section.content as? [String: Any] {
                     SectionContentView(
                         section: ContentSection(header: section.header, content: sourceData["text"] ?? ""),
-                        attributedString: sourceAnalysisAttributedString,
+                        attributedString: getAttributedStringForSection(section.header),
                         isLoading: isSectionLoading(section.header)
                     )
                 }
@@ -1345,7 +1379,7 @@ struct NewsDetailView: View {
         case "Critical Analysis":
             SectionContentView(
                 section: section,
-                attributedString: criticalAnalysisAttributedString,
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
             // Removed onAppear handler - content loading now only triggered by section expansion
@@ -1355,7 +1389,7 @@ struct NewsDetailView: View {
         case "Logical Fallacies":
             SectionContentView(
                 section: section,
-                attributedString: logicalFallaciesAttributedString,
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
             // Removed onAppear handler - content loading now only triggered by section expansion
@@ -1365,7 +1399,7 @@ struct NewsDetailView: View {
         case "Relevance":
             SectionContentView(
                 section: section,
-                attributedString: cachedContentBySection["Relevance"],
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
             // Removed onAppear handler - content loading now only triggered by section expansion
@@ -1375,7 +1409,7 @@ struct NewsDetailView: View {
         case "Context & Perspective":
             SectionContentView(
                 section: section,
-                attributedString: cachedContentBySection["Context & Perspective"],
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
             // Removed onAppear handler - content loading now only triggered by section expansion
@@ -1509,9 +1543,10 @@ struct NewsDetailView: View {
         // Ensure the Summary section is expanded
         expandedSections["Summary"] = true
 
-        // Load minimal content (title and body) via ViewModel
+        // IMPROVEMENT: Use synchronous loading for critical above-the-fold content
+        // to prevent showing unformatted content first
         Task {
-            // Let the viewModel handle loading using our unified context approach
+            // First, let's load the title and body synchronously to prevent flashing of unformatted content
             await viewModel.loadMinimalContent()
 
             // Log minimal content load completion

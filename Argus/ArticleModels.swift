@@ -84,8 +84,8 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     }
 
     let url = json["url"] as? String // Extract the URL but don't make it required
-    // Use the global extractDomain function from CommonUtilities
-    let domain = extractDomain(from: url ?? "")
+    // Use the String extension method from CommonUtilities
+    let domain = (url ?? "").extractDomain()
 
     // Include quality badge information in the first pass
     let sourcesQuality = json["sources_quality"] as? Int

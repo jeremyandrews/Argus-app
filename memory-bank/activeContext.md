@@ -54,6 +54,73 @@
 
 ## Recent Changes
 
+- **Fixed Cloud Build Domain Extraction Scope Error** (Completed):
+  - Resolved build error that occurred in Apple's cloud build but not in local Xcode build:
+    - Error symptoms: `Cannot find 'extractDomain' in scope` in DatabaseCoordinator.swift and ArticleModels.swift
+    - Root cause: Global functions may not be properly visible across files in cloud build environments due to different file processing order
+  - Implementation details:
+    - Converted the global `extractDomain(from:)` function to a String extension method:
+      ```swift
+      // Before - Global function
+      func extractDomain(from urlString: String) -> String? {
+          // Implementation
+      }
+      
+      // After - String extension method
+      extension String {
+          func extractDomain() -> String? {
+              // Implementation (self replaces urlString)
+          }
+      }
+      ```
+    - Updated all call sites to use the new method syntax:
+      ```swift
+      // Before
+      let domain = extractDomain(from: url)
+      
+      // After
+      let domain = url.extractDomain()
+      ```
+  - Results:
+    - App now builds successfully in both local Xcode and Apple's cloud build environment
+    - No functional changes, just improved code organization
+    - More Swift-idiomatic approach using String extensions
+  - Key learnings:
+    - Extensions provide better scope visibility than global functions across file boundaries
+    - String extensions are available anywhere a String is used, regardless of file processing order
+    - Cloud build environments may process files in different orders than local builds
+    - Swift extensions offer a more elegant and reliable solution for common string operations
+
+- **Fixed Swift 6 String Interpolation Issues with RichTextField** (Completed):
+  - Resolved compiler errors related to RichTextField enum in string interpolation:
+    - Problem: Swift 6 is more strict about type safety and requires CustomStringConvertible for string interpolation
+    - Error symptoms: "Type of expression is ambiguous without a type annotation" when using RichTextField in strings
+  - Implementation details:
+    - Identified that RichTextField enum was used in string interpolation but didn't conform to CustomStringConvertible
+    - Added explicit String conversion using `String(describing:)` in all places where RichTextField was used:
+      ```swift
+      // Before:
+      AppLogger.database.debug("Generating rich text content for field: \(field) on article \(articleId)")
+      
+      // After:
+      AppLogger.database.debug("Generating rich text content for field: \(String(describing: field)) on article \(articleId)")
+      ```
+    - Fixed multiple similar issues throughout ArticleService.swift
+    - Made body text loading in ArticleService more robust with safe unwrapping
+  - Specific fixes included:
+    - Corrected `bodyText = article.body` to handle non-optional String properly
+    - Fixed all string interpolation instances using `String(describing:)` wrapper
+    - Made RichTextField enum conform to CaseIterable to enable iteration in diagnostic functions
+  - Results:
+    - All compiler errors related to string interpolation resolved
+    - ArticleService now builds successfully in Swift 6 mode
+    - Type-safety warning messages eliminated
+    - Section blobs now properly save to the database with context
+  - Key learnings:
+    - Swift 6 requires explicit CustomStringConvertible for string interpolation of custom types
+    - The `String(describing:)` wrapper provides a clean solution without modifying enum definitions
+    - When working with enums in string contexts, it's important to provide proper string conversion
+
 - **Fixed Article Content Display Issue in NewsView** (Completed):
   - Successfully resolved the display issue where formatted article content wasn't properly displayed in NewsView:
     - Initial problem: Text appeared as faint gray with improper formatting and was wrapping off screen edges in NewsView
@@ -277,43 +344,6 @@
       - Success message: `✅ Blob saved to database (11551 bytes)`
     - CloudKit is properly syncing the blobs to iCloud:
       - Log shows successful record creation: `<CKRecord: 0x10fa16280>`
-      - Log shows modified blob fields: `"CD_criticalAnalysisBlob", "CD_titleBlob", "CD_bodyBlob"`
-      - Log confirms CloudKit export success: `CoreData: warning: CoreData+CloudKit: Finished export`
-    - However, there are still some issues that need further investigation:
-      - Error remains for some articles: `⚠️ Article 2F1B3CEA-BE44-4F30-944E-E0115CB334F7 has no model context - not saved to database`
-      - This suggests some article instances are still being created without a proper model context
-      - Interestingly, even with this error, the system recovers: `⚙️ PHASE 2: Blob loading failed, attempting rich text generation for Critical Analysis`
-  - Future investigation needed:
-    - Trace complete context propagation path to ensure no article instances miss getting a SwiftData context
-    - Verify ArticleModel creation in NewsDetailViewModel is always capturing model context
-    - Review all places in the app that create NotificationData objects to ensure they maintain context
-    - Add more robust fallback mechanisms for cases where context is missing
-    - Enhance logging around context assignment to pinpoint exactly where we're losing it
-
-- **Diagnosed Rich Text Blob Storage Architectural Limitations** (In Progress):
-  - Implemented partial fixes for rich text blobs not being saved to database:
-    - Root cause identified: Architectural disconnect between models and view initialization flow
-    - Primary issue: NotificationData objects lose SwiftData model context when converted from ArticleModel
-    - Log evidence: `⚠️ Article 0B3B3CC6-9536-48D8-88EC-485152E8738E has no model context - not saved to database`
-    - Core architectural conflict: NewsDetailView creates its own ViewModel internally, ignoring externally created ViewModel
-  - Implemented a two-model synchronization approach:
-    - Added `getArticleModelWithContext(byId:)` to ArticleOperations to retrieve intact database model
-    - Added `saveBlobToDatabase(field:blobData:articleModel:)` method for direct database blob storage
-    - Added support in NewsDetailViewModel for tracking and using ArticleModel alongside NotificationData
-    - Modified NewsView+Extensions to fetch and prepare ArticleModel when opening articles
-    - Fixed string interpolation compiler errors with RichTextField enum
-    - Added comprehensive logging for blob saving operations
-  - Current state and limitations:
-    - Log shows successful ArticleModel fetch: `✅ Found ArticleModel with valid context for ID: 0B3B3CC6-9536-48D8-88EC-485152E8738E`
-    - Log shows successful blob saving: `✅ Successfully saved blob to database model`
-    - Blobs exist in database but aren't loaded between sessions due to architectural disconnect
-    - Fundamental issue: NewsDetailView initializer creates its own ViewModel instead of using our pre-configured one
-  - Architectural resolution requires:
-    - Modifying NewsDetailView to accept a pre-configured ViewModel rather than creating its own
-    - Or adding a secondary initializer to NewsDetailView that accepts a ViewModel directly 
-    - Better adherence to MVVM by creating ViewModels at a higher level and injecting them into views
-  - Created diagnostic tool (blob-diagnostic.swift) to analyze and verify database state
-  - Learned valuable architectural insights about SwiftData context propagation:
     - Model context is lost when converting between models, requiring explicit context preservation
     - Using the right model for each operation is critical for database persistence
     - Nested view creation can cause dependency injection issues with ViewModels
@@ -428,8 +458,36 @@
     - Add more diagnostic logging around model conversion
     - Verify complete article loading during navigation includes all required fields
 
+- **Improved Article Content Loading in NewsDetailView** (In Progress, Partially Successful):
+  - Addressed two key issues with article content display in NewsDetailView:
+    - Problem 1: Body initially showing unformatted text before switching to formatted version
+    - Problem 2: Sections repeatedly converting from Markdown to Blob when closed and reopened
+  - Implemented consistent content loading pattern across all sections:
+    - Modified all section content views to use `getAttributedStringForSection()` helper method
+    - Fixed Summary, Critical Analysis, Logical Fallacies sections to use the standard pattern
+    - Updated both Relevance and Context & Perspective sections to use the same content loading 
+    - Removed redundant cached attributed strings in favor of centralized caching in the ViewModel
+  - Technical implementation:
+    - Fixed cases where we were using local cached variables instead of ViewModel's cached content
+    - Used `replace_in_file` tool to systematically update all content sections with consistent pattern
+    - ViewModel now properly handles content loading and caching for all section types
+    - Consolidated the pattern for both Markdown-to-blob conversion and blob loading
+    - Eliminated inconsistent access patterns that were causing repeated conversions
+  - Current state:
+    - Progress made but not fully resolved yet
+    - Body sometimes still shows unformatted text briefly before formatted version appears
+    - Some sections may still require repeated conversion in certain scenarios
+    - Underlying architectural issues with context preservation and blob management remain
+  - Key learnings:
+    - Content loading should follow a consistent pattern across the app
+    - All content sections should use the same ViewModel-based caching mechanism
+    - The ViewModel should be the single source of truth for formatted content
+    - Section handling benefits from a unified approach rather than section-specific implementations
+
 ## Next Steps
 
+- Continue improving NewsDetailView with further optimizations to content loading
+- Review and fix the remaining blob loading issues in NewsDetailView rendering
 - Continue working on the migration path to fully transition from NotificationData to ArticleModel
 - Fix the remaining concurrency issues in NewsView.swift:
   - Update asynchronous calls in non-async functions

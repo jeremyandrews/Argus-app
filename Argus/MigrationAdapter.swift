@@ -127,11 +127,19 @@ class MigrationAdapter {
     /// Legacy compatibility method for finding existing articles
     func findExistingArticle(jsonURL: String, articleID: UUID? = nil, articleURL _: String? = nil) async -> NotificationData? {
         do {
+            // ArticleService now returns ArticleModel, so we need to convert it to NotificationData
             if let articleID = articleID {
-                return try await articleService.fetchArticle(byId: articleID)
+                if let articleModel = try await articleService.fetchArticle(byId: articleID) {
+                    // Convert ArticleModel to NotificationData using the helper method in MarkdownUtilities
+                    return NotificationData.from(articleModel: articleModel)
+                }
             } else {
-                return try await articleService.fetchArticle(byJsonURL: jsonURL)
+                if let articleModel = try await articleService.fetchArticle(byJsonURL: jsonURL) {
+                    // Convert ArticleModel to NotificationData using the helper method in MarkdownUtilities
+                    return NotificationData.from(articleModel: articleModel)
+                }
             }
+            return nil
         } catch {
             return nil
         }

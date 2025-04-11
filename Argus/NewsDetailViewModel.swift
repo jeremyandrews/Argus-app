@@ -387,6 +387,8 @@ final class NewsDetailViewModel: ObservableObject {
     // MARK: - Public Methods - Content Loading
 
     /// Loads minimal content needed for the article header
+    /// This function is deliberately synchronous for "above the fold" elements to prevent
+    /// showing unformatted content before formatted content is ready
     func loadMinimalContent() async {
         guard let article = currentArticleModel ?? currentArticle else { return }
 
@@ -394,22 +396,84 @@ final class NewsDetailViewModel: ObservableObject {
         let hasTitleBlob = article.titleBlob != nil
         let hasBodyBlob = article.bodyBlob != nil
         AppLogger.database.debug("⚙️ loadMinimalContent: Title blob exists: \(hasTitleBlob), Body blob exists: \(hasBodyBlob)")
-
-        // Title and body are required for header display
-        if titleAttributedString == nil {
+        
+        // Start loading with a synchronous approach for critical content
+        AppLogger.database.debug("⚙️ Loading initial content synchronously for article \(article.id)")
+        
+        // First attempt to directly load from blobs if they exist
+        if titleAttributedString == nil && article.titleBlob != nil {
+            do {
+                let startTime = Date()
+                if let blob = article.titleBlob, 
+                   let attrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob) {
+                    titleAttributedString = attrString
+                    AppLogger.database.debug("✅ Title loaded from blob in \(Date().timeIntervalSince(startTime))s")
+                } else {
+                    // Only if blob extraction fails, try getAttributedContent
+                    titleAttributedString = articleOperations.getAttributedContent(
+                        for: .title,
+                        from: article,
+                        createIfMissing: true
+                    )
+                    AppLogger.database.debug("✅ Title generated in \(Date().timeIntervalSince(startTime))s")
+                }
+            } catch {
+                // Only if blob extraction fails, try getAttributedContent
+                let startTime = Date()
+                titleAttributedString = articleOperations.getAttributedContent(
+                    for: .title,
+                    from: article,
+                    createIfMissing: true
+                )
+                AppLogger.database.debug("⚠️ Title blob extraction failed, generated in \(Date().timeIntervalSince(startTime))s")
+            }
+        } else if titleAttributedString == nil {
+            // No blob exists, generate from markdown
+            let startTime = Date()
             titleAttributedString = articleOperations.getAttributedContent(
                 for: .title,
                 from: article,
                 createIfMissing: true
             )
+            AppLogger.database.debug("✅ Title generated in \(Date().timeIntervalSince(startTime))s")
         }
-
-        if bodyAttributedString == nil {
+        
+        // Direct blob extraction for body - prioritizing formatted content
+        if bodyAttributedString == nil && article.bodyBlob != nil {
+            do {
+                let startTime = Date()
+                if let blob = article.bodyBlob,
+                   let attrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob) {
+                    bodyAttributedString = attrString
+                    AppLogger.database.debug("✅ Body loaded from blob in \(Date().timeIntervalSince(startTime))s")
+                } else {
+                    // Only if blob extraction fails, try getAttributedContent
+                    bodyAttributedString = articleOperations.getAttributedContent(
+                        for: .body,
+                        from: article,
+                        createIfMissing: true
+                    )
+                    AppLogger.database.debug("✅ Body generated in \(Date().timeIntervalSince(startTime))s")
+                }
+            } catch {
+                // Only if blob extraction fails, try getAttributedContent
+                let startTime = Date()
+                bodyAttributedString = articleOperations.getAttributedContent(
+                    for: .body,
+                    from: article,
+                    createIfMissing: true
+                )
+                AppLogger.database.debug("⚠️ Body blob extraction failed, generated in \(Date().timeIntervalSince(startTime))s")
+            }
+        } else if bodyAttributedString == nil {
+            // No blob exists, generate from markdown
+            let startTime = Date()
             bodyAttributedString = articleOperations.getAttributedContent(
                 for: .body,
                 from: article,
                 createIfMissing: true
             )
+            AppLogger.database.debug("✅ Body generated in \(Date().timeIntervalSince(startTime))s")
         }
     }
 
@@ -456,14 +520,18 @@ final class NewsDetailViewModel: ObservableObject {
     /// - Parameter section: The section to load content for
     @MainActor
     func loadContentForSection(_ section: String) {
-        guard let article = currentArticle else { return }
+        guard let article = currentArticleModel ?? currentArticle else { return }
 
         // Log beginning of section load
         AppLogger.database.debug("🔄 VIEW MODEL: Loading section \(section) for article \(article.id)")
 
-        // Already loaded check - if we already have content, use it
-        if getAttributedStringForSection(section) != nil {
+        // IMPROVEMENT: Create a reliable in-memory content cache check
+        // Check if we already have this content cached in the view model
+        let cachedContent = getAttributedStringForSection(section)
+        if cachedContent != nil {
             AppLogger.database.debug("✅ SECTION ALREADY LOADED: \(section) - using cached content")
+            // Force a UI refresh to ensure the cached content is used
+            objectWillChange.send()
             return
         }
 
@@ -477,21 +545,52 @@ final class NewsDetailViewModel: ObservableObject {
         let task = Task(priority: .userInitiated) {
             let startTime = Date()
 
+            // Make sure we have an article with a valid context before proceeding
+            let contextArticle = await articleOperations.getArticleModelWithContext(byId: article.id)
+            
             // Use the centralized loader in ArticleOperations
             if let content = await articleOperations.loadContentForSection(section: section, articleId: article.id) {
                 if !Task.isCancelled {
                     await MainActor.run {
                         // Update the content in the view model
                         updateSectionContent(section, SectionNaming.fieldForSection(section), content)
+                        
+                        // Also update the currentArticleModel if needed
+                        if self.currentArticleModel == nil || self.currentArticleModel?.modelContext == nil {
+                            self.currentArticleModel = contextArticle
+                        }
                     }
 
                     let totalTime = Date().timeIntervalSince(startTime)
                     AppLogger.database.debug("✅ VIEW MODEL: Section \(section) loaded in \(String(format: "%.4f", totalTime))s")
 
+                    // Directly save the content to the article model for persistence
+                    let field = SectionNaming.fieldForSection(section)
+                    if let contextArticle = contextArticle {
+                        do {
+                            let blobData = try NSKeyedArchiver.archivedData(
+                                withRootObject: content,
+                                requiringSecureCoding: false
+                            )
+                            
+                            await MainActor.run {
+                                field.setBlob(blobData, on: contextArticle)
+                                
+                                // Save the context manually to ensure persistence
+                                if let context = contextArticle.modelContext {
+                                    try? context.save()
+                                    AppLogger.database.debug("✅ Explicitly saved \(section) blob to database")
+                                }
+                            }
+                        } catch {
+                            AppLogger.database.error("❌ Failed to archive \(section) content: \(error)")
+                        }
+                    }
+
                     // Verify the blob was actually saved to the database
                     Task {
                         await articleOperations.verifyBlobStorage(
-                            field: SectionNaming.fieldForSection(section),
+                            field: field,
                             articleId: article.id
                         )
                     }

@@ -47,7 +47,7 @@ final class ArticleService: ArticleServiceProtocol {
         isArchived: Bool?,
         limit: Int?,
         offset: Int?
-    ) async throws -> [NotificationData] {
+    ) async throws -> [ArticleModel] {
         // Check cache first for common queries
         let cacheKey = createCacheKey(topic: topic, isRead: isRead, isBookmarked: isBookmarked, isArchived: isArchived)
 
@@ -107,20 +107,17 @@ final class ArticleService: ArticleServiceProtocol {
             let context = ModelContext(modelContainer)
             let articleModels = try context.fetch(fetchDescriptor)
 
-            // Convert the ArticleModel objects to NotificationData objects
-            let results = articleModels.map { NotificationData.from(articleModel: $0) }
+            // Cache the results directly without conversion
+            cacheResults(articleModels, for: cacheKey)
 
-            // Cache the results
-            cacheResults(results, for: cacheKey)
-
-            return results
+            return articleModels
         } catch {
             AppLogger.database.error("Error fetching articles: \(error)")
             throw ArticleServiceError.databaseError(underlyingError: error)
         }
     }
 
-    func fetchArticle(byId id: UUID) async throws -> NotificationData? {
+    func fetchArticle(byId id: UUID) async throws -> ArticleModel? {
         let fetchDescriptor = FetchDescriptor<ArticleModel>(
             predicate: #Predicate<ArticleModel> { $0.id == id }
         )
@@ -129,13 +126,10 @@ final class ArticleService: ArticleServiceProtocol {
             let context = ModelContext(modelContainer)
             let results = try context.fetch(fetchDescriptor)
 
-            // Convert the ArticleModel to NotificationData if found
             if let articleModel = results.first {
-                // Check for complete article fields
+                // Log diagnostics info for debugging
                 let hasEngineStats = articleModel.engineStats != nil
                 let hasSimilarArticles = articleModel.similarArticles != nil
-
-                // Check for blobs
                 let hasTitleBlob = articleModel.titleBlob != nil
                 let hasBodyBlob = articleModel.bodyBlob != nil
                 let hasSummaryBlob = articleModel.summaryBlob != nil
@@ -149,25 +143,7 @@ final class ArticleService: ArticleServiceProtocol {
                 - Has summary blob: \(hasSummaryBlob)
                 """)
 
-                let notificationData = NotificationData.from(articleModel: articleModel)
-
-                // Verify converted data has the fields and model context
-                let hasModelContext = notificationData.modelContext != nil
-                let hasEngineStatsConverted = notificationData.engine_stats != nil
-                let hasSimilarArticlesConverted = notificationData.similar_articles != nil
-                let hasTitleBlobConverted = notificationData.title_blob != nil
-                let hasBodyBlobConverted = notificationData.body_blob != nil
-
-                AppLogger.database.debug("""
-                Converted to NotificationData:
-                - Has model context: \(hasModelContext)
-                - Has engine stats: \(hasEngineStatsConverted)
-                - Has similar articles: \(hasSimilarArticlesConverted)
-                - Has title blob: \(hasTitleBlobConverted)
-                - Has body blob: \(hasBodyBlobConverted)
-                """)
-
-                return notificationData
+                return articleModel
             }
             return nil
         } catch {
@@ -176,7 +152,7 @@ final class ArticleService: ArticleServiceProtocol {
         }
     }
 
-    func fetchArticle(byJsonURL jsonURL: String) async throws -> NotificationData? {
+    func fetchArticle(byJsonURL jsonURL: String) async throws -> ArticleModel? {
         let fetchDescriptor = FetchDescriptor<ArticleModel>(
             predicate: #Predicate<ArticleModel> { $0.jsonURL == jsonURL }
         )
@@ -185,9 +161,9 @@ final class ArticleService: ArticleServiceProtocol {
             let context = ModelContext(modelContainer)
             let results = try context.fetch(fetchDescriptor)
 
-            // Convert the ArticleModel to NotificationData if found
             if let articleModel = results.first {
-                return NotificationData.from(articleModel: articleModel)
+                AppLogger.database.debug("Fetched ArticleModel with jsonURL: \(jsonURL)")
+                return articleModel
             }
             return nil
         } catch {
@@ -196,7 +172,7 @@ final class ArticleService: ArticleServiceProtocol {
         }
     }
 
-    func searchArticles(queryText: String, limit: Int?) async throws -> [NotificationData] {
+    func searchArticles(queryText: String, limit: Int?) async throws -> [ArticleModel] {
         guard !queryText.isEmpty else {
             return []
         }
@@ -220,9 +196,9 @@ final class ArticleService: ArticleServiceProtocol {
         do {
             let context = ModelContext(modelContainer)
             let articleModels = try context.fetch(fetchDescriptor)
-
-            // Convert the ArticleModel objects to NotificationData objects
-            return articleModels.map { NotificationData.from(articleModel: $0) }
+            
+            AppLogger.database.debug("Found \(articleModels.count) articles matching search: \(queryText)")
+            return articleModels
         } catch {
             AppLogger.database.error("Error searching articles: \(error)")
             throw ArticleServiceError.databaseError(underlyingError: error)
@@ -508,10 +484,55 @@ final class ArticleService: ArticleServiceProtocol {
     /// Generates initial rich text content for a new article
     /// This must run on the main actor to properly handle NSAttributedString
     @MainActor
-    private func generateInitialRichText(for article: NotificationData) {
-        // Generate the basic rich text for immediate display
-        _ = getAttributedString(for: .title, from: article, createIfMissing: true)
-        _ = getAttributedString(for: .body, from: article, createIfMissing: true)
+    private func generateInitialRichText(for article: ArticleModel) {
+        // Generate the basic rich text for immediate display directly on ArticleModel
+        AppLogger.database.debug("Generating initial rich text for article \(article.id)")
+        
+        // Generate for title
+        if article.titleBlob == nil || article.titleBlob?.isEmpty == true {
+            let titleText = article.title
+            if !titleText.isEmpty {
+                if let attributedString = markdownToAttributedString(titleText, textStyle: RichTextField.title.textStyle) {
+                    AppLogger.database.debug("✅ Generated title rich text")
+                    
+                    // Archive to data
+                    do {
+                        let blobData = try NSKeyedArchiver.archivedData(
+                            withRootObject: attributedString,
+                            requiringSecureCoding: false
+                        )
+                        
+                        // Set the blob directly on ArticleModel
+                        article.titleBlob = blobData
+                    } catch {
+                        AppLogger.database.error("❌ Failed to create title blob: \(error)")
+                    }
+                }
+            }
+        }
+        
+        // Generate for body
+        if article.bodyBlob == nil || article.bodyBlob?.isEmpty == true {
+            let bodyText = article.body
+            if !bodyText.isEmpty {
+                if let attributedString = markdownToAttributedString(bodyText, textStyle: RichTextField.body.textStyle) {
+                    AppLogger.database.debug("✅ Generated body rich text")
+                    
+                    // Archive to data
+                    do {
+                        let blobData = try NSKeyedArchiver.archivedData(
+                            withRootObject: attributedString,
+                            requiringSecureCoding: false
+                        )
+                        
+                        // Set the blob directly on ArticleModel
+                        article.bodyBlob = blobData
+                    } catch {
+                        AppLogger.database.error("❌ Failed to create body blob: \(error)")
+                    }
+                }
+            }
+        }
     }
 
     /// Diagnoses and repairs rich text blob issues in articles
@@ -568,31 +589,38 @@ final class ArticleService: ArticleServiceProtocol {
         // Process each article
         for articleModel in articleModels {
             diagnosedCount += 1
-
-            // Convert to NotificationData for diagnostic access
-            let notificationData = NotificationData.from(articleModel: articleModel)
-
-            // Check if blob verification is needed
-            let verified = notificationData.verifyAllBlobs()
-
+            
             // Add to details log
             detailsLog += "Article \(articleModel.id): "
+            
+            // Directly check if blobs exist and are valid
+            let verificationResults = verifyArticleBlobs(articleModel)
+            let allBlobsValid = verificationResults.allValid
+            let missingBlobs = verificationResults.missingFields
 
-            if !verified || forceRegenerate {
+            if !allBlobsValid || forceRegenerate {
                 // Regenerate blobs if needed or forced
-                if !verified {
-                    detailsLog += "Found invalid blobs. "
+                if !allBlobsValid {
+                    detailsLog += "Found \(missingBlobs.count) invalid/missing blobs: \(missingBlobs.joined(separator: ", ")). "
                 } else {
                     detailsLog += "Force regenerating blobs. "
                 }
 
-                // Regenerate blobs directly on ArticleModel
-                let regeneratedCount = articleModel.regenerateMissingBlobs()
+                // Regenerate each field that needs it
+                var regeneratedCount = 0
+                
+                for field in RichTextField.allCases {
+                    if !verificationResults.validFields.contains(field.rawValue) || forceRegenerate {
+                        if regenerateRichTextForField(field, on: articleModel) {
+                            regeneratedCount += 1
+                        }
+                    }
+                }
 
                 if regeneratedCount > 0 {
                     repairedCount += 1
                     detailsLog += "Regenerated \(regeneratedCount) blobs.\n"
-
+                    
                     // Save the changes
                     try context.save()
                 } else {
@@ -608,8 +636,91 @@ final class ArticleService: ArticleServiceProtocol {
 
         return (diagnosedCount, repairedCount, detailsLog)
     }
+    
+    /// Verifies all blobs in an ArticleModel
+    /// - Parameter article: The article to verify
+    /// - Returns: A tuple containing validation results and missing fields
+    private func verifyArticleBlobs(_ article: ArticleModel) -> (allValid: Bool, validFields: Set<String>, missingFields: [String]) {
+        var validFields = Set<String>()
+        var missingFields = [String]()
+        
+        // Check each field
+        for field in RichTextField.allCases {
+            let blobData = field.getBlob(from: article)
+            
+            // A field is valid if it has blob data and it can be unarchived
+            if let data = blobData, !data.isEmpty {
+                do {
+                    if try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: data) != nil {
+                        validFields.insert(field.rawValue)
+                        continue
+                    }
+                } catch {
+                    // Failed to unarchive
+                }
+            }
+            
+            // If we get here, the field is invalid or missing
+            missingFields.append(field.rawValue)
+        }
+        
+        return (missingFields.isEmpty, validFields, missingFields)
+    }
+    
+    /// Regenerates rich text for a specific field on an ArticleModel
+    /// - Parameters:
+    ///   - field: The field to regenerate
+    ///   - article: The article model
+    /// - Returns: True if successful, false otherwise
+    private func regenerateRichTextForField(_ field: RichTextField, on article: ArticleModel) -> Bool {
+        // Get the text for this field
+        let text: String?
+        switch field {
+        case .title:
+            text = article.title
+        case .body:
+            text = article.body
+        case .summary:
+            text = article.summary
+        case .criticalAnalysis:
+            text = article.criticalAnalysis
+        case .sourceAnalysis:
+            text = article.sourceAnalysis
+        case .logicalFallacies:
+            text = article.logicalFallacies
+        case .relationToTopic:
+            text = article.relationToTopic
+        case .additionalInsights:
+            text = article.additionalInsights
+        }
+        
+        // Skip if no text
+        guard let unwrappedText = text, !unwrappedText.isEmpty else {
+            return false
+        }
+        
+        // Generate attributed string
+        guard let attributedString = markdownToAttributedString(unwrappedText, textStyle: field.textStyle) else {
+            return false
+        }
+        
+        // Archive and save
+        do {
+            let blobData = try NSKeyedArchiver.archivedData(
+                withRootObject: attributedString,
+                requiringSecureCoding: false
+            )
+            
+            // Set the blob on the article model
+            field.setBlob(blobData, on: article)
+            return true
+        } catch {
+            AppLogger.database.error("Failed to save blob for \(String(describing: field)): \(error)")
+            return false
+        }
+    }
 
-    /// Generates rich text content for an article field
+    /// Generates rich text content for a specific field of an article
     /// This entire method runs on the main actor to properly handle NSAttributedString
     @MainActor
     func generateRichTextContent(
@@ -626,20 +737,87 @@ final class ArticleService: ArticleServiceProtocol {
             let articleModels = try context.fetch(fetchDescriptor)
 
             guard let articleModel = articleModels.first else {
+                AppLogger.database.error("Article not found with ID: \(articleId)")
                 return nil
             }
+            
+            AppLogger.database.debug("Generating rich text content for field: \(String(describing: field)) on article \(articleId)")
 
-            // Convert to NotificationData for rich text generation
-            let notificationData = NotificationData.from(articleModel: articleModel)
-
+            // First try to get from existing blob
+            if let blobData = field.getBlob(from: articleModel), !blobData.isEmpty {
+                do {
+                    if let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self,
+                        from: blobData
+                    ) {
+                        AppLogger.database.debug("✅ Retrieved existing blob for \(String(describing: field))")
+                        return attributedString
+                    }
+                } catch {
+                    AppLogger.database.error("Failed to unarchive blob for \(String(describing: field)): \(error)")
+                }
+            }
+            
+            // If no blob or failed to load, create fresh
+            let markdownText: String?
+            switch field {
+            case .title:
+                markdownText = articleModel.title
+            case .body:
+                markdownText = articleModel.body
+            case .summary:
+                markdownText = articleModel.summary
+            case .criticalAnalysis:
+                markdownText = articleModel.criticalAnalysis
+            case .sourceAnalysis:
+                markdownText = articleModel.sourceAnalysis
+            case .logicalFallacies:
+                markdownText = articleModel.logicalFallacies
+            case .relationToTopic:
+                markdownText = articleModel.relationToTopic
+            case .additionalInsights:
+                markdownText = articleModel.additionalInsights
+            }
+            
+            guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
+                AppLogger.database.warning("No text available for field: \(String(describing: field))")
+                return nil
+            }
+            
+            AppLogger.database.debug("⚙️ Converting markdown to attributed string (length: \(unwrappedText.count), preview: \"\(unwrappedText.prefix(50))...\")")
+            
             // Generate the attributed string
-            let attributedString = getAttributedString(
-                for: field,
-                from: notificationData,
-                createIfMissing: true
+            let startTime = Date()
+            let attributedString = markdownToAttributedString(
+                unwrappedText,
+                textStyle: field.textStyle
             )
-
-            return attributedString
+            
+            let duration = Date().timeIntervalSince(startTime)
+            AppLogger.database.debug("✅ Markdown conversion completed in \(String(format: "%.4f", duration))s (result length: \(unwrappedText.count))")
+            
+            if let attributedString = attributedString {
+                // Archive to data
+                do {
+                    let blobData = try NSKeyedArchiver.archivedData(
+                        withRootObject: attributedString,
+                        requiringSecureCoding: false
+                    )
+                    
+                    // Set the blob on the article model
+                    field.setBlob(blobData, on: articleModel)
+                    
+                    // Save the context
+                    try context.save()
+                    AppLogger.database.debug("✅ Saved \(String(describing: field)) blob to database (\(blobData.count) bytes) - verified")
+                } catch {
+                    AppLogger.database.error("❌ Failed to save blob for \(String(describing: field)): \(error)")
+                }
+                
+                return attributedString
+            }
+            
+            return nil
         } catch {
             AppLogger.database.error("Error generating rich text content: \(error)")
             return nil
@@ -700,14 +878,8 @@ final class ArticleService: ArticleServiceProtocol {
 
                 context.insert(newArticle)
 
-                // Create a NotificationData instance for rich text generation
-                let notificationData = NotificationData.from(articleModel: newArticle)
-
-                // Ensure we generate the rich text for at least title and body
-                await generateInitialRichText(for: notificationData)
-
-                // Important: Transfer the generated blobs back to the ArticleModel
-                newArticle.updateBlobs(from: notificationData)
+                // Generate rich text directly on the ArticleModel
+                await generateInitialRichText(for: newArticle)
 
                 addedCount += 1
             } else {
@@ -865,7 +1037,7 @@ final class ArticleService: ArticleServiceProtocol {
         return "\(topicPart)_\(readPart)_\(bookmarkPart)_\(archivedPart)"
     }
 
-    private func checkCache(for key: String) -> [NotificationData]? {
+    private func checkCache(for key: String) -> [ArticleModel]? {
         return cacheQueue.sync {
             // Check if cache is valid (not expired)
             let now = Date()
@@ -875,7 +1047,7 @@ final class ArticleService: ArticleServiceProtocol {
             }
 
             // Check if we have this key in cache
-            if let cachedArray = self.cache.object(forKey: key as NSString) as? [NotificationData] {
+            if let cachedArray = self.cache.object(forKey: key as NSString) as? [ArticleModel] {
                 ModernizationLogger.log(.debug, component: .articleService,
                                         message: "Cache hit for key: \(key)")
                 return cachedArray
@@ -887,7 +1059,7 @@ final class ArticleService: ArticleServiceProtocol {
         }
     }
 
-    private func cacheResults(_ results: [NotificationData], for key: String) {
+    private func cacheResults(_ results: [ArticleModel], for key: String) {
         cacheQueue.async {
             // Log before accessing cacheKeys
             ModernizationLogger.log(.debug, component: .articleService,

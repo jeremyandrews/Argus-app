@@ -647,25 +647,40 @@ final class ArticleOperations {
 
         // Get the field enum from section name
         let field = SectionNaming.fieldForSection(section)
+        let normalizedKey = SectionNaming.normalizedKey(section)
+        
+        // Log section loading details for debugging
+        let hasBlobField = field.getBlob(from: model) != nil
+        let hasTextField = field.getMarkdownText(from: model) != nil
+        AppLogger.database.debug("🔍 SECTION CHECK: \(section) (key: \(normalizedKey)) - Has blob: \(hasBlobField), Has text: \(hasTextField)")
 
-        // PHASE 1: Try to load from blob
+        // PHASE 1: Try to directly extract from blob - we should always try this first
+        // and cache the result to avoid unnecessary regeneration
         if let blob = field.getBlob(from: model), !blob.isEmpty {
             do {
+                AppLogger.database.debug("⚙️ Attempting to extract attributed string from blob for \(section) (\(blob.count) bytes)")
+                
                 let attributedString = try NSKeyedUnarchiver.unarchivedObject(
                     ofClass: NSAttributedString.self,
                     from: blob
                 )
 
-                if let content = attributedString {
+                if let content = attributedString, content.length > 0 {
                     AppLogger.database.debug("✅ LOADED FROM BLOB: \(section) - \(blob.count) bytes")
+                    // CRITICAL: Return the cached blob content instead of regenerating
                     return content
+                } else {
+                    // We found a blob but it was empty or invalid - log this problem
+                    AppLogger.database.warning("⚠️ BLOB INVALID: \(section) - Blob exists but content is empty or nil")
                 }
             } catch {
                 AppLogger.database.error("❌ BLOB ERROR: \(section) - \(error.localizedDescription)")
             }
+        } else {
+            AppLogger.database.debug("ℹ️ No blob found for \(section), will need to generate")
         }
 
-        // PHASE 2: Generate from markdown
+        // PHASE 2: Generate from markdown only if blob loading failed
         let markdownText = field.getMarkdownText(from: model)
 
         guard let text = markdownText, !text.isEmpty else {
@@ -673,34 +688,61 @@ final class ArticleOperations {
             return nil
         }
 
+        AppLogger.database.debug("⚙️ PHASE 2: Blob loading failed, attempting rich text generation for \(section)")
+        
         // Generate attributed string from markdown
         if let attributedString = markdownToAttributedString(text, textStyle: field.textStyle) {
             AppLogger.database.debug("⚙️ GENERATED: \(section) - Created attributed string")
+            
+            // IMPROVEMENT: Confirm the attributed string is valid
+            if attributedString.length > 0 {
+                AppLogger.database.debug("✅ \(section) blob contains valid attributed string")
+            } else {
+                AppLogger.database.warning("⚠️ Generated \(section) AttributedString is empty")
+                // Still continue with save attempt since empty is better than nil
+            }
 
             // Create blob data and save to the ArticleModel
             do {
+                // Create blob data for storage
                 let blobData = try NSKeyedArchiver.archivedData(
                     withRootObject: attributedString,
                     requiringSecureCoding: false
                 )
 
-                // Save directly to the model
+                // Save to the model and ensure it's stored in the database
+                AppLogger.database.debug("⚙️ Saving generated blob for \(section) (\(blobData.count) bytes)")
+                
+                // First try with the model we already have
                 let saved = saveBlobToDatabase(field: field, blobData: blobData, articleModel: model)
-                AppLogger.database.debug("✅ SAVED TO MODEL: \(section) - \(saved ? "Success" : "Failed")")
-
-                if !saved {
-                    // Last resort - try to get a fresh model and save there
+                
+                if saved {
+                    AppLogger.database.debug("✅ SAVED TO MODEL: \(section) - Successfully stored blob")
+                } else {
+                    // If first attempt fails, try with a fresh model
+                    AppLogger.database.warning("⚠️ Initial blob save failed for \(section), attempting with fresh model")
+                    
                     if let freshModel = await getArticleModelWithContext(byId: articleId) {
                         let freshSaved = saveBlobToDatabase(field: field, blobData: blobData, articleModel: freshModel)
-                        AppLogger.database.debug("✅ SAVED TO FRESH MODEL: \(section) - \(freshSaved ? "Success" : "Failed")")
+                        if freshSaved {
+                            AppLogger.database.debug("✅ SAVED TO FRESH MODEL: \(section) - Successfully stored blob")
+                        } else {
+                            AppLogger.database.debug("❌ FAILED TO SAVE TO FRESH MODEL: \(section) - Context issue persists")
+                        }
                     } else {
-                        AppLogger.database.warning("⚠️ SAVE FAILED: \(section) - No valid context found for blob storage")
+                        AppLogger.database.error("❌ SAVE FAILED: \(section) - Could not retrieve fresh model")
                     }
+                }
+                
+                // Always verify the blob was stored properly
+                Task {
+                    await verifyBlobStorage(field: field, articleId: articleId)
                 }
             } catch {
                 AppLogger.database.error("❌ BLOB CREATION ERROR: \(section) - \(error.localizedDescription)")
             }
 
+            // Return the generated attributed string regardless of save result
             return attributedString
         }
 

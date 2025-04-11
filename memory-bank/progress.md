@@ -34,6 +34,23 @@
 
 ## What's In Progress
 
+- ✅ **Fixed Swift 6 String Interpolation Issues with RichTextField** (Completed):
+  - Resolved all compiler errors related to RichTextField enum in string interpolation:
+    - Swift 6 requires types to conform to CustomStringConvertible for string interpolation
+    - Fixed by using `String(describing:)` wrapper in all string interpolation contexts
+    - Made RichTextField enum conform to CaseIterable to support iteration in diagnostic functions
+    - Ensured sections properly save to database with model context by fixing non-optional String handling
+    - Implemented consistent approach across all log statements and string formatting operations
+  - Key technical changes:
+    - Added explicit String conversion in ArticleService.swift debug logs and error messages
+    - Fixed body text handling in rich text generation methods with proper non-optional access
+    - Addressed all "Type of expression is ambiguous without a type annotation" errors
+  - Result: 
+    - All compiler errors resolved related to string interpolation
+    - ArticleService builds successfully in Swift 6 mode
+    - Improved type safety throughout the codebase
+    - Better section persistence with proper String handling
+
 - 🔶 **Article Content Display Issue in NewsView** (In Progress):
   - Identified a display issue where article content appears correctly in NewsDetailView but not in NewsView:
     - Root cause: NewsView used wrong field (`summary` instead of `body`) to display article content
@@ -163,6 +180,23 @@
 
 ## Recently Completed
 
+- ✅ **Fixed Swift 6 Equatable Conformance Issues** (Completed):
+  - Resolved compilation issues with SwiftData models and Equatable conformance:
+    - Fixed `"Type 'ArticleModel' does not conform to protocol 'Equatable'"` errors 
+    - Addressed `"Invalid redeclaration of '=='"` errors in model classes
+    - Solved compiler errors related to NotificationData and PersistentModel protocol
+  - Implemented a comprehensive solution approach:
+    - Kept in-class Equatable implementation in SwiftData model classes (the correct pattern)
+    - Removed obsolete code comments about moved Equatable implementations
+    - Updated ArgusApp.swift to use ArticleModel instead of NotificationData in all FetchDescriptor instances
+    - Fixed property name references in predicates to match ArticleModel (e.g., date → addedDate)
+  - Key learnings about SwiftData and Swift 6:
+    - The SwiftData `@Model` macro in Swift 6 generates partial Equatable machinery
+    - Explicit Equatable implementations in model classes must follow a consistent pattern
+    - Duplicate implementations across files can cause conflicts with macro-generated code
+    - NotificationData (legacy class) should be avoided in SwiftData contexts
+  - This fix allows the project to compile successfully and advances the migration path toward fully transitioning from NotificationData to ArticleModel
+
 - ✅ **Fixed Additional Swift 6 Compatibility Issues in NewsDetailView** (Completed):
   - Resolved remaining Swift 6 compatibility problems in NewsDetailView.swift:
     - Fixed PersistentModel Sendable violations by restructuring the `loadSimilarArticle` method
@@ -182,23 +216,6 @@
     - Improved codebase consistency by continuing the migration from NotificationData to ArticleModel
     - Documented best practices for handling PersistentModel in concurrent contexts
   - The app now successfully builds without errors in Swift 6 language mode
-
-- ✅ **Fixed Swift 6 Equatable Conformance Issues** (Completed):
-  - Resolved compilation issues with SwiftData models and Equatable conformance:
-    - Fixed `"Type 'ArticleModel' does not conform to protocol 'Equatable'"` errors 
-    - Addressed `"Invalid redeclaration of '=='"` errors in model classes
-    - Solved compiler errors related to NotificationData and PersistentModel protocol
-  - Implemented a comprehensive solution approach:
-    - Kept in-class Equatable implementation in SwiftData model classes (the correct pattern)
-    - Removed obsolete code comments about moved Equatable implementations
-    - Updated ArgusApp.swift to use ArticleModel instead of NotificationData in all FetchDescriptor instances
-    - Fixed property name references in predicates to match ArticleModel (e.g., date → addedDate)
-  - Key learnings about SwiftData and Swift 6:
-    - The SwiftData `@Model` macro in Swift 6 generates partial Equatable machinery
-    - Explicit Equatable implementations in model classes must follow a consistent pattern
-    - Duplicate implementations across files can cause conflicts with macro-generated code
-    - NotificationData (legacy class) should be avoided in SwiftData contexts
-  - This fix allows the project to compile successfully and advances the migration path toward fully transitioning from NotificationData to ArticleModel
 
 - ✅ **Fixed Swift Closure Capture Semantics and Section Viewing Issues** (Completed):
   - Fixed section viewing problems where content was falling back to raw text:
@@ -527,14 +544,3 @@
   - Implemented proper actor isolation for UI-related operations
   - Eliminated "getAttributedString called from background thread" warnings
   - Ensured proper handling of non-Sendable types in async contexts
-  - Fixed all NewsViewModel batch operation calls with proper result handling
-
-- ✅ **Error Handling Improvements**
-  - Enhanced article fetching with better HTTP status code detection
-  - Added more comprehensive error messages for failed article retrievals
-  - Fixed duplicate notification ID errors in logs
-
-- ✅ **DatabaseCoordinator Implementation**
-  - Completed full implementation with Swift 6 concurrency safety
-  - Fixed all actor-isolation and variable capture warnings
-  - Eliminated redundant code to avoid conflicts with

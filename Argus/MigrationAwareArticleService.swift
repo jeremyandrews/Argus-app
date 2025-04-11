@@ -74,7 +74,7 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         isArchived: Bool?,
         limit: Int?,
         offset: Int?
-    ) async throws -> [NotificationData] {
+    ) async throws -> [ArticleModel] {
         // Simply pass through to the underlying service
         return try await articleService.fetchArticles(
             topic: topic,
@@ -86,17 +86,17 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         )
     }
 
-    func fetchArticle(byId id: UUID) async throws -> NotificationData? {
+    func fetchArticle(byId id: UUID) async throws -> ArticleModel? {
         // Simply pass through to the underlying service
         return try await articleService.fetchArticle(byId: id)
     }
 
-    func fetchArticle(byJsonURL jsonURL: String) async throws -> NotificationData? {
+    func fetchArticle(byJsonURL jsonURL: String) async throws -> ArticleModel? {
         // Simply pass through to the underlying service
         return try await articleService.fetchArticle(byJsonURL: jsonURL)
     }
 
-    func searchArticles(queryText: String, limit: Int?) async throws -> [NotificationData] {
+    func searchArticles(queryText: String, limit: Int?) async throws -> [ArticleModel] {
         // Simply pass through to the underlying service
         return try await articleService.searchArticles(queryText: queryText, limit: limit)
     }

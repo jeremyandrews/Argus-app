@@ -4,7 +4,7 @@ import SwiftyMarkdown
 import UIKit
 
 // Field types we can process
-enum RichTextField {
+enum RichTextField: String, CaseIterable {
     case title
     case body
     case summary

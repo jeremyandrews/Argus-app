@@ -50,24 +50,24 @@ protocol ArticleServiceProtocol {
         isArchived: Bool?,
         limit: Int?,
         offset: Int?
-    ) async throws -> [NotificationData]
+    ) async throws -> [ArticleModel]
 
     /// Fetches a specific article by ID
     /// - Parameter id: The unique identifier of the article
     /// - Returns: The article if found, nil otherwise
-    func fetchArticle(byId id: UUID) async throws -> NotificationData?
+    func fetchArticle(byId id: UUID) async throws -> ArticleModel?
 
     /// Fetches an article by its JSON URL
     /// - Parameter jsonURL: The JSON URL of the article
     /// - Returns: The article if found, nil otherwise
-    func fetchArticle(byJsonURL jsonURL: String) async throws -> NotificationData?
+    func fetchArticle(byJsonURL jsonURL: String) async throws -> ArticleModel?
 
     /// Searches articles with the given query text
     /// - Parameters:
     ///   - queryText: Text to search for in article titles and bodies
     ///   - limit: Maximum number of results to return
     /// - Returns: Array of matching articles
-    func searchArticles(queryText: String, limit: Int?) async throws -> [NotificationData]
+    func searchArticles(queryText: String, limit: Int?) async throws -> [ArticleModel]
 
     // MARK: - State Management Operations
 
