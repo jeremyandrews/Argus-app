@@ -415,10 +415,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         Task {
             do {
                 let removedCount = try await ArticleService.shared.removeDuplicateArticles()
-                
+
                 if removedCount > 0 {
                     AppLogger.app.info("✅ Removed \(removedCount) duplicate articles")
-                    
+
                     // Update badge count after cleanup
                     await MainActor.run {
                         NotificationUtils.updateAppBadgeCount()
@@ -429,12 +429,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             } catch {
                 AppLogger.app.error("Error removing duplicates: \(error)")
             }
-            
+
             // Reset flag when done
             isDuplicateRemovalRunning = false
         }
     }
-    
+
     // Helper function to select best article is no longer needed as
     // ArticleService handles this internally with its own implementation
 

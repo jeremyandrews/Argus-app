@@ -24,7 +24,7 @@ extension NewsView {
                 // Using a safer approach to avoid predicate type issues
                 let descriptor = FetchDescriptor<ArticleModel>()
                 let allArticles = try? mainContext.fetch(descriptor)
-                
+
                 // Manual filtering by ID string to avoid predicate issues
                 let idString = articleID.uuidString
                 guard let article = allArticles?.first(where: { $0.id.uuidString == idString }) else {
@@ -225,7 +225,7 @@ extension NewsView {
             return "You are not currently subscribed to any topics. Click 'Subscriptions' below."
         }
         var message = "Please be patient, news will arrive automatically. You do not need to leave this application open.\n\nYou are currently subscribed to: \(activeSubscriptions.joined(separator: ", "))."
-        
+
         // Check filter status directly from viewModel instead of using isAnyFilterActive property
         let filtersActive = viewModel.showUnreadOnly || viewModel.showBookmarkedOnly
         if filtersActive {
@@ -257,7 +257,7 @@ extension NewsView {
             withAnimation {
                 viewModel.selectedArticleIds.removeAll()
             }
-            
+
             // Post a notification that can be observed by NewsView to reset edit mode
             NotificationCenter.default.post(
                 name: Notification.Name("ResetEditMode"),

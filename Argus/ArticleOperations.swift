@@ -124,25 +124,25 @@ final class ArticleOperations {
 
         // Build predicates using modern compound approach
         var conditions = [Predicate<ArticleModel>]()
-        
+
         // Topic filter (only if a specific topic is selected)
         if let topic = topic, topic != "All" {
             conditions.append(#Predicate<ArticleModel> { $0.topic == topic })
         }
-        
+
         // Read status filter
         if showUnreadOnly {
             conditions.append(#Predicate<ArticleModel> { !$0.isViewed })
         }
-        
+
         // Bookmark filter
         if showBookmarkedOnly {
             conditions.append(#Predicate<ArticleModel> { $0.isBookmarked })
         }
-        
+
         // Create the fetch descriptor
         var descriptor = FetchDescriptor<ArticleModel>()
-        
+
         // Apply predicates to the descriptor
         if !conditions.isEmpty {
             if conditions.count == 1 {
@@ -151,7 +151,7 @@ final class ArticleOperations {
             } else {
                 // For multiple conditions, we need to use one condition in the initial fetch
                 // and then filter the results manually for the other conditions
-                
+
                 // First, apply the most restrictive predicate to limit the initial fetch
                 if showUnreadOnly {
                     // This is typically the most restrictive filter
@@ -174,35 +174,35 @@ final class ArticleOperations {
 
         do {
             var articles = try context.fetch(descriptor)
-            
+
             // Apply additional in-memory filtering for multiple filter conditions
             if conditions.count > 1 {
                 AppLogger.database.debug("🔍 Applying additional in-memory filters")
-                
+
                 // Track which predicate was applied at the database level
                 let appliedUnreadFilter = showUnreadOnly && descriptor.predicate != nil && conditions.count > 1
                 let appliedBookmarkFilter = showBookmarkedOnly && !appliedUnreadFilter && descriptor.predicate != nil
                 let appliedTopicFilter = topic != nil && topic != "All" && !appliedUnreadFilter && !appliedBookmarkFilter && descriptor.predicate != nil
-                
+
                 // Apply remaining filters in memory
                 if let topic = topic, topic != "All", !appliedTopicFilter {
                     AppLogger.database.debug("🔍 Applying topic filter in memory: \(topic)")
                     articles = articles.filter { $0.topic == topic }
                 }
-                
+
                 // Apply unread filter in memory if not applied at database level
-                if showUnreadOnly && !appliedUnreadFilter {
+                if showUnreadOnly, !appliedUnreadFilter {
                     AppLogger.database.debug("🔍 Applying unread filter in memory")
                     articles = articles.filter { !$0.isViewed }
                 }
-                
+
                 // Apply bookmark filter in memory if not applied at database level
-                if showBookmarkedOnly && !appliedBookmarkFilter {
+                if showBookmarkedOnly, !appliedBookmarkFilter {
                     AppLogger.database.debug("🔍 Applying bookmark filter in memory")
                     articles = articles.filter { $0.isBookmarked }
                 }
             }
-            
+
             AppLogger.database.debug("✅ Fetched \(articles.count) articles with filters")
             return articles
         } catch {
@@ -492,7 +492,7 @@ final class ArticleOperations {
         case "date":
             // Create a dictionary mapping dates to articles
             var groupedByDay: [Date: [ArticleModel]] = [:]
-            
+
             // Manually group rather than using Dictionary(grouping:) to avoid Sendable issues
             for article in sortedArticles {
                 let day = Calendar.current.startOfDay(for: article.publishDate)
@@ -512,7 +512,7 @@ final class ArticleOperations {
         case "topic":
             // Create a dictionary mapping topics to articles
             var groupedByTopic: [String: [ArticleModel]] = [:]
-            
+
             // Manually group rather than using Dictionary(grouping:) to avoid Sendable issues
             for article in sortedArticles {
                 let topic = article.topic ?? "Uncategorized"

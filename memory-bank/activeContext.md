@@ -1,6 +1,46 @@
 # Active Context: Argus iOS App
 
 ## Current Work Focus
+
+- **Fixed Rich Text Formatting and Size Issue** (Completed):
+  - Successfully resolved issue where article content was displayed either as raw markdown or with text too small:
+    - Root cause identified: NonSelectableRichTextView was directly using the original attributed string without proper font sizing
+    - When displaying sections like Summary or Critical Analysis, rich text was properly formatted but too small to read
+    - The issue affected both article lists in NewsView and detailed article views in NewsDetailView
+  - Implementation details:
+    - Modified NonSelectableRichTextView.updateUIView to create a mutable copy of the original attributed string
+    - Added font size normalization that preserves all formatting attributes while ensuring consistent readable size:
+      ```swift
+      // Create a mutable copy to preserve formatting but ensure proper font size
+      let mutableString = NSMutableAttributedString(attributedString: attributedString)
+      
+      // Apply system body font size to all text while preserving other attributes
+      let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+      mutableString.enumerateAttributes(in: NSRange(location: 0, length: mutableString.length)) { attributes, range, _ in
+          if let existingFont = attributes[.font] as? UIFont {
+              // Create a new font with the same characteristics but body font size
+              let newFont = existingFont.withSize(bodyFont.pointSize)
+              mutableString.addAttribute(.font, value: newFont, range: range)
+          } else {
+              // If no font exists, add the body font
+              mutableString.addAttribute(.font, value: bodyFont, range: range)
+          }
+      }
+      ```
+    - Preserved all formatting attributes like bold, italic, and headers while normalizing font size
+    - Ensured all text is rendered at the system's preferred body text size for readability
+  - Results:
+    - Article content now displays with proper rich text formatting (bold, italic, headers) at a consistent, readable size
+    - Both the article list view and detail view show properly formatted content at the same size
+    - Text no longer appears as raw markdown with visible formatting characters
+    - Content is properly readable without being too small or requiring pinch-to-zoom
+  - Key learnings:
+    - When working with NSAttributedString, it's important to preserve formatting while ensuring readability
+    - The NonSelectableRichTextView implementation needed to balance preserving styling with consistent sizing
+    - This fix aligns with the guidance in .clinerules about using NonSelectableRichTextView for article content
+    - Rich text rendering requires careful attribute handling to maintain both formatting and readability
+
+## Current Work Focus
 - **Active Development Phase**: Modernization implementation in progress with focus on error handling, robustness, and simplifying migration
 - **Critical Bug Resolution**: Working to resolve persistent blob storage issues after multiple attempted fixes
 - **Primary Focus Areas**: Implementing error handling improvements, CloudKit integration fixes, API resilience enhancements, and simplifying migration system
@@ -13,6 +53,32 @@
 - **Settings Functionality**: Fixing issues with settings updates not being observed by view models
 
 ## Recent Changes
+
+- **Fixed Article Content Display Issue in NewsView** (Completed):
+  - Successfully resolved the display issue where formatted article content wasn't properly displayed in NewsView:
+    - Initial problem: Text appeared as faint gray with improper formatting and was wrapping off screen edges in NewsView
+    - Text displayed correctly in NewsDetailView but not in NewsView despite using the same data
+  - Root cause identified:
+    - NewsView and NewsDetailView used completely different UI components to render rich text:
+      - NewsView was using `AccessibleAttributedText` component
+      - NewsDetailView was using `NonSelectableRichTextView` component 
+    - These components have fundamental internal differences:
+      - Different width constraints (32px vs 40px padding)
+      - Different font handling (`NonSelectableRichTextView` forces body font on all text)
+      - Different text container configurations
+  - Solution implemented:
+    - Modified `summaryContent` method in NewsView.swift to use `NonSelectableRichTextView` instead of `AccessibleAttributedText`
+    - Kept the secondary text color for visual consistency
+    - Removed any modifiers that might interfere with proper text wrapping
+  - Results:
+    - Text now displays consistently in both views with proper formatting and wrapping
+    - Article body content is fully visible and formatted correctly
+    - No text stretches off screen edges
+  - Key learnings:
+    - Component selection is critical - seemingly similar UI components can have very different rendering behaviors
+    - Consistency between views should extend to the actual UI components used, not just visual styling
+    - When rich text rendering issues occur, investigate the fundamental component differences first
+    - Use the same UI component across the app for the same type of content display
 
 - **Fixed Swift 6 Equatable Conformance Issue** (Completed):
   - Successfully resolved Equatable conformance issues with SwiftData models in Swift 6:

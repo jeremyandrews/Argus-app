@@ -175,7 +175,7 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
             // since we're using the container directly
             let context = SwiftDataContainer.shared.container.mainContext
             let descriptor = FetchDescriptor<ArticleModel>()
-            
+
             // Directly fetch using the MainActor-isolated context instead of using performTransaction
             // This avoids crossing actor boundaries with non-Sendable types
             return try context.fetch(descriptor)
@@ -192,13 +192,13 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         // Store Sendable values for use across actor boundaries
         let targetId = id
         let targetURL = jsonURL
-        
+
         // Check if article exists in the legacy system before attempting to find it
         // Using a direct boolean check instead of binding to unused variable
         if await migrationAdapter.findExistingArticle(jsonURL: targetURL, articleID: targetId) != nil {
             // We're already on the MainActor, so get the context directly
             let context = SwiftDataContainer.shared.container.mainContext
-            
+
             do {
                 // Try to find by URL first (most reliable) using a direct predicate
                 if !targetURL.isEmpty {
@@ -206,24 +206,24 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
                         predicate: #Predicate<ArticleModel> { $0.jsonURL == targetURL }
                     )
                     let urlMatches = try context.fetch(urlDescriptor)
-                    
+
                     if let matchByURL = urlMatches.first {
                         return matchByURL
                     }
                 }
-                
+
                 // If not found by URL, try by ID
                 let idDescriptor = FetchDescriptor<ArticleModel>(
                     predicate: #Predicate<ArticleModel> { $0.id == targetId }
                 )
                 let idMatches = try context.fetch(idDescriptor)
-                
+
                 return idMatches.first
             } catch {
                 AppLogger.database.error("Error in findLegacyArticle: \(error)")
             }
         }
-        
+
         return nil
     }
 
@@ -309,23 +309,23 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         // Store Sendable properties before actor transitions
         let targetId = id
         let targetField = field
-        
+
         // Get a fresh context on the MainActor
         let context = SwiftDataContainer.shared.container.mainContext
-        
+
         // Create descriptor and fetch articles on the MainActor
         let descriptor = FetchDescriptor<ArticleModel>(
             predicate: #Predicate<ArticleModel> { $0.id == targetId }
         )
         let matchingArticles = try context.fetch(descriptor)
-        
+
         // Find the article with matching ID
         guard let article = matchingArticles.first else {
             // Article not found - log and return early
             AppLogger.database.debug("Article with ID \(targetId) not found in legacy system for update")
             return
         }
-        
+
         // Update the appropriate field
         switch targetField {
         case "isViewed":
@@ -341,9 +341,8 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         // Archive functionality removed
         default:
             AppLogger.database.warning("Attempted to update unsupported field \(targetField) for article \(targetId)")
-            break
         }
-        
+
         // Save the changes
         try context.save()
     }
@@ -354,27 +353,27 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
     private func deleteLegacyArticle(id: UUID) async throws {
         // Store the ID as Sendable value before actor transition
         let targetId = id
-        
+
         // Get a fresh context on the MainActor
         let context = SwiftDataContainer.shared.container.mainContext
-        
+
         // Create descriptor with predicate matching the ID
         let descriptor = FetchDescriptor<ArticleModel>(
             predicate: #Predicate<ArticleModel> { $0.id == targetId }
         )
         let matchingArticles = try context.fetch(descriptor)
-        
+
         // Find the article with matching ID
         guard let article = matchingArticles.first else {
             // Not found - log and exit early
             AppLogger.database.debug("Article with ID \(targetId) not found in legacy system for deletion")
             return
         }
-        
+
         // Delete the article
         context.delete(article)
         AppLogger.database.debug("Deleted article \(targetId) from legacy system")
-        
+
         // Save the changes
         try context.save()
     }

@@ -24,36 +24,8 @@ struct NewsDetailView: View {
 
     /// Access to the model context for database operations
     @Environment(\.modelContext) private var modelContext
-    @State private var preloadedNotification: NotificationData? = nil
+    // Removed legacy preloaded notification state
 
-    /// Convert notification content to attributed string
-    private func getAttributedString(
-        for field: RichTextField,
-        from notification: NotificationData,
-        createIfMissing: Bool = false,
-        customFontSize: CGFloat? = nil
-    ) -> NSAttributedString? {
-        // Call directly to MarkdownUtilities since the customFontSize parameter is needed
-        // but not available in the ArticleOperations API
-        if let textContent = getTextContentForField(field, from: notification) {
-            return markdownToAttributedString(
-                textContent,
-                textStyle: "UIFontTextStyleBody",
-                customFontSize: customFontSize
-            )
-        } else if createIfMissing {
-            // If we should create missing content, use placeholder text
-            let fieldName = SectionNaming.nameForField(field).lowercased()
-            let placeholder = "No \(fieldName) content available."
-            return markdownToAttributedString(
-                placeholder,
-                textStyle: "UIFontTextStyleBody",
-                customFontSize: customFontSize
-            )
-        }
-        return nil
-    }
-    
     /// Convert article content to attributed string
     private func getAttributedString(
         for field: RichTextField,
@@ -81,7 +53,7 @@ struct NewsDetailView: View {
         }
         return nil
     }
-    
+
     /// Gets the text content for a specific rich text field from an ArticleModel
     private func getTextContentForField(_ field: RichTextField, from article: ArticleModel) -> String? {
         switch field {
@@ -92,39 +64,20 @@ struct NewsDetailView: View {
         case .summary:
             return article.summary
         case .criticalAnalysis:
-            return article.critical_analysis
+            return article.criticalAnalysis
         case .logicalFallacies:
-            return article.logical_fallacies
+            return article.logicalFallacies
         case .sourceAnalysis:
-            return article.source_analysis
+            return article.sourceAnalysis
         case .relationToTopic:
-            return article.relation_to_topic
+            return article.relationToTopic
         case .additionalInsights:
-            return article.additional_insights
+            return article.additionalInsights
         }
     }
 
     /// Gets the text content for a specific rich text field
-    private func getTextContentForField(_ field: RichTextField, from notification: NotificationData) -> String? {
-        switch field {
-        case .title:
-            return notification.title
-        case .body:
-            return notification.body
-        case .summary:
-            return notification.summary
-        case .criticalAnalysis:
-            return notification.critical_analysis
-        case .logicalFallacies:
-            return notification.logical_fallacies
-        case .sourceAnalysis:
-            return notification.source_analysis
-        case .relationToTopic:
-            return notification.relation_to_topic
-        case .additionalInsights:
-            return notification.additional_insights
-        }
-    }
+    // Removed legacy NotificationData getTextContentForField method - using ArticleModel version instead
 
     @State private var titleAttributedString: NSAttributedString? = nil
     @State private var bodyAttributedString: NSAttributedString? = nil
@@ -199,7 +152,7 @@ struct NewsDetailView: View {
     var body: some View {
         mainView
     }
-    
+
     // Breaking the body into smaller components to help the compiler
     private var mainView: some View {
         NavigationStack {
@@ -226,7 +179,7 @@ struct NewsDetailView: View {
                 .gesture(createDismissGesture())
         }
     }
-    
+
     private var articleContentView: some View {
         Group {
             if let _ = currentNotification {
@@ -241,7 +194,7 @@ struct NewsDetailView: View {
             }
         }
     }
-    
+
     private var articleDetailContent: some View {
         VStack(spacing: 0) {
             topBar
@@ -249,7 +202,7 @@ struct NewsDetailView: View {
             bottomToolbar
         }
     }
-    
+
     private var articleScrollView: some View {
         ScrollView {
             ScrollViewReader { proxy in
@@ -278,7 +231,7 @@ struct NewsDetailView: View {
             }
         }
     }
-    
+
     private func createDismissGesture() -> some Gesture {
         DragGesture()
             .onEnded { value in
@@ -287,7 +240,7 @@ struct NewsDetailView: View {
                 }
             }
     }
-    
+
     private func handleOnAppear() {
         setupDeletionHandling()
         markAsViewed()
@@ -423,20 +376,20 @@ struct NewsDetailView: View {
         sections.append(ContentSection(header: "Summary", content: summaryContent))
 
         // 2) “Relevance” section
-        let relevanceContent = n.relation_to_topic ?? (json["relation_to_topic"] as? String ?? "")
+        let relevanceContent = n.relationToTopic ?? (json["relationToTopic"] as? String ?? "")
         sections.append(ContentSection(header: "Relevance", content: relevanceContent))
 
         // 3) “Critical Analysis” section
-        let criticalContent = n.critical_analysis ?? (json["critical_analysis"] as? String ?? "")
+        let criticalContent = n.criticalAnalysis ?? (json["criticalAnalysis"] as? String ?? "")
         sections.append(ContentSection(header: "Critical Analysis", content: criticalContent))
 
         // 4) “Logical Fallacies” section
-        let fallaciesContent = n.logical_fallacies ?? (json["logical_fallacies"] as? String ?? "")
+        let fallaciesContent = n.logicalFallacies ?? (json["logicalFallacies"] as? String ?? "")
         sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
 
         // 5) “Source Analysis” section
-        let sourceAnalysisText = n.source_analysis ?? (json["source_analysis"] as? String ?? "")
-        let sourceType = n.source_type ?? (json["source_type"] as? String ?? "")
+        let sourceAnalysisText = n.sourceAnalysis ?? (json["sourceAnalysis"] as? String ?? "")
+        let sourceType = n.sourceType ?? (json["sourceType"] as? String ?? "")
         let sourceAnalysisData: [String: Any] = [
             "text": sourceAnalysisText,
             "sourceType": sourceType,
@@ -444,20 +397,20 @@ struct NewsDetailView: View {
         sections.append(ContentSection(header: "Source Analysis", content: sourceAnalysisData))
 
         // 6) “Context & Perspective” (aka “additional_insights”)
-        let insights = n.additional_insights ?? (json["additional_insights"] as? String ?? "")
+        let insights = n.additionalInsights ?? (json["additionalInsights"] as? String ?? "")
         if !insights.isEmpty {
             sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
 
         // 7) “Argus Engine Stats” (argus_details)
-        if let engineString = n.engine_stats {
+        if let engineString = n.engineStats {
             // parseEngineStatsJSON returns an ArgusDetailsData if valid
             if let parsed = parseEngineStatsJSON(engineString, fallbackDate: n.date) {
                 sections.append(ContentSection(header: "Argus Engine Stats", content: parsed))
             } else {}
         } else if
             let model = json["model"] as? String,
-            let elapsed = json["elapsed_time"] as? Double,
+            let elapsed = json["elapsedTime"] as? Double,
             let stats = json["stats"] as? String
         {
             // Create ArgusDetailsData for fallback
@@ -466,7 +419,7 @@ struct NewsDetailView: View {
                 elapsedTime: elapsed,
                 date: n.date,
                 stats: stats,
-                systemInfo: json["system_info"] as? [String: Any]
+                systemInfo: json["systemInfo"] as? [String: Any]
             )
             sections.append(ContentSection(header: "Argus Engine Stats", content: dataObject))
         }
@@ -477,11 +430,11 @@ struct NewsDetailView: View {
         }
 
         // 9) “Related Articles” (similar_articles)
-        if let localSimilar = n.similar_articles {
+        if let localSimilar = n.similarArticles {
             if let parsedArray = parseSimilarArticlesJSON(localSimilar) {
                 sections.append(ContentSection(header: "Related Articles", content: parsedArray))
             }
-        } else if let fallbackArr = json["similar_articles"] as? [[String: Any]], !fallbackArr.isEmpty {
+        } else if let fallbackArr = json["similarArticles"] as? [[String: Any]], !fallbackArr.isEmpty {
             sections.append(ContentSection(header: "Related Articles", content: fallbackArr))
         }
 
@@ -592,48 +545,7 @@ struct NewsDetailView: View {
         }
     }
 
-    // This function handles the processing of rich text on a background thread
-    // while keeping data access on the MainActor
-    private func processRichText(for notification: NotificationData) async {
-        // Title processing - all UI updates on MainActor
-        await MainActor.run {
-            // Stay on MainActor for this potentially expensive operation
-            // to avoid Sendable issues with NSAttributedString and NotificationData
-            let titleResult = getAttributedString(for: .title, from: notification)
-
-            // Check if task is cancelled before updating UI
-            if !Task.isCancelled {
-                titleAttributedString = titleResult
-            }
-        }
-
-        // Body processing - all UI updates on MainActor
-        await MainActor.run {
-            let bodyResult = getAttributedString(for: .body, from: notification)
-
-            if !Task.isCancelled {
-                bodyAttributedString = bodyResult
-            }
-        }
-
-        // Check if Summary section is expanded before processing it
-        let isSummaryExpanded = await MainActor.run { expandedSections["Summary"] == true }
-
-        if isSummaryExpanded {
-            await MainActor.run {
-                // Process summary (which might be more expensive)
-                let summaryResult = getAttributedString(
-                    for: .summary,
-                    from: notification,
-                    createIfMissing: true
-                )
-
-                if !Task.isCancelled {
-                    summaryAttributedString = summaryResult
-                }
-            }
-        }
-    }
+    // Removed legacy processRichText method - we now use the ArticleOperations and ViewModel
 
     // Fix the loadContentForSection function to properly handle section loading
     // Function removed - using SectionNaming.normalizedKey directly at call sites
@@ -769,7 +681,7 @@ struct NewsDetailView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         DomainSourceView(
                             domain: domain,
-                            sourceType: n.source_type,
+                            sourceType: n.sourceType,
                             onTap: {
                                 // Default tap behavior for domain
                                 if let url = URL(string: "https://\(domain)") {
@@ -798,7 +710,7 @@ struct NewsDetailView: View {
                         QualityBadges(
                             sourcesQuality: n.sources_quality,
                             argumentQuality: n.argument_quality,
-                            sourceType: n.source_type,
+                            sourceType: n.sourceType,
                             scrollToSection: $scrollToSection,
                             onBadgeTap: { section in
                                 // First ensure the section is expanded
@@ -961,15 +873,15 @@ struct NewsDetailView: View {
         return similarArticles
     }
 
-    // Helper to build source analysis content
-    private func buildSourceAnalysis(_ notification: NotificationData) -> String {
+    // Helper to build source analysis content - using ArticleModel instead of NotificationData
+    private func buildSourceAnalysis(_ article: ArticleModel) -> String {
         var content = ""
 
-        if let sourceType = notification.source_type {
+        if let sourceType = article.sourceType {
             content += "Source Type: \(sourceType)\n\n"
         }
 
-        if let sourcesQuality = notification.sources_quality {
+        if let sourcesQuality = article.sourcesQuality {
             let qualityLabel: String
             switch sourcesQuality {
             case 1: qualityLabel = "Poor"
@@ -981,8 +893,8 @@ struct NewsDetailView: View {
             content += "Source Quality: \(qualityLabel)\n\n"
         }
 
-        // Add more details if available in the notification
-        if let domain = notification.domain {
+        // Add more details if available in the article
+        if let domain = article.domain {
             content += "Domain: \(domain)\n\n"
         }
 
@@ -1014,10 +926,10 @@ struct NewsDetailView: View {
         }
     }
 
-    private func hasRequiredContent(_ notification: NotificationData) -> Bool {
-        return notification.summary != nil &&
-            notification.critical_analysis != nil &&
-            notification.logical_fallacies != nil
+    private func hasRequiredContent(_ article: ArticleModel) -> Bool {
+        return article.summary != nil &&
+            article.criticalAnalysis != nil &&
+            article.logicalFallacies != nil
     }
 
     // Helper function to build content dictionary from article model
@@ -1030,32 +942,32 @@ struct NewsDetailView: View {
         }
 
         // Transfer metadata fields directly without processing
-        content["sources_quality"] = article.sources_quality
+        content["sources_quality"] = article.sourcesQuality
         content["argument_quality"] = article.argument_quality
-        content["source_type"] = article.source_type
+        content["sourceType"] = article.sourceType
 
         // Just check if these fields exist without converting to attributed strings
         content["summary"] = article.summary
-        content["critical_analysis"] = article.critical_analysis
-        content["logical_fallacies"] = article.logical_fallacies
-        content["relation_to_topic"] = article.relation_to_topic
-        content["additional_insights"] = article.additional_insights
+        content["criticalAnalysis"] = article.criticalAnalysis
+        content["logicalFallacies"] = article.logicalFallacies
+        content["relationToTopic"] = article.relationToTopic
+        content["additionalInsights"] = article.additionalInsights
 
         // For source analysis, just create a basic dictionary without processing the text
-        if let sourceAnalysis = article.source_analysis {
-            content["source_analysis"] = [
+        if let sourceAnalysis = article.sourceAnalysis {
+            content["sourceAnalysis"] = [
                 "text": sourceAnalysis,
-                "sourceType": article.source_type ?? "",
+                "sourceType": article.sourceType ?? "",
             ]
         } else {
-            content["source_analysis"] = [
+            content["sourceAnalysis"] = [
                 "text": "",
-                "sourceType": article.source_type ?? "",
+                "sourceType": article.sourceType ?? "",
             ]
         }
 
         // Transfer engine stats and similar articles as is
-        if let engineStatsJson = article.engine_stats,
+        if let engineStatsJson = article.engineStats,
            let engineStatsData = engineStatsJson.data(using: .utf8),
            let engineStats = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
         {
@@ -1075,7 +987,7 @@ struct NewsDetailView: View {
         }
 
         // Transfer similar articles as is
-        if let similarArticlesJson = article.similar_articles,
+        if let similarArticlesJson = article.similarArticles,
            let similarArticlesData = similarArticlesJson.data(using: .utf8),
            let similarArticles = try? JSONSerialization.jsonObject(with: similarArticlesData) as? [[String: Any]]
         {
@@ -1085,70 +997,7 @@ struct NewsDetailView: View {
         return content
     }
 
-    // Helper function to build content dictionary from notification
-    private func buildContentDictionary(from notification: NotificationData) -> [String: Any] {
-        var content: [String: Any] = [:]
-
-        // Add URL if available
-        if let domain = notification.domain {
-            content["url"] = "https://\(domain)"
-        }
-
-        // Transfer metadata fields directly without processing
-        content["sources_quality"] = notification.sources_quality
-        content["argument_quality"] = notification.argument_quality
-        content["source_type"] = notification.source_type
-
-        // Just check if these fields exist without converting to attributed strings
-        content["summary"] = notification.summary
-        content["critical_analysis"] = notification.critical_analysis
-        content["logical_fallacies"] = notification.logical_fallacies
-        content["relation_to_topic"] = notification.relation_to_topic
-        content["additional_insights"] = notification.additional_insights
-
-        // For source analysis, just create a basic dictionary without processing the text
-        if let sourceAnalysis = notification.source_analysis {
-            content["source_analysis"] = [
-                "text": sourceAnalysis,
-                "sourceType": notification.source_type ?? "",
-            ]
-        } else {
-            content["source_analysis"] = [
-                "text": "",
-                "sourceType": notification.source_type ?? "",
-            ]
-        }
-
-        // Transfer engine stats and similar articles as is
-        if let engineStatsJson = notification.engine_stats,
-           let engineStatsData = engineStatsJson.data(using: .utf8),
-           let engineStats = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
-        {
-            // Transfer relevant engine stats fields
-            if let model = engineStats["model"] as? String {
-                content["model"] = model
-            }
-            if let elapsedTime = engineStats["elapsed_time"] as? Double {
-                content["elapsed_time"] = elapsedTime
-            }
-            if let stats = engineStats["stats"] as? String {
-                content["stats"] = stats
-            }
-            if let systemInfo = engineStats["system_info"] as? [String: Any] {
-                content["system_info"] = systemInfo
-            }
-        }
-
-        // Transfer similar articles as is
-        if let similarArticlesJson = notification.similar_articles,
-           let similarArticlesData = similarArticlesJson.data(using: .utf8),
-           let similarArticles = try? JSONSerialization.jsonObject(with: similarArticlesData) as? [[String: Any]]
-        {
-            content["similar_articles"] = similarArticles
-        }
-
-        return content
-    }
+    // Helper function for NotificationData removed as we now use ArticleModel directly
 
     enum ContentLoadType {
         case minimal // Just title and body (minimum needed for header)
@@ -1274,27 +1123,7 @@ struct NewsDetailView: View {
         }
     }
 
-    // Helper function to load attributed string asynchronously with better error handling
-    private func loadAttributedStringAsync(for field: RichTextField, from notification: NotificationData) async -> NSAttributedString? {
-        // Use actor isolation to safely perform the operation
-        return await withTaskCancellationHandler {
-            // The actual task
-            await withCheckedContinuation { continuation in
-                // Use the main queue for simplicity and to avoid Sendable issues
-                DispatchQueue.main.async {
-                    // This is the synchronous function that generates the attributed string
-                    let result = getAttributedString(
-                        for: field,
-                        from: notification,
-                        createIfMissing: true
-                    )
-                    continuation.resume(returning: result)
-                }
-            }
-        } onCancel: {
-            // Nothing to do on cancellation - the continuation won't be resumed
-        }
-    }
+    // Removed legacy loadAttributedStringAsync method - we now use ArticleOperations and ViewModel
 
     private func saveModel() {
         do {
@@ -1383,14 +1212,27 @@ struct NewsDetailView: View {
                     .padding(.vertical, 12)
                 } else {
                     // Fallback for plain text - NO ANIMATIONS
-                    Text(section.content as? String ?? "No content available")
-                        .font(.callout)
-                        .padding(.top, 6)
-                        .lineSpacing(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
+                    let rawContent = section.content as? String ?? "No content available"
+                    if let formattedContent = markdownToAttributedString(rawContent, textStyle: "UIFontTextStyleBody") {
+                        // Try to format the content on the fly if regular text display failed
+                        NonSelectableRichTextView(attributedString: formattedContent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 6)
+                            .padding(.bottom, 2)
+                            .textSelection(.enabled)
+                    } else {
+                        // Last resort fallback to plain text
+                        Text(rawContent)
+                            .font(.callout)
+                            .padding(.top, 6)
+                            .lineSpacing(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
                 }
             }
         }
@@ -1423,7 +1265,6 @@ struct NewsDetailView: View {
         logicalFallaciesAttributedString = nil
         sourceAnalysisAttributedString = nil
         cachedContentBySection = [:]
-        preloadedNotification = nil
 
         // Generate a new transition ID
         contentTransitionID = UUID()
@@ -1686,7 +1527,7 @@ struct NewsDetailView: View {
     }
 
     struct LazyLoadingContentView<Content: View>: View {
-        let notification: NotificationData
+        let article: ArticleModel
         let field: RichTextField
         let placeholder: String
         var fontSize: CGFloat = 16
@@ -1776,7 +1617,7 @@ struct NewsDetailView: View {
                 var attributedString: NSAttributedString? = nil
 
                 // Check if we can get this from a blob
-                if let blobs = notification.getBlobsForField(field), let blob = blobs.first {
+                if let blob = field.getBlob(from: article), !blob.isEmpty {
                     do {
                         attributedString = try NSKeyedUnarchiver.unarchivedObject(
                             ofClass: NSAttributedString.self,
@@ -1794,7 +1635,7 @@ struct NewsDetailView: View {
 
                 // If blob failed, generate from markdown
                 if attributedString == nil && !Task.isCancelled {
-                    let textContent = getTextContentFor(field, from: notification)
+                    let textContent = getTextContentFor(field, from: article)
 
                     if let content = textContent, !content.isEmpty {
                         attributedString = markdownToAttributedString(
@@ -1838,25 +1679,25 @@ struct NewsDetailView: View {
             }
         }
 
-        // Helper function to extract text content from notification
-        private func getTextContentFor(_ field: RichTextField, from notification: NotificationData) -> String? {
+        // Helper function to extract text content from article
+        private func getTextContentFor(_ field: RichTextField, from article: ArticleModel) -> String? {
             switch field {
             case .title:
-                return notification.title
+                return article.title
             case .body:
-                return notification.body
+                return article.body
             case .summary:
-                return notification.summary
+                return article.summary
             case .criticalAnalysis:
-                return notification.critical_analysis
+                return article.criticalAnalysis
             case .logicalFallacies:
-                return notification.logical_fallacies
+                return article.logicalFallacies
             case .sourceAnalysis:
-                return notification.source_analysis
+                return article.sourceAnalysis
             case .relationToTopic:
-                return notification.relation_to_topic
+                return article.relationToTopic
             case .additionalInsights:
-                return notification.additional_insights
+                return article.additionalInsights
             }
         }
 
@@ -2045,7 +1886,7 @@ struct NewsDetailView: View {
                             QualityBadges(
                                 sourcesQuality: content["sources_quality"] as? Int,
                                 argumentQuality: content["argument_quality"] as? Int,
-                                sourceType: content["source_type"] as? String,
+                                sourceType: content["sourceType"] as? String,
                                 scrollToSection: $scrollToSection
                             )
                         }
@@ -2240,7 +2081,7 @@ struct SimilarArticleRow: View {
                             article.jsonURL == urlToFetch
                         }
                     ))
-                    
+
                     // Process results immediately within the MainActor context
                     if let foundArticle = foundArticles.first {
                         selectedArticle = foundArticle
@@ -2565,19 +2406,19 @@ struct ShareSelectionView: View {
                     sectionContent = notification.summary
 
                 case "Critical Analysis":
-                    sectionContent = notification.critical_analysis
+                    sectionContent = notification.criticalAnalysis
 
                 case "Logical Fallacies":
-                    sectionContent = notification.logical_fallacies
+                    sectionContent = notification.logicalFallacies
 
                 case "Source Analysis":
-                    sectionContent = notification.source_analysis
+                    sectionContent = notification.sourceAnalysis
 
                 case "Relevance":
-                    sectionContent = notification.relation_to_topic
+                    sectionContent = notification.relationToTopic
 
                 case "Context & Perspective":
-                    sectionContent = notification.additional_insights
+                    sectionContent = notification.additionalInsights
 
                 case "Argus Engine Stats":
                     if let details = section.argusDetails {
@@ -2591,7 +2432,7 @@ struct ShareSelectionView: View {
                         if let systemInfo = details.systemInfo {
                             sectionContent! += formatSystemInfo(systemInfo)
                         }
-                    } else if let engineStats = notification.engine_stats {
+                    } else if let engineStats = notification.engineStats {
                         sectionContent = "Engine Stats: \(engineStats)"
                     }
 
@@ -2681,21 +2522,21 @@ struct ShareSelectionView: View {
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
         var sections = [
-            ContentSection(header: "Title", content: json["tiny_title"] as? String ?? ""),
-            ContentSection(header: "Brief Summary", content: json["tiny_summary"] as? String ?? ""),
+            ContentSection(header: "Title", content: json["tinyTitle"] as? String ?? ""),
+            ContentSection(header: "Brief Summary", content: json["tinySummary"] as? String ?? ""),
             ContentSection(header: "Article URL", content: json["url"] as? String ?? ""),
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
-            ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
-            ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
-            ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
-            ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
+            ContentSection(header: "Relevance", content: json["relationToTopic"] as? String ?? ""),
+            ContentSection(header: "Critical Analysis", content: json["criticalAnalysis"] as? String ?? ""),
+            ContentSection(header: "Logical Fallacies", content: json["logicalFallacies"] as? String ?? ""),
+            ContentSection(header: "Source Analysis", content: json["sourceAnalysis"] as? String ?? ""),
         ]
 
-        let insights = json["additional_insights"] as? String ?? notification.additional_insights ?? ""
+        let insights = json["additionalInsights"] as? String ?? notification.additionalInsights ?? ""
         sections.append(ContentSection(header: "Context & Perspective", content: insights))
 
         if let model = json["model"] as? String,
-           let elapsedTime = json["elapsed_time"] as? Double,
+           let elapsedTime = json["elapsedTime"] as? Double,
            let stats = json["stats"] as? String
         {
             sections.append(ContentSection(
@@ -2705,7 +2546,7 @@ struct ShareSelectionView: View {
                     elapsedTime: elapsedTime,
                     date: notification.date,
                     stats: stats,
-                    systemInfo: json["system_info"] as? [String: Any]
+                    systemInfo: json["systemInfo"] as? [String: Any]
                 )
             ))
         }

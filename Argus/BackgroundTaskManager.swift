@@ -236,7 +236,7 @@ final class BackgroundTaskManager {
     /// Fetches recent article URLs for syncing - modified for Swift 6 sendability
     private func fetchRecentArticles() async -> [String] {
         let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
-        
+
         // Use the new method that returns Sendable String URLs directly
         return await DatabaseCoordinator.shared.fetchRecentArticleURLs(since: oneDayAgo)
     }

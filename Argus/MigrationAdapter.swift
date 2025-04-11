@@ -146,11 +146,11 @@ class MigrationAdapter {
                 // Within MainActor, safely access the context
                 let container = SwiftDataContainer.shared.container
                 let context = container.mainContext
-                
+
                 // Store the search criteria as Sendable values
                 let searchID = articleID
                 let searchURL = jsonURL
-                
+
                 if let articleID = searchID {
                     // Get all articles with ID matching
                     let descriptor = FetchDescriptor<ArticleModel>(
@@ -166,7 +166,7 @@ class MigrationAdapter {
                     let matchingArticles = try context.fetch(descriptor)
                     return !matchingArticles.isEmpty
                 }
-                
+
                 return false
             } catch {
                 AppLogger.database.error("Error in standardizedArticleExistsCheck: \(error)")

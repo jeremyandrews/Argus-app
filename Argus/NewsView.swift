@@ -481,31 +481,31 @@ struct NewsView: View {
             // Mark that we've tried to fetch metadata to avoid repeated attempts
             hasFetchedMetadata = true
 
-                // Only query the local database to see if we have any metadata already stored
-                Task {
-                    // Get a fresh copy of the article to see if it has metadata
-                    let articleOperations = ArticleOperations()
-                    if let updatedArticle = await articleOperations.getArticleModelWithContext(byId: article.id) {
-                        await MainActor.run {
-                            if updatedArticle.sourcesQuality != nil ||
-                                updatedArticle.argumentQuality != nil ||
-                                updatedArticle.sourceType != nil
-                            {
-                                // No need to trigger loadFullContent as the database already has the metadata
-                                // Just force a view refresh with the latest data
-                            }
+            // Only query the local database to see if we have any metadata already stored
+            Task {
+                // Get a fresh copy of the article to see if it has metadata
+                let articleOperations = ArticleOperations()
+                if let updatedArticle = await articleOperations.getArticleModelWithContext(byId: article.id) {
+                    await MainActor.run {
+                        if updatedArticle.sourcesQuality != nil ||
+                            updatedArticle.argumentQuality != nil ||
+                            updatedArticle.sourceType != nil
+                        {
+                            // No need to trigger loadFullContent as the database already has the metadata
+                            // Just force a view refresh with the latest data
                         }
-                    } else {
-                        AppLogger.database.error("Could not fetch article \(article.id) for metadata check")
                     }
+                } else {
+                    AppLogger.database.error("Could not fetch article \(article.id) for metadata check")
                 }
+            }
         }
 
         private func loadFullContent() {
             guard !isLoading else { return }
 
             isLoading = true
-            
+
             // Use Task to properly handle async calls
             Task {
                 // Access the article with context
@@ -655,14 +655,28 @@ struct NewsView: View {
     // Summary content from extensions
     private func summaryContent(_ article: ArticleModel) -> some View {
         Group {
-            if let summary = article.summary, !summary.isEmpty {
-                Text(summary)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .lineLimit(3)
-                    .padding(.top, 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.disabled)
+            if !article.body.isEmpty {
+                if let bodyBlobData = article.bodyBlob,
+                   let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                       ofClass: NSAttributedString.self,
+                       from: bodyBlobData
+                   )
+                {
+                    // Use NonSelectableRichTextView to match NewsDetailView's rendering
+                    NonSelectableRichTextView(attributedString: attributedString)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 5)
+                        .textSelection(.disabled)
+                } else {
+                    // Fallback to plain text with original styling
+                    Text(article.body)
+                        .font(.subheadline) // Keep the original font size
+                        .foregroundColor(.secondary) // Keep the original color
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 5)
+                        .textSelection(.disabled)
+                }
             }
         }
     }
@@ -929,35 +943,36 @@ struct NewsView: View {
             await viewModel.toggleBookmark(for: article)
         }
     }
+
     // Extension methods are used directly through instance methods defined above
-    
+
     // MARK: - Filter View
-    
+
     private struct FilterView: View {
         @Binding var showUnreadOnly: Bool
         @Binding var showBookmarkedOnly: Bool
-        
+
         var body: some View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Filter Articles")
                     .font(.headline)
                     .padding(.top, 10)
-                
+
                 VStack(alignment: .leading, spacing: 16) {
                     Toggle(isOn: $showUnreadOnly) {
                         Label("Unread Only", systemImage: "envelope.badge")
                     }
-                    
+
                     Toggle(isOn: $showBookmarkedOnly) {
                         Label("Bookmarked Only", systemImage: "bookmark.fill")
                     }
                 }
-                
+
                 Text("Changes are applied immediately")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 10)
-                
+
                 Spacer()
             }
             .padding(.horizontal, 20)

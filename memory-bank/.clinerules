@@ -28,6 +28,32 @@ This file captures important patterns, preferences, and project intelligence tha
   }
   ```
 
+### Rich Text Display Component Selection
+- Always use `NonSelectableRichTextView` for rich text display in list views and detail views for consistent rendering
+- Never use `AccessibleAttributedText` for article body content in list views (causes text wrapping issues)
+- The internal implementation differences between these components affect:
+  - Text wrapping behavior (NonSelectableRichTextView uses proper width constraints)
+  - Font handling (NonSelectableRichTextView forces body font style on all content)
+  - Text container configuration (different padding values: 32px vs 40px)
+- Each UIComponent has specific use cases:
+  - `NonSelectableRichTextView`: Article body content in lists and detail views
+  - `AccessibleAttributedText`: Accessibility-focused content where selection isn't needed
+  - `RichTextView`: Content where text selection is required
+- When implementing new views with rich text content, maintain component consistency:
+  ```swift
+  // CORRECT: Using NonSelectableRichTextView for article content
+  if let bodyBlobData = article.bodyBlob,
+     let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+         ofClass: NSAttributedString.self,
+         from: bodyBlobData
+     ) {
+      NonSelectableRichTextView(attributedString: attributedString)
+          .foregroundColor(.secondary)
+          .padding(.top, 5)
+          .textSelection(.disabled)
+  }
+  ```
+
 ## Project-Specific Patterns
 
 ### File Organization

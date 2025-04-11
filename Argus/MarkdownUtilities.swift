@@ -324,7 +324,7 @@ private func getAttributedStringInternal<T>(
         completion?(nil)
         return nil
     }
-    
+
     guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
         completion?(nil)
         return nil
@@ -337,7 +337,7 @@ private func getAttributedStringInternal<T>(
     } else if let notification = source as? NotificationData {
         blobData = field.getBlob(from: notification)
     }
-    
+
     if let blobData = blobData,
        let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
            ofClass: NSAttributedString.self,
@@ -381,7 +381,7 @@ private func getAttributedStringInternal<T>(
                 // Set the blob on the appropriate source object
                 if let article = source as? ArticleModel {
                     field.setBlob(blobData, on: article)
-                    
+
                     // Save the context if possible
                     if let context = article.modelContext {
                         do {
@@ -724,7 +724,7 @@ class NotificationData {
             .additionalInsights,
         ]
 
-        AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(self.id):")
+        AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(id):")
 
         var allValid = true
         for field in fields {
@@ -762,7 +762,7 @@ extension NotificationData {
     var effectiveDate: Date {
         return pub_date ?? date
     }
-    
+
     /// Creates a NotificationData instance from an ArticleModel
     /// Used for migration and compatibility with legacy code
     static func from(articleModel: ArticleModel) -> NotificationData {
@@ -802,7 +802,7 @@ extension NotificationData {
             engine_stats: articleModel.engineStats,
             similar_articles: articleModel.similarArticles
         )
-        
+
         return notification
     }
 }

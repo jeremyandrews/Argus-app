@@ -34,6 +34,25 @@
 
 ## What's In Progress
 
+- 🔶 **Article Content Display Issue in NewsView** (In Progress):
+  - Identified a display issue where article content appears correctly in NewsDetailView but not in NewsView:
+    - Root cause: NewsView used wrong field (`summary` instead of `body`) to display article content
+    - In NewsView, the content doesn't display with proper formatting unlike in NewsDetailView
+    - NewsDetailView correctly shows formatted rich text while NewsView shows plain or improperly formatted text
+  - Implemented partial fix:
+    - Changed `summaryContent` method to use `article.body` instead of `article.summary`
+    - Attempted to use bodyBlob with different rendering approaches (AccessibleAttributedText, Text with AttributedString)
+    - Tried various combinations of text wrapping modifiers (fixedSize, multilineTextAlignment)
+  - Current status:
+    - NewsView now correctly uses `article.body` field data but formatting remains inconsistent with NewsDetailView
+    - Text wrapping and display issues persist despite using the same field data
+    - The inconsistency suggests architectural differences in how the two views handle rich text
+  - Next steps:
+    - Further investigate how NewsDetailView successfully renders rich text while NewsView doesn't
+    - Examine UI component differences affecting rendering (AccessibleAttributedText implementation)
+    - Analyze if different view modifiers are needed for proper text wrapping in list rows
+    - Consider refactoring to share rendering code between the two views
+
 - 🔶 **Blob Persistence Issue** (Critical, Multiple Failed Attempts):
   - 7th attempted fix identified fundamental type system conflicts:
     - Swift predicates cannot directly compare properties between different model types (NotificationData vs ArticleModel)
@@ -361,7 +380,6 @@
   - Added `markMigrationCompleted()` method to properly handle migration when source tables are missing
   - Fixed compiler warnings related to async/non-async method calls and unused values
 
-
 - ✅ **Enhanced SyncManager Robustness** (Completed):
   - Fixed unnecessary try/catch blocks in all SyncManager forwarding methods
   - Removed redundant error handling for non-throwing operations
@@ -519,35 +537,4 @@
 - ✅ **DatabaseCoordinator Implementation**
   - Completed full implementation with Swift 6 concurrency safety
   - Fixed all actor-isolation and variable capture warnings
-  - Eliminated redundant code to avoid conflicts with existing utilities
-  - Added proper handling of concurrent database operations
-
-- ✅ **Thread Safety Enhancements**
-  - Improved handling of shared state in background tasks
-  - Added safeguards against race conditions in database operations
-
-## What's Left To Build
-
-### Modernization Plan Implementation
-
-#### Phase 1: Setup and Model Migration ✅
-- ✅ **Define SwiftData Models**
-  - Created Article, SeenArticle, and Topic models with SwiftData annotations
-  - Ensured fields align with backend API structure 
-  - Made models CloudKit-compatible by adding default values to all required properties  
-  - Removed unique constraints for CloudKit compatibility
-  - Designed model relationships with proper cascade rules
-  
-- ✅ **Resolve CloudKit Compatibility Issues**
-  - Updated model definitions to be CloudKit-compatible
-  - Prepared for future cross-device syncing capability
-  - Fixed app crash in SwiftData Test view
-  - Implemented robust deletion pattern for SwiftData relationships
-  - Resolved EXC_BAD_ACCESS crashes during entity deletion
-  - Added comprehensive logging for SwiftData operations
-
-- ✅ **Initialize SwiftData Container**
-  - Created dedicated SwiftDataContainer class to isolate new models during transition
-  - Added test interface (SwiftDataTestView) to verify SwiftData operations
-  - Integrated with Settings view for developer testing
-  - Successfully implemented persistent storage with dedicated test database
+  - Eliminated redundant code to avoid conflicts with

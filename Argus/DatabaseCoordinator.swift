@@ -396,35 +396,35 @@ actor DatabaseCoordinator {
         if let results = try? await performTransaction("findExistingArticles", { _, context -> [UUID: ArticleModel] in
             // Create a dictionary to store results
             var results = [UUID: ArticleModel]()
-            
+
             // Process IDs in batches for better performance
             for idBatch in ids.chunked(into: 25) {
                 // Build OR predicates for each ID
                 var orPredicates: [Predicate<ArticleModel>] = []
-                
+
                 for id in idBatch {
                     orPredicates.append(#Predicate<ArticleModel> { article in
                         article.id.uuidString == id.uuidString
                     })
                 }
-                
+
                 // Combine predicates with OR
                 let combinedPredicate = orPredicates.reduce(Predicate<ArticleModel>.false) { result, predicate in
                     #Predicate<ArticleModel> { article in
                         result.evaluate(article) || predicate.evaluate(article)
                     }
                 }
-                
+
                 // Fetch matching articles
                 let descriptor = FetchDescriptor<ArticleModel>(predicate: combinedPredicate)
                 let articles = try context.fetch(descriptor)
-                
+
                 // Add articles to results dictionary
                 for article in articles {
                     results[article.id] = article
                 }
             }
-            
+
             return results
         }) {
             return results
@@ -449,23 +449,23 @@ actor DatabaseCoordinator {
             for urlBatch in jsonURLs.chunked(into: 25) {
                 // Instead of using a predicate with contains, we'll use OR conditions
                 var orPredicates: [Predicate<ArticleModel>] = []
-                
+
                 for url in urlBatch {
                     orPredicates.append(#Predicate<ArticleModel> { article in
                         article.jsonURL == url
                     })
                 }
-                
+
                 // Combine the predicates with OR
                 let combinedPredicate = orPredicates.reduce(Predicate<ArticleModel>.false) { result, predicate in
                     #Predicate<ArticleModel> { article in
                         result.evaluate(article) || predicate.evaluate(article)
                     }
                 }
-                
+
                 let descriptor = FetchDescriptor<ArticleModel>(predicate: combinedPredicate)
                 let articles = try context.fetch(descriptor)
-                
+
                 // Populate the local dictionary
                 for article in articles {
                     localResults[article.jsonURL] = article
@@ -543,25 +543,25 @@ actor DatabaseCoordinator {
                 for urlBatch in urlsToCheck.chunked(into: 25) {
                     // We need to use OR conditions instead of contains for Swift 6 compatibility
                     var orPredicates: [Predicate<ArticleModel>] = []
-                    
+
                     for url in urlBatch {
                         orPredicates.append(#Predicate<ArticleModel> { article in
                             article.jsonURL == url
                         })
                     }
-                    
+
                     // Combine the predicates with OR
                     let combinedPredicate = orPredicates.reduce(Predicate<ArticleModel>.false) { result, predicate in
                         #Predicate<ArticleModel> { article in
                             result.evaluate(article) || predicate.evaluate(article)
                         }
                     }
-                    
+
                     var urlDescriptor = FetchDescriptor<ArticleModel>(predicate: combinedPredicate)
-                    
+
                     // Only fetch the specific properties we need
                     urlDescriptor.propertiesToFetch = [\.id, \.jsonURL]
-                    
+
                     let articles = try context.fetch(urlDescriptor)
                     for article in articles {
                         existingURLs.insert(article.jsonURL)
@@ -570,20 +570,20 @@ actor DatabaseCoordinator {
 
                     // Also check SeenArticle table with the same approach
                     var seenOrPredicates: [Predicate<SeenArticle>] = []
-                    
+
                     for url in urlBatch {
                         seenOrPredicates.append(#Predicate<SeenArticle> { seen in
                             seen.jsonURL == url
                         })
                     }
-                    
+
                     // Combine the predicates with OR
                     let seenCombinedPredicate = seenOrPredicates.reduce(Predicate<SeenArticle>.false) { result, predicate in
                         #Predicate<SeenArticle> { seen in
                             result.evaluate(seen) || predicate.evaluate(seen)
                         }
                     }
-                    
+
                     var seenDescriptor = FetchDescriptor<SeenArticle>(predicate: seenCombinedPredicate)
                     seenDescriptor.propertiesToFetch = [\.id, \.jsonURL]
 
@@ -600,23 +600,23 @@ actor DatabaseCoordinator {
                 for idBatch in idsToCheck.chunked(into: 25) {
                     // Use OR conditions for ID comparison to work with Swift 6
                     var idOrPredicates: [Predicate<ArticleModel>] = []
-                    
+
                     for id in idBatch {
                         idOrPredicates.append(#Predicate<ArticleModel> { article in
                             article.id.uuidString == id.uuidString
                         })
                     }
-                    
+
                     // Combine the predicates with OR
                     let combinedIdPredicate = idOrPredicates.reduce(Predicate<ArticleModel>.false) { result, predicate in
                         #Predicate<ArticleModel> { article in
                             result.evaluate(article) || predicate.evaluate(article)
                         }
                     }
-                    
+
                     var idDescriptor = FetchDescriptor<ArticleModel>(predicate: combinedIdPredicate)
                     idDescriptor.propertiesToFetch = [\.id, \.jsonURL]
-                    
+
                     let articles = try context.fetch(idDescriptor)
                     for article in articles {
                         existingIDs.insert(article.id)
@@ -625,23 +625,23 @@ actor DatabaseCoordinator {
 
                     // Also check SeenArticle table with same approach
                     var seenIdOrPredicates: [Predicate<SeenArticle>] = []
-                    
+
                     for id in idBatch {
                         seenIdOrPredicates.append(#Predicate<SeenArticle> { seen in
                             seen.id.uuidString == id.uuidString
                         })
                     }
-                    
+
                     // Combine the predicates with OR
                     let seenCombinedIdPredicate = seenIdOrPredicates.reduce(Predicate<SeenArticle>.false) { result, predicate in
                         #Predicate<SeenArticle> { seen in
                             result.evaluate(seen) || predicate.evaluate(seen)
                         }
                     }
-                    
+
                     var seenDescriptor = FetchDescriptor<SeenArticle>(predicate: seenCombinedIdPredicate)
                     seenDescriptor.propertiesToFetch = [\.id, \.jsonURL]
-                    
+
                     let seenArticles = try context.fetch(seenDescriptor)
                     for seen in seenArticles {
                         existingIDs.insert(seen.id)
@@ -771,10 +771,10 @@ actor DatabaseCoordinator {
 
                 // Extract the UUID which is Sendable before the closure to avoid capturing the non-Sendable ArticleModel
                 let articleIdForClosure = article.id
-                
+
                 // Create descriptor outside the MainActor closure to avoid capturing context
                 let descriptor = FetchDescriptor<ArticleModel>(predicate: #Predicate<ArticleModel> { $0.id == articleIdForClosure })
-                
+
                 // Generate rich text attributes synchronously on the main actor
                 // This ensures rich text is created before the article is saved
                 await MainActor.run {
@@ -799,7 +799,7 @@ actor DatabaseCoordinator {
     func updateArticle(_ article: ArticleModel, with data: ArticleJSON) async throws -> ArticleModel {
         // Extract the ID before the transaction to avoid capturing the non-Sendable article in a @Sendable closure
         let articleIdForTransaction = article.id
-        
+
         return try await performTransaction { _, context in
             // Use the extracted ID (which is Sendable) within the transaction
             let fetchDescriptor = FetchDescriptor<ArticleModel>(
@@ -894,7 +894,7 @@ actor DatabaseCoordinator {
         article.engineStats = data.engineStats
         article.similarArticles = data.similarArticles
     }
-    
+
     /// Helper method to update the fields of a NotificationData article
     /// - Parameters:
     ///   - article: The article to update
@@ -1024,7 +1024,7 @@ actor DatabaseCoordinator {
 
         return results ?? []
     }
-    
+
     /// Fetch just the JSON URLs from recent articles since a specified date
     /// - Parameter date: The date to fetch URLs from
     /// - Returns: Array of JSON URLs (strings, which are Sendable)
@@ -1036,15 +1036,15 @@ actor DatabaseCoordinator {
                     seenArticle.date >= date
                 }
             )
-            
+
             // Only fetch the JSON URL property to minimize data transfer
             descriptor.propertiesToFetch = [\.jsonURL]
-            
+
             // Fetch the seen articles and extract just the URLs
             let articles = try context.fetch(descriptor)
             return articles.map { $0.jsonURL }
         }
-        
+
         return urls ?? []
     }
 

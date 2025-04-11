@@ -60,7 +60,7 @@ class PreloadManager {
 
                 // Extract the article ID (which is Sendable) to use inside MainActor
                 let articleId = article.id
-                
+
                 // Generate blobs for key fields - everything related to ArticleModel must run on MainActor
                 // for Swift 6 sendability compliance
                 // Use Task with @MainActor annotation to handle async operations on the MainActor
@@ -70,7 +70,7 @@ class PreloadManager {
                         // These operations already run on the main actor since they involve NSAttributedString
                         _ = operations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
                         _ = operations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
-                        
+
                         AppLogger.database.debug("✅ Preloaded blobs for article \(articleId)")
                     } else {
                         AppLogger.database.warning("⚠️ Could not preload article \(articleId) - context not available")

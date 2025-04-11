@@ -208,23 +208,23 @@ final class ArticleModel: Equatable {
     /// Used during migration and compatibility with legacy code
     func updateBlobs(from notification: NotificationData) {
         // Transfer all blob data from the NotificationData to this ArticleModel
-        self.titleBlob = notification.title_blob
-        self.bodyBlob = notification.body_blob
-        self.summaryBlob = notification.summary_blob
-        self.criticalAnalysisBlob = notification.critical_analysis_blob
-        self.logicalFallaciesBlob = notification.logical_fallacies_blob
-        self.sourceAnalysisBlob = notification.source_analysis_blob
-        self.relationToTopicBlob = notification.relation_to_topic_blob
-        self.additionalInsightsBlob = notification.additional_insights_blob
+        titleBlob = notification.title_blob
+        bodyBlob = notification.body_blob
+        summaryBlob = notification.summary_blob
+        criticalAnalysisBlob = notification.critical_analysis_blob
+        logicalFallaciesBlob = notification.logical_fallacies_blob
+        sourceAnalysisBlob = notification.source_analysis_blob
+        relationToTopicBlob = notification.relation_to_topic_blob
+        additionalInsightsBlob = notification.additional_insights_blob
     }
-    
+
     /// Regenerates missing blob data for this ArticleModel
     /// Returns the number of blobs regenerated
     @MainActor
     func regenerateMissingBlobs() -> Int {
         return regenerateAllBlobs(for: self)
     }
-    
+
     public static func == (lhs: ArticleModel, rhs: ArticleModel) -> Bool {
         return lhs.id == rhs.id
     }
@@ -252,7 +252,7 @@ final class SeenArticleModel: Equatable {
         self.jsonURL = jsonURL
         self.date = date
     }
-    
+
     public static func == (lhs: SeenArticleModel, rhs: SeenArticleModel) -> Bool {
         return lhs.id == rhs.id
     }
@@ -289,7 +289,7 @@ final class TopicModel: Equatable {
         self.notificationsEnabled = notificationsEnabled
         self.displayOrder = displayOrder
     }
-    
+
     public static func == (lhs: TopicModel, rhs: TopicModel) -> Bool {
         return lhs.id == rhs.id
     }
@@ -347,7 +347,7 @@ extension ArticleModel {
         get { return url }
         set { url = newValue }
     }
-    
+
     /// Get the best available URL for this article - mirrors NotificationData implementation
     func getArticleUrl(additionalContent: [String: Any]? = nil) -> String? {
         // First check for the direct article_url field (which is 'url' in ArticleModel)
