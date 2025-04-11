@@ -53,6 +53,56 @@ struct NewsDetailView: View {
         }
         return nil
     }
+    
+    /// Convert article content to attributed string
+    private func getAttributedString(
+        for field: RichTextField,
+        from article: ArticleModel,
+        createIfMissing: Bool = false,
+        customFontSize: CGFloat? = nil
+    ) -> NSAttributedString? {
+        // Call directly to MarkdownUtilities since the customFontSize parameter is needed
+        // but not available in the ArticleOperations API
+        if let textContent = getTextContentForField(field, from: article) {
+            return markdownToAttributedString(
+                textContent,
+                textStyle: "UIFontTextStyleBody",
+                customFontSize: customFontSize
+            )
+        } else if createIfMissing {
+            // If we should create missing content, use placeholder text
+            let fieldName = SectionNaming.nameForField(field).lowercased()
+            let placeholder = "No \(fieldName) content available."
+            return markdownToAttributedString(
+                placeholder,
+                textStyle: "UIFontTextStyleBody",
+                customFontSize: customFontSize
+            )
+        }
+        return nil
+    }
+    
+    /// Gets the text content for a specific rich text field from an ArticleModel
+    private func getTextContentForField(_ field: RichTextField, from article: ArticleModel) -> String? {
+        switch field {
+        case .title:
+            return article.title
+        case .body:
+            return article.body
+        case .summary:
+            return article.summary
+        case .criticalAnalysis:
+            return article.critical_analysis
+        case .logicalFallacies:
+            return article.logical_fallacies
+        case .sourceAnalysis:
+            return article.source_analysis
+        case .relationToTopic:
+            return article.relation_to_topic
+        case .additionalInsights:
+            return article.additional_insights
+        }
+    }
 
     /// Gets the text content for a specific rich text field
     private func getTextContentForField(_ field: RichTextField, from notification: NotificationData) -> String? {
@@ -112,8 +162,8 @@ struct NewsDetailView: View {
     /// The initially expanded section, if any
     let initiallyExpandedSection: String?
 
-    /// Current notification being displayed
-    private var currentNotification: NotificationData? {
+    /// Current article being displayed
+    private var currentNotification: ArticleModel? {
         viewModel.currentArticle
     }
 
@@ -147,82 +197,103 @@ struct NewsDetailView: View {
     }
 
     var body: some View {
+        mainView
+    }
+    
+    // Breaking the body into smaller components to help the compiler
+    private var mainView: some View {
         NavigationStack {
-            Group {
-                if let _ = currentNotification {
-                    VStack(spacing: 0) {
-                        topBar
-                        ScrollView {
-                            ScrollViewReader { proxy in
-                                VStack {
-                                    // Invisible anchor to scroll to top
-                                    Color.clear
-                                        .frame(height: 1)
-                                        .id("top")
-
-                                    // Immediately show header with minimal data
-                                    articleHeaderStyle
-
-                                    // All sections below, default collapsed
-                                    additionalSectionsView
-                                        .opacity(isLoadingNextArticle ? 0.3 : 1.0) // Fade sections during transitions
-                                        .animation(.easeInOut(duration: 0.2), value: isLoadingNextArticle)
-                                }
-                                .onAppear {
-                                    scrollViewProxy = proxy
-                                }
-                            }
-                        }
-                        .onChange(of: scrollToTopTrigger) { _, _ in
-                            withAnimation {
-                                scrollViewProxy?.scrollTo("top", anchor: .top)
-                            }
-                        }
-                        bottomToolbar
+            articleContentView
+                .navigationBarHidden(true)
+                .onAppear(perform: handleOnAppear)
+                .onChange(of: viewModel.articles) { _, _ in
+                    validateAndAdjustIndex()
+                }
+                .alert("Are you sure you want to delete this article?", isPresented: $showDeleteConfirmation) {
+                    Button("Delete", role: .destructive) {
+                        deleteNotification()
                     }
-                } else {
-                    Text("Article no longer available")
-                        .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                                dismiss()
-                            }
-                        }
+                    Button("Cancel", role: .cancel) {}
                 }
-            }
-            .navigationBarHidden(true)
-            .onAppear {
-                setupDeletionHandling()
-                markAsViewed()
-                loadInitialMinimalContent()
-                if let section = initiallyExpandedSection {
-                    expandedSections[section] = true
+                .sheet(isPresented: $isSharePresented) {
+                    ShareSelectionView(
+                        content: additionalContent,
+                        notification: currentNotification ?? viewModel.articles[0],
+                        selectedSections: $selectedSections,
+                        isPresented: $isSharePresented
+                    )
                 }
-            }
-            .onChange(of: viewModel.articles) { _, _ in
-                validateAndAdjustIndex()
-            }
-            .alert("Are you sure you want to delete this article?", isPresented: $showDeleteConfirmation) {
-                Button("Delete", role: .destructive) {
-                    deleteNotification()
-                }
-                Button("Cancel", role: .cancel) {}
-            }
-            .sheet(isPresented: $isSharePresented) {
-                ShareSelectionView(
-                    content: additionalContent,
-                    notification: currentNotification ?? viewModel.articles[0],
-                    selectedSections: $selectedSections,
-                    isPresented: $isSharePresented
-                )
-            }
-            .gesture(
-                DragGesture()
-                    .onEnded { value in
-                        if value.translation.width > 100 {
+                .gesture(createDismissGesture())
+        }
+    }
+    
+    private var articleContentView: some View {
+        Group {
+            if let _ = currentNotification {
+                articleDetailContent
+            } else {
+                Text("Article no longer available")
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                             dismiss()
                         }
                     }
-            )
+            }
+        }
+    }
+    
+    private var articleDetailContent: some View {
+        VStack(spacing: 0) {
+            topBar
+            articleScrollView
+            bottomToolbar
+        }
+    }
+    
+    private var articleScrollView: some View {
+        ScrollView {
+            ScrollViewReader { proxy in
+                VStack {
+                    // Invisible anchor to scroll to top
+                    Color.clear
+                        .frame(height: 1)
+                        .id("top")
+
+                    // Immediately show header with minimal data
+                    articleHeaderStyle
+
+                    // All sections below, default collapsed
+                    additionalSectionsView
+                        .opacity(isLoadingNextArticle ? 0.3 : 1.0) // Fade sections during transitions
+                        .animation(.easeInOut(duration: 0.2), value: isLoadingNextArticle)
+                }
+                .onAppear {
+                    scrollViewProxy = proxy
+                }
+            }
+        }
+        .onChange(of: scrollToTopTrigger) { _, _ in
+            withAnimation {
+                scrollViewProxy?.scrollTo("top", anchor: .top)
+            }
+        }
+    }
+    
+    private func createDismissGesture() -> some Gesture {
+        DragGesture()
+            .onEnded { value in
+                if value.translation.width > 100 {
+                    dismiss()
+                }
+            }
+    }
+    
+    private func handleOnAppear() {
+        setupDeletionHandling()
+        markAsViewed()
+        loadInitialMinimalContent()
+        if let section = initiallyExpandedSection {
+            expandedSections[section] = true
         }
     }
 
@@ -495,10 +566,10 @@ struct NewsDetailView: View {
             markAsViewed()
 
             // Log the new article state
-            let hasEngineStats = newArticle.engine_stats != nil
-            let hasSimilarArticles = newArticle.similar_articles != nil
-            let hasTitleBlob = newArticle.title_blob != nil
-            let hasBodyBlob = newArticle.body_blob != nil
+            let hasEngineStats = newArticle.engineStats != nil
+            let hasSimilarArticles = newArticle.similarArticles != nil
+            let hasTitleBlob = newArticle.titleBlob != nil
+            let hasBodyBlob = newArticle.bodyBlob != nil
 
             AppLogger.database.debug("""
             NewsDetailView - After navigation to article ID: \(newArticle.id)
@@ -663,12 +734,11 @@ struct NewsDetailView: View {
                 }
 
                 // Publication Date
-                if let pubDate = n.pub_date {
-                    Text("Published: \(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                // n.pub_date from ArticleModel's compatibility API returns Date not optional
+                Text("Published: \(n.pub_date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Body - use rich text if available, otherwise fall back to plain text
                 Group {
@@ -725,8 +795,11 @@ struct NewsDetailView: View {
                         )
 
                         // Remaining quality badges (Proof, Logic, Context)
-                        LazyLoadingQualityBadges(
-                            notification: n,
+                        QualityBadges(
+                            sourcesQuality: n.sources_quality,
+                            argumentQuality: n.argument_quality,
+                            sourceType: n.source_type,
+                            scrollToSection: $scrollToSection,
                             onBadgeTap: { section in
                                 // First ensure the section is expanded
                                 expandedSections[section] = true
@@ -933,7 +1006,7 @@ struct NewsDetailView: View {
                 // Update app badge count and remove notification if exists
                 NotificationUtils.updateAppBadgeCount()
                 if let notification = currentNotification {
-                    AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
+                    AppDelegate().removeNotificationIfExists(jsonURL: notification.jsonURL)
                 }
             } catch {
                 AppLogger.database.error("Failed to mark article as viewed: \(error)")
@@ -945,6 +1018,71 @@ struct NewsDetailView: View {
         return notification.summary != nil &&
             notification.critical_analysis != nil &&
             notification.logical_fallacies != nil
+    }
+
+    // Helper function to build content dictionary from article model
+    private func buildContentDictionary(from article: ArticleModel) -> [String: Any] {
+        var content: [String: Any] = [:]
+
+        // Add URL if available
+        if let domain = article.domain {
+            content["url"] = "https://\(domain)"
+        }
+
+        // Transfer metadata fields directly without processing
+        content["sources_quality"] = article.sources_quality
+        content["argument_quality"] = article.argument_quality
+        content["source_type"] = article.source_type
+
+        // Just check if these fields exist without converting to attributed strings
+        content["summary"] = article.summary
+        content["critical_analysis"] = article.critical_analysis
+        content["logical_fallacies"] = article.logical_fallacies
+        content["relation_to_topic"] = article.relation_to_topic
+        content["additional_insights"] = article.additional_insights
+
+        // For source analysis, just create a basic dictionary without processing the text
+        if let sourceAnalysis = article.source_analysis {
+            content["source_analysis"] = [
+                "text": sourceAnalysis,
+                "sourceType": article.source_type ?? "",
+            ]
+        } else {
+            content["source_analysis"] = [
+                "text": "",
+                "sourceType": article.source_type ?? "",
+            ]
+        }
+
+        // Transfer engine stats and similar articles as is
+        if let engineStatsJson = article.engine_stats,
+           let engineStatsData = engineStatsJson.data(using: .utf8),
+           let engineStats = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
+        {
+            // Transfer relevant engine stats fields
+            if let model = engineStats["model"] as? String {
+                content["model"] = model
+            }
+            if let elapsedTime = engineStats["elapsed_time"] as? Double {
+                content["elapsed_time"] = elapsedTime
+            }
+            if let stats = engineStats["stats"] as? String {
+                content["stats"] = stats
+            }
+            if let systemInfo = engineStats["system_info"] as? [String: Any] {
+                content["system_info"] = systemInfo
+            }
+        }
+
+        // Transfer similar articles as is
+        if let similarArticlesJson = article.similar_articles,
+           let similarArticlesData = similarArticlesJson.data(using: .utf8),
+           let similarArticles = try? JSONSerialization.jsonObject(with: similarArticlesData) as? [[String: Any]]
+        {
+            content["similar_articles"] = similarArticles
+        }
+
+        return content
     }
 
     // Helper function to build content dictionary from notification
@@ -1843,10 +1981,8 @@ struct NewsDetailView: View {
             }
 
             // Publication Date
-            if let notification = currentNotification,
-               let pubDate = notification.pub_date
-            {
-                Text("Published: \(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
+            if let notification = currentNotification {
+                Text("Published: \(notification.pub_date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
@@ -1960,7 +2096,7 @@ struct SimilarArticleRow: View {
     @Environment(\.modelContext) private var modelContext
     @State private var showError = false
     @State private var showDetailView = false
-    @State private var selectedNotification: NotificationData?
+    @State private var selectedArticle: ArticleModel?
 
     // Cache for processed content
     @State private var processedTitle: String = ""
@@ -2031,13 +2167,13 @@ struct SimilarArticleRow: View {
             Button("OK", role: .cancel) {}
         }
         .sheet(isPresented: $showDetailView, onDismiss: {
-            selectedNotification = nil
+            selectedArticle = nil
         }) {
-            if let notification = selectedNotification {
+            if let article = selectedArticle {
                 // Create a view model with the article
                 let articleViewModel = NewsDetailViewModel(
-                    articles: [notification],
-                    allArticles: [notification],
+                    articles: [article],
+                    allArticles: [article],
                     currentIndex: 0,
                     initiallyExpandedSection: "Summary"
                 )
@@ -2095,26 +2231,25 @@ struct SimilarArticleRow: View {
         let urlToFetch = jsonURL
 
         Task {
-            do {
-                // Perform the fetch on the main actor since ModelContext is main actor-isolated
-                let results = try await MainActor.run {
-                    try modelContext.fetch(FetchDescriptor<NotificationData>(
-                        predicate: #Predicate { $0.json_url == urlToFetch }
+            // Perform the fetch directly on the MainActor (MainActor.run doesn't throw errors)
+            await MainActor.run {
+                do {
+                    // Use modelContext directly on the MainActor
+                    let foundArticles = try modelContext.fetch(FetchDescriptor<ArticleModel>(
+                        predicate: #Predicate<ArticleModel> { article in
+                            article.jsonURL == urlToFetch
+                        }
                     ))
-                }
-
-                // Update UI on main thread
-                await MainActor.run {
-                    if let foundArticle = results.first {
-                        selectedNotification = foundArticle
+                    
+                    // Process results immediately within the MainActor context
+                    if let foundArticle = foundArticles.first {
+                        selectedArticle = foundArticle
                         showDetailView = true
                     } else {
                         showError = true
                     }
-                }
-            } catch {
-                AppLogger.sync.error("Failed to fetch similar article: \(error)")
-                await MainActor.run {
+                } catch {
+                    AppLogger.sync.error("Failed to fetch similar article: \(error)")
                     showError = true
                 }
             }
@@ -2327,7 +2462,7 @@ struct ArgusDetailsView: View {
 
 struct ShareSelectionView: View {
     let content: [String: Any]?
-    let notification: NotificationData
+    let notification: ArticleModel
     @Binding var selectedSections: Set<String>
     @Binding var isPresented: Bool
     @State private var formatText = true

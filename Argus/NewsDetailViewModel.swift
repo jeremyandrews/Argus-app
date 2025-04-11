@@ -912,10 +912,6 @@ extension ArticleModel {
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
-
-    static func == (lhs: ArticleModel, rhs: ArticleModel) -> Bool {
-        return lhs.id == rhs.id
-    }
 }
 
 // MARK: - Array Extensions

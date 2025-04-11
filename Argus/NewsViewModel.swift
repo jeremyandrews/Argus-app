@@ -167,7 +167,7 @@ final class NewsViewModel: ObservableObject {
             // Clear loading state
             isLoading = false
 
-            AppLogger.database.debug("✅ Refreshed articles: loaded \(filteredArticles.count) articles")
+            AppLogger.database.debug("✅ Refreshed articles: loaded \(self.filteredArticles.count) articles")
         } catch {
             self.error = error
             isLoading = false
@@ -429,7 +429,11 @@ final class NewsViewModel: ObservableObject {
     // MARK: - Private Methods
 
     /// Updates the groupedArticles array without re-fetching from the database
+    /// - Note: This method is explicitly marked as MainActor-isolated to handle non-Sendable ArticleModel results
+    @MainActor
     private func updateGroupedArticles() async {
+        // Since we're explicitly on the MainActor, we can safely handle the non-Sendable result
+        // containing ArticleModel objects which are not Sendable in Swift 6
         groupedArticles = await articleOperations.groupArticles(
             filteredArticles,
             by: groupingStyle,

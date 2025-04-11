@@ -14,6 +14,45 @@
 
 ## Recent Changes
 
+- **Fixed Swift 6 Equatable Conformance Issue** (Completed):
+  - Successfully resolved Equatable conformance issues with SwiftData models in Swift 6:
+    - Identified a complex interaction between SwiftData's `@Model` macro and Swift 6's handling of Equatable conformances
+    - Cleaned up NewsDetailViewModel.swift by removing obsolete comment about moved Equatable implementation
+    - Kept the necessary `hash(into:)` implementation which is important for collections
+    - Updated ArgusApp.swift to use ArticleModel instead of NotificationData in all FetchDescriptor instances
+    - Fixed field name references in predicates to match ArticleModel (e.g., date → addedDate)
+  - Implemented solution confirmed that in-class Equatable implementation in model classes is the correct approach:
+    - The SwiftData models in ArticleDataModels.swift (ArticleModel, SeenArticleModel, TopicModel) were already 
+      using the correct pattern with in-class Equatable implementation
+    - Conflicts arose from remnants of previous implementations in other files
+    - The `@Model` macro in Swift 6 generates partial Equatable machinery that conflicts with explicit implementations
+  - Key learnings for SwiftData models in Swift 6:
+    - Use in-class Equatable conformance and implementation for SwiftData models
+    - Avoid duplicate implementations across files (extensions, etc.)
+    - Maintain Hashable support through proper `hash(into:)` implementations where needed
+    - Be cautious about using NotificationData (legacy class) with SwiftData contexts
+
+- **Fixed Swift 6 Compatibility Issues** (In Progress, Partially Successful):
+  - Tackled Swift 6 compilation errors across multiple files:
+    - Fixed Equatable protocol conformance issues for SwiftData models
+    - Addressed issues with `@Model` classes and their Equatable implementations
+    - Several approaches attempted with varying success:
+      - Initially tried adding explicit Equatable protocol to class declarations (`final class ArticleModel: Equatable`)
+      - Also tried implementing Equatable in extensions (`extension ArticleModel: Equatable`)
+      - Ultimately removed explicit Equatable conformance from class declarations while keeping extension methods
+    - Attempted to avoid "Invalid redeclaration of '=='" errors while still maintaining Equatable functionality
+    - Fixed improper optional handling in NewsView.swift for Date properties
+    - Fixed nil coalescing operators on non-optional properties (`article.title ?? ""` to `article.title`)
+    - Added proper try-catch error handling to methods where needed
+  - Current status:
+    - Many issues resolved but Equatable conformance errors persist
+    - Some conflicts between the SwiftData auto-generated Equatable conformance and manual implementations
+    - Need a more fundamental approach to resolve the remaining Equatable issues
+  - Learned key insights about SwiftData and Swift 6:
+    - SwiftData models generate some built-in protocol conformances that can conflict with manual implementations
+    - Swift 6 is more strict about optional handling and explicit self-references
+    - Type conversion between model types still needs refinement
+
 - **7th Attempted Fix for Blob Persistence Issue** (In Progress, Unsuccessful):
   - Identified fundamental type system conflict at the root of the problem:
     - Swift predicates cannot directly compare properties between different model types (NotificationData vs ArticleModel)
@@ -323,185 +362,11 @@
     - Add more diagnostic logging around model conversion
     - Verify complete article loading during navigation includes all required fields
 
-- **Removed Archive Functionality** (Completed):
-  - Removed the archive concept completely from the codebase:
-    - Removed `toggleArchive` function from ArticleOperations.swift
-    - Updated `fetchArticles` method to remove archive parameters 
-    - Removed archive batch operations from ArticleOperations.swift
-    - Removed `markArticle(id:asArchived:)` method from ArticleService.swift
-    - Removed `markArticle(id:asArchived:)` method from MigrationAwareArticleService.swift
-    - Removed archive-related UI comments from view files
-    - Maintained backward compatibility with two-part strategy:
-      - Kept `isArchived` property in legacy `NotificationData` model for database compatibility with existing installations
-      - Omitted `isArchived` property from new `ArticleModel` (SwiftData model) as the concept is removed
-      - ArticleModelAdapter converts between models, with isArchived always set to false
-      - During migration, isArchived status is effectively discarded (not migrated to new model)
-      - All parameters/methods accepting isArchived keep it for API compatibility but ignore the value in processing
-  - Benefits:
-    - Simplified article lifecycle to just read/unread and bookmarked/unbookmarked
-    - Improved UX by removing a confusing concept
-    - Reduced code complexity and maintenance burden
-    - Streamlined UI with clearer state management
-    - Eliminated potential bugs from ambiguous article states
-    - Preserved compatibility with existing installations
+## Next Steps
 
-- **Fixed API Sync Error by Optimizing seen_articles List** (Completed):
-  - Fixed critical sync timeout issue in APIClient:
-    - Modified `fetchArticleURLs()` method to only include articles from the last 12 hours
-    - Previously sent empty arrays which caused server to return ALL articles
-    - Added database query with time-based filtering (`addedDate >= twelveHoursAgo`)
-    - Limited payload size to maximum 200 entries to prevent oversized requests
-    - Added comprehensive error handling with fallback to empty list if database query fails
-    - Implemented detailed logging to track sync article counts
-  - Benefits of this fix:
-    - Significantly reduced server load and response times
-    - Decreased network payload sizes
-    - Prevented timeouts during large sync operations
-    - Made client properly follow the incremental sync protocol
-  - Implementation follows Swift best practices:
-    - Used SwiftData predicates with proper date comparison
-    - Added defensive programming with error handling
-    - Maintained backward compatibility with existing code
-
-- **Implemented Robust CloudKit Integration** (Completed):
-  - Created a comprehensive CloudKit health monitoring system:
-    - Implemented `CloudKitHealthMonitor` class with state machine (unknown → healthy → degraded → failed)
-    - Used lightweight zone operation checks with modern async/await API to verify connectivity
-    - Added threshold-based state transitions (3 failures → failed, 2 successes → healthy)
-    - Implemented thermal state awareness to preserve battery life
-    - Added notification-based status updates with emoji indicators
-  - Created a request coordination system using the actor pattern:
-    - Implemented `CloudKitRequestCoordinator` actor for thread-safe operation management
-    - Created type-specific request queues to prevent "request already in progress" errors
-    - Used Swift's Result type with modern CloudKit APIs (fetchRecordsResultBlock, etc.)
-    - Added robust error handling with comprehensive logging
-    - Implemented proper operation cleanup and prioritization
-  - Enhanced the app with graceful degradation and recovery features:
-    - Added automatic switching between CloudKit and local storage based on health status
-    - Implemented network and account monitoring for recovery attempts
-    - Added user notifications about sync status changes
-    - Created background tasks for periodic health checks
-    - Enhanced the system to automatically recover from transient issues
-  - Fixed numerous compile-time and runtime issues:
-    - Updated all deprecated CloudKit API usage to modern equivalents
-    - Fixed thermal state comparison logic in AppDelegate and health monitor
-    - Properly implemented actor patterns for thread safety
-    - Removed unnecessary weak self capture patterns in Swift actors
-    - Addressed all Swift 6 warnings related to CloudKit integration
-  
-- **Converted Migration System to True One-Time Approach** (Completed):
-  - Simplified MigrationService by removing mode parameter and resetMigration method
-  - Updated MigrationCoordinator to use a consistent "isMigrationCompleted" flag stored in UserDefaults
-  - Removed all reset functionality to ensure migration runs exactly once per device
-  - Enhanced MigrationView UI with clearer messaging about the one-time nature of migration
-  - Removed debug/testing buttons from the production UI
-  - Enhanced deprecation notices in MigrationAwareArticleService to indicate future removal
-  - Updated initialization paths to remove MigrationMode enum entirely
-  - Simplified error handling and state tracking in migration components
-  - Made system more maintainable by removing conditional logic for different migration modes
-
-- **Removed Dual-Implementation Pattern in MigrationAwareArticleService** (Completed):
-  - Removed all write-back operations to the legacy database from MigrationAwareArticleService
-  - Added clear deprecation annotations to encourage direct ArticleService usage
-  - Maintained read-only access to legacy data for migration purposes
-  - Simplified architecture to eliminate redundant database operations
-  - Prepared for eventual removal of legacy components when migration is no longer needed
-  - Improved code maintainability with more straightforward data flow
-  - Made the transition from dual-database mode to single-database mode more explicit
-  - Reduced potential bugs from maintaining state across multiple databases
-
-- **Enhanced Article Section Loading System** (Completed):
-  - Successfully resolved issues with section loading in NewsDetailView:
-    1. When opening articles directly, Summary spun forever saying "Converting text..."
-    2. When navigating between articles with Chevrons, sections would load correctly
-    3. Opening other sections like Critical Analysis would hang with "Converting text..."
-  - Implemented robust sequential loading process with improved diagnostics:
-    - Created a clear three-phase loading approach:
-      - Phase 1: Check for blobs in the database (fastest path)
-      - Phase 2: Only attempt rich text generation if blob loading fails
-      - Phase 3: Fall back to plain text display as a last resort
-    - Added comprehensive logging at each phase with detailed timing information
-    - Reduced timeout from 5 seconds to 3 seconds for faster response
-    - Added proper cancellation handling to prevent resource leaks
-    - Improved error presentation with fallback content when sections can't be loaded
-  - Fixed Swift compiler issues:
-    - Added explicit `self.` references in closure contexts where required
-    - Replaced unused error parameter with underscore to fix compiler warning
-    - Corrected ambiguous type expressions with explicit `String(describing:)` calls 
-    - Fixed OSLogMessage error by using individual log statements
-  - Improved NewsDetailView architecture:
-    - Simplified loadContentForSection to delegate properly to the ViewModel
-    - Enhanced loadInitialMinimalContent to properly load summary section at startup
-    - Added complete diagnostic logging for blob checks and content generation
-    - Ensured Summary section is explicitly expanded when opening articles
-  - Implementation details:
-    - Added detailed debug logging for each phase with millisecond precision
-    - Fixed Swift type issues for proper compilation with stricter Swift 6 rules
-    - Added blob size reporting for better diagnostic information
-    - Implemented proper temporary status messages during generation
-  - Result: All article sections now load quickly and reliably:
-    - Sections with blobs load nearly instantly (confirmed in logs)
-    - Even without blobs, loading completes in a reasonable time
-    - No sections hang indefinitely with "Converting text..." status
-    - Users get appropriate fallback content when generation fails
-
-- **Fixed ModelContainer Initialization Crash and Database Table Creation** (Completed):
-  - Fixed critical app startup crash in `sharedModelContainer` initialization in `ArgusApp.swift`
-  - Resolved issue where no articles were appearing in the database after migration
-  - Fixed CloudKit integration conflicts by unifying ModelContainer creation:
-    - Modified `ArgusApp.swift` to use the existing `SwiftDataContainer.shared.container` instead of creating its own
-    - Updated `SwiftDataContainer.swift` to include legacy models (NotificationData, SeenArticle) in its schema
-    - Ensured consistent database access by using the same container throughout the application
-  - Enhanced database table creation process:
-    - Added explicit code to create legacy tables when needed using direct SQL
-    - Added table verification with comprehensive logging
-    - Implemented proper error handling for database initialization failures
-  - Improved the migration coordinator:
-    - Enhanced `forceCompleteReset()` to properly recreate tables after database deletion
-    - Added verification steps after reset operations
-    - Fixed SQLite import issues in MigrationCoordinator
-  - Fixed compiler errors in ModelConfiguration initialization with correct parameter formats
-  - Documented critical findings about SwiftData and CloudKit integration:
-    - Multiple ModelContainer instances with different schemas cause conflicts
-    - All models (legacy and new) must be in a single schema during migration
-    - CloudKit requires careful error handling and fallback mechanisms
-    - Database paths must be consistent across all components
-
-- **Fixed Database Counting and Arithmetic Overflow** (Completed):
-  - Fixed a critical arithmetic overflow crash in `logDatabaseTableSizes()`
-  - Implemented robust error handling with safe defaults in database operations:
-    - Created `safeCount()` helper to properly handle database errors and default to 0
-    - Added `safeAdd()` helper with overflow detection and prevention
-    - Improved logging for database errors during table statistics gathering
-  - Enhanced the database table verification process:
-    - Made `ensureDatabaseIndexes()` resilient when tables are missing
-    - Added total table count check before attempting index creation
-    - Refactored index creation into dedicated helper methods
-  - Improved the migration process safety:
-    - Added verification for database tables existence before migration
-    - Created `verifyDatabaseTablesExist()` to safely check for required tables
-    - Added `markMigrationCompleted()` to handle cases when tables are missing
-    - Ensured migration completes successfully even when old tables are unavailable
-  - Fixed compiler warnings:
-    - Corrected async/non-async method call syntax
-    - Improved handling of unused values in counting operations
-    - Simplified error handling in methods that don't throw errors
-    
-- **Completed SyncManager Removal** (Completed):
-  - Completely removed SyncManager.swift file from the codebase
-  - Created CommonUtilities.swift to house shared utility functions:
-    - Moved TimeoutError and withTimeout helper from SyncManager
-    - Added extractDomain utility function
-    - Added comprehensive documentation for all utility functions
-  - Moved notification name extensions to NotificationUtils:
-    - Relocated articleProcessingCompleted and syncStatusChanged notifications
-  - Updated Logger system to use "Sync" instead of "SyncManager":
-    - Changed ModernizationLogger.Component.syncManager to .sync with description update
-    - Updated AppLogger.sync to reference "Sync" category
-  - Removed all direct SyncManager references from MigrationAdapter:
-    - Updated all method documentation to use "legacy compatibility method" terminology
-    - Removed all references to SyncManager in comments and documentation
-  - Verified no direct SyncManager references remain in the codebase
-  - Ensured that all functionality continues to work through the MigrationAdapter layer
-
--
+- Continue working on the migration path to fully transition from NotificationData to ArticleModel
+- Fix the remaining concurrency issues in NewsView.swift:
+  - Update asynchronous calls in non-async functions
+  - Address unreachable catch blocks in loadFullContent()
+- Refine the migration process to ensure smooth data transition between models
+- Investigate and fix the issues in ArticleModelAdapter with proper field conversion between models

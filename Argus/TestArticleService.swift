@@ -212,6 +212,8 @@ class TestArticleService: ObservableObject {
     }
 
     /// Retrieves all test articles to verify querying
+    /// - Note: This method is isolated to the MainActor since it returns non-Sendable ArticleModel objects
+    @MainActor
     func fetchAllArticles() async -> [ArticleModel] {
         do {
             let descriptor = FetchDescriptor<ArticleModel>()
@@ -230,6 +232,8 @@ class TestArticleService: ObservableObject {
     }
 
     /// Retrieves all test topics to verify querying
+    /// - Note: This method is isolated to the MainActor since it returns non-Sendable TopicModel objects
+    @MainActor
     func fetchAllTopics() async -> [TopicModel] {
         do {
             let descriptor = FetchDescriptor<TopicModel>()
@@ -248,6 +252,8 @@ class TestArticleService: ObservableObject {
     }
 
     /// Cleans up test data
+    /// - Note: This method is isolated to the MainActor since it uses modelContext operations
+    @MainActor
     func cleanupTestData() async -> Bool {
         do {
             // Delete all test articles

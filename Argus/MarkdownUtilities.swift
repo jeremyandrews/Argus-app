@@ -288,15 +288,57 @@ func getAttributedString(
     customFontSize: CGFloat? = nil,
     completion: ((NSAttributedString?) -> Void)? = nil
 ) -> NSAttributedString? {
-    // First check if the source text exists for this field
-    let markdownText = field.getMarkdownText(from: article)
+    return getAttributedStringInternal(for: field, from: article, createIfMissing: createIfMissing, customFontSize: customFontSize, completion: completion)
+}
+
+/// Overload to handle NotificationData objects
+/// This function allows getAttributedString to work with legacy NotificationData objects
+@MainActor
+func getAttributedString(
+    for field: RichTextField,
+    from notification: NotificationData,
+    createIfMissing: Bool = true,
+    customFontSize: CGFloat? = nil,
+    completion: ((NSAttributedString?) -> Void)? = nil
+) -> NSAttributedString? {
+    return getAttributedStringInternal(for: field, from: notification, createIfMissing: createIfMissing, customFontSize: customFontSize, completion: completion)
+}
+
+/// Internal implementation that handles both ArticleModel and NotificationData
+@MainActor
+private func getAttributedStringInternal<T>(
+    for field: RichTextField,
+    from source: T,
+    createIfMissing: Bool = true,
+    customFontSize: CGFloat? = nil,
+    completion: ((NSAttributedString?) -> Void)? = nil
+) -> NSAttributedString? {
+    // Get the markdown text using the appropriate extension method
+    let markdownText: String?
+    if let article = source as? ArticleModel {
+        markdownText = field.getMarkdownText(from: article)
+    } else if let notification = source as? NotificationData {
+        markdownText = field.getMarkdownText(from: notification)
+    } else {
+        AppLogger.database.error("❌ Invalid source type for getAttributedStringInternal")
+        completion?(nil)
+        return nil
+    }
+    
     guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
         completion?(nil)
         return nil
     }
 
     // Try to use existing blob data if available
-    if let blobData = field.getBlob(from: article),
+    var blobData: Data?
+    if let article = source as? ArticleModel {
+        blobData = field.getBlob(from: article)
+    } else if let notification = source as? NotificationData {
+        blobData = field.getBlob(from: notification)
+    }
+    
+    if let blobData = blobData,
        let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
            ofClass: NSAttributedString.self,
            from: blobData
@@ -336,20 +378,24 @@ func getAttributedString(
                     requiringSecureCoding: false
                 )
 
-                // Set the blob on the article model
-                field.setBlob(blobData, on: article)
-
-                // Save the context if possible - we can't use the @ModelActor actor pattern here
-                // so we get the context directly from the article
-                if let context = article.modelContext {
-                    do {
-                        try context.save()
-                        AppLogger.database.debug("✅ Saved blob for \(String(describing: field)) to ArticleModel (\(blobData.count) bytes)")
-                    } catch {
-                        AppLogger.database.error("❌ Failed to save context for \(String(describing: field)) blob: \(error)")
+                // Set the blob on the appropriate source object
+                if let article = source as? ArticleModel {
+                    field.setBlob(blobData, on: article)
+                    
+                    // Save the context if possible
+                    if let context = article.modelContext {
+                        do {
+                            try context.save()
+                            AppLogger.database.debug("✅ Saved blob for \(String(describing: field)) to ArticleModel (\(blobData.count) bytes)")
+                        } catch {
+                            AppLogger.database.error("❌ Failed to save context for \(String(describing: field)) blob: \(error)")
+                        }
+                    } else {
+                        AppLogger.database.warning("⚠️ ArticleModel has no context to save blob for \(String(describing: field))")
                     }
-                } else {
-                    AppLogger.database.warning("⚠️ ArticleModel has no context to save blob for \(String(describing: field))")
+                } else if let notification = source as? NotificationData {
+                    field.setBlob(blobData, on: notification)
+                    AppLogger.database.debug("✅ Set blob for \(String(describing: field)) on NotificationData")
                 }
             } catch {
                 AppLogger.database.error("❌ Failed to create blob data for \(String(describing: field)): \(error)")
@@ -678,7 +724,7 @@ class NotificationData {
             .additionalInsights,
         ]
 
-        AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(id):")
+        AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(self.id):")
 
         var allValid = true
         for field in fields {
@@ -715,6 +761,49 @@ class NotificationData {
 extension NotificationData {
     var effectiveDate: Date {
         return pub_date ?? date
+    }
+    
+    /// Creates a NotificationData instance from an ArticleModel
+    /// Used for migration and compatibility with legacy code
+    static func from(articleModel: ArticleModel) -> NotificationData {
+        let notification = NotificationData(
+            id: articleModel.id,
+            date: articleModel.addedDate,
+            title: articleModel.title,
+            body: articleModel.body,
+            json_url: articleModel.jsonURL,
+            article_url: articleModel.url,
+            topic: articleModel.topic,
+            article_title: articleModel.articleTitle,
+            affected: articleModel.affected,
+            domain: articleModel.domain,
+            pub_date: articleModel.publishDate,
+            isViewed: articleModel.isViewed,
+            isBookmarked: articleModel.isBookmarked,
+            isArchived: false, // Archive functionality removed
+            sources_quality: articleModel.sourcesQuality,
+            argument_quality: articleModel.argumentQuality,
+            source_type: articleModel.sourceType,
+            source_analysis: articleModel.sourceAnalysis,
+            quality: articleModel.quality,
+            summary: articleModel.summary,
+            critical_analysis: articleModel.criticalAnalysis,
+            logical_fallacies: articleModel.logicalFallacies,
+            relation_to_topic: articleModel.relationToTopic,
+            additional_insights: articleModel.additionalInsights,
+            title_blob: articleModel.titleBlob,
+            body_blob: articleModel.bodyBlob,
+            summary_blob: articleModel.summaryBlob,
+            critical_analysis_blob: articleModel.criticalAnalysisBlob,
+            logical_fallacies_blob: articleModel.logicalFallaciesBlob,
+            source_analysis_blob: articleModel.sourceAnalysisBlob,
+            relation_to_topic_blob: articleModel.relationToTopicBlob,
+            additional_insights_blob: articleModel.additionalInsightsBlob,
+            engine_stats: articleModel.engineStats,
+            similar_articles: articleModel.similarArticles
+        )
+        
+        return notification
     }
 }
 

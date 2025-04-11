@@ -337,7 +337,7 @@ struct NewsView: View {
                         // Remove fixed height constraint
                         AccessibleAttributedText(attributedString: attributedTitle)
                     } else {
-                        Text(article.title ?? "")
+                        Text(article.title)
                             .font(.headline)
                             .multilineTextAlignment(.leading)
                     }
@@ -345,11 +345,9 @@ struct NewsView: View {
                 .fontWeight(article.isViewed ? .regular : .bold)
 
                 // Publication Date
-                if let pubDate = article.publishDate {
-                    Text(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                }
+                Text(article.publishDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
 
                 // Body - with accessibility support
                 Group {
@@ -357,7 +355,7 @@ struct NewsView: View {
                         // Remove fixed height constraint
                         AccessibleAttributedText(attributedString: attributedBody)
                     } else {
-                        Text(article.body ?? "")
+                        Text(article.body)
                             .font(.body)
                             .multilineTextAlignment(.leading)
                             .lineLimit(3)
@@ -483,11 +481,8 @@ struct NewsView: View {
             // Mark that we've tried to fetch metadata to avoid repeated attempts
             hasFetchedMetadata = true
 
-            // Only query the local database to see if we have any metadata already stored
-            Task {
-                // Check if there's any metadata in the database for this article ID
-                // without making a network request
-                do {
+                // Only query the local database to see if we have any metadata already stored
+                Task {
                     // Get a fresh copy of the article to see if it has metadata
                     let articleOperations = ArticleOperations()
                     if let updatedArticle = await articleOperations.getArticleModelWithContext(byId: article.id) {
@@ -500,17 +495,18 @@ struct NewsView: View {
                                 // Just force a view refresh with the latest data
                             }
                         }
+                    } else {
+                        AppLogger.database.error("Could not fetch article \(article.id) for metadata check")
                     }
-                } catch {
-                    AppLogger.database.error("Error fetching metadata from database: \(error)")
                 }
-            }
         }
 
         private func loadFullContent() {
             guard !isLoading else { return }
 
             isLoading = true
+            
+            // Use Task to properly handle async calls
             Task {
                 // Access the article with context
                 let articleOperations = ArticleOperations()
@@ -520,7 +516,7 @@ struct NewsView: View {
                     _ = articleOperations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
                 }
 
-                // Update UI state
+                // Update UI state on main thread
                 await MainActor.run {
                     isLoading = false
                     loadError = nil
@@ -633,7 +629,7 @@ struct NewsView: View {
     }
 
     private func titleView(_ article: ArticleModel) -> some View {
-        Text(article.title ?? "")
+        Text(article.title)
             .font(.headline)
             .lineLimit(3)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -649,12 +645,10 @@ struct NewsView: View {
 
     private func publicationDateView(_ article: ArticleModel) -> some View {
         Group {
-            if let pubDate = article.publishDate {
-                Text(dateFormatter.string(from: pubDate))
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .textSelection(.disabled)
-            }
+            Text(dateFormatter.string(from: article.publishDate))
+                .font(.footnote)
+                .foregroundColor(.secondary)
+                .textSelection(.disabled)
         }
     }
 
@@ -784,7 +778,7 @@ struct NewsView: View {
             )
             .frame(height: filterViewHeight)
             .background(Color(UIColor.systemBackground))
-            .cornerRadius(15, corners: [.topLeft, .topRight])
+            .cornerRadius(15, corners: UIRectCorner([.topLeft, .topRight]))
             .shadow(radius: 10)
             .gesture(
                 DragGesture()
@@ -829,7 +823,7 @@ struct NewsView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(Color(UIColor.systemBackground))
-        .cornerRadius(15, corners: [.topLeft, .topRight])
+        .cornerRadius(15, corners: UIRectCorner([.topLeft, .topRight]))
         .shadow(radius: 10)
     }
 
@@ -935,3 +929,38 @@ struct NewsView: View {
             await viewModel.toggleBookmark(for: article)
         }
     }
+    // Extension methods are used directly through instance methods defined above
+    
+    // MARK: - Filter View
+    
+    private struct FilterView: View {
+        @Binding var showUnreadOnly: Bool
+        @Binding var showBookmarkedOnly: Bool
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Filter Articles")
+                    .font(.headline)
+                    .padding(.top, 10)
+                
+                VStack(alignment: .leading, spacing: 16) {
+                    Toggle(isOn: $showUnreadOnly) {
+                        Label("Unread Only", systemImage: "envelope.badge")
+                    }
+                    
+                    Toggle(isOn: $showBookmarkedOnly) {
+                        Label("Bookmarked Only", systemImage: "bookmark.fill")
+                    }
+                }
+                
+                Text("Changes are applied immediately")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 10)
+                
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+}

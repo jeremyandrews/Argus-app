@@ -591,24 +591,24 @@ struct ArgusApp: App {
                 return result.partialValue
             }
 
-            // Get counts safely
-            let notificationCount = safeCount(FetchDescriptor<NotificationData>(), label: "NotificationData table")
-            let seenArticleCount = safeCount(FetchDescriptor<SeenArticle>(), label: "SeenArticle table")
+            // Get counts safely - use ArticleModel instead of NotificationData
+            let articleCount = safeCount(FetchDescriptor<ArticleModel>(), label: "ArticleModel table")
+            let seenArticleCount = safeCount(FetchDescriptor<SeenArticleModel>(), label: "SeenArticleModel table")
 
             // Safely calculate total
-            let totalRecords = safeAdd(notificationCount, seenArticleCount)
+            let totalRecords = safeAdd(articleCount, seenArticleCount)
             AppLogger.database.debug("📊 Database Stats: Total records across all tables: \(totalRecords)")
 
-            // Continue with other stats directly for logging
+            // Continue with other stats directly for logging - using ArticleModel
             // These counts are only used for logging in safeCount and not needed for further calculations
             let _ = safeCount(
-                FetchDescriptor<NotificationData>(predicate: #Predicate { !$0.isViewed }),
-                label: "Unviewed notifications"
+                FetchDescriptor<ArticleModel>(predicate: #Predicate { !$0.isViewed }),
+                label: "Unviewed articles"
             )
 
             let _ = safeCount(
-                FetchDescriptor<NotificationData>(predicate: #Predicate { $0.isBookmarked }),
-                label: "Bookmarked notifications"
+                FetchDescriptor<ArticleModel>(predicate: #Predicate { $0.isBookmarked }),
+                label: "Bookmarked articles"
             )
 
             // Archive feature removed
@@ -618,13 +618,13 @@ struct ArgusApp: App {
             if daysSetting > 0 {
                 let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date())!
                 let _ = safeCount(
-                    FetchDescriptor<NotificationData>(
-                        predicate: #Predicate { notification in
-                            notification.date < cutoffDate &&
-                                !notification.isBookmarked
+                    FetchDescriptor<ArticleModel>(
+                        predicate: #Predicate { article in
+                            article.addedDate < cutoffDate &&
+                                !article.isBookmarked
                         }
                     ),
-                    label: "Notifications eligible for cleanup"
+                    label: "Articles eligible for cleanup"
                 )
             }
         }

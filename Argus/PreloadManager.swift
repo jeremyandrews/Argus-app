@@ -58,19 +58,24 @@ class PreloadManager {
                 // Use ArticleOperations to process blob generation
                 let operations = ArticleOperations()
 
-                // Get article with context for proper blob persistence
-                if let articleWithContext = await operations.getArticleModelWithContext(byId: article.id) {
-                    // Generate blobs for key fields - must run on MainActor since this involves UI components
-                    await MainActor.run {
-                        // These operations must run on the main actor since they involve NSAttributedString
+                // Extract the article ID (which is Sendable) to use inside MainActor
+                let articleId = article.id
+                
+                // Generate blobs for key fields - everything related to ArticleModel must run on MainActor
+                // for Swift 6 sendability compliance
+                // Use Task with @MainActor annotation to handle async operations on the MainActor
+                await Task { @MainActor in
+                    // Within MainActor, get a fresh ArticleModel with context
+                    if let articleWithContext = await operations.getArticleModelWithContext(byId: articleId) {
+                        // These operations already run on the main actor since they involve NSAttributedString
                         _ = operations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
                         _ = operations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
+                        
+                        AppLogger.database.debug("✅ Preloaded blobs for article \(articleId)")
+                    } else {
+                        AppLogger.database.warning("⚠️ Could not preload article \(articleId) - context not available")
                     }
-
-                    AppLogger.database.debug("✅ Preloaded blobs for article \(article.id)")
-                } else {
-                    AppLogger.database.warning("⚠️ Could not preload article \(article.id) - context not available")
-                }
+                }.value
 
                 // Schedule processing through the queue manager as a fallback
                 await ProcessingQueueManager.shared.scheduleProcessing(for: article.id)

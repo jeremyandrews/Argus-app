@@ -3,7 +3,7 @@
 ## Current Status
 **Overall Status**: Beta - Core functionality implemented with known issues
 **Development Phase**: Architecture Modernization - Migration Simplification Phase
-**Last Updated**: April 10, 2025
+**Last Updated**: April 11, 2025
 
 ## What Works
 
@@ -143,6 +143,43 @@
   - Batch operations with proper error handling to prevent partial updates
 
 ## Recently Completed
+
+- ✅ **Fixed Additional Swift 6 Compatibility Issues in NewsDetailView** (Completed):
+  - Resolved remaining Swift 6 compatibility problems in NewsDetailView.swift:
+    - Fixed PersistentModel Sendable violations by restructuring the `loadSimilarArticle` method
+    - Solved type conversion issues between ArticleModel and NotificationData
+    - Fixed non-optional binding errors for pub_date property
+    - Broke down complex SwiftUI views to help compiler type-checking
+  - Implemented several specific fixes:
+    - Restructured asynchronous code to keep SwiftData operations within a single MainActor context
+    - Added getArticleUrl implementation to ArticleModel for compatibility with NotificationData
+    - Created getTextContentForField method that works with ArticleModel
+    - Updated ShareSelectionView to accept ArticleModel instead of NotificationData
+    - Fixed optional binding issues by accessing non-optional properties directly
+  - Key improvements:
+    - Fixed all compilation errors in Swift 6 mode
+    - Made code more resilient to future Swift compiler changes
+    - Reduced risk of subtle concurrency bugs with better actor isolation
+    - Improved codebase consistency by continuing the migration from NotificationData to ArticleModel
+    - Documented best practices for handling PersistentModel in concurrent contexts
+  - The app now successfully builds without errors in Swift 6 language mode
+
+- ✅ **Fixed Swift 6 Equatable Conformance Issues** (Completed):
+  - Resolved compilation issues with SwiftData models and Equatable conformance:
+    - Fixed `"Type 'ArticleModel' does not conform to protocol 'Equatable'"` errors 
+    - Addressed `"Invalid redeclaration of '=='"` errors in model classes
+    - Solved compiler errors related to NotificationData and PersistentModel protocol
+  - Implemented a comprehensive solution approach:
+    - Kept in-class Equatable implementation in SwiftData model classes (the correct pattern)
+    - Removed obsolete code comments about moved Equatable implementations
+    - Updated ArgusApp.swift to use ArticleModel instead of NotificationData in all FetchDescriptor instances
+    - Fixed property name references in predicates to match ArticleModel (e.g., date → addedDate)
+  - Key learnings about SwiftData and Swift 6:
+    - The SwiftData `@Model` macro in Swift 6 generates partial Equatable machinery
+    - Explicit Equatable implementations in model classes must follow a consistent pattern
+    - Duplicate implementations across files can cause conflicts with macro-generated code
+    - NotificationData (legacy class) should be avoided in SwiftData contexts
+  - This fix allows the project to compile successfully and advances the migration path toward fully transitioning from NotificationData to ArticleModel
 
 - ✅ **Fixed Swift Closure Capture Semantics and Section Viewing Issues** (Completed):
   - Fixed section viewing problems where content was falling back to raw text:
@@ -514,70 +551,3 @@
   - Added test interface (SwiftDataTestView) to verify SwiftData operations
   - Integrated with Settings view for developer testing
   - Successfully implemented persistent storage with dedicated test database
-  - Enhanced reset store functionality for reliable repeated testing
-  - Updated UI to display storage location and persistent/in-memory status
-
-- ✅ **Migrate Existing Data**
-  - Created migration routine for converting old data to SwiftData models
-  - Implemented progress tracking with checkpoint system for resiliency
-  - Successfully tested basic migration functionality 
-  - Implemented automatic migration on app launch with modal UI
-  - Added re-migration (temporary mode) with state synchronization
-  - Created resilient system that can handle app termination during migration
-
-#### Phase 2: Networking and API Refactor ✅
-- ✅ **Create Article API Client**
-  - Refactored APIClient to use async/await for all API calls
-  - Implemented key API methods: fetchArticles(), fetchArticle(by:), fetchArticleByURL(), and syncArticles()
-  - Enhanced error handling with comprehensive status code validation
-  - Added automatic token refresh and JWT authentication
-
-- ✅ **Build ArticleService**
-  - Implemented as bridge between API and SwiftData using repository pattern
-  - Created key methods for article syncing, filtering, and status management
-  - Implemented immutable article pattern (articles are never updated once synced)
-  - Applied application-level uniqueness validation using jsonURL as identifier
-  - Used batch processing with intermediate saves for performance
-  - Incorporated full Swift 6 concurrency with async/await and proper cancellation
-  - Implemented efficient SwiftData query patterns with optimized existence checks
-  - Added comprehensive error handling with specific error types
-  - Designed for gradual adoption to enable smooth transition from legacy components
-
-#### Phase 3: MVVM Implementation and UI Refactor ✅
-- ✅ **Implement Shared Architecture Components**
-  - Created ArticleServiceProtocol as interface for dependency injection and testing
-  - Implemented ArticleOperations as shared business logic layer to reduce code duplication
-  - Developed shared components for article state management and rich text processing
-  - Created consistent error handling across shared components
-
-- ✅ **Implement ViewModels**
-  - Created NewsViewModel for article list management
-  - Implemented NewsDetailViewModel for article detail view
-  - Added pagination, filtering, and sorting logic in ViewModels
-  - Incorporated proper state management via @Published properties
-  - Implemented caching strategies for better performance
-  - Added proper error handling and recovery mechanisms
-
-- ✅ **Refactor NewsView to Use ViewModel**
-  - Updated NewsView to use NewsViewModel instead of direct database access
-  - Fixed property visibility to allow extension access to ViewModel
-  - Properly implemented extension methods to delegate to ViewModel
-  - Fixed SwiftUI/UIKit integration for presenting detail views
-  - Corrected environment value passing between views
-  - Updated pagination to use ViewModel-based article filtering
-  - Removed unused variables to fix Swift compiler warnings
-  - Implemented proper MVVM separation between view and business logic
-
-- ✅ **Implement Model Adapter Pattern**
-  - Created ArticleModelAdapter to bridge between ArticleModel and NotificationData
-  - Updated ArticleService to query ArticleModel but return NotificationData
-  - Ensured all CRUD operations work with the correct model types
-  - Fixed model container disconnect that was preventing display of articles
-  - Maintained backward compatibility with existing UI while updating data layer
-
-- ✅ **Refactor NewsDetailView to Use ViewModel**
-  - Completed: Updated NewsDetailView to use NewsDetailViewModel
-  - Completed: Moved article operations (read/bookmark/archive/delete) to ViewModel
-  - Completed: Implemented proper state management with ObservableObject pattern
-  - Completed: Enhanced navigation between articles with better state preservation
-  - Completed: Improved section loading with task cancellation for better performance

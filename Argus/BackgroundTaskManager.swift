@@ -212,9 +212,8 @@ final class BackgroundTaskManager {
     /// Performs the actual sync process - preserving exact API compatibility
     /// - Throws: Any error from the API or database operations
     private func performSync() async throws {
-        // 1. Get recently seen articles (same pattern as SyncManager)
-        let recentArticles = await fetchRecentArticles()
-        let jsonUrls = recentArticles.map { $0.json_url }
+        // 1. Get recently seen article URLs (modified for Swift 6 sendability)
+        let jsonUrls = await fetchRecentArticles()
 
         // 2. Sync with server using APIClient - maintain same API interaction
         let unseenUrls = try await APIClient.shared.syncArticles(seenArticles: jsonUrls)
@@ -234,10 +233,12 @@ final class BackgroundTaskManager {
         }
     }
 
-    /// Fetches recent articles for syncing - maintains compatibility with SyncManager
-    private func fetchRecentArticles() async -> [SeenArticle] {
+    /// Fetches recent article URLs for syncing - modified for Swift 6 sendability
+    private func fetchRecentArticles() async -> [String] {
         let oneDayAgo = Calendar.current.date(byAdding: .hour, value: -24, to: Date()) ?? Date()
-        return await DatabaseCoordinator.shared.fetchRecentArticles(since: oneDayAgo)
+        
+        // Use the new method that returns Sendable String URLs directly
+        return await DatabaseCoordinator.shared.fetchRecentArticleURLs(since: oneDayAgo)
     }
 
     /// Processes articles in batches

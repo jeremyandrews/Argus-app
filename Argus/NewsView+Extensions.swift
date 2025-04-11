@@ -18,16 +18,16 @@ extension NewsView {
 
             // Process the article
             Task { @MainActor in
-                // Get the article from the main context
-                let descriptor = FetchDescriptor<ArticleModel>(
-                    predicate: #Predicate<ArticleModel> { $0.id == articleID }
-                )
-
                 // Get the main context from SwiftDataContainer
                 let mainContext = SwiftDataContainer.shared.container.mainContext
 
-                // Try to fetch the article
-                guard let article = try? mainContext.fetch(descriptor).first else {
+                // Using a safer approach to avoid predicate type issues
+                let descriptor = FetchDescriptor<ArticleModel>()
+                let allArticles = try? mainContext.fetch(descriptor)
+                
+                // Manual filtering by ID string to avoid predicate issues
+                let idString = articleID.uuidString
+                guard let article = allArticles?.first(where: { $0.id.uuidString == idString }) else {
                     AppLogger.database.error("Failed to fetch article \(articleID) for markdown processing")
                     return
                 }
@@ -111,10 +111,8 @@ extension NewsView {
 
                 // If extraction failed but blob exists, generate from text
                 if let summaryText = article.summary, !summaryText.isEmpty {
-                    // Must be called on MainActor since it involves NSAttributedString
-                    await MainActor.run {
-                        extractedSummary = articleOperations.getAttributedContent(for: .summary, from: article, createIfMissing: true)
-                    }
+                    // Generated synchronously without awaiting since we're already on the main thread
+                    extractedSummary = articleOperations.getAttributedContent(for: .summary, from: article, createIfMissing: true)
                     AppLogger.database.debug("Generated fallback summary for article \(article.id)")
                 }
             }
@@ -122,10 +120,8 @@ extension NewsView {
             // No blob exists, generate it if we have text content
             AppLogger.database.debug("No summary blob found for article \(article.id), generating one")
             if let summaryText = article.summary, !summaryText.isEmpty {
-                // Must be called on MainActor since it involves NSAttributedString
-                await MainActor.run {
-                    extractedSummary = articleOperations.getAttributedContent(for: .summary, from: article, createIfMissing: true)
-                }
+                // Generate synchronously since we're already on the main thread
+                extractedSummary = articleOperations.getAttributedContent(for: .summary, from: article, createIfMissing: true)
                 AppLogger.database.debug("Generated new summary for article \(article.id)")
             }
         }
@@ -229,7 +225,10 @@ extension NewsView {
             return "You are not currently subscribed to any topics. Click 'Subscriptions' below."
         }
         var message = "Please be patient, news will arrive automatically. You do not need to leave this application open.\n\nYou are currently subscribed to: \(activeSubscriptions.joined(separator: ", "))."
-        if isAnyFilterActive {
+        
+        // Check filter status directly from viewModel instead of using isAnyFilterActive property
+        let filtersActive = viewModel.showUnreadOnly || viewModel.showBookmarkedOnly
+        if filtersActive {
             message += "\n\n"
             if viewModel.showUnreadOnly && viewModel.showBookmarkedOnly {
                 message += "You are filtering to show only Unread articles that have also been Bookmarked."
@@ -253,11 +252,17 @@ extension NewsView {
                 }
             }
 
-            // Reset selection state
+            // Reset selection state - only clear selected IDs here
+            // The parent view will handle resetting editMode
             withAnimation {
-                editMode?.wrappedValue = .inactive
                 viewModel.selectedArticleIds.removeAll()
             }
+            
+            // Post a notification that can be observed by NewsView to reset edit mode
+            NotificationCenter.default.post(
+                name: Notification.Name("ResetEditMode"),
+                object: nil
+            )
         }
     }
 }

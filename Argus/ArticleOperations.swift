@@ -25,10 +25,15 @@ final class ArticleOperations {
         let newReadStatus = !article.isViewed
         try await articleService.markArticle(id: article.id, asRead: newReadStatus)
 
-        // Ensure UI state is updated immediately
-        await MainActor.run {
-            // Force update the in-memory article object
-            article.isViewed = newReadStatus
+        // Update UI state on the MainActor
+        // Note: In Swift 6, we can't capture a PersistentModel directly in a @Sendable closure
+        // So we extract the ID (which is Sendable) and use that in the Task
+        let articleId = article.id // UUID is Sendable
+        // Fire-and-forget task with explicit discard using underscore
+        _ = Task { @MainActor in
+            if let freshArticle = await getArticleModelWithContext(byId: articleId) {
+                freshArticle.isViewed = newReadStatus
+            }
         }
 
         AppLogger.database.debug("✅ Toggled read status to \(newReadStatus) for article \(article.id)")
@@ -43,9 +48,15 @@ final class ArticleOperations {
         let newBookmarkStatus = !article.isBookmarked
         try await articleService.markArticle(id: article.id, asBookmarked: newBookmarkStatus)
 
-        // Ensure UI state is updated immediately
-        await MainActor.run {
-            article.isBookmarked = newBookmarkStatus
+        // Update UI state on the MainActor
+        // Note: In Swift 6, we can't capture a PersistentModel directly in a @Sendable closure
+        // So we extract the ID (which is Sendable) and use that in the Task
+        let articleId = article.id // UUID is Sendable
+        // Fire-and-forget task with explicit discard using underscore
+        _ = Task { @MainActor in
+            if let freshArticle = await getArticleModelWithContext(byId: articleId) {
+                freshArticle.isBookmarked = newBookmarkStatus
+            }
         }
 
         AppLogger.database.debug("✅ Toggled bookmark status to \(newBookmarkStatus) for article \(article.id)")
@@ -83,15 +94,12 @@ final class ArticleOperations {
                 - Title blob: \(hasTitleBlob)
                 - Body blob: \(hasBodyBlob)
                 - Summary blob: \(hasSummaryBlob)
-                - Engine stats: \(hasEngineStats != nil)
-                - Similar articles: \(hasSimilarArticles != nil)
+                - Engine stats: \(hasEngineStats)
+                - Similar articles: \(hasSimilarArticles)
                 """)
             }
 
             return model
-        } catch {
-            AppLogger.database.error("Error fetching complete article: \(error)")
-            return nil
         }
     }
 
@@ -114,42 +122,46 @@ final class ArticleOperations {
         let container = SwiftDataContainer.shared.container
         let context = container.mainContext
 
-        var predicate: Predicate<ArticleModel>?
-
-        // Build the predicate based on filters
-        var conditions: [Predicate<ArticleModel>] = []
-
-        // Topic filter
+        // Build predicates using modern compound approach
+        var conditions = [Predicate<ArticleModel>]()
+        
+        // Topic filter (only if a specific topic is selected)
         if let topic = topic, topic != "All" {
             conditions.append(#Predicate<ArticleModel> { $0.topic == topic })
         }
-
+        
         // Read status filter
         if showUnreadOnly {
             conditions.append(#Predicate<ArticleModel> { !$0.isViewed })
         }
-
+        
         // Bookmark filter
         if showBookmarkedOnly {
             conditions.append(#Predicate<ArticleModel> { $0.isBookmarked })
         }
-
-        // Combine conditions
-        if !conditions.isEmpty {
-            if conditions.count == 1 {
-                predicate = conditions[0]
-            } else {
-                // Combine with AND
-                predicate = conditions.reduce(into: conditions[0]) { result, condition in
-                    result = result && condition
-                }
-            }
-        }
-
+        
         // Create the fetch descriptor
         var descriptor = FetchDescriptor<ArticleModel>()
-        if let predicate = predicate {
-            descriptor.predicate = predicate
+        
+        // Apply predicates to the descriptor
+        if !conditions.isEmpty {
+            if conditions.count == 1 {
+                // If only one condition, use it directly
+                descriptor.predicate = conditions[0]
+            } else {
+                // For multiple conditions, we need to use one condition in the initial fetch
+                // and then filter the results manually for the other conditions
+                
+                // First, apply the most restrictive predicate to limit the initial fetch
+                if showUnreadOnly {
+                    // This is typically the most restrictive filter
+                    descriptor.predicate = #Predicate<ArticleModel> { !$0.isViewed }
+                } else if showBookmarkedOnly {
+                    descriptor.predicate = #Predicate<ArticleModel> { $0.isBookmarked }
+                } else if let topic = topic, topic != "All" {
+                    descriptor.predicate = #Predicate<ArticleModel> { $0.topic == topic }
+                }
+            }
         }
 
         // Sort by date (newest first)
@@ -161,7 +173,36 @@ final class ArticleOperations {
         }
 
         do {
-            let articles = try context.fetch(descriptor)
+            var articles = try context.fetch(descriptor)
+            
+            // Apply additional in-memory filtering for multiple filter conditions
+            if conditions.count > 1 {
+                AppLogger.database.debug("🔍 Applying additional in-memory filters")
+                
+                // Track which predicate was applied at the database level
+                let appliedUnreadFilter = showUnreadOnly && descriptor.predicate != nil && conditions.count > 1
+                let appliedBookmarkFilter = showBookmarkedOnly && !appliedUnreadFilter && descriptor.predicate != nil
+                let appliedTopicFilter = topic != nil && topic != "All" && !appliedUnreadFilter && !appliedBookmarkFilter && descriptor.predicate != nil
+                
+                // Apply remaining filters in memory
+                if let topic = topic, topic != "All", !appliedTopicFilter {
+                    AppLogger.database.debug("🔍 Applying topic filter in memory: \(topic)")
+                    articles = articles.filter { $0.topic == topic }
+                }
+                
+                // Apply unread filter in memory if not applied at database level
+                if showUnreadOnly && !appliedUnreadFilter {
+                    AppLogger.database.debug("🔍 Applying unread filter in memory")
+                    articles = articles.filter { !$0.isViewed }
+                }
+                
+                // Apply bookmark filter in memory if not applied at database level
+                if showBookmarkedOnly && !appliedBookmarkFilter {
+                    AppLogger.database.debug("🔍 Applying bookmark filter in memory")
+                    articles = articles.filter { $0.isBookmarked }
+                }
+            }
+            
             AppLogger.database.debug("✅ Fetched \(articles.count) articles with filters")
             return articles
         } catch {
@@ -370,8 +411,8 @@ final class ArticleOperations {
                 markdownText,
                 textStyle: field.textStyle
             ) {
-                // Save as blob for future use
-                saveAttributedString(attributedString, for: field, in: article)
+                // Save as blob for future use - explicitly discard result to avoid warning
+                _ = saveAttributedString(attributedString, for: field, in: article)
                 return attributedString
             } else {
                 AppLogger.database.error("❌ Failed to generate attributed string for \(String(describing: field))")
@@ -436,42 +477,58 @@ final class ArticleOperations {
     ///   - groupingStyle: The grouping style to use (date, topic, none)
     ///   - sortOrder: The sort order to use within groups
     /// - Returns: An array of grouped articles with keys
+    /// - Note: In Swift 6, this method must be isolated to the MainActor since it returns non-Sendable ArticleModel types
+    @MainActor
     func groupArticles(
         _ articles: [ArticleModel],
         by groupingStyle: String,
         sortOrder: String
     ) async -> [(key: String, articles: [ArticleModel])] {
-        return await Task.detached(priority: .userInitiated) {
-            // First, sort the articles according to the sort order
-            let sortedArticles = self.sortArticles(articles, by: sortOrder)
+        // First, sort the articles according to the sort order
+        let sortedArticles = sortArticles(articles, by: sortOrder)
 
-            // Then group them according to the grouping style
-            switch groupingStyle {
-            case "date":
-                let groupedByDay = Dictionary(grouping: sortedArticles) {
-                    Calendar.current.startOfDay(for: $0.publishDate)
+        // Then group them according to the grouping style
+        switch groupingStyle {
+        case "date":
+            // Create a dictionary mapping dates to articles
+            var groupedByDay: [Date: [ArticleModel]] = [:]
+            
+            // Manually group rather than using Dictionary(grouping:) to avoid Sendable issues
+            for article in sortedArticles {
+                let day = Calendar.current.startOfDay(for: article.publishDate)
+                if groupedByDay[day] == nil {
+                    groupedByDay[day] = []
                 }
-
-                let sortedDayKeys = groupedByDay.keys.sorted { $0 > $1 }
-                return sortedDayKeys.map { day in
-                    let displayKey = day.formatted(date: .abbreviated, time: .omitted)
-                    let articles = groupedByDay[day] ?? []
-                    return (key: displayKey, articles: articles)
-                }
-
-            case "topic":
-                let groupedByTopic = Dictionary(grouping: sortedArticles) {
-                    $0.topic ?? "Uncategorized"
-                }
-
-                return groupedByTopic.map {
-                    (key: $0.key, articles: $0.value)
-                }.sorted { $0.key < $1.key }
-
-            default: // "none"
-                return [("", sortedArticles)]
+                groupedByDay[day]?.append(article)
             }
-        }.value
+
+            let sortedDayKeys = groupedByDay.keys.sorted { $0 > $1 }
+            return sortedDayKeys.map { day in
+                let displayKey = day.formatted(date: .abbreviated, time: .omitted)
+                let articles = groupedByDay[day] ?? []
+                return (key: displayKey, articles: articles)
+            }
+
+        case "topic":
+            // Create a dictionary mapping topics to articles
+            var groupedByTopic: [String: [ArticleModel]] = [:]
+            
+            // Manually group rather than using Dictionary(grouping:) to avoid Sendable issues
+            for article in sortedArticles {
+                let topic = article.topic ?? "Uncategorized"
+                if groupedByTopic[topic] == nil {
+                    groupedByTopic[topic] = []
+                }
+                groupedByTopic[topic]?.append(article)
+            }
+
+            return groupedByTopic.map {
+                (key: $0.key, articles: $0.value)
+            }.sorted { $0.key < $1.key }
+
+        default: // "none"
+            return [("", sortedArticles)]
+        }
     }
 
     /// Sorts articles by the specified sort order
@@ -657,8 +714,9 @@ final class ArticleOperations {
     /// - Parameters:
     ///   - field: The field to verify
     ///   - articleId: The article ID to verify for
+    @MainActor // Entire function must be MainActor-isolated for Swift 6 sendability rules
     func verifyBlobStorage(field: RichTextField, articleId: UUID) async {
-        @MainActor
+        // Already MainActor-isolated so no need for nested @MainActor annotation
         func verifyWithArticle(_ article: ArticleModel?) {
             guard let article = article else {
                 AppLogger.database.error("⚠️ VERIFICATION FAILED: Could not retrieve article model for ID: \(articleId)")
@@ -694,6 +752,7 @@ final class ArticleOperations {
 
         // Get article with context to verify
         let model = await getArticleModelWithContext(byId: articleId)
-        await verifyWithArticle(model)
+        // No need for await since verifyWithArticle is not async
+        verifyWithArticle(model)
     }
 }

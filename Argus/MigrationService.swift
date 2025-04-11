@@ -3,6 +3,9 @@ import SwiftData
 import SwiftUI
 
 /// Service responsible for migrating data from the old database to SwiftData
+/// - Note: This service intentionally uses deprecated MigrationAwareArticleService since
+///         it's specifically designed for the one-time migration process.
+///         The deprecation warnings are expected and can be safely ignored.
 @MainActor
 class MigrationService: ObservableObject {
     // Published properties for UI updates
@@ -127,7 +130,9 @@ class MigrationService: ObservableObject {
                 status = "Processing batch \(index + 1) of \(articleBatches.count)..."
 
                 // Process batch with state synchronization
-                try await processBatchWithStateSync(batch)
+                // Convert ArticleModel batch to NotificationData for processing
+                let notificationBatch = batch.map { NotificationData.from(articleModel: $0) }
+                try await processBatchWithStateSync(notificationBatch)
 
                 // Check for cancellation
                 if isCancelled {
@@ -200,7 +205,7 @@ class MigrationService: ObservableObject {
     }
 
     /// Fetch all articles that need migration
-    private func fetchArticlesToMigrate() async -> [NotificationData] {
+    private func fetchArticlesToMigrate() async -> [ArticleModel] {
         // Use migrationArticleService to fetch articles from legacy system
         let articles = await migrationArticleService.fetchArticlesFromLegacySystem()
 
@@ -545,13 +550,13 @@ class MigrationService: ObservableObject {
         backgroundTaskID = UUID()
 
         // We're still tracking that a task is in progress, but using SwiftUI lifecycle instead
-        AppLogger.database.debug("Background task registered: \(backgroundTaskID)")
+        AppLogger.database.debug("Background task registered: \(self.backgroundTaskID)")
     }
 
     /// End the background task if active
     private func endBackgroundTaskIfNeeded() {
         // Clean up any resources associated with the background task
-        AppLogger.database.debug("Background task completed: \(backgroundTaskID)")
+        AppLogger.database.debug("Background task completed: \(self.backgroundTaskID)")
 
         // Reset the ID
         backgroundTaskID = UUID()

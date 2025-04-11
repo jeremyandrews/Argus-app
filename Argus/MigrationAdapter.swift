@@ -139,34 +139,40 @@ class MigrationAdapter {
 
     /// Legacy compatibility method for checking if an article exists
     func standardizedArticleExistsCheck(jsonURL: String, articleID: UUID? = nil, articleURL _: String? = nil) async -> Bool {
-        // Completely rewritten to avoid any predicate or direct comparison between types
-        do {
-            // We'll use raw SQL-like queries with context.fetch(sqlWhere:)
-            let container = SwiftDataContainer.shared.container
-            let context = container.mainContext
-
-            if let articleID = articleID {
-                // Get all articles - not ideal but avoids predicate issues
-                let descriptor = FetchDescriptor<ArticleModel>()
-                let allArticles = try context.fetch(descriptor)
-
-                // Manual filtering by ID string - no predicates
-                let idString = articleID.uuidString
-                return allArticles.contains { $0.id.uuidString == idString }
-            } else if !jsonURL.isEmpty {
-                // Get all articles - not ideal but avoids predicate issues
-                let descriptor = FetchDescriptor<ArticleModel>()
-                let allArticles = try context.fetch(descriptor)
-
-                // Manual filtering by JSON URL - no predicates
-                return allArticles.contains { $0.jsonURL == jsonURL }
+        // Rewritten to ensure all ModelContext operations happen on the MainActor
+        // and only Sendable values cross actor boundaries
+        return await Task { @MainActor in
+            do {
+                // Within MainActor, safely access the context
+                let container = SwiftDataContainer.shared.container
+                let context = container.mainContext
+                
+                // Store the search criteria as Sendable values
+                let searchID = articleID
+                let searchURL = jsonURL
+                
+                if let articleID = searchID {
+                    // Get all articles with ID matching
+                    let descriptor = FetchDescriptor<ArticleModel>(
+                        predicate: #Predicate<ArticleModel> { $0.id == articleID }
+                    )
+                    let matchingArticles = try context.fetch(descriptor)
+                    return !matchingArticles.isEmpty
+                } else if !searchURL.isEmpty {
+                    // Get all articles with jsonURL matching
+                    let descriptor = FetchDescriptor<ArticleModel>(
+                        predicate: #Predicate<ArticleModel> { $0.jsonURL == searchURL }
+                    )
+                    let matchingArticles = try context.fetch(descriptor)
+                    return !matchingArticles.isEmpty
+                }
+                
+                return false
+            } catch {
+                AppLogger.database.error("Error in standardizedArticleExistsCheck: \(error)")
+                return false
             }
-
-            return false
-        } catch {
-            AppLogger.database.error("Error in standardizedArticleExistsCheck: \(error)")
-            return false
-        }
+        }.value
     }
 
     /// Log a deprecation warning for methods that should no longer be used
