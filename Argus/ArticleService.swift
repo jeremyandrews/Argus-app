@@ -375,7 +375,8 @@ final class ArticleService: ArticleServiceProtocol {
             // Fetch articles from server with default limits
             // Note: The API sends all unseen articles, so we'll handle limiting after fetch
             let remoteArticles = try await apiClient.fetchArticles(
-                topic: topic
+                topic: topic,
+                progressHandler: progressHandler
             )
 
             // Process the articles with progress updates

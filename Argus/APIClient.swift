@@ -164,10 +164,11 @@ class APIClient {
     ///   - topic: Optional topic filter (note: may be ignored by server)
     ///   - since: Optional date filter (note: may be ignored by server)
     ///   - allowRetries: Whether to retry on network failures
+    ///   - progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Array of ArticleJSON objects
     /// - Throws: ApiError if fetch fails
     func fetchArticles(limit: Int = 50, topic _: String? = nil, since _: Date? = nil,
-                       allowRetries: Bool = true) async throws -> [ArticleJSON]
+                       allowRetries: Bool = true, progressHandler: ((Int, Int) -> Void)? = nil) async throws -> [ArticleJSON]
     {
         // Note: The backend only supports the /articles/sync endpoint, not /articles
         // The parameters (limit, topic, since) are kept for backward compatibility
@@ -188,13 +189,24 @@ class APIClient {
         ModernizationLogger.log(.info, component: .apiClient,
                                 message: "Retrieved \(articleURLs.count) article URLs, fetching content...")
 
+        // Calculate the total number of articles to fetch
+        let totalCount = min(articleURLs.count, limit)
+        
+        // Initial progress update now that we know the total count
+        progressHandler?(0, totalCount)
+
         // For each URL, fetch the actual article
         var articles: [ArticleJSON] = []
 
-        for url in articleURLs.prefix(limit) { // Honor the limit parameter locally
+        for (index, url) in articleURLs.prefix(limit).enumerated() { // Honor the limit parameter locally
+            // Update progress for each article being processed
+            progressHandler?(index, totalCount)
             do {
                 if let article = try await fetchArticleByURL(jsonURL: url, allowEmptyResponse: true, allowRetries: allowRetries) {
                     articles.append(article)
+                    
+                    // Update progress after successful article fetch
+                    progressHandler?(index + 1, totalCount)
 
                     // Check if we've hit the limit
                     if articles.count >= limit {
