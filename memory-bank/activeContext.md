@@ -532,6 +532,68 @@
     - The ViewModel should be the single source of truth for formatted content
     - Section handling benefits from a unified approach rather than section-specific implementations
 
+- **Fixed Article Opening in NewsDetailView** (Completed):
+  - Resolved critical issue where tapping an article would mark it as read but not open the detail view:
+    - Root cause identified: Filter changes occurring between article tap and detail view presentation
+    - Log evidence: `Could not find article index for presentation: [article-id]` appearing after filters were applied
+    - Article was being lost from the filtered list during async operations, preventing its index from being found
+  - Technical implementation:
+    - Modified `openArticle()` method in NewsView+Extensions.swift to use a snapshot-based approach:
+      ```swift
+      // STEP 1: Take a snapshot of the current filtered articles immediately
+      let articlesSnapshot = viewModel.filteredArticles
+      
+      // STEP 2: Find the index in our snapshot (which won't change during async operations)
+      guard let index = articlesSnapshot.firstIndex(where: { $0.id == article.id }) else {
+          AppLogger.database.error("Article not found in filtered articles: \(article.id)")
+          return
+      }
+      
+      // STEP 3: Create view model with our snapshot
+      let detailViewModel = NewsDetailViewModel(
+          articles: articlesSnapshot,
+          allArticles: viewModel.allArticles,
+          currentIndex: index,
+          initiallyExpandedSection: "Summary"
+      )
+      ```
+    - Moved the presentation logic before any async operations to ensure immediate UI response
+    - Kept blob generation and article marking as read in the background after view is presented
+    - Added detailed logging for better diagnostic capability in the future
+  - Results:
+    - Articles now immediately open in NewsDetailView when tapped
+    - Read status is still properly updated in the background
+    - Chevron navigation between articles works correctly
+    - Blob generation happens as a background operation, not blocking the UI
+  - Key learnings:
+    - Async operations in SwiftUI require careful handling of state that might change during awaits
+    - Taking snapshots of state before async operations prevents race conditions
+    - UI operations should be prioritized before background data operations
+    - A viewModel should be configured completely before presenting the associated view
+    - Logging both success and failure paths is essential for debugging future issues
+
+- **Enhanced Empty State Screen with Detailed Information** (Completed):
+  - Improved the "No news is good news" empty state screen to provide helpful context and actionable information:
+    - Original issue: Screen only displayed minimal text ("RSS Fed" and "No unread articles found") without context
+    - Users had no visibility into active subscriptions, filters, or actions they could take to see content
+  - Technical implementation:
+    - Added subscription information section showing active subscriptions or a message if none are found
+    - Added filter status information section showing which filters are currently active
+    - Added explanation text when filters might be hiding content
+    - Added a prominent "Sync Now" button for immediate content retrieval
+    - Created helper method `getActiveSubscriptions()` to extract active subscription data from viewModel
+    - Used consistent visual styling for all informational sections
+  - Results:
+    - Empty state screen now provides comprehensive context about why no articles are showing
+    - Users can see which topics they're subscribed to at a glance
+    - Filter status is clearly visible with indications of active filters
+    - Clear path to action with sync button and filter adjustment suggestions
+  - Key learnings:
+    - Empty states should provide context about the current system state, not just indicate absence
+    - Showing active filters and subscriptions helps users understand why they might not see content
+    - Providing clear actions allows users to resolve the empty state themselves
+    - Helper methods for extracting and formatting data improve code maintainability
+
 ## Next Steps
 
 - Continue improving NewsDetailView with further optimizations to content loading
