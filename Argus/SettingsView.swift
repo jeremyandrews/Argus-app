@@ -145,26 +145,6 @@ struct SettingsView: View {
                 // Development section for testing SwiftData
                 #if DEBUG
                     Section {
-                        NavigationLink(destination: SwiftDataContainerView {
-                            SwiftDataTestView()
-                        }) {
-                            HStack {
-                                Image(systemName: "database.fill")
-                                    .foregroundColor(.blue)
-                                Text("SwiftData Test")
-                            }
-                        }
-                        .foregroundColor(.primary)
-
-                        NavigationLink(destination: MigrationView()) {
-                            HStack {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .foregroundColor(.orange)
-                                Text("Data Migration")
-                            }
-                        }
-                        .foregroundColor(.primary)
-                        
                         NavigationLink(destination: TopicDiagnosticView()) {
                             HStack {
                                 Image(systemName: "chart.bar.fill")
@@ -199,7 +179,7 @@ struct SettingsView: View {
                         }
                         .foregroundColor(.primary)
 
-                        Text("This section is for testing the new SwiftData models being implemented as part of the modernization plan.")
+                        Text("This section provides diagnostic and maintenance tools for the application.")
                             .font(.footnote)
                             .foregroundColor(.secondary)
                     } header: {
