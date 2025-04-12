@@ -1245,7 +1245,55 @@ extension DatabaseCoordinator {
         )
     }
 
-    // We now use the global extractDomain function from CommonUtilities.swift
+    // We're moving the domain extraction function directly into this file to avoid cloud build issues
+    
+    /// Helper function to extract the domain from a URL
+    ///
+    /// This extracts the domain portion from a URL string by:
+    /// 1. Removing the scheme (http://, https://)
+    /// 2. Removing any "www." prefix
+    /// 3. Keeping only the domain part (removing paths)
+    /// 4. Trimming whitespace
+    ///
+    /// - Parameter urlString: The URL to extract domain from
+    /// - Returns: The domain string, or nil if the URL is invalid or malformed
+    private func extractDomain(from urlString: String) -> String? {
+        // Early check for empty or nil URLs
+        guard !urlString.isEmpty else {
+            return nil
+        }
+
+        // Try the URL-based approach first for properly formatted URLs
+        if let url = URL(string: urlString), let host = url.host {
+            return host.replacingOccurrences(of: "www.", with: "")
+        }
+
+        // Fallback manual parsing for URLs that might not parse with URL initializer
+        var working = urlString.lowercased()
+
+        // Strip scheme
+        if working.hasPrefix("http://") {
+            working.removeFirst("http://".count)
+        } else if working.hasPrefix("https://") {
+            working.removeFirst("https://".count)
+        }
+
+        // Strip any leading "www."
+        if working.hasPrefix("www.") {
+            working.removeFirst("www.".count)
+        }
+
+        // Now split on first slash to remove any path
+        if let slashIndex = working.firstIndex(of: "/") {
+            working = String(working[..<slashIndex])
+        }
+
+        // Trim whitespace
+        working = working.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Return nil if we ended up with an empty string
+        return working.isEmpty ? nil : working
+    }
 
     // Helper to extract engine stats from JSON
     private func extractEngineStats(from json: [String: Any]) -> String? {

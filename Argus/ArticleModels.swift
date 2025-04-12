@@ -84,8 +84,8 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     }
 
     let url = json["url"] as? String // Extract the URL but don't make it required
-    // Use the String extension method from CommonUtilities
-    let domain = (url ?? "").extractDomain()
+    // Use a local domain extraction function for cloud build compatibility
+    let domain = extractDomain(from: url ?? "")
 
     // Include quality badge information in the first pass
     let sourcesQuality = json["sources_quality"] as? Int
@@ -136,4 +136,51 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     )
 }
 
-// Function moved to CommonUtilities.swift for centralized implementation
+// Domain extraction function duplicated directly in this file for cloud build compatibility
+/// Helper function to extract the domain from a URL
+///
+/// This extracts the domain portion from a URL string by:
+/// 1. Removing the scheme (http://, https://)
+/// 2. Removing any "www." prefix
+/// 3. Keeping only the domain part (removing paths)
+/// 4. Trimming whitespace
+///
+/// - Parameter urlString: The URL to extract domain from
+/// - Returns: The domain string, or nil if the URL is invalid or malformed
+func extractDomain(from urlString: String) -> String? {
+    // Early check for empty or nil URLs
+    guard !urlString.isEmpty else {
+        return nil
+    }
+
+    // Try the URL-based approach first for properly formatted URLs
+    if let url = URL(string: urlString), let host = url.host {
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+
+    // Fallback manual parsing for URLs that might not parse with URL initializer
+    var working = urlString.lowercased()
+
+    // Strip scheme
+    if working.hasPrefix("http://") {
+        working.removeFirst("http://".count)
+    } else if working.hasPrefix("https://") {
+        working.removeFirst("https://".count)
+    }
+
+    // Strip any leading "www."
+    if working.hasPrefix("www.") {
+        working.removeFirst("www.".count)
+    }
+
+    // Now split on first slash to remove any path
+    if let slashIndex = working.firstIndex(of: "/") {
+        working = String(working[..<slashIndex])
+    }
+
+    // Trim whitespace
+    working = working.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // Return nil if we ended up with an empty string
+    return working.isEmpty ? nil : working
+}

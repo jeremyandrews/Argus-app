@@ -57,39 +57,26 @@
 - **Fixed Cloud Build Domain Extraction Scope Error** (Completed):
   - Resolved build error that occurred in Apple's cloud build but not in local Xcode build:
     - Error symptoms: `Cannot find 'extractDomain' in scope` in DatabaseCoordinator.swift and ArticleModels.swift
-    - Root cause: Global functions may not be properly visible across files in cloud build environments due to different file processing order
+    - Root cause: Global functions may not be properly visible across file boundaries in cloud build environments
   - Implementation details:
-    - Converted the global `extractDomain(from:)` function to a String extension method:
+    - Duplicated the `extractDomain(from:)` function directly in both files that need it:
       ```swift
-      // Before - Global function
-      func extractDomain(from urlString: String) -> String? {
+      // Function duplicated in both files that need it
+      private func extractDomain(from urlString: String) -> String? {
           // Implementation
       }
-      
-      // After - String extension method
-      extension String {
-          func extractDomain() -> String? {
-              // Implementation (self replaces urlString)
-          }
-      }
       ```
-    - Updated all call sites to use the new method syntax:
-      ```swift
-      // Before
-      let domain = extractDomain(from: url)
-      
-      // After
-      let domain = url.extractDomain()
-      ```
+    - Made the function private to each file to avoid potential naming conflicts
+    - Maintained identical implementation in both files to ensure consistent behavior
   - Results:
     - App now builds successfully in both local Xcode and Apple's cloud build environment
-    - No functional changes, just improved code organization
-    - More Swift-idiomatic approach using String extensions
+    - No functional changes, just improved build reliability
+    - Self-contained files with no external function dependencies
   - Key learnings:
-    - Extensions provide better scope visibility than global functions across file boundaries
-    - String extensions are available anywhere a String is used, regardless of file processing order
-    - Cloud build environments may process files in different orders than local builds
-    - Swift extensions offer a more elegant and reliable solution for common string operations
+    - Cloud build environments may process files in a different order than local builds
+    - Functions defined in one file may not be visible to other files during cloud builds
+    - Sometimes direct duplication is more reliable than elegant centralization for build systems
+    - Each file containing all its dependencies makes it more resilient to build order issues
 
 - **Fixed Swift 6 String Interpolation Issues with RichTextField** (Completed):
   - Resolved compiler errors related to RichTextField enum in string interpolation:
