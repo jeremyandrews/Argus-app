@@ -304,15 +304,114 @@ struct NewsView: View {
                 Text("No news is good news.")
                     .font(.title2)
                     .fontWeight(.bold)
+                
                 Text(getEmptyStateMessage())
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
+                    .padding(.bottom, 8)
+                
+                // Add info about active subscriptions
+                if !viewModel.subscriptions.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Your active subscriptions:")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .padding(.bottom, 2)
+                        
+                        ForEach(getActiveSubscriptions(), id: \.self) { topic in
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                    .font(.caption)
+                                Text(topic)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        
+                        if getActiveSubscriptions().isEmpty {
+                            Text("No active subscriptions found. Visit the Subscriptions tab to subscribe to topics.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.vertical, 4)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                }
+                
+                // Add info about active filters
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Active filters:")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    
+                    HStack {
+                        Image(systemName: viewModel.showUnreadOnly ? "checkmark.square.fill" : "square")
+                            .foregroundColor(viewModel.showUnreadOnly ? .blue : .gray)
+                        Text("Unread Only")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Image(systemName: viewModel.showBookmarkedOnly ? "checkmark.square.fill" : "square")
+                            .foregroundColor(viewModel.showBookmarkedOnly ? .blue : .gray)
+                        Text("Bookmarked Only")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Image(systemName: viewModel.selectedTopic != "All" ? "checkmark.square.fill" : "square")
+                            .foregroundColor(viewModel.selectedTopic != "All" ? .blue : .gray)
+                        Text("Topic Filter: \(viewModel.selectedTopic)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if viewModel.showUnreadOnly || viewModel.showBookmarkedOnly || viewModel.selectedTopic != "All" {
+                        Text("Try adjusting your filters to see more articles.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 4)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                
+                // Add sync suggestion
+                Button(action: {
+                    Task {
+                        await viewModel.syncWithServer()
+                    }
+                }) {
+                    Label("Sync Now", systemImage: "arrow.clockwise")
+                        .font(.subheadline)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                }
+                .padding(.top, 8)
             }
             .padding(.horizontal)
         }
         .frame(maxWidth: .infinity, alignment: .top)
         .padding()
+    }
+    
+    // Helper to get active subscriptions for the empty state view
+    private func getActiveSubscriptions() -> [String] {
+        return viewModel.subscriptions
+            .filter { $0.value.isSubscribed }
+            .map { $0.key }
+            .sorted()
     }
 
     // MARK: - Row building
@@ -607,20 +706,14 @@ struct NewsView: View {
                 selectedArticleIDs.wrappedValue.insert(article.id)
             }
         }
-        .gesture(
-            TapGesture(count: 2)
-                .exclusively(before: TapGesture(count: 1))
-                .onEnded { result in
-                    switch result {
-                    case .first:
-                        // This is the double‐tap case
-                        toggleReadStatus(article)
-                    case .second:
-                        // This is the single‐tap case
-                        openArticle(article)
-                    }
-                }
-        )
+        // Single tap gesture to open article
+        .onTapGesture {
+            openArticle(article)
+        }
+        // Double tap gesture to toggle read status
+        .onTapGesture(count: 2) {
+            toggleReadStatus(article)
+        }
         .onAppear {
             loadMoreArticlesIfNeeded(currentItem: article)
 

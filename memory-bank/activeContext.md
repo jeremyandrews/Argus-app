@@ -2,6 +2,30 @@
 
 ## Current Work Focus
 
+- **Improved Sync Status Indicator with Real-Time Feedback** (Completed):
+  - Enhanced the article download process to provide per-article progress updates:
+    - Modified `APIClient.fetchArticles` to accept a progressHandler parameter
+    - Added progress updates at each stage of the download process:
+      - Initial "Checking for new articles..." during URL fetching
+      - "Downloading 0 of X articles..." after article URLs are retrieved
+      - "Downloading 1 of X articles...", "Downloading 2 of X articles..." etc. during each article download
+    - Updated `ArticleService.syncArticlesFromServer` to pass the progressHandler to APIClient
+  - Technical implementation details:
+    - Enhanced loop in `fetchArticles` to track the current article index
+    - Utilized the enumerate() method to access both the index and URL in the loop
+    - Added progress updates before and after each article fetch
+    - Created a predictive total count based on the number of article URLs
+  - User experience improvements:
+    - Eliminated the issue where "Checking for new articles..." would display for 99% of the sync time
+    - Added real-time countdown feedback showing exactly which article is being downloaded
+    - Provided clear visual indication of sync progress with exact article counts
+    - Increased transparency into which part of the sync operation is taking time
+  - Benefits for users:
+    - Better understanding of sync progress and how much longer it will take
+    - Clearer feedback during potentially long network operations
+    - Improved perception of app responsiveness during sync operations
+    - More informative status messages during the sync process
+
 - **Fixed Rich Text Formatting and Size Issue** (Completed):
   - Successfully resolved issue where article content was displayed either as raw markdown or with text too small:
     - Root cause identified: NonSelectableRichTextView was directly using the original attributed string without proper font sizing

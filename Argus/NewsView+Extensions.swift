@@ -35,42 +35,67 @@ extension NewsView {
     // MARK: - Article Opening
     
     func openArticle(_ article: ArticleModel) {
-        Task {
-            await viewModel.openArticle(article)
+        // STEP 1: Take a snapshot of the current filtered articles immediately
+        // This prevents issues if filters are applied during async operations
+        let articlesSnapshot = viewModel.filteredArticles
+        
+        // STEP 2: Find the index in our snapshot (which won't change during async operations)
+        guard let index = articlesSnapshot.firstIndex(where: { $0.id == article.id }) else {
+            AppLogger.database.error("Article not found in filtered articles: \(article.id)")
+            return
+        }
+        
+        AppLogger.database.debug("Opening article with ID: \(article.id) at index \(index) of \(articlesSnapshot.count) articles")
+        
+        // STEP 3: Create view model with our snapshot
+        let detailViewModel = NewsDetailViewModel(
+            articles: articlesSnapshot,
+            allArticles: viewModel.allArticles,
+            currentIndex: index,
+            initiallyExpandedSection: "Summary"
+        )
+        
+        // Create the detail view wrapper
+        struct DetailViewWrapper: View {
+            let viewModel: NewsDetailViewModel
+            @Environment(\.modelContext) var modelContext
             
-            // Create a view model with the right context
-            if let index = viewModel.filteredArticles.firstIndex(where: { $0.id == article.id }) {
-                let detailViewModel = NewsDetailViewModel(
-                    articles: viewModel.filteredArticles,
-                    allArticles: viewModel.allArticles,
-                    currentIndex: index
-                )
-                
-                // Create the detail view 
-                // We need to make a host view to properly pass the modelContext
-                struct DetailViewWrapper: View {
-                    let viewModel: NewsDetailViewModel
-                    @Environment(\.modelContext) var modelContext
+            var body: some View {
+                NewsDetailView(viewModel: viewModel)
+            }
+        }
+        
+        let detailView = DetailViewWrapper(viewModel: detailViewModel)
+        
+        // STEP 4: Present immediately before doing any async work
+        let hostingController = UIHostingController(rootView: detailView)
+        hostingController.modalPresentationStyle = .fullScreen
+        
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController
+        {
+            AppLogger.database.debug("Presenting NewsDetailView for article: \(article.id)")
+            rootViewController.present(hostingController, animated: true)
+            
+            // STEP 5: After presentation, do the article update and blob generation in the background
+            Task {
+                // Get article with context
+                let articleOperations = ArticleOperations()
+                if let articleWithContext = await articleOperations.getArticleModelWithContext(byId: article.id) {
+                    // Mark as read
+                    await viewModel.openArticle(articleWithContext)
                     
-                    var body: some View {
-                        NewsDetailView(viewModel: viewModel)
+                    // Generate blobs in the background after view is already shown
+                    await MainActor.run {
+                        _ = articleOperations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
+                        _ = articleOperations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
+                        AppLogger.database.debug("Title and body blobs generated for article: \(article.id)")
                     }
                 }
-                
-                let detailView = DetailViewWrapper(viewModel: detailViewModel)
-                
-                // Present modally in full screen
-                let hostingController = UIHostingController(rootView: detailView)
-                hostingController.modalPresentationStyle = .fullScreen
-                
-                // Use the shared scene to present
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let window = windowScene.windows.first,
-                   let rootViewController = window.rootViewController
-                {
-                    rootViewController.present(hostingController, animated: true)
-                }
             }
+        } else {
+            AppLogger.database.error("Could not get root view controller to present article: \(article.id)")
         }
     }
     

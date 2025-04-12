@@ -34,6 +34,25 @@
 
 ## What's In Progress
 
+- ✅ **Improved Sync Status Indicator with Real-Time Feedback** (Completed):
+  - Enhanced the article download process to provide per-article progress updates:
+    - Modified `APIClient.fetchArticles` to accept a progressHandler parameter
+    - Added progress updates at each stage of the download process:
+      - Initial "Checking for new articles..." during URL fetching
+      - "Downloading 0 of X articles..." after article URLs are retrieved
+      - "Downloading 1 of X articles...", "Downloading 2 of X articles..." etc. during each article download
+    - Updated `ArticleService.syncArticlesFromServer` to pass the progressHandler to APIClient
+  - Key technical changes:
+    - Enhanced loop in `fetchArticles` to track the current article index
+    - Utilized the enumerate() method to access both the index and URL in the loop
+    - Added progress updates before and after each article fetch
+    - Created a predictive total count based on the number of article URLs
+  - Result:
+    - Improved user experience with real-time feedback throughout the sync process
+    - No more "Checking for new articles..." message persisting for 99% of the operation
+    - Clear visual indication of download progress with exact article counts
+    - Transparency into which part of the sync operation is taking time
+
 - ✅ **Fixed Swift 6 String Interpolation Issues with RichTextField** (Completed):
   - Resolved all compiler errors related to RichTextField enum in string interpolation:
     - Swift 6 requires types to conform to CustomStringConvertible for string interpolation
