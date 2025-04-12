@@ -119,6 +119,14 @@ final class ArticleOperations {
         showBookmarkedOnly: Bool,
         limit: Int? = nil
     ) async throws -> [ArticleModel] {
+        // Define missing topics to watch for
+        let missingTopics = Set(["Rust", "Space", "Tuscany", "Vulnerability"])
+        
+        // Special logging for missing topics only
+        if let topic = topic, missingTopics.contains(topic) {
+            AppLogger.database.debug("🔍 MISSING TOPIC: Fetch requested for topic '\(topic)'")
+        }
+        
         let container = SwiftDataContainer.shared.container
         let context = container.mainContext
 
@@ -174,6 +182,20 @@ final class ArticleOperations {
 
         do {
             var articles = try context.fetch(descriptor)
+            
+            // Special logging for missing topics only
+            if let topic = topic, missingTopics.contains(topic) {
+                AppLogger.database.debug("📊 MISSING TOPIC: Initial fetch for '\(topic)' returned \(articles.count) articles")
+                
+                // If no articles found, do a broader database check
+                if articles.isEmpty {
+                    let topicOnlyDescriptor = FetchDescriptor<ArticleModel>(
+                        predicate: #Predicate<ArticleModel> { $0.topic == topic }
+                    )
+                    let allArticlesWithTopic = try context.fetch(topicOnlyDescriptor)
+                    AppLogger.database.debug("📊 MISSING TOPIC: Database contains \(allArticlesWithTopic.count) total articles with topic '\(topic)'")
+                }
+            }
 
             // Apply additional in-memory filtering for multiple filter conditions
             if conditions.count > 1 {
@@ -188,6 +210,11 @@ final class ArticleOperations {
                 if let topic = topic, topic != "All", !appliedTopicFilter {
                     AppLogger.database.debug("🔍 Applying topic filter in memory: \(topic)")
                     articles = articles.filter { $0.topic == topic }
+                    
+                    // Special logging for missing topics only
+                    if missingTopics.contains(topic) {
+                        AppLogger.database.debug("📊 MISSING TOPIC: After in-memory filtering, '\(topic)' has \(articles.count) articles")
+                    }
                 }
 
                 // Apply unread filter in memory if not applied at database level

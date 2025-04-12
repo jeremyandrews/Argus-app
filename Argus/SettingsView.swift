@@ -164,6 +164,15 @@ struct SettingsView: View {
                             }
                         }
                         .foregroundColor(.primary)
+                        
+                        NavigationLink(destination: TopicDiagnosticView()) {
+                            HStack {
+                                Image(systemName: "chart.bar.fill")
+                                    .foregroundColor(.green)
+                                Text("Topic Statistics")
+                            }
+                        }
+                        .foregroundColor(.primary)
 
                         Button(action: {
                             Task {

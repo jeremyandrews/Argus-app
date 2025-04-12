@@ -829,10 +829,18 @@ final class ArticleService: ArticleServiceProtocol {
     private func processRemoteArticles(_ articles: [ArticleJSON]) async throws -> Int {
         guard !articles.isEmpty else { return 0 }
 
+        // Define missing topics to watch for
+        let missingTopics = Set(["Rust", "Space", "Tuscany", "Vulnerability"])
+        
         let context = ModelContext(modelContainer)
         var addedCount = 0
 
         for article in articles {
+            // Special logging for missing topics only
+            if let topic = article.topic, missingTopics.contains(topic) {
+                AppLogger.database.debug("📊 MISSING TOPIC: Processing article with topic '\(topic)' - jsonURL: \(article.jsonURL)")
+            }
+            
             // Extract the jsonURL for checking duplicates
             let jsonURLString = article.jsonURL
 
@@ -880,11 +888,21 @@ final class ArticleService: ArticleServiceProtocol {
 
                 // Generate rich text directly on the ArticleModel
                 await generateInitialRichText(for: newArticle)
+                
+                // Special logging for missing topics only
+                if let topic = article.topic, missingTopics.contains(topic) {
+                    AppLogger.database.debug("✅ MISSING TOPIC: Added new article with topic '\(topic)' - title: \(article.title)")
+                }
 
                 addedCount += 1
             } else {
-                // Log that we're skipping a duplicate
-                AppLogger.database.debug("Skipping duplicate article with jsonURL: \(jsonURLString)")
+                // Special logging for missing topics only
+                if let topic = article.topic, missingTopics.contains(topic) {
+                    AppLogger.database.debug("⚠️ MISSING TOPIC: Skipping duplicate article with topic '\(topic)'")
+                } else {
+                    // Log that we're skipping a duplicate (normal logging)
+                    AppLogger.database.debug("Skipping duplicate article with jsonURL: \(jsonURLString)")
+                }
 
                 // We already have this article - update any missing fields if needed
                 // This could be expanded to update specific fields that might change
@@ -991,6 +1009,48 @@ final class ArticleService: ArticleServiceProtocol {
                                     message: "Error fetching unviewed article count: \(error.localizedDescription)")
             throw ArticleServiceError.databaseError(underlyingError: error)
         }
+    }
+    
+    // MARK: - Topic Statistics
+    
+    /// Get statistics for all topics in the database
+    func getTopicStatistics() async throws -> [TopicStatistic] {
+        let context = ModelContext(modelContainer)
+        
+        // Fetch all articles
+        let allArticles = try context.fetch(FetchDescriptor<ArticleModel>())
+        
+        // Group by topic
+        var topicStats: [String: TopicStatistic] = [:]
+        
+        for article in allArticles {
+            let topic = article.topic ?? "Uncategorized"
+            
+            var stat = topicStats[topic] ?? TopicStatistic(
+                topic: topic,
+                totalCount: 0,
+                unreadCount: 0,
+                bookmarkedCount: 0
+            )
+            
+            // Update counts
+            stat = TopicStatistic(
+                topic: topic,
+                totalCount: stat.totalCount + 1,
+                unreadCount: stat.unreadCount + (article.isViewed ? 0 : 1),
+                bookmarkedCount: stat.bookmarkedCount + (article.isBookmarked ? 1 : 0)
+            )
+            
+            topicStats[topic] = stat
+        }
+        
+        return Array(topicStats.values).sorted { $0.topic < $1.topic }
+    }
+    
+    /// Get total article count
+    func getTotalArticleCount() async throws -> Int {
+        let context = ModelContext(modelContainer)
+        return try context.fetchCount(FetchDescriptor<ArticleModel>())
     }
 
     // MARK: - Cache Management
