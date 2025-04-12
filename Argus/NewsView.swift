@@ -121,6 +121,12 @@ struct NewsView: View {
                         await viewModel.syncWithServer()
                     }
                 }
+                // Add the toolbar item for the sync status in the navigation bar
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        SyncStatusIndicator(status: $viewModel.syncStatus)
+                    }
+                }
                 // Edit mode handling
                 .onChange(of: editMode?.wrappedValue) { _, newValue in
                     if newValue == .inactive {
@@ -537,9 +543,17 @@ struct NewsView: View {
                 initiallyExpandedSection: section
             )
 
-            // Use the new initializer with the viewModel
-            let detailView = NewsDetailView(viewModel: viewModel)
-                .environment(\.modelContext, modelContext)
+            // We need to make a host view to properly pass the modelContext
+            struct DetailViewWrapper: View {
+                let viewModel: NewsDetailViewModel
+                @Environment(\.modelContext) var modelContext
+                
+                var body: some View {
+                    NewsDetailView(viewModel: viewModel)
+                }
+            }
+            
+            let detailView = DetailViewWrapper(viewModel: viewModel)
 
             let hostingController = UIHostingController(rootView: detailView)
             hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
@@ -816,14 +830,14 @@ struct NewsView: View {
                 icon: "envelope.badge",
                 label: "Toggle Read"
             ) {
-                performActionOnSelection { toggleReadStatus($0) }
+                self.performActionOnSelection { toggleReadStatus($0) }
             }
             Spacer()
             toolbarButton(
                 icon: "bookmark",
                 label: "Bookmark"
             ) {
-                performActionOnSelection { toggleBookmark($0) }
+                self.performActionOnSelection { toggleBookmark($0) }
             }
             Spacer()
             toolbarButton(
@@ -931,51 +945,52 @@ struct NewsView: View {
             // The selectedArticleIds are cleared in the ViewModel's performBatchOperation
         }
     }
-
-    private func toggleReadStatus(_ article: ArticleModel) {
-        Task {
-            await viewModel.toggleReadStatus(for: article)
-        }
-    }
-
-    private func toggleBookmark(_ article: ArticleModel) {
-        Task {
-            await viewModel.toggleBookmark(for: article)
-        }
-    }
-
-    // Extension methods are used directly through instance methods defined above
-
+    
+    
     // MARK: - Filter View
-
+    
     private struct FilterView: View {
         @Binding var showUnreadOnly: Bool
         @Binding var showBookmarkedOnly: Bool
-
+        
         var body: some View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Filter Articles")
                     .font(.headline)
                     .padding(.top, 10)
-
+                
                 VStack(alignment: .leading, spacing: 16) {
                     Toggle(isOn: $showUnreadOnly) {
                         Label("Unread Only", systemImage: "envelope.badge")
                     }
-
+                    
                     Toggle(isOn: $showBookmarkedOnly) {
                         Label("Bookmarked Only", systemImage: "bookmark.fill")
                     }
                 }
-
+                
                 Text("Changes are applied immediately")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 10)
-
+                
                 Spacer()
             }
             .padding(.horizontal, 20)
+        }
+    }
+    
+    // MARK: - Article Operations
+    
+    private func toggleReadStatus(_ article: ArticleModel) {
+        Task {
+            await viewModel.toggleReadStatus(for: article)
+        }
+    }
+    
+    private func toggleBookmark(_ article: ArticleModel) {
+        Task {
+            await viewModel.toggleBookmark(for: article)
         }
     }
 }

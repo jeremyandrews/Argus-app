@@ -482,18 +482,34 @@ final class ArticleOperations {
     /// - Parameters:
     ///   - topic: Optional topic to sync content for
     ///   - limit: Maximum number of articles to sync
+    ///   - progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Number of new articles added
-    func syncContent(topic: String? = nil, limit: Int? = 30) async throws -> Int {
-        return try await articleService.syncArticlesFromServer(
-            topic: topic,
-            limit: limit
-        )
+    func syncContent(
+        topic: String? = nil,
+        limit: Int? = 30,
+        progressHandler: ((Int, Int) -> Void)? = nil
+    ) async throws -> Int {
+        do {
+            let articleService = ArticleService.shared
+            
+            // Forward the progressHandler to the service layer
+            // This will provide real-time progress updates for both searching and downloading
+            return try await articleService.syncArticlesFromServer(
+                topic: topic,
+                limit: limit,
+                progressHandler: progressHandler
+            )
+        } catch {
+            AppLogger.sync.error("Error syncing content: \(error)")
+            throw error
+        }
     }
 
     /// Performs a background sync for all subscribed topics
+    /// - Parameter progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Summary of the sync operation
-    func performBackgroundSync() async throws -> SyncResultSummary {
-        return try await articleService.performBackgroundSync()
+    func performBackgroundSync(progressHandler: ((Int, Int) -> Void)? = nil) async throws -> SyncResultSummary {
+        return try await articleService.performBackgroundSync(progressHandler: progressHandler)
     }
 
     // MARK: - Group & Sort Operations

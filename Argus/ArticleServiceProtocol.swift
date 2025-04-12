@@ -90,17 +90,26 @@ protocol ArticleServiceProtocol {
     func deleteArticle(id: UUID) async throws
 
     // MARK: - Sync Operations
-
+    
+    /// Processes the provided article data and adds new articles to the database
+    /// - Parameters:
+    ///   - articles: Array of article JSON data to process
+    ///   - progressHandler: Optional handler for progress updates (current, total)
+    /// - Returns: Number of new articles added
+    func processArticleData(_ articles: [ArticleJSON], progressHandler: ((Int, Int) -> Void)?) async throws -> Int
+    
     /// Synchronizes articles from the server for the specified topic
     /// - Parameters:
     ///   - topic: Topic to sync articles for, or nil for all topics
     ///   - limit: Maximum number of articles to sync
+    ///   - progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Number of new articles added
-    func syncArticlesFromServer(topic: String?, limit: Int?) async throws -> Int
+    func syncArticlesFromServer(topic: String?, limit: Int?, progressHandler: ((Int, Int) -> Void)?) async throws -> Int
 
     /// Performs a full background synchronization
+    /// - Parameter progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Result summary with counts of added, updated, and deleted articles
-    func performBackgroundSync() async throws -> SyncResultSummary
+    func performBackgroundSync(progressHandler: ((Int, Int) -> Void)?) async throws -> SyncResultSummary
 
     /// Removes duplicate articles from the database, keeping only the newest version of each article
     /// - Returns: The number of duplicate articles removed

@@ -121,16 +121,16 @@ class MigrationAwareArticleService: ArticleServiceProtocol {
         try await articleService.deleteArticle(id: id)
     }
 
-    func processArticleData(_ articles: [ArticleJSON]) async throws -> Int {
-        try await articleService.processArticleData(articles)
+    func processArticleData(_ articles: [ArticleJSON], progressHandler: ((Int, Int) -> Void)? = nil) async throws -> Int {
+        try await articleService.processArticleData(articles, progressHandler: progressHandler)
     }
 
-    func syncArticlesFromServer(topic: String?, limit: Int?) async throws -> Int {
-        try await articleService.syncArticlesFromServer(topic: topic, limit: limit)
+    func syncArticlesFromServer(topic: String?, limit: Int?, progressHandler: ((Int, Int) -> Void)? = nil) async throws -> Int {
+        try await articleService.syncArticlesFromServer(topic: topic, limit: limit, progressHandler: progressHandler)
     }
 
-    func performBackgroundSync() async throws -> SyncResultSummary {
-        try await articleService.performBackgroundSync()
+    func performBackgroundSync(progressHandler: ((Int, Int) -> Void)? = nil) async throws -> SyncResultSummary {
+        try await articleService.performBackgroundSync(progressHandler: progressHandler)
     }
 
     /// Generates rich text content for a specific field of an article

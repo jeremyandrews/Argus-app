@@ -36,6 +36,9 @@ final class NewsViewModel: ObservableObject {
 
     /// Flag indicating if loading more pages is in progress
     @Published var isLoadingMorePages = false
+    
+    /// Current sync status (for the indicator)
+    @Published var syncStatus: SyncStatus = .idle
 
     // MARK: - Filter State
 
@@ -233,13 +236,23 @@ final class NewsViewModel: ObservableObject {
 
     /// Performs a sync with the server for updated content
     func syncWithServer() async {
+        // Set status to searching and loading state
+        syncStatus = .searching
         isLoading = true
         error = nil
 
         do {
             // Sync with server
             let addedCount = try await articleOperations.syncContent(
-                topic: selectedTopic != "All" ? selectedTopic : nil
+                topic: selectedTopic != "All" ? selectedTopic : nil,
+                progressHandler: { current, total in
+                    // Update progress state
+                    if current > 0 && total > 0 {
+                        Task { @MainActor in
+                            self.syncStatus = .downloading(current: current, total: total)
+                        }
+                    }
+                }
             )
 
             // If we got new articles, refresh
@@ -247,12 +260,33 @@ final class NewsViewModel: ObservableObject {
                 await refreshArticles()
             }
 
+            // Set status to complete
+            syncStatus = .complete
             isLoading = false
+            
+            // Schedule a task to reset to idle after a delay
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                if case .complete = syncStatus {
+                    syncStatus = .idle
+                }
+            }
+            
             AppLogger.database.debug("✅ Synced with server: added \(addedCount) articles")
         } catch {
+            // Set error status
+            syncStatus = .error(error.localizedDescription)
             isLoading = false
             self.error = error
             AppLogger.database.error("❌ Error syncing with server: \(error)")
+            
+            // Schedule a task to reset to idle after a delay
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                if case .error = syncStatus {
+                    syncStatus = .idle
+                }
+            }
         }
     }
 

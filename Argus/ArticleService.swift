@@ -359,22 +359,27 @@ final class ArticleService: ArticleServiceProtocol {
     // MARK: - Sync Operations
 
     /// Process a collection of articles fetched from the remote server
-    /// - Parameter articles: Array of ArticleJSON objects to process
+    /// - Parameters:
+    ///   - articles: Array of ArticleJSON objects to process
+    ///   - progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Number of new articles added to the database
-    func processArticleData(_ articles: [ArticleJSON]) async throws -> Int {
-        return try await processRemoteArticles(articles)
+    func processArticleData(_ articles: [ArticleJSON], progressHandler: ((Int, Int) -> Void)? = nil) async throws -> Int {
+        return try await processRemoteArticles(articles, progressHandler: progressHandler)
     }
 
-    func syncArticlesFromServer(topic: String?, limit _: Int?) async throws -> Int {
+    func syncArticlesFromServer(topic: String?, limit _: Int?, progressHandler: ((Int, Int) -> Void)? = nil) async throws -> Int {
         do {
+            // Signal that we're searching for articles
+            progressHandler?(0, 0)
+            
             // Fetch articles from server with default limits
             // Note: The API sends all unseen articles, so we'll handle limiting after fetch
             let remoteArticles = try await apiClient.fetchArticles(
                 topic: topic
             )
 
-            // Process the articles
-            return try await processRemoteArticles(remoteArticles)
+            // Process the articles with progress updates
+            return try await processRemoteArticles(remoteArticles, progressHandler: progressHandler)
 
         } catch {
             AppLogger.sync.error("Error syncing articles from server: \(error)")
@@ -382,7 +387,7 @@ final class ArticleService: ArticleServiceProtocol {
         }
     }
 
-    func performBackgroundSync() async throws -> SyncResultSummary {
+    func performBackgroundSync(progressHandler: ((Int, Int) -> Void)? = nil) async throws -> SyncResultSummary {
         // Cancel any existing task
         activeSyncTask?.cancel()
 
@@ -391,23 +396,48 @@ final class ArticleService: ArticleServiceProtocol {
         var addedCount = 0
         let updatedCount = 0
         let deletedCount = 0
+        
+        // Initial progress - searching
+        progressHandler?(0, 0)
 
         // Create a new task for syncing
         do {
             // Fetch subscribed topics
             let subscriptions = await SubscriptionsView().loadSubscriptions()
             let subscribedTopics = subscriptions.filter { $0.value.isSubscribed }.keys
+            
+            // Create a progress tracker across all topics
+            var currentProgress = 0
+            let totalTopics = 1 + subscribedTopics.count // "All" + subscribed topics
+            var topicProgress: ((Int, Int) -> Void)? = nil
+            
+            if let progressHandler = progressHandler {
+                topicProgress = { current, total in
+                    if total > 0 {
+                        // Map the progress of this topic to the overall progress
+                        let topicWeight = 1.0 / Double(totalTopics)
+                        let topicCompletion = Double(current) / Double(total)
+                        let overallProgress = Int(Double(currentProgress) + topicCompletion * 100.0 * topicWeight)
+                        progressHandler(overallProgress, 100)
+                    } else {
+                        // Just pass the searching state
+                        progressHandler(0, 0)
+                    }
+                }
+            }
 
             // Start with "All" topics sync (limited count)
-            addedCount += try await syncArticlesFromServer(topic: nil, limit: 30)
+            addedCount += try await syncArticlesFromServer(topic: nil, limit: 30, progressHandler: topicProgress)
+            currentProgress += 100 / totalTopics
 
             // Sync each subscribed topic
-            for topic in subscribedTopics {
+            for (index, topic) in subscribedTopics.enumerated() {
                 // Check for cancellation before each topic
                 try Task.checkCancellation()
 
                 // Sync this topic (limited count)
-                addedCount += try await syncArticlesFromServer(topic: topic, limit: 20)
+                addedCount += try await syncArticlesFromServer(topic: topic, limit: 20, progressHandler: topicProgress)
+                currentProgress = ((index + 1) * 100) / totalTopics
             }
 
             // Update last sync time
@@ -826,7 +856,7 @@ final class ArticleService: ArticleServiceProtocol {
 
     // MARK: - Private Helper Methods
 
-    private func processRemoteArticles(_ articles: [ArticleJSON]) async throws -> Int {
+    private func processRemoteArticles(_ articles: [ArticleJSON], progressHandler: ((Int, Int) -> Void)? = nil) async throws -> Int {
         guard !articles.isEmpty else { return 0 }
 
         // Define missing topics to watch for
@@ -834,8 +864,17 @@ final class ArticleService: ArticleServiceProtocol {
         
         let context = ModelContext(modelContainer)
         var addedCount = 0
+        let totalCount = articles.count
+        
+        // Report initial progress
+        progressHandler?(0, totalCount)
 
-        for article in articles {
+        for (index, article) in articles.enumerated() {
+            // Report progress every few articles
+            if index % 2 == 0 || index == totalCount - 1 {
+                progressHandler?(index + 1, totalCount)
+            }
+            
             // Special logging for missing topics only
             if let topic = article.topic, missingTopics.contains(topic) {
                 AppLogger.database.debug("📊 MISSING TOPIC: Processing article with topic '\(topic)' - jsonURL: \(article.jsonURL)")
