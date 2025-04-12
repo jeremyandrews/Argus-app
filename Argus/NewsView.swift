@@ -300,7 +300,7 @@ struct NewsView: View {
                 .scaledToFit()
                 .frame(width: 120, height: 120)
                 .padding(.bottom, 8)
-            VStack(spacing: 12) {
+            VStack(spacing: 16) {
                 Text("No news is good news.")
                     .font(.title2)
                     .fontWeight(.bold)
@@ -309,96 +309,24 @@ struct NewsView: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 4)
                 
-                // Add info about active subscriptions
+                // Subscription information in paragraph form
                 if !viewModel.subscriptions.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Your active subscriptions:")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .padding(.bottom, 2)
-                        
-                        ForEach(getActiveSubscriptions(), id: \.self) { topic in
-                            HStack(spacing: 4) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                                    .font(.caption)
-                                Text(topic)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        if getActiveSubscriptions().isEmpty {
-                            Text("No active subscriptions found. Visit the Subscriptions tab to subscribe to topics.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.vertical, 4)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(getSubscriptionsInfoText())
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                        .padding(.bottom, 4)
+                }
+                
+                // Filter information in paragraph form
+                Text(getFiltersInfoText())
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal)
-                    .padding(.bottom, 8)
-                }
-                
-                // Add info about active filters
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Active filters:")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                    
-                    HStack {
-                        Image(systemName: viewModel.showUnreadOnly ? "checkmark.square.fill" : "square")
-                            .foregroundColor(viewModel.showUnreadOnly ? .blue : .gray)
-                        Text("Unread Only")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    HStack {
-                        Image(systemName: viewModel.showBookmarkedOnly ? "checkmark.square.fill" : "square")
-                            .foregroundColor(viewModel.showBookmarkedOnly ? .blue : .gray)
-                        Text("Bookmarked Only")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    HStack {
-                        Image(systemName: viewModel.selectedTopic != "All" ? "checkmark.square.fill" : "square")
-                            .foregroundColor(viewModel.selectedTopic != "All" ? .blue : .gray)
-                        Text("Topic Filter: \(viewModel.selectedTopic)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    if viewModel.showUnreadOnly || viewModel.showBookmarkedOnly || viewModel.selectedTopic != "All" {
-                        Text("Try adjusting your filters to see more articles.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 4)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-                
-                // Add sync suggestion
-                Button(action: {
-                    Task {
-                        await viewModel.syncWithServer()
-                    }
-                }) {
-                    Label("Sync Now", systemImage: "arrow.clockwise")
-                        .font(.subheadline)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
-                }
-                .padding(.top, 8)
             }
             .padding(.horizontal)
         }
@@ -412,6 +340,40 @@ struct NewsView: View {
             .filter { $0.value.isSubscribed }
             .map { $0.key }
             .sorted()
+    }
+    
+    // Helper to create subscription info paragraph
+    private func getSubscriptionsInfoText() -> String {
+        let activeSubscriptions = getActiveSubscriptions()
+        
+        if activeSubscriptions.isEmpty {
+            return "You don't have any active subscriptions. Visit the Subscriptions tab to subscribe to topics that interest you."
+        } else {
+            return "You're currently subscribed to: \(activeSubscriptions.joined(separator: ", ")). Articles from these topics will appear here when available."
+        }
+    }
+    
+    // Helper to create filters info paragraph
+    private func getFiltersInfoText() -> String {
+        var activeFilters = [String]()
+        
+        if viewModel.showUnreadOnly {
+            activeFilters.append("Unread Only")
+        }
+        
+        if viewModel.showBookmarkedOnly {
+            activeFilters.append("Bookmarked Only")
+        }
+        
+        if viewModel.selectedTopic != "All" {
+            activeFilters.append("Topic: \(viewModel.selectedTopic)")
+        }
+        
+        if activeFilters.isEmpty {
+            return "No filters are currently active. Pull down to refresh and check for new articles."
+        } else {
+            return "Active filters: \(activeFilters.joined(separator: ", ")). These filters may be hiding some articles. Try adjusting your filters to see more content."
+        }
     }
 
     // MARK: - Row building
@@ -1084,6 +1046,88 @@ struct NewsView: View {
     private func toggleBookmark(_ article: ArticleModel) {
         Task {
             await viewModel.toggleBookmark(for: article)
+        }
+    }
+    
+    // Helper to get the empty state message
+    private func getEmptyStateMessage() -> String {
+        if viewModel.allArticles.isEmpty {
+            return "No articles found. Pull down to check for new articles."
+        } else if viewModel.filteredArticles.isEmpty {
+            return "No articles match your current filters."
+        } else {
+            return "No articles to display."
+        }
+    }
+    
+    // Helper to perform actions on selected articles
+    private func performActionOnSelection(_ action: (ArticleModel) -> Void) {
+        for id in viewModel.selectedArticleIds {
+            if let article = viewModel.allArticles.first(where: { $0.id == id }) {
+                action(article)
+            }
+        }
+    }
+    
+    // Load more articles when user reaches end of list
+    private func loadMoreArticlesIfNeeded(currentItem: ArticleModel) {
+        // Check if we're near the end of the list
+        let thresholdIndex = viewModel.filteredArticles.count - 5
+        
+        // If we're at one of the last 5 items and have more to load
+        if let index = viewModel.filteredArticles.firstIndex(where: { $0.id == currentItem.id }),
+           index >= thresholdIndex,
+           viewModel.hasMoreArticlesToLoad {
+            
+            Task {
+                await viewModel.loadMoreArticles()
+            }
+        }
+    }
+    
+    // Open article detail view
+    private func openArticle(_ article: ArticleModel) {
+        Task {
+            // Mark article as viewed
+            await viewModel.markArticleAsViewed(article)
+            
+            // STEP 1: Take a snapshot of the current filtered articles immediately
+            let articlesSnapshot = viewModel.filteredArticles
+            
+            // STEP 2: Find the index in our snapshot (which won't change during async operations)
+            guard let index = articlesSnapshot.firstIndex(where: { $0.id == article.id }) else {
+                AppLogger.database.error("Article not found in filtered articles: \(article.id)")
+                return
+            }
+            
+            // STEP 3: Create view model with our snapshot
+            let detailViewModel = NewsDetailViewModel(
+                articles: articlesSnapshot,
+                allArticles: viewModel.allArticles,
+                currentIndex: index,
+                initiallyExpandedSection: "Summary"
+            )
+            
+            // Create a host view to properly pass the modelContext
+            struct DetailViewWrapper: View {
+                let viewModel: NewsDetailViewModel
+                @Environment(\.modelContext) var modelContext
+                
+                var body: some View {
+                    NewsDetailView(viewModel: viewModel)
+                }
+            }
+            
+            // Present full screen detail view
+            let detailView = DetailViewWrapper(viewModel: detailViewModel)
+            let hostingController = UIHostingController(rootView: detailView)
+            hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = windowScene.windows.first,
+               let rootViewController = window.rootViewController {
+                rootViewController.present(hostingController, animated: true)
+            }
         }
     }
 }
