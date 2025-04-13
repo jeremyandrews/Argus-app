@@ -35,14 +35,15 @@
   - Network-aware scheduling with proper power requirements
   - BGTaskScheduler implementation with proper expiration handling
 
-- 🔄 **Legacy Code Removal** (Substantially Complete):
+- ✅ **Legacy Code Removal** (Complete):
   - ✅ MigrationAwareArticleService properly marked with deprecation notices
   - ✅ All write operations in MigrationAwareArticleService correctly forward to ArticleService
   - ✅ MigrationService properly isolated and using the deprecated service appropriately
   - ✅ Core data collections in NewsViewModel and NewsDetailViewModel fully converted to use ArticleModel
   - ✅ Comprehensive compatibility extensions in ArticleModel to facilitate smooth transition
-  - 🔄 Need to verify any remaining UI components still directly using NotificationData
-  - 🔄 Need to check ShareSelectionView and other specific view components
+  - ✅ UI components audited and verified to use ArticleModel (LazyLoadingQualityBadges updated)
+  - ✅ ShareSelectionView confirmed to already use ArticleModel properly
+  - ✅ Removed unnecessary NotificationData extension as ArticleModel provides same functionality
   - 🔄 Need to document migration components for future clean removal
 
 ## What's Next

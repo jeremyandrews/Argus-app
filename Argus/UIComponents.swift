@@ -233,7 +233,7 @@ struct TopicPill: View {
 // MARK: - Quality Badges Components
 
 struct LazyLoadingQualityBadges: View {
-    let notification: NotificationData
+    let article: ArticleModel
     var onBadgeTap: ((String) -> Void)?
     var isDetailView: Bool = false
     @State private var scrollToSection: String? = nil
@@ -244,14 +244,14 @@ struct LazyLoadingQualityBadges: View {
     var body: some View {
         Group {
             // First try to use the locally stored data
-            if notification.sources_quality != nil ||
-                notification.argument_quality != nil ||
-                notification.source_type != nil
+            if article.sourcesQuality != nil ||
+                article.argumentQuality != nil ||
+                article.sourceType != nil
             {
                 QualityBadges(
-                    sourcesQuality: notification.sources_quality,
-                    argumentQuality: notification.argument_quality,
-                    sourceType: notification.source_type,
+                    sourcesQuality: article.sourcesQuality,
+                    argumentQuality: article.argumentQuality,
+                    sourceType: article.sourceType,
                     scrollToSection: $scrollToSection,
                     onBadgeTap: onBadgeTap,
                     isDetailView: isDetailView

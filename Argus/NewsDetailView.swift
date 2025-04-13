@@ -2628,24 +2628,4 @@ struct SafariView: UIViewControllerRepresentable {
     func updateUIViewController(_: SFSafariViewController, context _: Context) {}
 }
 
-extension NotificationData {
-    // Get the best available URL for this article
-    func getArticleUrl(additionalContent: [String: Any]? = nil) -> String? {
-        // First check for the direct article_url field we added
-        if let directURL = article_url, !directURL.isEmpty {
-            return directURL
-        }
-
-        // If we have the URL cached in additionalContent, use that
-        if let content = additionalContent, let url = content["url"] as? String {
-            return url
-        }
-
-        // Otherwise try to construct a URL from the domain
-        if let domain = domain {
-            return "https://\(domain)"
-        }
-
-        return nil
-    }
-}
+// NotificationData extension removed - ArticleModel already provides equivalent functionality
