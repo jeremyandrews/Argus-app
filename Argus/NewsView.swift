@@ -840,7 +840,14 @@ struct NewsView: View {
 
     // MARK: - Toolbar and Filter Sheet
 
-    var filterSheet: some View {
+var filterSheet: some View {
+    ZStack {
+        // Full-coverage background layer to prevent seeing through
+        Color(UIColor.systemBackground)
+            .opacity(1.0)
+            .ignoresSafeArea()
+            .edgesIgnoringSafeArea(.all)
+        
         VStack(spacing: 0) {
             Color.black.opacity(0.3)
                 .ignoresSafeArea()
@@ -850,14 +857,9 @@ struct NewsView: View {
                     }
                 }
             FilterView(
-                showUnreadOnly: Binding(
-                    get: { viewModel.showUnreadOnly },
-                    set: { viewModel.showUnreadOnly = $0 }
-                ),
-                showBookmarkedOnly: Binding(
-                    get: { viewModel.showBookmarkedOnly },
-                    set: { viewModel.showBookmarkedOnly = $0 }
-                )
+                showUnreadOnly: $viewModel.showUnreadOnly,
+                showBookmarkedOnly: $viewModel.showBookmarkedOnly,
+                viewModel: viewModel
             )
             .frame(height: filterViewHeight)
             .background(Color(UIColor.systemBackground))
@@ -878,6 +880,7 @@ struct NewsView: View {
         .ignoresSafeArea()
         .padding(.bottom, tabBarHeight)
     }
+}
 
     var editToolbar: some View {
         HStack {
@@ -1004,36 +1007,43 @@ struct NewsView: View {
     
     // MARK: - Filter View
     
-    private struct FilterView: View {
-        @Binding var showUnreadOnly: Bool
-        @Binding var showBookmarkedOnly: Bool
-        
-        var body: some View {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Filter Articles")
-                    .font(.headline)
-                    .padding(.top, 10)
-                
-                VStack(alignment: .leading, spacing: 16) {
-                    Toggle(isOn: $showUnreadOnly) {
-                        Label("Unread Only", systemImage: "envelope.badge")
-                    }
-                    
-                    Toggle(isOn: $showBookmarkedOnly) {
-                        Label("Bookmarked Only", systemImage: "bookmark.fill")
-                    }
+private struct FilterView: View {
+    @Binding var showUnreadOnly: Bool
+    @Binding var showBookmarkedOnly: Bool
+    var viewModel: NewsViewModel
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Filter Articles")
+                .font(.headline)
+                .padding(.top, 10)
+            
+            VStack(alignment: .leading, spacing: 16) {
+                Toggle(isOn: $showUnreadOnly) {
+                    Label("Unread Only", systemImage: "envelope.badge")
+                }
+                .onChange(of: showUnreadOnly) { _, _ in
+                    Task { await viewModel.refreshArticles() }
                 }
                 
-                Text("Changes are applied immediately")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 10)
-                
-                Spacer()
+                Toggle(isOn: $showBookmarkedOnly) {
+                    Label("Bookmarked Only", systemImage: "bookmark.fill")
+                }
+                .onChange(of: showBookmarkedOnly) { _, _ in
+                    Task { await viewModel.refreshArticles() }
+                }
             }
-            .padding(.horizontal, 20)
+            
+            Text("Changes are applied immediately")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.top, 10)
+            
+            Spacer()
         }
+        .padding(.horizontal, 20)
     }
+}
     
     // MARK: - Article Operations
     

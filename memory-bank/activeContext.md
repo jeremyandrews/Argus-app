@@ -513,6 +513,51 @@
     - Cache operations benefit from serial queue isolation
     - Proper logging is essential for diagnosing concurrency issues
 
+- **Fixed Filter Panel Display and Functionality Issues** (Completed):
+  - Fixed two related issues with the filter panel in NewsView:
+    - UI Layout Problem: The filter panel wasn't properly covering content below it, allowing text from underlying views to show through
+    - Incorrect Functionality: The panel stated that "Changes are applied immediately" but filtering changes weren't actually applied until the user performed other actions
+  - Implementation details:
+    - Enhanced `filterSheet` implementation by using a ZStack with an opaque background:
+      ```swift
+      ZStack {
+          // Full-coverage background layer to prevent seeing through
+          Color(UIColor.systemBackground)
+              .opacity(1.0)
+              .ignoresSafeArea()
+              .edgesIgnoringSafeArea(.all)
+          
+          // Rest of filter sheet content
+          // ...
+      }
+      ```
+    - Improved FilterView component by passing the viewModel and adding immediate refresh:
+      ```swift
+      private struct FilterView: View {
+          @Binding var showUnreadOnly: Bool
+          @Binding var showBookmarkedOnly: Bool
+          var viewModel: NewsViewModel
+          
+          var body: some View {
+              // ...
+              Toggle(isOn: $showUnreadOnly) { ... }
+                  .onChange(of: showUnreadOnly) { _, _ in
+                      Task { await viewModel.refreshArticles() }
+                  }
+              // ...
+          }
+      }
+      ```
+  - Results:
+    - The filter panel now completely covers the content beneath it, eliminating visual confusion
+    - Filter changes now trigger an immediate UI refresh when toggled
+    - The descriptive text "Changes are applied immediately" is now accurate
+  - Key learnings:
+    - In SwiftUI, using ZStack with a solid background can ensure proper visual layering
+    - The `.onChange` modifier is the preferred modern approach for responding to state changes in SwiftUI
+    - Passing the viewModel as a dependency enhances component reusability and testability
+    - This approach follows iOS 18+ and Swift 6+ best practices for reactive UI updates
+
 - **Implemented Modern Settings Observation** (Completed):
   - Fixed display preferences in Settings not affecting the NewsView and NodeDetailView:
     - Created dedicated UserDefaultsExtensions.swift for standardized settings access
@@ -524,4 +569,4 @@
   - Added typed key constants to avoid stringly-typed programming
   - Implemented computed properties for all relevant UserDefaults settings
   - Used modern iOS 18+ patterns with Combine publishers for reactive settings updates
-  - Achieved real-time
+  - Achieved real-time UI updates when settings change
