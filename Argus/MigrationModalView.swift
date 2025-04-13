@@ -1,5 +1,29 @@
 import SwiftUI
 
+/**
+ * MigrationModalView - Full-screen modal UI for displaying migration progress
+ *
+ * This view provides a blocking modal interface that prevents user interaction
+ * during the migration process. It displays progress, status, and appropriate
+ * animations to indicate that migration is in progress.
+ *
+ * ## Primary Responsibilities
+ * - Display migration progress visually with animations
+ * - Block all user interaction during migration
+ * - Show status messages from the migration coordinator
+ * - Auto-dismiss when migration is complete
+ *
+ * ## Dependencies
+ * - MigrationCoordinator: For migration state and progress
+ *
+ * ## Removal Considerations
+ * - Should be removed along with other migration UI components
+ * - Remove during Phase 2 (UI Component Removal) after MigrationView
+ * - No functionality needs to be preserved
+ *
+ * @see migration-removal-plan.md for complete removal strategy
+ */
+
 /// Standard iOS modal view for migration progress display
 struct MigrationModalView: View {
     @ObservedObject var coordinator: MigrationCoordinator

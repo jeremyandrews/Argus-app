@@ -799,7 +799,7 @@ extension NotificationData {
             source_analysis_blob: articleModel.sourceAnalysisBlob,
             relation_to_topic_blob: articleModel.relationToTopicBlob,
             additional_insights_blob: articleModel.additionalInsightsBlob,
-            engine_stats: articleModel.engineStats,
+            engine_stats: articleModel.engine_stats,
             similar_articles: articleModel.similarArticles
         )
 

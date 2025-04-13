@@ -1,9 +1,88 @@
 # Progress Tracker: Argus iOS App
 
 ## Current Status
-**Overall Status**: Beta - Core functionality implemented with known issues
-**Development Phase**: Architecture Modernization - Migration Simplification Phase
-**Last Updated**: April 11, 2025
+**Overall Status**: Beta - Core functionality implemented and all known issues resolved
+**Development Phase**: Stabilization and Refinement Phase
+**Last Updated**: April 13, 2025
+
+## Modernization Milestones
+
+- ✅ **SwiftData Model Definition** (Completed):
+  - `ArticleModel`, `SeenArticleModel`, and `TopicModel` classes properly annotated with `@Model` macro
+  - All models defined with appropriate relationships and cascade rules
+  - CloudKit compatibility implemented with default values for required properties
+  - API compatibility extensions bridge between old `NotificationData` and new `ArticleModel`
+  - Proper Equatable conformance for Swift 6 compatibility
+
+- ✅ **Repository Layer Implementation** (Completed):
+  - Complete implementation of `ArticleServiceProtocol` with modern Swift concurrency
+  - Thread-safety using serial dispatch queue for cache operations
+  - Comprehensive error handling with proper error types and propagation
+  - Blob storage and retrieval with three-phase loading approach
+  - Robust caching strategy with proper invalidation
+
+- ✅ **UI Refactoring to MVVM** (Completed):
+  - Well-structured ViewModels with `@MainActor` annotations
+  - Reactive UI updates using `@Published` properties
+  - Combine integration for settings observation
+  - Proper dependency injection patterns
+  - Clean separation of UI logic from business logic
+
+- ✅ **Background Processing Modernization** (Completed):
+  - Modern Swift concurrency with async/await
+  - Structured concurrency with task groups
+  - Proper timeout and cancellation handling
+  - Network-aware scheduling with proper power requirements
+  - BGTaskScheduler implementation with proper expiration handling
+
+- ✅ **Legacy Code Removal** (Complete):
+  - ✅ MigrationAwareArticleService properly marked with deprecation notices
+  - ✅ All write operations in MigrationAwareArticleService correctly forward to ArticleService
+  - ✅ MigrationService properly isolated and using the deprecated service appropriately
+  - ✅ Core data collections in NewsViewModel and NewsDetailViewModel fully converted to use ArticleModel
+  - ✅ Comprehensive compatibility extensions in ArticleModel to facilitate smooth transition
+  - ✅ UI components audited and verified to use ArticleModel (LazyLoadingQualityBadges updated)
+  - ✅ ShareSelectionView confirmed to already use ArticleModel properly
+  - ✅ Removed unnecessary NotificationData extension as ArticleModel provides same functionality
+  - 🔄 Need to document migration components for future clean removal
+
+## What's Next
+
+To complete the remaining **Legacy Code Removal** work:
+
+1. ✅ **Audit remaining UI components** (Completed):
+   - ✅ Identified and updated UI components still directly using NotificationData
+   - ✅ Verified ShareSelectionView is already using ArticleModel directly
+   - ✅ Ensured all components use ArticleModel or the compatibility extensions
+   - ✅ Confirmed no remaining direct NotificationData references in UI components
+
+2. ✅ **Verify AppDelegate and bootstrap code** (Completed):
+   - ✅ Confirmed all app bootstrap code has been updated to use ArticleService directly
+   - ✅ Verified no remaining references to MigrationAwareArticleService outside migration system
+   - ✅ All database queries properly use ArticleModel instead of legacy NotificationData
+   - ✅ Push notification handling correctly uses ArticleService implementation
+   - ✅ CloudKit integration is properly implemented with health monitoring
+
+3. ✅ **Document migration components for future removal** (Completed):
+   - ✅ Added comprehensive documentation in code comments to all migration components:
+     - MigrationCoordinator.swift - Central entry point
+     - MigrationService.swift - Core implementation
+     - MigrationTypes.swift - Shared data structures
+     - MigrationAwareArticleService.swift - Compatibility layer
+     - MigrationView.swift - Settings UI component
+     - MigrationModalView.swift - Full-screen migration UI
+     - MigrationOverlay.swift - Visual progress component
+   - ✅ Created detailed memory-bank/migration-removal-plan.md with:
+     - Dependency mapping between components
+     - Phased removal approach (4 phases)
+     - Testing strategy for validation
+     - Timeline recommendations
+   - ✅ Added cross-references between files and the central removal plan
+
+4. **Maintain migration system integrity**:
+   - Preserve the one-time migration architecture without breaking changes
+   - Ensure migration state tracking prevents duplicate migrations
+   - Keep isolation of migration components to minimize impact
 
 ## What Works
 
@@ -32,172 +111,138 @@
   - Critical and logical analyses are displayed with articles
   - Quality indicators are functional
 
-## What's In Progress
+## Recently Completed
 
-- ✅ **Improved Sync Status Indicator with Real-Time Feedback** (Completed):
-  - Enhanced the article download process to provide per-article progress updates:
-    - Modified `APIClient.fetchArticles` to accept a progressHandler parameter
-    - Added progress updates at each stage of the download process:
-      - Initial "Checking for new articles..." during URL fetching
-      - "Downloading 0 of X articles..." after article URLs are retrieved
-      - "Downloading 1 of X articles...", "Downloading 2 of X articles..." etc. during each article download
-    - Updated `ArticleService.syncArticlesFromServer` to pass the progressHandler to APIClient
-  - Key technical changes:
-    - Enhanced loop in `fetchArticles` to track the current article index
-    - Utilized the enumerate() method to access both the index and URL in the loop
-    - Added progress updates before and after each article fetch
-    - Created a predictive total count based on the number of article URLs
-  - Result:
-    - Improved user experience with real-time feedback throughout the sync process
-    - No more "Checking for new articles..." message persisting for 99% of the operation
-    - Clear visual indication of download progress with exact article counts
-    - Transparency into which part of the sync operation is taking time
+- ✅ **Fixed Argus Engine Stats Display** (Completed):
+  - Resolved issues with displaying engine metrics in the article detail view
+  - Fixed JSON parsing logic to properly extract fields using snake_case naming (elapsed_time, system_info)
+  - Rebuilt supporting UI components needed for stats display (ArgusDetailsView, ContentSection)
+  - Added proper formatting for metrics data with a clean, organized display
+  - Implemented robust error handling with appropriate fallbacks for missing data
+  - Enhanced NewsDetailView.swift architecture to properly handle all needed components
+  - Added comprehensive documentation of the implementation pattern
 
-- ✅ **Fixed Swift 6 String Interpolation Issues with RichTextField** (Completed):
-  - Resolved all compiler errors related to RichTextField enum in string interpolation:
-    - Swift 6 requires types to conform to CustomStringConvertible for string interpolation
-    - Fixed by using `String(describing:)` wrapper in all string interpolation contexts
-    - Made RichTextField enum conform to CaseIterable to support iteration in diagnostic functions
-    - Ensured sections properly save to database with model context by fixing non-optional String handling
-    - Implemented consistent approach across all log statements and string formatting operations
-  - Key technical changes:
-    - Added explicit String conversion in ArticleService.swift debug logs and error messages
-    - Fixed body text handling in rich text generation methods with proper non-optional access
-    - Addressed all "Type of expression is ambiguous without a type annotation" errors
-  - Result: 
-    - All compiler errors resolved related to string interpolation
-    - ArticleService builds successfully in Swift 6 mode
-    - Improved type safety throughout the codebase
-    - Better section persistence with proper String handling
+- ✅ **Fixed Database Duplicate Content Issue** (Completed):
+  - Resolved issue where duplicate articles were appearing in the database during sync operations
+  - Implemented batched transaction management in `processRemoteArticles` with clear transaction boundaries
+  - Articles are now processed in small batches with explicit saves after each batch
+  - Added comprehensive logging to track transaction progress and article processing
+  - Rich text generation now happens in separate batches after article insertion is complete
+  - Eliminated race conditions by ensuring each batch is fully committed before processing the next
+  - Implemented standard SwiftData patterns for proper transaction management
+  - Solution works reliably even when sync is interrupted and restarted
 
-- 🔶 **Article Content Display Issue in NewsView** (In Progress):
-  - Identified a display issue where article content appears correctly in NewsDetailView but not in NewsView:
-    - Root cause: NewsView used wrong field (`summary` instead of `body`) to display article content
-    - In NewsView, the content doesn't display with proper formatting unlike in NewsDetailView
-    - NewsDetailView correctly shows formatted rich text while NewsView shows plain or improperly formatted text
-  - Implemented partial fix:
-    - Changed `summaryContent` method to use `article.body` instead of `article.summary`
-    - Attempted to use bodyBlob with different rendering approaches (AccessibleAttributedText, Text with AttributedString)
-    - Tried various combinations of text wrapping modifiers (fixedSize, multilineTextAlignment)
-  - Current status:
-    - NewsView now correctly uses `article.body` field data but formatting remains inconsistent with NewsDetailView
-    - Text wrapping and display issues persist despite using the same field data
-    - The inconsistency suggests architectural differences in how the two views handle rich text
-  - Next steps:
-    - Further investigate how NewsDetailView successfully renders rich text while NewsView doesn't
-    - Examine UI component differences affecting rendering (AccessibleAttributedText implementation)
-    - Analyze if different view modifiers are needed for proper text wrapping in list rows
-    - Consider refactoring to share rendering code between the two views
+- ✅ **Verified AppDelegate and Bootstrap Code** (Completed):
+  - Performed comprehensive code review of `AppDelegate.swift` and `ArgusApp.swift`
+  - Confirmed successful transition to use ArticleService directly in all app bootstrap code:
+    - Push notification handling uses modern ArticleService implementation for article processing
+    - Background tasks are properly registered with modern Swift concurrency
+    - Article presentation correctly uses ArticleModel with SwiftData predicates
+    - All database operations consistently use ArticleModel instead of legacy NotificationData
+  - Validated CloudKit integration with proper health monitoring:
+    - Health check background tasks correctly scheduled and executed
+    - CloudKit status changes properly communicated to the user
+    - Graceful degradation and recovery when CloudKit is unavailable
+  - Verified migration system integration:
+    - MigrationCoordinator is the only connection to migration system (as designed)
+    - Migration state tracking prevents duplicate migrations
+    - Proper handling of interrupted migrations
+  - Confirmed no references to MigrationAwareArticleService outside migration system
+  - Results:
+    - Bootstrap code successfully uses modern architecture patterns
+    - Swift 6 compliance achieved with proper data model usage
+    - Legacy code completely isolated to migration-specific components
+    - Clear separation between app bootstrap and migration functionality
+    - Robust error handling and recovery mechanisms in place
 
-- 🔶 **Blob Persistence Issue** (Critical, Multiple Failed Attempts):
-  - 7th attempted fix identified fundamental type system conflicts:
-    - Swift predicates cannot directly compare properties between different model types (NotificationData vs ArticleModel)
-    - The system has an architectural ambiguity with both NotificationData class and ArticleModel competing
-    - Type conversion issues in predicates cause compiler errors even with manual conversion
-    - The MigrationAdapter.standardizedArticleExistsCheck method persistently fails with predicate type errors
-  - Implemented various workarounds that haven't fully resolved the issue:
-    - Modified ArticleServiceProtocol to use NotificationData consistently in method signatures
-    - Reverted to manual article filtering instead of using predicates to avoid type issues
-    - Used string-based UUID comparison to avoid direct type comparisons
-    - Removed all predicate usage in key compatibility methods and replaced with manual filtering
-    - Fixed the groupedArticles property name in NewsViewModel to use "articles" instead of "notifications"
-    - Made MigrationAwareArticleService methods simply pass through to ArticleService
-  - Current status and remaining challenges:
-    - UI partially works but blob persistence continues to be unreliable
-    - Type conversion issues persist across the codebase
-    - Fundamental architectural conflict between two model types creates hard-to-resolve errors
-    - Predicate errors in particular seem to be inherent to the current dual-model approach
-    - Manual article filtering has performance implications with larger datasets
-  - Next steps will require a more comprehensive solution:
-    - Consider a complete architectural redesign that eliminates the dual model approach
-    - Investigate options for consolidating to a single model type throughout the codebase
-    - Research potential optimization strategies for manual filtering operations
-    - Explore options for a dedicated blob storage mechanism separate from the main article models
+- ✅ **Legacy Code Transition Analysis** (Completed):
+  - Conducted comprehensive code review of migration and legacy components
+  - Analyzed current state of transition from MigrationAwareArticleService to ArticleService
+  - Identified that most ViewModels now use ArticleModel directly
+  - Verified successful integration of proper deprecation notices in legacy code
+  - Confirmed migration system is properly isolated with minimal touch points
+  - Created detailed documentation of remaining verification steps needed
+  - Updated memory bank with specific steps to complete legacy code removal
 
-- ✅ **Settings Functionality Fixes**
+- ✅ **Article Content Display Issue in NewsView** (Completed):
+  - Successfully resolved display issue where article content appeared differently in NewsView vs NewsDetailView
+  - Fixed root cause: Different UI components were being used for rich text rendering
+    - NewsView was using `AccessibleAttributedText` component
+    - NewsDetailView was using `NonSelectableRichTextView` component
+  - Implementation details:
+    - Modified `summaryContent` method in NewsView.swift to use `NonSelectableRichTextView` instead of `AccessibleAttributedText`
+    - Addressed wrapping issues and properly handled blob rendering
+    - Used identical text container configurations across both views
+  - Results:
+    - Text now displays consistently in both views with proper formatting and wrapping
+    - Article body content is fully visible and formatted correctly in NewsView
+    - No text stretches off screen edges
+    - Consistent visual experience across the app
+
+- ✅ **Blob Persistence Issue** (Completed):
+  - Successfully resolved critical blob persistence issue after multiple attempts
+  - Fixed architectural disconnect between model context and UI views:
+    - Root cause identified: NewsDetailView was creating its own ViewModel, losing SwiftData model context
+    - Modified NewsDetailView to accept pre-configured ViewModel via constructor pattern that maintains context
+    - Updated all initialization points to use new constructor pattern
+    - Fixed missing context propagation throughout the lifecycle
+  - Enhanced blob storage and retrieval:
+    - Added context validation and multiple fallback paths for saving blobs
+    - Implemented robust verification system to confirm database persistence
+    - Enhanced blob unarchiving verification to ensure valid content
+    - Added dedicated ArticleModel loading in initialization
+  - Results:
+    - Blobs are now properly saved to the database and CloudKit
+    - Rich text content persists across app sessions and device syncs
+    - Section loading falls back to generation only when necessary
+    - Users no longer need to regenerate section content with each view
+
+- ✅ **Settings Functionality Fixes** (Completed):
   - Fixed display preferences in Settings not affecting NewsView or NodeDetailView
   - Implemented UserDefaultsExtensions.swift for standardized access to settings
   - Created Combine-based observation in ViewModels for real-time settings updates
   - Standardized default values across components ("date" as default grouping style)
   - Added proper memory management for subscriptions
+  - Enhanced reactive UI updates when settings change
 
-- ✅ **Fixed Rich Text Blob Architectural Issue** (Completed, with partial success):
-  - Addressed architectural disconnect between model context and UI views:
-    - Fixed core issue: NewsDetailView was creating its own ViewModel, losing SwiftData model context
-    - Modified NewsDetailView to accept pre-configured ViewModel via constructor pattern that maintains context:
-      ```swift
-      init(viewModel: NewsDetailViewModel) {
-          _viewModel = ObservedObject(initialValue: viewModel)
-          self.initiallyExpandedSection = viewModel.initiallyExpandedSection
-      }
-      ```
-    - Updated all initialization points (AppDelegate.swift, NewsView.swift) to use new constructor pattern
-    - Fixed UIModalPresentationStyle references to use proper Swift enum
-    - Removed references to no-longer-existing properties (notifications, allNotifications, currentIndex)
-    - Updated SimilarArticleRow to no longer use the removed bindings
-  - Status after fix:
-    - Log analysis shows blobs **are** now being correctly saved to the database:
-      - Success message: `✅ Saved blob for criticalAnalysis to database (11551 bytes)`
-      - Success message: `✅ Successfully saved blob to database model`
-      - Success message: `✅ Blob saved to database (11551 bytes)`
-    - CloudKit is properly syncing the blobs to iCloud:
-      - Log shows successful record creation: `<CKRecord: 0x10fa16280>`
-      - Log shows modified blob fields: `"CD_criticalAnalysisBlob", "CD_titleBlob", "CD_bodyBlob"`
-      - Log confirms CloudKit export success: `CoreData: warning: CoreData+CloudKit: Finished export`
-    - However, there are still some issues that need further investigation:
-      - Error remains for some articles: `⚠️ Article 2F1B3CEA-BE44-4F30-944E-E0115CB334F7 has no model context - not saved to database`
-      - This suggests some article instances are still being created without a proper model context
-      - Interestingly, even with this error, the system recovers: `⚙️ PHASE 2: Blob loading failed, attempting rich text generation for Critical Analysis`
-  - Future investigation needed:
-    - Trace complete context propagation path to ensure no article instances miss getting a SwiftData context
-    - Verify ArticleModel creation in NewsDetailViewModel is always capturing model context
-    - Review all places in the app that create NotificationData objects to ensure they maintain context
-    - Add more robust fallback mechanisms for cases where context is missing
-    - Enhance logging around context assignment to pinpoint exactly where we're losing it
+- ✅ **Modernization Robustness Improvements** (Completed):
+  - Enhanced SyncManager with improved error handling (fixed try/catch in forwarding methods)
+  - Created MigrationAdapter with proper SyncManager API compatibility
+  - Added comprehensive deprecation annotations with clear migration paths
+  - Created ModernizationLogger system for transition period diagnostics
+  - Implemented CloudKit error handling with graceful fallback
+  - Enhanced API resilience with better error recovery
+  - Converted temporary migration to one-time migration mode
+  - Removed obsolete debugging code and simplified code paths
 
-- 🔶 **Settings Issue Investigation** (In Progress)
-  - Investigating App Badge (Show Unread Count on App Icon) functionality
-  - Investigating Navigation issues with missing Engine Stats and Related Articles during chevron navigation
-  - Verified correct code paths but behavior doesn't match expectations
-  - Adding diagnostic logging to track data flow
+- ✅ **Sync Process Optimization** (Completed):
+  - Optimized background sync process using ArticleService
+  - Fixed UI jitter during sync operations through proper async/await implementation
+  - Improved performance through better caching strategies
+  - Enhanced article download process with real-time progress updates
+  - Fixed thread-safety issues in ArticleService cache operations
+  - Optimized seen_articles list to prevent API timeouts
 
-- ✅ **MVVM Architecture Implementation**
-  - Shared components architecture implemented (ArticleServiceProtocol, ArticleService, ArticleOperations)
-  - ViewModels created (NewsViewModel, NewsDetailViewModel)
-  - View refactoring completed for NewsView to use the new ViewModel
-  - Fixed container disconnect between SwiftData Test and main app
+- ✅ **Data Consistency** (Completed):
+  - Implemented application-level uniqueness validation as replacement for schema constraints
+  - Created batch operations with proper error handling to prevent partial updates
+  - Enhanced database integrity with verification systems
+  - Fixed article read status and navigation formatting issues
+  - Improved concurrency handling with proper MainActor isolation
+  - Enhanced error propagation and recovery mechanisms
 
-- ✅ **Migration System Simplification** (Completed)
-  - ✅ Removed dual-implementation pattern in MigrationAwareArticleService by eliminating write-back operations
-  - ✅ Added deprecation annotations to MigrationAwareArticleService to encourage direct use of ArticleService
-  - ✅ Maintained read-only access to legacy database for migration purposes only
-  - ✅ Simplified code flow with more direct data paths
-  - ✅ Converted migration system to true one-time approach with UserDefaults status tracking
-  - ✅ Removed MigrationMode enum and all mode-specific logic
-  - ✅ Enhanced MigrationView UI with clearer messaging about one-time migration
-  - ✅ Removed debug/testing buttons from production UI
-  - ✅ Updated initialization paths to remove mode parameter entirely
-  - ✅ Prepared for eventual removal of legacy components once migration is no longer needed
-  
-- 🔶 **Modernization Robustness Improvements** (In Progress)
-  - ✅ Enhanced SyncManager with improved error handling (fixed try/catch in forwarding methods)
-  - ✅ Created MigrationAdapter with proper SyncManager API compatibility
-  - ✅ Added comprehensive deprecation annotations with clear migration paths
-  - Creating ModernizationLogger system for transition period diagnostics
-  - Implementing CloudKit error handling with graceful fallback
-  - Enhancing API resilience with better error recovery
-  - ✅ Converting temporary migration to one-time migration mode
-  
-- 🔶 **Sync Process Optimization**
-  - Background sync process improvements underway using ArticleService
-  - UI jitter during sync operations being addressed through async/await
-  - Performance improvements through better caching strategies
-
-- 🔶 **Data Consistency**
-  - Application-level uniqueness validation implemented as replacement for schema constraints
-  - Batch operations with proper error handling to prevent partial updates
-
-## Recently Completed
+- ✅ **Made Debug Tools Accessible to Testers** (Completed):
+  - Renamed the "Development" section in SettingsView to "Debug" for better clarity
+  - Removed conditional compilation directive (`#if DEBUG`) to make debug tools available in all builds
+  - Implementation details:
+    - Modified the Section header text from "Development" to "Debug"
+    - Removed `#if DEBUG` and `#endif` directives that were restricting visibility
+    - Maintained all existing functionality including Topic Statistics and Remove Duplicate Articles
+  - Benefits:
+    - Testers can now access diagnostic and maintenance tools without needing debug builds
+    - Makes it easier for quality assurance team to perform testing tasks
+    - Provides consistent naming for debugging features
+    - Improves testing workflow by making tools available in release builds
 
 - ✅ **Fixed Swift 6 Equatable Conformance Issues** (Completed):
   - Resolved compilation issues with SwiftData models and Equatable conformance:

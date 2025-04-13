@@ -3,7 +3,42 @@ import Foundation
 import SQLite3
 import SwiftUI
 
-// Keys for UserDefaults
+/**
+ * MigrationCoordinator - Central coordinator for the one-time database migration
+ *
+ * This coordinator is the primary entry point for the migration system and orchestrates
+ * the entire migration process. It is designed to be self-contained and easily removable
+ * once all users have completed the migration to SwiftData.
+ *
+ * ## Primary Responsibilities
+ * - Determine if migration is needed based on state tracking
+ * - Initialize and manage the MigrationService
+ * - Display migration UI when needed
+ * - Track migration state and progress in UserDefaults
+ * - Handle app termination during migration
+ *
+ * ## Dependencies
+ * - MigrationService: Performs the actual data migration
+ * - UserDefaults: Stores migration state
+ * - MigrationModalView: UI for displaying migration progress
+ *
+ * ## Removal Considerations
+ * - This is the primary entry point from ArgusApp.swift
+ * - Should be removed only after verifying all users have completed migration
+ * - Removing this coordinator should be the final step in migration system removal
+ * - When removing, also clean up associated UserDefaults keys
+ *
+ * ## Future Removal Path
+ * 1. In ArgusApp.swift, remove the call to checkMigrationStatus()
+ * 2. Remove all migration-related UI components (MigrationModalView, etc.)
+ * 3. Remove MigrationService.swift
+ * 4. Finally, remove this coordinator class
+ * 5. Clean up UserDefaults keys: migration_completed, migration_count, last_migration_date
+ *
+ * @see migration-removal-plan.md for complete removal strategy
+ */
+
+// Keys for UserDefaults - These will be removed when migration system is removed
 private enum MigrationDefaults {
     static let migrationCompletedKey = "migration_completed"
     static let migrationCountKey = "migration_count"

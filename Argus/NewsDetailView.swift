@@ -362,32 +362,32 @@ struct NewsDetailView: View {
         }
     }
 
-    /// Returns all sections (Article, Summary, etc.) for the “accordion” in NewsDetailView.
+    /// Returns all sections (Article, Summary, etc.) for the "accordion" in NewsDetailView.
     private func getSections(from json: [String: Any]) -> [ContentSection] {
         var sections: [ContentSection] = []
 
-        // Bail out if we have no “currentNotification” (or no data):
+        // Bail out if we have no "currentNotification" (or no data):
         guard let n = currentNotification else {
             return sections
         }
 
-        // 1) “Summary” section
+        // 1) "Summary" section
         let summaryContent = n.summary ?? (json["summary"] as? String ?? "")
         sections.append(ContentSection(header: "Summary", content: summaryContent))
 
-        // 2) “Relevance” section
+        // 2) "Relevance" section
         let relevanceContent = n.relationToTopic ?? (json["relationToTopic"] as? String ?? "")
         sections.append(ContentSection(header: "Relevance", content: relevanceContent))
 
-        // 3) “Critical Analysis” section
+        // 3) "Critical Analysis" section
         let criticalContent = n.criticalAnalysis ?? (json["criticalAnalysis"] as? String ?? "")
         sections.append(ContentSection(header: "Critical Analysis", content: criticalContent))
 
-        // 4) “Logical Fallacies” section
+        // 4) "Logical Fallacies" section
         let fallaciesContent = n.logicalFallacies ?? (json["logicalFallacies"] as? String ?? "")
         sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
 
-        // 5) “Source Analysis” section
+        // 5) "Source Analysis" section
         let sourceAnalysisText = n.sourceAnalysis ?? (json["sourceAnalysis"] as? String ?? "")
         let sourceType = n.sourceType ?? (json["sourceType"] as? String ?? "")
         let sourceAnalysisData: [String: Any] = [
@@ -396,14 +396,14 @@ struct NewsDetailView: View {
         ]
         sections.append(ContentSection(header: "Source Analysis", content: sourceAnalysisData))
 
-        // 6) “Context & Perspective” (aka “additional_insights”)
+        // 6) "Context & Perspective" (aka "additional_insights")
         let insights = n.additionalInsights ?? (json["additionalInsights"] as? String ?? "")
         if !insights.isEmpty {
             sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
 
-        // 7) “Argus Engine Stats” (argus_details)
-        if let engineString = n.engineStats {
+        // 7) "Argus Engine Stats" (argus_details)
+        if let engineString = n.engine_stats {
             // parseEngineStatsJSON returns an ArgusDetailsData if valid
             if let parsed = parseEngineStatsJSON(engineString, fallbackDate: n.date) {
                 sections.append(ContentSection(header: "Argus Engine Stats", content: parsed))
@@ -424,12 +424,12 @@ struct NewsDetailView: View {
             sections.append(ContentSection(header: "Argus Engine Stats", content: dataObject))
         }
 
-        // 8) “Preview” section
+        // 8) "Preview" section
         if let fullURL = n.getArticleUrl(additionalContent: additionalContent), !fullURL.isEmpty {
             sections.append(ContentSection(header: "Preview", content: fullURL))
         }
 
-        // 9) “Related Articles” (similar_articles)
+        // 9) "Related Articles" (similar_articles)
         if let localSimilar = n.similarArticles {
             if let parsedArray = parseSimilarArticlesJSON(localSimilar) {
                 sections.append(ContentSection(header: "Related Articles", content: parsedArray))
@@ -519,7 +519,7 @@ struct NewsDetailView: View {
             markAsViewed()
 
             // Log the new article state
-            let hasEngineStats = newArticle.engineStats != nil
+            let hasEngineStats = newArticle.engine_stats != nil
             let hasSimilarArticles = newArticle.similarArticles != nil
             let hasTitleBlob = newArticle.titleBlob != nil
             let hasBodyBlob = newArticle.bodyBlob != nil
@@ -870,15 +870,13 @@ struct NewsDetailView: View {
             )
         }
     }
-
+    
     private func toggleBookmark() {
         Task {
             await viewModel.toggleBookmark()
         }
     }
-
-    // Archive functionality removed
-
+    
     private func deleteNotification() {
         Task {
             await viewModel.deleteArticle()
@@ -891,53 +889,24 @@ struct NewsDetailView: View {
             }
         }
     }
-
-    // MARK: - Helper Methods
-
-    private func getSimilarArticles(from jsonString: String?) -> [[String: Any]]? {
-        guard let jsonString = jsonString,
-              let jsonData = jsonString.data(using: .utf8),
-              let similarArticles = try? JSONSerialization.jsonObject(with: jsonData) as? [[String: Any]]
-        else {
-            return nil
+    
+    /// Helper method to get a cached attributed string for a section
+    private func getAttributedStringForSection(_ section: String) -> NSAttributedString? {
+        let cachedContent = viewModel.getAttributedStringForSection(section)
+        
+        if cachedContent == nil && !isSectionLoading(section) {
+            AppLogger.database.warning("⚠️ View requested cached content for \(section) but it was nil despite being reported as loaded")
         }
-        return similarArticles
+        
+        return cachedContent
     }
-
-    // Helper to build source analysis content - using ArticleModel instead of NotificationData
-    private func buildSourceAnalysis(_ article: ArticleModel) -> String {
-        var content = ""
-
-        if let sourceType = article.sourceType {
-            content += "Source Type: \(sourceType)\n\n"
-        }
-
-        if let sourcesQuality = article.sourcesQuality {
-            let qualityLabel: String
-            switch sourcesQuality {
-            case 1: qualityLabel = "Poor"
-            case 2: qualityLabel = "Fair"
-            case 3: qualityLabel = "Good"
-            case 4: qualityLabel = "Strong"
-            default: qualityLabel = "Unknown"
-            }
-            content += "Source Quality: \(qualityLabel)\n\n"
-        }
-
-        // Add more details if available in the article
-        if let domain = article.domain {
-            content += "Domain: \(domain)\n\n"
-        }
-
-        // If we have no content at all, add a placeholder
-        if content.isEmpty {
-            content = "No source analysis data available."
-        }
-
-        return content
+    
+    /// Helper function to check if section content is being loaded
+    private func isSectionLoading(_ section: String) -> Bool {
+        return sectionLoadingTasks[section] != nil
     }
-
-    // Mark article as viewed using the view model
+    
+    /// Mark the current article as viewed
     private func markAsViewed() {
         Task {
             do {
@@ -956,14 +925,290 @@ struct NewsDetailView: View {
             }
         }
     }
+    
+    /// Load the minimal content needed for the initial display
+    private func loadInitialMinimalContent() {
+        // Only proceed if we have a notification
+        guard let article = currentNotification else { return }
 
-    private func hasRequiredContent(_ article: ArticleModel) -> Bool {
-        return article.summary != nil &&
-            article.criticalAnalysis != nil &&
-            article.logicalFallacies != nil
+        // Log the loading attempt
+        AppLogger.database.debug("Loading initial content for article ID: \(article.id)")
+
+        // Ensure the Summary section is expanded
+        expandedSections["Summary"] = true
+
+        // Use synchronous loading for critical above-the-fold content
+        Task {
+            // First, load the title and body synchronously to prevent flashing of unformatted content
+            await viewModel.loadMinimalContent()
+
+            // Log minimal content load completion
+            AppLogger.database.debug("✅ Minimal content loaded for article ID: \(article.id)")
+
+            // After minimal content is loaded, force load the Summary section
+            loadContentForSection("Summary")
+
+            // Log that we've explicitly loaded the Summary section
+            AppLogger.database.debug("✅ Summary section load triggered for initial view")
+        }
+    }
+    
+    /// Generate content for a section
+    @ViewBuilder
+    private func sectionContent(for section: ContentSection) -> some View {
+        switch section.header {
+        // MARK: - Summary
+        case "Summary":
+            SectionContentView(
+                section: section,
+                attributedString: getAttributedStringForSection(section.header),
+                isLoading: isSectionLoading(section.header)
+            )
+            
+        // MARK: - Source Analysis
+        case "Source Analysis":
+            VStack(alignment: .leading, spacing: 10) {
+                // Source type and domain info
+                HStack {
+                    // Source type badge first
+                    if let sourceData = section.content as? [String: Any],
+                       let sourceType = sourceData["sourceType"] as? String,
+                       !sourceType.isEmpty
+                    {
+                        HStack(spacing: 4) {
+                            Image(systemName: sourceTypeIcon(for: sourceType))
+                                .font(.footnote)
+                                .foregroundColor(.blue)
+                            Text(sourceType.capitalized)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(getSourceTypeColor(sourceType).opacity(0.2))
+                        .foregroundColor(getSourceTypeColor(sourceType))
+                        .cornerRadius(8)
+                    }
+
+                    // Domain after source type
+                    if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
+                       !domain.isEmpty
+                    {
+                        Text(domain)
+                            .font(.subheadline)
+                            .foregroundColor(.blue)
+                            .onTapGesture {
+                                if let url = URL(string: "https://\(domain)") {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+
+                // Source analysis text
+                if let sourceData = section.content as? [String: Any] {
+                    SectionContentView(
+                        section: ContentSection(header: section.header, content: sourceData["text"] ?? ""),
+                        attributedString: getAttributedStringForSection(section.header),
+                        isLoading: isSectionLoading(section.header)
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+            .textSelection(.enabled)
+            
+        // MARK: - Critical Analysis, Logical Fallacies, Relevance, Context & Perspective
+        case "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective":
+            SectionContentView(
+                section: section,
+                attributedString: getAttributedStringForSection(section.header),
+                isLoading: isSectionLoading(section.header)
+            )
+            
+        // MARK: - Related Articles
+        case "Related Articles":
+            VStack(alignment: .leading, spacing: 8) {
+                if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 10) {
+                                ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
+                                    SimilarArticleRow(
+                                        articleDict: article,
+                                        isLastItem: index == similarArticles.count - 1
+                                    )
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 400)
+                    }
+                } else {
+                    VStack(spacing: 6) {
+                        ProgressView()
+                            .padding()
+                        Text("Loading similar articles...")
+                            .font(.callout)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                }
+
+                Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
+                    .font(.footnote)
+                    .padding(.top, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+            
+        // MARK: - Argus Engine Stats
+        case "Argus Engine Stats":
+            if let details = section.content as? ArgusDetailsData {
+                if let rawMarkdown = details.systemInfo?["raw_markdown"] as? [String: Any],
+                   let content = rawMarkdown["content"] as? String
+                {
+                    // This means we have raw markdown - display it as text
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Engine Stats (Raw Content)")
+                            .font(.headline)
+                            .padding(.bottom, 4)
+
+                        Text(content)
+                            .font(.system(size: 14))
+                            .textSelection(.enabled)
+                    }
+                    .padding()
+                } else {
+                    // Normal detailed view
+                    ArgusDetailsView(data: details)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                Text("No engine statistics available.")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+            }
+            
+        // MARK: - Preview
+        case "Preview":
+            VStack(spacing: 8) {
+                if let urlString = section.content as? String,
+                   let articleURL = URL(string: urlString)
+                {
+                    SafariView(url: articleURL)
+                        .frame(height: 450)
+                    Button("Open in Browser") {
+                        UIApplication.shared.open(articleURL)
+                    }
+                    .font(.callout)
+                    .padding(.top, 4)
+                } else {
+                    Text("Invalid URL")
+                        .font(.callout)
+                        .frame(height: 450)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            
+        // MARK: - Default fallback
+        default:
+            Text(section.content as? String ?? "")
+                .font(.callout)
+                .padding(.top, 6)
+                .lineSpacing(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+    }
+    
+    private func sourceTypeIcon(for sourceType: String) -> String {
+        switch sourceType.lowercased() {
+        case "press", "news":
+            return "newspaper"
+        case "blog":
+            return "text.bubble"
+        case "academic":
+            return "book"
+        case "government":
+            return "building.columns"
+        case "social media":
+            return "person.2"
+        default:
+            return "doc.text"
+        }
     }
 
-    // Helper function to build content dictionary from article model
+    private func getSourceTypeColor(_ sourceType: String) -> Color {
+        switch sourceType.lowercased() {
+        case "press", "news":
+            return .blue
+        case "blog":
+            return .orange
+        case "academic", "research":
+            return .purple
+        case "gov", "government":
+            return .green
+        case "opinion":
+            return .red
+        default:
+            return .gray
+        }
+    }
+    
+    /// Parse engine stats JSON into a structured type
+    private func parseEngineStatsJSON(_ jsonString: String, fallbackDate: Date) -> ArgusDetailsData? {
+        // Try to parse as JSON first
+        if let data = jsonString.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
+            // Using only snake_case for JSON field names
+            let model = dict["model"] as? String ?? ""
+            let elapsedTime = dict["elapsed_time"] as? Double ?? 0.0
+            let stats = dict["stats"] as? String ?? "0:0:0:0:0:0"
+            let systemInfo = dict["system_info"] as? [String: Any]
+            
+            AppLogger.database.debug("Engine stats parsed: model=\(model), time=\(elapsedTime), stats=\(stats)")
+            
+            return ArgusDetailsData(
+                model: model,
+                elapsedTime: elapsedTime,
+                date: fallbackDate,
+                stats: stats,
+                systemInfo: systemInfo
+            )
+        }
+
+        // If that fails, just create a hardcoded object with the raw text
+        AppLogger.database.debug("Failed to parse engine stats JSON, using fallback")
+        return ArgusDetailsData(
+            model: "Unknown",
+            elapsedTime: 0.0,
+            date: fallbackDate,
+            stats: "0:0:0:0:0:0",
+            systemInfo: ["raw_content": jsonString as Any]
+        )
+    }
+    
+    /// Helper function to parse similar articles JSON
+    private func parseSimilarArticlesJSON(_ jsonString: String) -> [[String: Any]]? {
+        if let data = jsonString.data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+           !arr.isEmpty
+        {
+            return arr
+        }
+        return nil
+    }
+    
+    /// Helper function to build content dictionary from an article
     private func buildContentDictionary(from article: ArticleModel) -> [String: Any] {
         var content: [String: Any] = [:]
 
@@ -984,37 +1229,39 @@ struct NewsDetailView: View {
         content["relationToTopic"] = article.relationToTopic
         content["additionalInsights"] = article.additionalInsights
 
-        // For source analysis, just create a basic dictionary without processing the text
+        // For source analysis, create a dictionary with the text and source type
         if let sourceAnalysis = article.sourceAnalysis {
             content["sourceAnalysis"] = [
                 "text": sourceAnalysis,
                 "sourceType": article.sourceType ?? "",
             ]
-        } else {
-            content["sourceAnalysis"] = [
-                "text": "",
-                "sourceType": article.sourceType ?? "",
-            ]
         }
 
         // Transfer engine stats and similar articles as is
-        if let engineStatsJson = article.engineStats,
-           let engineStatsData = engineStatsJson.data(using: .utf8),
-           let engineStats = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
+        if let engineStats = article.engine_stats,
+           let engineStatsData = engineStats.data(using: .utf8),
+           let engineStatsDict = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
         {
             // Transfer relevant engine stats fields
-            if let model = engineStats["model"] as? String {
+            if let model = engineStatsDict["model"] as? String {
                 content["model"] = model
             }
-            if let elapsedTime = engineStats["elapsed_time"] as? Double {
-                content["elapsed_time"] = elapsedTime
+            if let elapsedTime = engineStatsDict["elapsed_time"] as? Double {
+                content["elapsedTime"] = elapsedTime
             }
-            if let stats = engineStats["stats"] as? String {
+            if let stats = engineStatsDict["stats"] as? String {
                 content["stats"] = stats
             }
-            if let systemInfo = engineStats["system_info"] as? [String: Any] {
-                content["system_info"] = systemInfo
+            if let systemInfo = engineStatsDict["system_info"] as? [String: Any] {
+                content["systemInfo"] = systemInfo
             }
+        }
+        // Alternative approach using engineDetails if available
+        else if let details = article.engineDetails {
+            content["model"] = details.model
+            content["elapsedTime"] = details.elapsedTime
+            content["stats"] = details.stats
+            content["systemInfo"] = details.systemInfo
         }
 
         // Transfer similar articles as is
@@ -1022,200 +1269,14 @@ struct NewsDetailView: View {
            let similarArticlesData = similarArticlesJson.data(using: .utf8),
            let similarArticles = try? JSONSerialization.jsonObject(with: similarArticlesData) as? [[String: Any]]
         {
-            content["similar_articles"] = similarArticles
+            content["similarArticles"] = similarArticles
         }
 
         return content
     }
-
-    // Helper function for NotificationData removed as we now use ArticleModel directly
-
-    enum ContentLoadType {
-        case minimal // Just title and body (minimum needed for header)
-        case header // Only content needed for article header rendering
-        case summary // Minimal + summary content (for default expanded section)
-        case sectionHeaders // Just section headers without content (for quick display)
-        case full // All content including rich text for all sections
-        case specific([RichTextField]) // Load only specific fields
-    }
-
-    // MARK: - Consolidated Content Loading Function
-
-    /**
-     Loads content for the current article with various levels of detail and timing options.
-
-     - Parameters:
-       - contentType: Determines which content to load (minimal, header, full, etc.)
-       - synchronously: If true, blocks until content is loaded; if false, loads asynchronously
-       - completion: Optional callback to execute when content loading completes
-     */
-    private func loadContent(
-        contentType: ContentLoadType = .minimal,
-        synchronously: Bool = false,
-        completion: (() -> Void)? = nil
-    ) {
-        guard let notification = currentNotification else { return }
-
-        // Function to execute the loading based on content type
-        let performLoading = {
-            // Always build the basic content dictionary which powers the section list
-            // regardless of the content type - this ensures sections appear even if content is loading
-            if self.additionalContent == nil {
-                self.additionalContent = self.buildContentDictionary(from: notification)
-            }
-
-            // Determine which fields to load based on content type
-            var fieldsToLoad: [RichTextField] = []
-
-            switch contentType {
-            case .minimal:
-                fieldsToLoad = [.title, .body]
-
-            case .header:
-                fieldsToLoad = [.title, .body]
-
-            case .summary:
-                fieldsToLoad = [.title, .body, .summary]
-
-            case .sectionHeaders:
-                // Just return since we already built the content dictionary
-                return
-
-            case .full:
-                // The specific sections will be loaded when expanded
-                fieldsToLoad = [.title, .body]
-
-            case let .specific(fields):
-                fieldsToLoad = fields
-            }
-
-            // Load the fields
-            for field in fieldsToLoad {
-                // FIX: Only load if the field hasn't already been loaded
-                let attributedString: NSAttributedString?
-                switch field {
-                case .title where self.titleAttributedString != nil:
-                    continue
-                case .body where self.bodyAttributedString != nil:
-                    continue
-                case .summary where self.summaryAttributedString != nil:
-                    continue
-                case .criticalAnalysis where self.criticalAnalysisAttributedString != nil:
-                    continue
-                case .logicalFallacies where self.logicalFallaciesAttributedString != nil:
-                    continue
-                case .sourceAnalysis where self.sourceAnalysisAttributedString != nil:
-                    continue
-                default:
-                    attributedString = getAttributedString(
-                        for: field,
-                        from: notification,
-                        createIfMissing: true
-                    )
-                }
-
-                // Store the attributed string in the appropriate property
-                if let attributedString = attributedString {
-                    switch field {
-                    case .title:
-                        self.titleAttributedString = attributedString
-                    case .body:
-                        self.bodyAttributedString = attributedString
-                    case .summary:
-                        self.summaryAttributedString = attributedString
-                    case .criticalAnalysis:
-                        self.criticalAnalysisAttributedString = attributedString
-                    case .logicalFallacies:
-                        self.logicalFallaciesAttributedString = attributedString
-                    case .sourceAnalysis:
-                        self.sourceAnalysisAttributedString = attributedString
-                    case .relationToTopic, .additionalInsights:
-                        // These don't have dedicated properties but are loaded for on-demand use
-                        break
-                    }
-                }
-            }
-        }
-
-        // Execute the loading based on synchronicity parameter
-        if synchronously {
-            performLoading()
-            completion?()
-        } else {
-            // Run asynchronously to prevent UI blocking
-            DispatchQueue.global(qos: .userInteractive).async {
-                performLoading()
-
-                // Call completion on main thread
-                DispatchQueue.main.async {
-                    completion?()
-                }
-            }
-        }
-    }
-
-    // Removed legacy loadAttributedStringAsync method - we now use ArticleOperations and ViewModel
-
-    private func saveModel() {
-        do {
-            try modelContext.save()
-        } catch {
-            AppLogger.database.error("Failed to save context: \(error)")
-        }
-    }
-
-    /// Parses the `engine_stats` JSON string into a strongly-typed ArgusDetailsData
-    private func parseEngineStatsJSON(_ jsonString: String, fallbackDate: Date) -> ArgusDetailsData? {
-        // Try to parse as JSON first
-        if let data = jsonString.data(using: .utf8),
-           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let model = dict["model"] as? String,
-           let elapsedTime = dict["elapsed_time"] as? Double,
-           let stats = dict["stats"] as? String
-        {
-            return ArgusDetailsData(
-                model: model,
-                elapsedTime: elapsedTime,
-                date: fallbackDate,
-                stats: stats,
-                systemInfo: dict["system_info"] as? [String: Any]
-            )
-        }
-
-        // If that fails, just create a hardcoded object with the raw text
-        AppLogger.database.debug("DEBUG: Creating fallback ArgusDetailsData with raw content")
-        return ArgusDetailsData(
-            model: "Argus Engine",
-            elapsedTime: 0.0,
-            date: fallbackDate,
-            stats: "0:0:0:0:0:0",
-            systemInfo: ["raw_content": jsonString as Any]
-        )
-    }
-
-    /// Parses the `similar_articles` JSON string into an array of dictionaries
-    private func parseSimilarArticlesJSON(_ jsonString: String) -> [[String: Any]]? {
-        // Try to parse as JSON array first
-        if let data = jsonString.data(using: .utf8),
-           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-           !arr.isEmpty
-        {
-            return arr
-        }
-
-        // Create a synthetic article that contains the raw text
-        let fallbackArticle: [String: Any] = [
-            "title": "Raw Content",
-            "tiny_summary": "Content could not be parsed as JSON",
-            "published_date": Date().ISO8601Format(),
-            "raw_content": jsonString,
-        ]
-
-        return [fallbackArticle]
-    }
-
-    // Helper view for consistent content loading display
-    private struct SectionContentView: View {
+    
+    /// Helper view for displaying section content
+    struct SectionContentView: View {
         let section: ContentSection
         let attributedString: NSAttributedString?
         let isLoading: Bool
@@ -1265,709 +1326,202 @@ struct NewsDetailView: View {
             }
         }
     }
+}
 
-    // Helper function to get cached attributed string for a section
-    private func getAttributedStringForSection(_ section: String) -> NSAttributedString? {
-        let cachedContent = viewModel.getAttributedStringForSection(section)
-        
-        if cachedContent == nil && !isSectionLoading(section) {
-            AppLogger.database.warning("⚠️ View requested cached content for \(section) but it was nil despite being reported as loaded")
-        }
-        
-        return cachedContent
-    }
+// MARK: - Supporting types and structures
 
-    // Helper function to check if section content is being loaded
-    private func isSectionLoading(_ section: String) -> Bool {
-        return sectionLoadingTasks[section] != nil
-    }
+/// ContentSection struct used to represent sections in the detail view
+struct ContentSection {
+    let header: String
+    let content: Any
 
-    // Reset loading state and content when navigating to a new article
-    private func resetContentState() {
-        // Cancel all loading tasks
-        tabChangeTask?.cancel()
-        for (_, task) in sectionLoadingTasks {
-            task.cancel()
-        }
-        sectionLoadingTasks = [:]
-
-        // Clear all cached content
-        titleAttributedString = nil
-        bodyAttributedString = nil
-        summaryAttributedString = nil
-        criticalAnalysisAttributedString = nil
-        logicalFallaciesAttributedString = nil
-        sourceAnalysisAttributedString = nil
-        cachedContentBySection = [:]
-
-        // Generate a new transition ID
-        contentTransitionID = UUID()
-    }
-
-    @ViewBuilder
-    private func sectionContent(for section: ContentSection) -> some View {
-        switch section.header {
-        // MARK: - Summary
-
-        case "Summary":
-            SectionContentView(
-                section: section,
-                attributedString: getAttributedStringForSection(section.header),
-                isLoading: isSectionLoading(section.header)
-            )
-
-            // MARK: - Source Analysis
-
-        case "Source Analysis":
-            VStack(alignment: .leading, spacing: 10) {
-                // Domain info with source type badge - source type first, then domain
-                HStack {
-                    // Source type badge first (to match DomainSourceView)
-                    if let sourceData = section.content as? [String: Any],
-                       let sourceType = sourceData["sourceType"] as? String,
-                       !sourceType.isEmpty
-                    {
-                        HStack(spacing: 4) {
-                            Image(systemName: sourceTypeIcon(for: sourceType))
-                                .font(.footnote)
-                                .foregroundColor(.blue)
-                            Text(sourceType.capitalized)
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(getSourceTypeColor(sourceType).opacity(0.2))
-                        .foregroundColor(getSourceTypeColor(sourceType))
-                        .cornerRadius(8)
-                    }
-
-                    // Domain after source type
-                    if let domain = currentNotification?.domain?.replacingOccurrences(of: "www.", with: ""),
-                       !domain.isEmpty
-                    {
-                        Text(domain)
-                            .font(.subheadline)
-                            .foregroundColor(.blue)
-                            .onTapGesture {
-                                if let url = URL(string: "https://\(domain)") {
-                                    UIApplication.shared.open(url)
-                                }
-                            }
-                    }
-
-                    Spacer()
-                }
-                .padding(.horizontal, 4) // Match other sections' padding
-
-                // The source analysis text
-                if let sourceData = section.content as? [String: Any] {
-                    SectionContentView(
-                        section: ContentSection(header: section.header, content: sourceData["text"] ?? ""),
-                        attributedString: getAttributedStringForSection(section.header),
-                        isLoading: isSectionLoading(section.header)
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8) // Match other sections - this is key to prevent shifting
-            .padding(.top, 6)
-            .textSelection(.enabled)
-
-        // MARK: - Critical Analysis
-
-        case "Critical Analysis":
-            SectionContentView(
-                section: section,
-                attributedString: getAttributedStringForSection(section.header),
-                isLoading: isSectionLoading(section.header)
-            )
-            // Removed onAppear handler - content loading now only triggered by section expansion
-
-        // MARK: - Logical Fallacies
-
-        case "Logical Fallacies":
-            SectionContentView(
-                section: section,
-                attributedString: getAttributedStringForSection(section.header),
-                isLoading: isSectionLoading(section.header)
-            )
-            // Removed onAppear handler - content loading now only triggered by section expansion
-
-        // MARK: - Relevance
-
-        case "Relevance":
-            SectionContentView(
-                section: section,
-                attributedString: getAttributedStringForSection(section.header),
-                isLoading: isSectionLoading(section.header)
-            )
-            // Removed onAppear handler - content loading now only triggered by section expansion
-
-        // MARK: - Context & Perspective
-
-        case "Context & Perspective":
-            SectionContentView(
-                section: section,
-                attributedString: getAttributedStringForSection(section.header),
-                isLoading: isSectionLoading(section.header)
-            )
-            // Removed onAppear handler - content loading now only triggered by section expansion
-
-        // MARK: - Related Articles
-
-        case "Related Articles":
-            VStack(alignment: .leading, spacing: 8) {
-                if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 10) {
-                                ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
-                                    SimilarArticleRow(
-                                        articleDict: article,
-                                        isLastItem: index == similarArticles.count - 1
-                                    )
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 400)
-                    }
-                } else {
-                    VStack(spacing: 6) {
-                        ProgressView()
-                            .padding()
-                        Text("Loading similar articles...")
-                            .font(.callout)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                }
-
-                Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
-                    .font(.footnote)
-                    .padding(.top, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
-
-        // MARK: - Argus Engine Stats
-
-        case "Argus Engine Stats":
-            if let details = section.content as? ArgusDetailsData {
-                if let rawMarkdown = details.systemInfo?["raw_markdown"] as? [String: Any],
-                   let content = rawMarkdown["content"] as? String
-                {
-                    // This means we have raw markdown - display it as text
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Engine Stats (Raw Content)")
-                            .font(.headline)
-                            .padding(.bottom, 4)
-
-                        Text(content)
-                            .font(.system(size: 14))
-                            .textSelection(.enabled)
-                    }
-                    .padding()
-                } else {
-                    // Normal detailed view
-                    ArgusDetailsView(data: details)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else {
-                Text("No engine statistics available.")
-                    .font(.callout)
-                    .foregroundColor(.secondary)
-            }
-
-        // MARK: - Preview
-
-        case "Preview":
-            VStack(spacing: 8) {
-                if let urlString = section.content as? String,
-                   let articleURL = URL(string: urlString)
-                {
-                    SafariView(url: articleURL)
-                        .frame(height: 450)
-                    Button("Open in Browser") {
-                        UIApplication.shared.open(articleURL)
-                    }
-                    .font(.callout)
-                    .padding(.top, 4)
-                } else {
-                    Text("Invalid URL")
-                        .font(.callout)
-                        .frame(height: 450)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-
-        // MARK: - Default fallback
-
-        default:
-            Text(section.content as? String ?? "")
-                .font(.callout)
-                .padding(.top, 6)
-                .lineSpacing(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        }
-    }
-
-    // Helper function to cache attributed strings by section
-    private func cacheAttributedString(_ attributedString: NSAttributedString, for section: String) {
-        switch section {
-        case "Summary":
-            summaryAttributedString = attributedString
-        case "Critical Analysis":
-            criticalAnalysisAttributedString = attributedString
-        case "Logical Fallacies":
-            logicalFallaciesAttributedString = attributedString
-        case "Source Analysis":
-            sourceAnalysisAttributedString = attributedString
-        default:
-            break // Other sections don't have cached properties
-        }
-    }
-
-    private func loadInitialMinimalContent() {
-        // Only proceed if we have a notification
-        guard let article = currentNotification else { return }
-
-        // Log the loading attempt
-        AppLogger.database.debug("Loading initial content for article ID: \(article.id)")
-
-        // Ensure the Summary section is expanded
-        expandedSections["Summary"] = true
-
-        // IMPROVEMENT: Use synchronous loading for critical above-the-fold content
-        // to prevent showing unformatted content first
-        Task {
-            // First, let's load the title and body synchronously to prevent flashing of unformatted content
-            await viewModel.loadMinimalContent()
-
-            // Log minimal content load completion
-            AppLogger.database.debug("✅ Minimal content loaded for article ID: \(article.id)")
-
-            // After minimal content is loaded, force load the Summary section
-            // This ensures proper context preservation via the centralized mechanism
-            loadContentForSection("Summary")
-
-            // Log that we've explicitly loaded the Summary section
-            AppLogger.database.debug("✅ Summary section load triggered for initial view")
-        }
-    }
-
-    struct LazyLoadingContentView<Content: View>: View {
-        let article: ArticleModel
-        let field: RichTextField
-        let placeholder: String
-        var fontSize: CGFloat = 16
-        var onLoad: ((NSAttributedString) -> Void)? = nil
-        @ViewBuilder var content: (NSAttributedString) -> Content
-
-        @State private var loadedAttributedString: NSAttributedString?
-        @State private var isLoading = true
-        @State private var loadTask: Task<Void, Never>? = nil
-        @State private var loadStartTime = Date()
-        @State private var retryCount = 0
-
-        var body: some View {
-            Group {
-                if let attributedString = loadedAttributedString {
-                    // Show the content using the provided view builder
-                    content(attributedString)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else if isLoading {
-                    // Show loading with elapsed time if taking too long
-                    VStack {
-                        ProgressView()
-                            .id(retryCount) // Force refresh of spinner when retrying
-
-                        // Show elapsed time after 1 second
-                        if Date().timeIntervalSince(loadStartTime) > 1.0 {
-                            Text("Loading \(placeholder)... (\(Int(Date().timeIntervalSince(loadStartTime)))s)")
-                                .font(.callout)
-                                .italic()
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text("Loading \(placeholder)...")
-                                .font(.callout)
-                                .italic()
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .frame(minHeight: 50) // Ensure consistent size to prevent layout shifts
-                    .padding(.vertical, 10)
-                    .onAppear {
-                        loadStartTime = Date()
-                        loadContent()
-                    }
-                    .onDisappear {
-                        loadTask?.cancel()
-                    }
-                } else {
-                    // Fallback with retry button if loading fails
-                    Button {
-                        // Reset state and retry loading
-                        isLoading = true
-                        loadStartTime = Date()
-                        retryCount += 1
-                        loadContent()
-                    } label: {
-                        HStack {
-                            Image(systemName: "arrow.clockwise")
-                            Text("Unable to load \(placeholder). Tap to retry.")
-                        }
-                        .font(.callout)
-                        .foregroundColor(.red)
-                        .padding(.top, 6)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-
-        private func loadContent() {
-            // Cancel any previous task
-            loadTask?.cancel()
-
-            // Track start time for diagnostics
-            let startTime = Date()
-            AppLogger.database.debug("LazyLoadingContentView: Loading content for \(SectionNaming.nameForField(field).lowercased())")
-
-            // Only load if we don't already have the content
-            if loadedAttributedString != nil {
-                isLoading = false
-                return
-            }
-
-            // Use a MainActor-constrained task to handle NSAttributedString
-            loadTask = Task { @MainActor in
-                // Try to get content from blob first
-                var loadedFromBlob = false
-                var attributedString: NSAttributedString? = nil
-
-                // Check if we can get this from a blob
-                if let blob = field.getBlob(from: article), !blob.isEmpty {
-                    do {
-                        attributedString = try NSKeyedUnarchiver.unarchivedObject(
-                            ofClass: NSAttributedString.self,
-                            from: blob
-                        )
-                        loadedFromBlob = attributedString != nil
-
-                        if loadedFromBlob {
-                            AppLogger.database.debug("LazyLoadingContentView: Loaded \(SectionNaming.nameForField(field).lowercased()) from blob")
-                        }
-                    } catch {
-                        AppLogger.database.error("LazyLoadingContentView: Failed to unarchive blob: \(error)")
-                    }
-                }
-
-                // If blob failed, generate from markdown
-                if attributedString == nil && !Task.isCancelled {
-                    let textContent = getTextContentFor(field, from: article)
-
-                    if let content = textContent, !content.isEmpty {
-                        attributedString = markdownToAttributedString(
-                            content,
-                            textStyle: "UIFontTextStyleBody",
-                            customFontSize: fontSize
-                        )
-
-                        if attributedString != nil {
-                            AppLogger.database.debug("LazyLoadingContentView: Generated \(SectionNaming.nameForField(field).lowercased()) from markdown")
-                        }
-                    } else {
-                        // Create placeholder content if needed
-                        let fieldName = SectionNaming.nameForField(field).lowercased()
-                        let placeholder = "No \(fieldName) content available."
-                        attributedString = markdownToAttributedString(
-                            placeholder,
-                            textStyle: "UIFontTextStyleBody",
-                            customFontSize: fontSize
-                        )
-                    }
-                }
-
-                // Update UI immediately when content is available
-                if !Task.isCancelled {
-                    // Update our state
-                    self.loadedAttributedString = attributedString
-                    self.isLoading = false
-
-                    // Log completion
-                    let loadTime = Date().timeIntervalSince(startTime)
-                    if let _ = attributedString {
-                        AppLogger.database.debug("LazyLoadingContentView: Completed loading \(SectionNaming.nameForField(field).lowercased()) in \(loadTime) seconds")
-                        if let callback = onLoad, let content = attributedString {
-                            callback(content)
-                        }
-                    } else {
-                        AppLogger.database.error("LazyLoadingContentView: Failed to load \(SectionNaming.nameForField(field).lowercased()) after \(loadTime) seconds")
-                    }
-                }
-            }
-        }
-
-        // Helper function to extract text content from article
-        private func getTextContentFor(_ field: RichTextField, from article: ArticleModel) -> String? {
-            switch field {
-            case .title:
-                return article.title
-            case .body:
-                return article.body
-            case .summary:
-                return article.summary
-            case .criticalAnalysis:
-                return article.criticalAnalysis
-            case .logicalFallacies:
-                return article.logicalFallacies
-            case .sourceAnalysis:
-                return article.sourceAnalysis
-            case .relationToTopic:
-                return article.relationToTopic
-            case .additionalInsights:
-                return article.additionalInsights
-            }
-        }
-
-        // Function removed - using SectionNaming.nameForField directly at call sites
-    }
-
-    // Function removed - using SectionNaming.fieldForSection directly at call sites
-
-    private func loadRelatedArticles() {
-        // Only load if we haven't already loaded the content
-        if expandedSections["Related Articles"] == true {
-            return // Already loaded
-        }
-
-        guard let content = additionalContent,
-              let _ = content["similar_articles"] as? [[String: Any]]
-        else {
-            return
-        }
-
-        // Process the similar articles in a background thread
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Here we'd do any expensive processing like markdown conversion, date parsing, etc.
-
-            // Update the UI on the main thread
-            DispatchQueue.main.async {
-                // Mark the Related Articles section as loaded
-                self.expandedSections["Related Articles"] = true
-            }
-        }
-    }
-
-    private func sourceTypeIcon(for sourceType: String) -> String {
-        switch sourceType.lowercased() {
-        case "press", "news":
-            return "newspaper"
-        case "blog":
-            return "text.bubble"
-        case "academic":
-            return "book"
-        case "government":
-            return "building.columns"
-        case "social media":
-            return "person.2"
-        default:
-            return "doc.text"
-        }
-    }
-
-    private func getSourceTypeColor(_ sourceType: String) -> Color {
-        switch sourceType.lowercased() {
-        case "press", "news":
-            return .blue
-        case "blog":
-            return .orange
-        case "academic", "research":
-            return .purple
-        case "gov", "government":
-            return .green
-        case "opinion":
-            return .red
-        default:
-            return .gray
-        }
-    }
-
-    private func qualityLabel(for quality: Int) -> String {
-        switch quality {
-        case 1: return "Poor"
-        case 2: return "Fair"
-        case 3: return "Good"
-        case 4: return "Strong"
-        default: return "Unknown"
-        }
-    }
-
-    private func updateArticleHeaderStyle() -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Topic pill only
-            HStack(spacing: 8) {
-                if let notification = currentNotification {
-                    if let topic = notification.topic, !topic.isEmpty {
-                        TopicPill(topic: topic)
-                    }
-                }
-            }
-
-            // Title using attributed string
-            if let notification = currentNotification {
-                if let content = additionalContent,
-                   let articleURLString = content["url"] as? String,
-                   let articleURL = URL(string: articleURLString)
-                {
-                    Link(destination: articleURL) {
-                        if let titleString = titleAttributedString {
-                            Text(AttributedString(titleString))
-                                .fontWeight(notification.isViewed ? .regular : .bold)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .multilineTextAlignment(.leading)
-                                .foregroundColor(.blue)
-                        } else {
-                            Text(notification.title)
-                                .font(.headline)
-                                .fontWeight(notification.isViewed ? .regular : .bold)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .multilineTextAlignment(.leading)
-                                .foregroundColor(.blue)
-                        }
-                    }
-                } else {
-                    if let titleString = titleAttributedString {
-                        Text(AttributedString(titleString))
-                            .fontWeight(notification.isViewed ? .regular : .bold)
-                            .foregroundColor(.primary)
-                    } else {
-                        Text(notification.title)
-                            .font(.headline)
-                            .fontWeight(notification.isViewed ? .regular : .bold)
-                            .foregroundColor(.primary)
-                    }
-                }
-            }
-
-            // Publication Date
-            if let notification = currentNotification {
-                Text("Published: \(notification.pub_date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-            }
-
-            // Quality indicator
-            if let notification = currentNotification,
-               let quality = notification.quality ?? notification.argument_quality,
-               quality > 0
-            {
-                HStack(spacing: 2) {
-                    ForEach(0 ..< min(quality, 4), id: \.self) { _ in
-                        Image(systemName: "star.fill")
-                            .foregroundColor(.blue)
-                            .font(.caption)
-                    }
-                    ForEach(0 ..< (4 - min(quality, 4)), id: \.self) { _ in
-                        Image(systemName: "star")
-                            .foregroundColor(.gray)
-                            .font(.caption)
-                    }
-
-                    Text("Article Quality: \(qualityLabel(for: quality))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.leading, 4)
-                }
-            }
-
-            // Body using attributed string
-            if let notification = currentNotification {
-                if let bodyString = bodyAttributedString {
-                    Text(AttributedString(bodyString))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
-                } else {
-                    Text(notification.body)
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
-                }
-
-                // Affected (optional)
-                if !notification.affected.isEmpty {
-                    Text(notification.affected)
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
-                }
-
-                // Domain
-                if let domain = notification.domain, !domain.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(domain)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.blue)
-                            .lineLimit(1)
-
-                        if let content = additionalContent {
-                            QualityBadges(
-                                sourcesQuality: content["sources_quality"] as? Int,
-                                argumentQuality: content["argument_quality"] as? Int,
-                                sourceType: content["sourceType"] as? String,
-                                scrollToSection: $scrollToSection
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .background(currentNotification?.isViewed ?? true ? Color.clear : Color.blue.opacity(0.15))
-    }
-
-    private func processSourceAnalysisContent(_ content: String) -> String {
-        let lines = content.components(separatedBy: .newlines)
-        guard lines.count >= 2 else { return content }
-
-        var pubDateIndex = -1
-        for (index, line) in lines.enumerated() {
-            let lowercaseLine = line.lowercased()
-            if lowercaseLine.starts(with: "publication date") || lowercaseLine.starts(with: "published") {
-                pubDateIndex = index
-                break
-            }
-        }
-
-        if pubDateIndex > 0 && pubDateIndex <= 5 {
-            return lines[pubDateIndex...].joined(separator: "\n")
-        }
-
-        let firstLine = lines[0].lowercased()
-        if firstLine.contains("domain") && firstLine.contains("name") {
-            return lines.dropFirst(3).joined(separator: "\n")
-        }
-
-        return content
+    /// If `content` is actually an `ArgusDetailsData`, return it; else nil.
+    var argusDetails: ArgusDetailsData? {
+        content as? ArgusDetailsData
     }
 }
 
-// MARK: - Supporting Structures
+/// ArgusDetailsView for displaying engine stats
+struct ArgusDetailsView: View {
+    let data: ArgusDetailsData
 
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Generated with \(data.model) in \(String(format: "%.2f", data.elapsedTime)) seconds.")
+                .font(.system(size: 14, weight: .regular, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("Metrics:")
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(formattedStats(data.stats))
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .padding(.leading, 16)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let sysInfo = data.systemInfo {
+                Text("System Information:")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let buildInfo = sysInfo["build_info"] as? [String: Any] {
+                    VStack(alignment: .leading) {
+                        Text("Build Details:")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        FormatBuildInfo(buildInfo)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.leading, 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let runtimeMetrics = sysInfo["runtime_metrics"] as? [String: Any] {
+                    VStack(alignment: .leading) {
+                        Text("Runtime Metrics:")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        FormatRuntimeMetrics(runtimeMetrics)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.leading, 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            Text("Received from Argus on \(data.date, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding()
+        .background(Color.gray.opacity(0.2))
+        .cornerRadius(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func formattedStats(_ stats: String) -> String {
+        let parts = stats.split(separator: ":").map { String($0) }
+        guard parts.count == 6 else {
+            return "Invalid stats format"
+        }
+
+        let numberFormatter = NumberFormatter()
+        numberFormatter.numberStyle = .decimal
+
+        func formattedNumber(_ value: String) -> String {
+            if let number = Int(value), let formatted = numberFormatter.string(from: NSNumber(value: number)) {
+                return formatted
+            }
+            return value
+        }
+
+        let descriptions = [
+            "Articles reviewed: \(formattedNumber(parts[0]))",
+            "Matched: \(formattedNumber(parts[1]))",
+            "Queued to review: \(formattedNumber(parts[2]))",
+            "Life safety queue: \(formattedNumber(parts[3]))",
+            "Matched topics queue: \(formattedNumber(parts[4]))",
+            "Clients: \(formattedNumber(parts[5]))",
+        ]
+
+        return descriptions.joined(separator: "\n")
+    }
+
+    struct FormatBuildInfo: View {
+        let buildInfo: [String: Any]
+
+        init(_ buildInfo: [String: Any]) {
+            self.buildInfo = buildInfo
+        }
+
+        var body: some View {
+            VStack(alignment: .leading) {
+                if let version = buildInfo["version"] as? String {
+                    Text("Version: \(version)")
+                }
+                if let rustVersion = buildInfo["rust_version"] as? String {
+                    Text("Rust: \(rustVersion)")
+                }
+                if let targetOs = buildInfo["target_os"] as? String {
+                    Text("OS: \(targetOs)")
+                }
+                if let targetArch = buildInfo["target_arch"] as? String {
+                    Text("Arch: \(targetArch)")
+                }
+            }
+            .font(.system(size: 12, weight: .regular, design: .monospaced))
+        }
+    }
+
+    struct FormatRuntimeMetrics: View {
+        let metrics: [String: Any]
+
+        init(_ metrics: [String: Any]) {
+            self.metrics = metrics
+        }
+
+        var body: some View {
+            VStack(alignment: .leading) {
+                if let cpuUsage = metrics["cpu_usage_percent"] as? Double {
+                    Text("CPU: \(String(format: "%.2f%%", cpuUsage))")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let memoryTotal = metrics["memory_total_kb"] as? Int {
+                    Text("Total Memory: \(formatMemory(memoryTotal))")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let memoryUsage = metrics["memory_usage_kb"] as? Int {
+                    Text("Used Memory: \(formatMemory(memoryUsage))")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let threadCount = metrics["thread_count"] as? Int {
+                    Text("Threads: \(threadCount)")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let uptime = metrics["uptime_seconds"] as? Int {
+                    Text("Uptime: \(formatUptime(uptime))")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .font(.system(size: 12, weight: .regular, design: .monospaced))
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        private func formatMemory(_ kb: Int) -> String {
+            let units = ["KB", "MB", "GB", "TB"]
+            var value = Double(kb)
+            var unitIndex = 0
+
+            while value >= 1024 && unitIndex < units.count - 1 {
+                value /= 1024
+                unitIndex += 1
+            }
+
+            return String(format: "%.2f %@", value, units[unitIndex])
+        }
+
+        private func formatUptime(_ seconds: Int) -> String {
+            let hours = seconds / 3600
+            let minutes = (seconds % 3600) / 60
+            let secs = seconds % 60
+            return String(format: "%02d:%02d:%02d", hours, minutes, secs)
+        }
+    }
+}
+
+/// SimilarArticleRow for displaying related articles
 struct SimilarArticleRow: View {
     let articleDict: [String: Any]
     // Using the view model directly to get articles and set current index
     // rather than binding to local variables that don't exist anymore
     @State private var viewModelForRow: NewsDetailViewModel? = nil
-    var isLastItem: Bool = false // Add this parameter
+    var isLastItem: Bool = false
 
     @Environment(\.modelContext) private var modelContext
     @State private var showError = false
@@ -2145,197 +1699,7 @@ struct SimilarArticleRow: View {
     }
 }
 
-struct ArgusDetailsData {
-    let model: String
-    let elapsedTime: Double
-    let date: Date
-    let stats: String
-    let systemInfo: [String: Any]?
-}
-
-private struct ContentSection {
-    let header: String
-    let content: Any
-
-    /// If `content` is actually an `ArgusDetailsData`, return it; else nil.
-    var argusDetails: ArgusDetailsData? {
-        content as? ArgusDetailsData
-    }
-}
-
-struct ArgusDetailsView: View {
-    let data: ArgusDetailsData
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Generated with \(data.model) in \(String(format: "%.2f", data.elapsedTime)) seconds.")
-                .font(.system(size: 14, weight: .regular, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text("Metrics:")
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(formattedStats(data.stats))
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                .padding(.leading, 16)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let sysInfo = data.systemInfo {
-                Text("System Information:")
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(.top, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let buildInfo = sysInfo["build_info"] as? [String: Any] {
-                    VStack(alignment: .leading) {
-                        Text("Build Details:")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        FormatBuildInfo(buildInfo)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(.leading, 16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if let runtimeMetrics = sysInfo["runtime_metrics"] as? [String: Any] {
-                    VStack(alignment: .leading) {
-                        Text("Runtime Metrics:")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        FormatRuntimeMetrics(runtimeMetrics)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(.leading, 16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-
-            Text("Received from Argus on \(data.date, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding()
-        .background(Color.gray.opacity(0.2))
-        .cornerRadius(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func formattedStats(_ stats: String) -> String {
-        let parts = stats.split(separator: ":").map { String($0) }
-        guard parts.count == 6 else {
-            return "Invalid stats format"
-        }
-
-        let numberFormatter = NumberFormatter()
-        numberFormatter.numberStyle = .decimal
-
-        func formattedNumber(_ value: String) -> String {
-            if let number = Int(value), let formatted = numberFormatter.string(from: NSNumber(value: number)) {
-                return formatted
-            }
-            return value
-        }
-
-        let descriptions = [
-            "Articles reviewed: \(formattedNumber(parts[0]))",
-            "Matched: \(formattedNumber(parts[1]))",
-            "Queued to review: \(formattedNumber(parts[2]))",
-            "Life safety queue: \(formattedNumber(parts[3]))",
-            "Matched topics queue: \(formattedNumber(parts[4]))",
-            "Clients: \(formattedNumber(parts[5]))",
-        ]
-
-        return descriptions.joined(separator: "\n")
-    }
-
-    struct FormatBuildInfo: View {
-        let buildInfo: [String: Any]
-
-        init(_ buildInfo: [String: Any]) {
-            self.buildInfo = buildInfo
-        }
-
-        var body: some View {
-            VStack(alignment: .leading) {
-                if let version = buildInfo["version"] as? String {
-                    Text("Version: \(version)")
-                }
-                if let rustVersion = buildInfo["rust_version"] as? String {
-                    Text("Rust: \(rustVersion)")
-                }
-                if let targetOs = buildInfo["target_os"] as? String {
-                    Text("OS: \(targetOs)")
-                }
-                if let targetArch = buildInfo["target_arch"] as? String {
-                    Text("Arch: \(targetArch)")
-                }
-            }
-            .font(.system(size: 12, weight: .regular, design: .monospaced))
-        }
-    }
-
-    struct FormatRuntimeMetrics: View {
-        let metrics: [String: Any]
-
-        init(_ metrics: [String: Any]) {
-            self.metrics = metrics
-        }
-
-        var body: some View {
-            VStack(alignment: .leading) {
-                if let cpuUsage = metrics["cpu_usage_percent"] as? Double {
-                    Text("CPU: \(String(format: "%.2f%%", cpuUsage))")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if let memoryTotal = metrics["memory_total_kb"] as? Int {
-                    Text("Total Memory: \(formatMemory(memoryTotal))")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if let memoryUsage = metrics["memory_usage_kb"] as? Int {
-                    Text("Used Memory: \(formatMemory(memoryUsage))")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if let threadCount = metrics["thread_count"] as? Int {
-                    Text("Threads: \(threadCount)")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if let uptime = metrics["uptime_seconds"] as? Int {
-                    Text("Uptime: \(formatUptime(uptime))")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .font(.system(size: 12, weight: .regular, design: .monospaced))
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-
-        private func formatMemory(_ kb: Int) -> String {
-            let units = ["KB", "MB", "GB", "TB"]
-            var value = Double(kb)
-            var unitIndex = 0
-
-            while value >= 1024 && unitIndex < units.count - 1 {
-                value /= 1024
-                unitIndex += 1
-            }
-
-            return String(format: "%.2f %@", value, units[unitIndex])
-        }
-
-        private func formatUptime(_ seconds: Int) -> String {
-            let hours = seconds / 3600
-            let minutes = (seconds % 3600) / 60
-            let secs = seconds % 60
-            return String(format: "%02d:%02d:%02d", hours, minutes, secs)
-        }
-    }
-}
-
+/// ShareSelectionView for sharing article content
 struct ShareSelectionView: View {
     let content: [String: Any]?
     let notification: ArticleModel
@@ -2467,7 +1831,7 @@ struct ShareSelectionView: View {
                         if let systemInfo = details.systemInfo {
                             sectionContent! += formatSystemInfo(systemInfo)
                         }
-                    } else if let engineStats = notification.engineStats {
+                    } else if let engineStats = notification.engine_stats {
                         sectionContent = "Engine Stats: \(engineStats)"
                     }
 
@@ -2602,6 +1966,7 @@ struct ShareSelectionView: View {
     }
 }
 
+/// Activity view controller for sharing content
 struct ActivityViewController: UIViewControllerRepresentable {
     let activityItems: [Any]
     let completion: UIActivityViewController.CompletionWithItemsHandler?
@@ -2615,6 +1980,7 @@ struct ActivityViewController: UIViewControllerRepresentable {
     func updateUIViewController(_: UIActivityViewController, context _: Context) {}
 }
 
+/// SafariView for displaying web content
 struct SafariView: UIViewControllerRepresentable {
     let url: URL
     @AppStorage("useReaderMode") private var useReaderMode: Bool = true
@@ -2626,26 +1992,4 @@ struct SafariView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_: SFSafariViewController, context _: Context) {}
-}
-
-extension NotificationData {
-    // Get the best available URL for this article
-    func getArticleUrl(additionalContent: [String: Any]? = nil) -> String? {
-        // First check for the direct article_url field we added
-        if let directURL = article_url, !directURL.isEmpty {
-            return directURL
-        }
-
-        // If we have the URL cached in additionalContent, use that
-        if let content = additionalContent, let url = content["url"] as? String {
-            return url
-        }
-
-        // Otherwise try to construct a URL from the domain
-        if let domain = domain {
-            return "https://\(domain)"
-        }
-
-        return nil
-    }
 }

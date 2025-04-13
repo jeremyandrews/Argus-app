@@ -128,7 +128,7 @@ final class ArticleService: ArticleServiceProtocol {
 
             if let articleModel = results.first {
                 // Log diagnostics info for debugging
-                let hasEngineStats = articleModel.engineStats != nil
+                let hasEngineStats = articleModel.engine_stats != nil || articleModel.engineDetails != nil
                 let hasSimilarArticles = articleModel.similarArticles != nil
                 let hasTitleBlob = articleModel.titleBlob != nil
                 let hasBodyBlob = articleModel.bodyBlob != nil
@@ -863,94 +863,150 @@ final class ArticleService: ArticleServiceProtocol {
         // Define missing topics to watch for
         let missingTopics = Set(["Rust", "Space", "Tuscany", "Vulnerability"])
         
-        let context = ModelContext(modelContainer)
         var addedCount = 0
         let totalCount = articles.count
         
         // Report initial progress
         progressHandler?(0, totalCount)
-
-        for (index, article) in articles.enumerated() {
-            // Report progress every few articles
-            if index % 2 == 0 || index == totalCount - 1 {
-                progressHandler?(index + 1, totalCount)
-            }
+        
+        // Create a fresh context for this transaction
+        let context = ModelContext(modelContainer)
+        
+        AppLogger.database.debug("🔄 Starting article processing with batched transaction management")
+        
+        // Process articles in batches for better memory management and transactional safety
+        let batchSize = 10
+        for batchStart in stride(from: 0, to: totalCount, by: batchSize) {
+            // Calculate the end index for this batch
+            let batchEnd = min(batchStart + batchSize, totalCount)
+            AppLogger.database.debug("📝 Starting batch \(batchStart/batchSize + 1): articles \(batchStart+1)-\(batchEnd) of \(totalCount)")
             
-            // Special logging for missing topics only
-            if let topic = article.topic, missingTopics.contains(topic) {
-                AppLogger.database.debug("📊 MISSING TOPIC: Processing article with topic '\(topic)' - jsonURL: \(article.jsonURL)")
-            }
-            
-            // Extract the jsonURL for checking duplicates
-            let jsonURLString = article.jsonURL
-
-            // Skip articles with empty jsonURL
-            guard !jsonURLString.isEmpty else {
-                AppLogger.database.warning("Skipping article with empty jsonURL")
-                continue
-            }
-
-            // Efficiently check for duplicates using a direct predicate query
-            let existingArticlePredicate = #Predicate<ArticleModel> { $0.jsonURL == jsonURLString }
-            let existingArticleDescriptor = FetchDescriptor<ArticleModel>(predicate: existingArticlePredicate)
-            let existingArticles = try context.fetch(existingArticleDescriptor)
-
-            if existingArticles.isEmpty {
-                // Create a new ArticleModel
-                let date = Date()
-                let newArticle = ArticleModel(
-                    id: UUID(),
-                    jsonURL: article.jsonURL,
-                    url: article.url,
-                    title: article.title,
-                    body: article.body,
-                    domain: article.domain,
-                    articleTitle: article.articleTitle,
-                    affected: article.affected,
-                    publishDate: article.pubDate ?? date,
-                    addedDate: date,
-                    topic: article.topic,
-                    isViewed: false,
-                    isBookmarked: false,
-                    sourcesQuality: article.sourcesQuality,
-                    argumentQuality: article.argumentQuality,
-                    sourceType: article.sourceType,
-                    sourceAnalysis: article.sourceAnalysis,
-                    quality: article.quality,
-                    summary: article.summary,
-                    criticalAnalysis: article.criticalAnalysis,
-                    logicalFallacies: article.logicalFallacies,
-                    relationToTopic: article.relationToTopic,
-                    additionalInsights: article.additionalInsights
-                )
-
-                context.insert(newArticle)
-
-                // Generate rich text directly on the ArticleModel
-                await generateInitialRichText(for: newArticle)
+            // Process each article in the batch
+            for index in batchStart..<batchEnd {
+                let article = articles[index]
+                
+                // Report progress every few articles
+                if index % 2 == 0 || index == totalCount - 1 {
+                    progressHandler?(index + 1, totalCount)
+                }
                 
                 // Special logging for missing topics only
                 if let topic = article.topic, missingTopics.contains(topic) {
-                    AppLogger.database.debug("✅ MISSING TOPIC: Added new article with topic '\(topic)' - title: \(article.title)")
+                    AppLogger.database.debug("📊 MISSING TOPIC: Processing article with topic '\(topic)' - jsonURL: \(article.jsonURL)")
+                }
+                
+                // Extract the jsonURL for checking duplicates
+                let jsonURLString = article.jsonURL
+
+                // Skip articles with empty jsonURL
+                guard !jsonURLString.isEmpty else {
+                    AppLogger.database.warning("⚠️ Skipping article with empty jsonURL")
+                    continue
                 }
 
-                addedCount += 1
-            } else {
-                // Special logging for missing topics only
-                if let topic = article.topic, missingTopics.contains(topic) {
-                    AppLogger.database.debug("⚠️ MISSING TOPIC: Skipping duplicate article with topic '\(topic)'")
+                // Efficiently check for duplicates using a direct predicate query
+                // All checks and insertions within this batch are part of the same transaction
+                let existingArticlePredicate = #Predicate<ArticleModel> { $0.jsonURL == jsonURLString }
+                let existingArticleDescriptor = FetchDescriptor<ArticleModel>(predicate: existingArticlePredicate)
+                let existingArticles = try context.fetch(existingArticleDescriptor)
+
+                if existingArticles.isEmpty {
+                    // Create a new ArticleModel
+                    let date = Date()
+                    let newArticle = ArticleModel(
+                        id: UUID(),
+                        jsonURL: article.jsonURL,
+                        url: article.url,
+                        title: article.title,
+                        body: article.body,
+                        domain: article.domain,
+                        articleTitle: article.articleTitle,
+                        affected: article.affected,
+                        publishDate: article.pubDate ?? date,
+                        addedDate: date,
+                        topic: article.topic,
+                        isViewed: false,
+                        isBookmarked: false,
+                        sourcesQuality: article.sourcesQuality,
+                        argumentQuality: article.argumentQuality,
+                        sourceType: article.sourceType,
+                        sourceAnalysis: article.sourceAnalysis,
+                        quality: article.quality,
+                        summary: article.summary,
+                        criticalAnalysis: article.criticalAnalysis,
+                        logicalFallacies: article.logicalFallacies,
+                        relationToTopic: article.relationToTopic,
+                        additionalInsights: article.additionalInsights,
+                        
+                        // Add structured engine stats
+                        engineModel: article.engineModel,
+                        engineElapsedTime: article.engineElapsedTime,
+                        engineRawStats: article.engineRawStats,
+                        engineSystemInfo: article.engineSystemInfo,
+                        
+                        similarArticles: article.similarArticles
+                    )
+
+                    context.insert(newArticle)
+                    
+                    // Special logging for missing topics only
+                    if let topic = article.topic, missingTopics.contains(topic) {
+                        AppLogger.database.debug("✅ MISSING TOPIC: Added new article with topic '\(topic)' - title: \(article.title)")
+                    }
+
+                    addedCount += 1
                 } else {
-                    // Log that we're skipping a duplicate (normal logging)
-                    AppLogger.database.debug("Skipping duplicate article with jsonURL: \(jsonURLString)")
+                    // Special logging for missing topics only
+                    if let topic = article.topic, missingTopics.contains(topic) {
+                        AppLogger.database.debug("⚠️ MISSING TOPIC: Skipping duplicate article with topic '\(topic)'")
+                    } else {
+                        // Log that we're skipping a duplicate (normal logging)
+                        AppLogger.database.debug("Skipping duplicate article with jsonURL: \(jsonURLString)")
+                    }
+
+                    // We already have this article - update any missing fields if needed
+                    // This could be expanded to update specific fields that might change
                 }
-
-                // We already have this article - update any missing fields if needed
-                // This could be expanded to update specific fields that might change
             }
+            
+            // Save after each batch to ensure changes are committed
+            // This creates transaction boundaries after each batch
+            try context.save()
+            AppLogger.database.debug("✅ Completed and saved batch \(batchStart/batchSize + 1)")
         }
-
-        // Save changes
-        try context.save()
+        
+        AppLogger.database.debug("✅ All batches processed - added \(addedCount) new articles")
+        
+        // Now that all articles are saved, generate rich text content
+        // This is done as a separate step to avoid overloading the initial insertion transaction
+        if addedCount > 0 {
+            AppLogger.database.debug("⚙️ Generating rich text for \(addedCount) new articles")
+            
+            // Fetch all the new articles we just added
+            var newArticlesFetchDescriptor = FetchDescriptor<ArticleModel>()
+            newArticlesFetchDescriptor.sortBy = [SortDescriptor(\.addedDate, order: .reverse)]
+            newArticlesFetchDescriptor.fetchLimit = addedCount
+            
+            let newArticles = try context.fetch(newArticlesFetchDescriptor)
+            
+            // Process rich text generation in smaller batches too
+            let richTextBatchSize = 5
+            for batchStart in stride(from: 0, to: newArticles.count, by: richTextBatchSize) {
+                let batchEnd = min(batchStart + richTextBatchSize, newArticles.count)
+                AppLogger.database.debug("⚙️ Generating rich text for batch \(batchStart/richTextBatchSize + 1): articles \(batchStart+1)-\(batchEnd) of \(newArticles.count)")
+                
+                for i in batchStart..<batchEnd {
+                    // Generate rich text directly on the ArticleModel
+                    await generateInitialRichText(for: newArticles[i])
+                }
+                
+                // Save after each batch of rich text generation
+                try context.save()
+                AppLogger.database.debug("✅ Completed and saved rich text batch \(batchStart/richTextBatchSize + 1)")
+            }
+            
+            AppLogger.database.debug("✅ Rich text generation completed for all \(addedCount) new articles")
+        }
 
         // Clear cache safely as we have new data
         await withCheckedContinuation { continuation in

@@ -2,6 +2,25 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+/// Structure for storing Argus engine processing details in a strongly-typed format 
+/// This is the canonical definition - do not redefine this struct elsewhere
+struct ArgusDetailsData {
+    /// The model used for processing (e.g., "mistral-small:24b-instruct-2501-fp16")
+    let model: String
+    
+    /// Processing time in seconds (e.g., 232.673831761)
+    let elapsedTime: Double
+    
+    /// When the article was processed
+    let date: Date
+    
+    /// Raw statistics string (e.g., "324871:41249:327:3:11:30")
+    let stats: String
+    
+    /// Additional system information
+    let systemInfo: [String: Any]?
+}
+
 /// SwiftData model for articles
 @Model
 final class ArticleModel: Equatable {
@@ -117,9 +136,18 @@ final class ArticleModel: Equatable {
     var additionalInsightsBlob: Data?
 
     // MARK: - Additional Metadata
-
-    /// Statistics about the AI engine processing
-    var engineStats: String?
+    
+    /// Engine model identifier (e.g., "mistral-small:24b-instruct-2501-fp16")
+    var engineModel: String?
+    
+    /// Processing time in seconds (e.g., 232.673831761)
+    var engineElapsedTime: Double?
+    
+    /// Raw statistics string (e.g., "324871:41249:327:3:11:30")
+    var engineRawStats: String?
+    
+    /// Serialized system information (JSON data)
+    var engineSystemInfoData: Data?
 
     /// Related articles data
     var similarArticles: String?
@@ -155,7 +183,13 @@ final class ArticleModel: Equatable {
         logicalFallacies: String? = nil,
         relationToTopic: String? = nil,
         additionalInsights: String? = nil,
+        // Legacy field - we'll parse it if provided
         engineStats: String? = nil,
+        // New engine stats fields
+        engineModel: String? = nil,
+        engineElapsedTime: Double? = nil,
+        engineRawStats: String? = nil,
+        engineSystemInfo: [String: Any]? = nil,
         similarArticles: String? = nil,
         titleBlob: Data? = nil,
         bodyBlob: Data? = nil,
@@ -190,7 +224,33 @@ final class ArticleModel: Equatable {
         self.logicalFallacies = logicalFallacies
         self.relationToTopic = relationToTopic
         self.additionalInsights = additionalInsights
-        self.engineStats = engineStats
+        // Handle new engine stats fields:
+        self.engineModel = engineModel
+        self.engineElapsedTime = engineElapsedTime
+        self.engineRawStats = engineRawStats
+        
+        // Serialize system info if provided
+        if let systemInfo = engineSystemInfo {
+            self.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: systemInfo)
+        }
+        
+        // If no structured data but we have engineStats, try to parse it
+        if (engineModel == nil || engineElapsedTime == nil || engineRawStats == nil) && engineStats != nil {
+            if let data = engineStats?.data(using: .utf8),
+               let engineDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                
+                // Parse the engine stats and extract structured fields
+                self.engineModel = self.engineModel ?? engineDict["model"] as? String
+                self.engineElapsedTime = self.engineElapsedTime ?? engineDict["elapsed_time"] as? Double
+                self.engineRawStats = self.engineRawStats ?? engineDict["stats"] as? String
+                
+                // If we have system info and no existing engine system info data
+                if self.engineSystemInfoData == nil, let sysInfo = engineDict["system_info"] as? [String: Any] {
+                    self.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
+                }
+            }
+        }
+        
         self.similarArticles = similarArticles
         self.titleBlob = titleBlob
         self.bodyBlob = bodyBlob
@@ -225,6 +285,32 @@ final class ArticleModel: Equatable {
         return regenerateAllBlobs(for: self)
     }
 
+    /// Computed property to access the system info
+    var engineSystemInfo: [String: Any]? {
+        get {
+            guard let data = engineSystemInfoData else { return nil }
+            return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        }
+    }
+    
+    /// Computed property for structured engine stats data
+    var engineDetails: ArgusDetailsData? {
+        // Only generate if we have the essential fields
+        guard let model = engineModel,
+              let elapsed = engineElapsedTime,
+              let stats = engineRawStats else {
+            return nil
+        }
+        
+        return ArgusDetailsData(
+            model: model,
+            elapsedTime: elapsed,
+            date: addedDate,
+            stats: stats,
+            systemInfo: engineSystemInfo
+        )
+    }
+    
     public static func == (lhs: ArticleModel, rhs: ArticleModel) -> Bool {
         return lhs.id == rhs.id
     }
@@ -436,8 +522,51 @@ extension ArticleModel {
 
     /// The engine_stats property of the notification data (renamed to match NotificationData)
     var engine_stats: String? {
-        get { return engineStats }
-        set { engineStats = newValue }
+        get {
+            // If we have the structured fields, reconstruct a JSON string
+            if let model = engineModel, let elapsedTime = engineElapsedTime, let stats = engineRawStats {
+                let dict: [String: Any] = [
+                    "model": model,
+                    "elapsed_time": elapsedTime,
+                    "stats": stats
+                ]
+                
+                // Add system info if available
+                if let sysInfo = engineSystemInfo {
+                    var fullDict = dict
+                    fullDict["system_info"] = sysInfo
+                    if let data = try? JSONSerialization.data(withJSONObject: fullDict),
+                       let jsonString = String(data: data, encoding: .utf8) {
+                        return jsonString
+                    }
+                } else {
+                    // Without system info
+                    if let data = try? JSONSerialization.data(withJSONObject: dict),
+                       let jsonString = String(data: data, encoding: .utf8) {
+                        return jsonString
+                    }
+                }
+            }
+            
+            // If we don't have structured fields or serialization failed, return nil
+            return nil
+        }
+        set {
+            // Parse the new value and update structured fields
+            if let newValue = newValue, let data = newValue.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                
+                // Extract structured fields
+                self.engineModel = dict["model"] as? String
+                self.engineElapsedTime = dict["elapsed_time"] as? Double
+                self.engineRawStats = dict["stats"] as? String
+                
+                // Handle system info
+                if let sysInfo = dict["system_info"] as? [String: Any] {
+                    self.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
+                }
+            }
+        }
     }
 
     /// The similar_articles property of the notification data (renamed to match NotificationData)
