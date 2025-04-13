@@ -113,6 +113,16 @@ To complete the remaining **Legacy Code Removal** work:
 
 ## Recently Completed
 
+- ✅ **Fixed Database Duplicate Content Issue** (Completed):
+  - Resolved issue where duplicate articles were appearing in the database during sync operations
+  - Implemented batched transaction management in `processRemoteArticles` with clear transaction boundaries
+  - Articles are now processed in small batches with explicit saves after each batch
+  - Added comprehensive logging to track transaction progress and article processing
+  - Rich text generation now happens in separate batches after article insertion is complete
+  - Eliminated race conditions by ensuring each batch is fully committed before processing the next
+  - Implemented standard SwiftData patterns for proper transaction management
+  - Solution works reliably even when sync is interrupted and restarted
+
 - ✅ **Verified AppDelegate and Bootstrap Code** (Completed):
   - Performed comprehensive code review of `AppDelegate.swift` and `ArgusApp.swift`
   - Confirmed successful transition to use ArticleService directly in all app bootstrap code:

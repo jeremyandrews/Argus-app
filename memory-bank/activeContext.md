@@ -98,6 +98,25 @@ To complete the Legacy Code Removal phase, we should focus on:
 
 ## Current Work Focus
 
+- **Fixed Database Duplicate Content Issue** (Completed):
+  - Successfully identified and resolved issue where duplicate articles were being added to database during sync operations
+  - Root cause analysis revealed potential race conditions in the article processing flow:
+    - Articles could be processed twice if a sync was interrupted and restarted
+    - The single transaction save at the end of processing created a window for race conditions
+    - Different ModelContext instances might not see each other's uncommitted changes
+  - Implementation details:
+    - Refactored `processRemoteArticles` in ArticleService to use batched transaction management
+    - Articles are now processed in batches of 10 with explicit transaction boundaries (context.save())
+    - Each batch is an atomic operation with duplicate checks within the same transaction
+    - Rich text generation happens in separate batches of 5 articles after all inserts are completed
+    - Added comprehensive logging to track transaction boundaries and batch progress
+  - Key improvements:
+    - Each batch is committed to the database before the next batch starts, preventing partial sync issues
+    - Duplicate checks now see fully committed records from previous batches
+    - Processing in smaller batches improves performance and memory usage
+    - Transaction boundaries provide clean restart points if sync is interrupted
+    - No more duplicate articles even if sync is exited and restarted
+
 - **Improved Sync Status Indicator with Real-Time Feedback** (Completed):
   - Enhanced the article download process to provide per-article progress updates:
     - Modified `APIClient.fetchArticles` to accept a progressHandler parameter
