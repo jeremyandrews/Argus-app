@@ -113,6 +113,15 @@ To complete the remaining **Legacy Code Removal** work:
 
 ## Recently Completed
 
+- ✅ **Fixed Argus Engine Stats Display** (Completed):
+  - Resolved issues with displaying engine metrics in the article detail view
+  - Fixed JSON parsing logic to properly extract fields using snake_case naming (elapsed_time, system_info)
+  - Rebuilt supporting UI components needed for stats display (ArgusDetailsView, ContentSection)
+  - Added proper formatting for metrics data with a clean, organized display
+  - Implemented robust error handling with appropriate fallbacks for missing data
+  - Enhanced NewsDetailView.swift architecture to properly handle all needed components
+  - Added comprehensive documentation of the implementation pattern
+
 - ✅ **Fixed Database Duplicate Content Issue** (Completed):
   - Resolved issue where duplicate articles were appearing in the database during sync operations
   - Implemented batched transaction management in `processRemoteArticles` with clear transaction boundaries

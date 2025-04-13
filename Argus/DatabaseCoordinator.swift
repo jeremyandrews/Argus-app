@@ -716,7 +716,10 @@ actor DatabaseCoordinator {
                 logicalFallacies: articleJSON.logicalFallacies,
                 relationToTopic: articleJSON.relationToTopic,
                 additionalInsights: articleJSON.additionalInsights,
-                engineStats: articleJSON.engineStats,
+                engineModel: articleJSON.engineModel,
+                engineElapsedTime: articleJSON.engineElapsedTime,
+                engineRawStats: articleJSON.engineRawStats,
+                engineSystemInfo: articleJSON.engineSystemInfo,
                 similarArticles: articleJSON.similarArticles
             )
 
@@ -890,8 +893,14 @@ actor DatabaseCoordinator {
         article.relationToTopic = data.relationToTopic
         article.additionalInsights = data.additionalInsights
 
-        // Update metadata
-        article.engineStats = data.engineStats
+        // Update metadata - use the individual engine fields
+        article.engineModel = data.engineModel
+        article.engineElapsedTime = data.engineElapsedTime
+        article.engineRawStats = data.engineRawStats
+        // Handle system info serialization
+        if let sysInfo = data.engineSystemInfo {
+            article.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
+        }
         article.similarArticles = data.similarArticles
     }
 
@@ -933,8 +942,29 @@ actor DatabaseCoordinator {
         article.relation_to_topic = data.relationToTopic
         article.additional_insights = data.additionalInsights
 
-        // Update metadata
-        article.engine_stats = data.engineStats
+        // Update metadata - Build engine_stats from individual fields
+        if let model = data.engineModel, 
+           let elapsedTime = data.engineElapsedTime,
+           let stats = data.engineRawStats {
+            // Create engine stats dictionary as a var since we modify it
+            var engineStatsDict: [String: Any] = [
+                "model": model,
+                "elapsed_time": elapsedTime,
+                "stats": stats
+            ]
+            
+            // Add system info if available
+            if let systemInfo = data.engineSystemInfo {
+                engineStatsDict["system_info"] = systemInfo
+            }
+            
+            // Serialize to JSON string
+            if let engineStatsData = try? JSONSerialization.data(withJSONObject: engineStatsDict),
+               let engineStatsString = String(data: engineStatsData, encoding: .utf8) {
+                article.engine_stats = engineStatsString
+            }
+        }
+        
         article.similar_articles = data.similarArticles
     }
 
@@ -1218,6 +1248,12 @@ extension DatabaseCoordinator {
         let sourcesQuality = json["sources_quality"] as? Int
         let argumentQuality = json["argument_quality"] as? Int
         let quality: Int? = (json["quality"] as? Double).map { Int($0) }
+        
+        // Extract engine stats fields directly from the JSON
+        let engineModel = json["model"] as? String
+        let engineElapsedTime = json["elapsed_time"] as? Double
+        let engineRawStats = json["stats"] as? String
+        let engineSystemInfo = json["system_info"] as? [String: Any]
 
         // Create the article JSON object
         return ArticleJSON(
@@ -1240,7 +1276,10 @@ extension DatabaseCoordinator {
             logicalFallacies: json["logical_fallacies"] as? String,
             relationToTopic: json["relation_to_topic"] as? String,
             additionalInsights: json["additional_insights"] as? String,
-            engineStats: extractEngineStats(from: json),
+            engineModel: engineModel,
+            engineElapsedTime: engineElapsedTime,
+            engineRawStats: engineRawStats,
+            engineSystemInfo: engineSystemInfo,
             similarArticles: extractSimilarArticles(from: json)
         )
     }

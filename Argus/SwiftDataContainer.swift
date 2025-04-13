@@ -81,6 +81,10 @@ class SwiftDataContainer {
             SeenArticleModel.self,
             TopicModel.self,
         ])
+        
+        // Skip migration plan since it's causing issues in Swift 6
+        // We'll implement schema evolution differently if needed later
+        // No migration plan needed for now
 
         // Storage path
         let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -141,7 +145,7 @@ class SwiftDataContainer {
 
             // Use persistent storage with a dedicated test database name
             print("Creating persistent SwiftData container at: \(dbPath.path)")
-            let localConfig = ModelConfiguration(url: dbPath)
+            let localConfig = ModelConfiguration(schema: schema, url: dbPath)
 
             do {
                 container = try ModelContainer(for: schema, configurations: [localConfig])
@@ -178,7 +182,10 @@ class SwiftDataContainer {
                 )
 
                 do {
-                    let emergencyConfig = ModelConfiguration(url: tempURL)
+                    // Create emergency config inside the do block
+                    let emergencyConfig = ModelConfiguration(schema: schema, url: tempURL)
+                    
+                    // This line can throw an error
                     container = try ModelContainer(for: schema, configurations: [emergencyConfig])
 
                     ModernizationLogger.log(

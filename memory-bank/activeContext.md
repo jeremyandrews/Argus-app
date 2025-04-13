@@ -98,6 +98,32 @@ To complete the Legacy Code Removal phase, we should focus on:
 
 ## Current Work Focus
 
+- **Fixed Argus Engine Stats Display** (Completed):
+  - Resolved issues with engine stats display in NewsDetailView:
+    - Fixed JSON field parsing for proper data extraction from API responses
+    - Modified `parseEngineStatsJSON` to handle snake_case field names from backend API (`elapsed_time`, `system_info`)
+    - Implemented proper fallback mechanisms for missing or malformed data
+    - Enhanced the UI components to display engine statistics in a user-friendly format
+  - Implementation details:
+    - Rebuilt supporting data models and UI components that were needed for displaying stats:
+      - Added `ContentSection` struct for representing section data
+      - Created specialized `ArgusDetailsView` for displaying engine metrics
+      - Implemented `SimilarArticleRow` for related articles section
+      - Added sharing capabilities with `ShareSelectionView` and `ActivityViewController`
+    - Added robust JSON parsing to extract critical fields:
+      - `model`: Engine model name (e.g., "mistral-small:24b-instruct-2501-fp16")
+      - `elapsed_time`: Processing duration in seconds
+      - `stats`: Article processing metrics in colon-separated format
+      - `system_info`: Build information and runtime metrics
+    - Enhanced content dictionary building to properly transfer engine stats data
+    - Implemented helper methods for formatting and displaying engine statistics
+  - Key improvements:
+    - Users can now see comprehensive statistics about AI processing for each article
+    - Proper display of processing time, model version, and metrics
+    - Consistent rendering of stats across all articles regardless of source
+    - Robust error handling with sensible defaults for missing data
+    - Smooth integration with existing NewsDetailView architecture
+
 - **Fixed Database Duplicate Content Issue** (Completed):
   - Successfully identified and resolved issue where duplicate articles were being added to database during sync operations
   - Root cause analysis revealed potential race conditions in the article processing flow:

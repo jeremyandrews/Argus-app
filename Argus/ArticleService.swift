@@ -128,7 +128,7 @@ final class ArticleService: ArticleServiceProtocol {
 
             if let articleModel = results.first {
                 // Log diagnostics info for debugging
-                let hasEngineStats = articleModel.engineStats != nil
+                let hasEngineStats = articleModel.engine_stats != nil || articleModel.engineDetails != nil
                 let hasSimilarArticles = articleModel.similarArticles != nil
                 let hasTitleBlob = articleModel.titleBlob != nil
                 let hasBodyBlob = articleModel.bodyBlob != nil
@@ -936,7 +936,15 @@ final class ArticleService: ArticleServiceProtocol {
                         criticalAnalysis: article.criticalAnalysis,
                         logicalFallacies: article.logicalFallacies,
                         relationToTopic: article.relationToTopic,
-                        additionalInsights: article.additionalInsights
+                        additionalInsights: article.additionalInsights,
+                        
+                        // Add structured engine stats
+                        engineModel: article.engineModel,
+                        engineElapsedTime: article.engineElapsedTime,
+                        engineRawStats: article.engineRawStats,
+                        engineSystemInfo: article.engineSystemInfo,
+                        
+                        similarArticles: article.similarArticles
                     )
 
                     context.insert(newArticle)

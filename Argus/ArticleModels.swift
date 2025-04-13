@@ -20,7 +20,13 @@ struct ArticleJSON {
     let logicalFallacies: String?
     let relationToTopic: String?
     let additionalInsights: String?
-    let engineStats: String?
+    
+    // Engine stats fields
+    let engineModel: String?
+    let engineElapsedTime: Double?
+    let engineRawStats: String?
+    let engineSystemInfo: [String: Any]?
+    
     let similarArticles: String?
 }
 
@@ -44,7 +50,13 @@ struct PreparedArticle {
     let logicalFallacies: String?
     let relationToTopic: String?
     let additionalInsights: String?
-    let engineStats: String?
+    
+    // Structured engine stats
+    let engineModel: String?
+    let engineElapsedTime: Double?
+    let engineRawStats: String?
+    let engineSystemInfo: [String: Any]?
+    
     let similarArticles: String?
 }
 
@@ -69,7 +81,13 @@ func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
         logicalFallacies: input.logicalFallacies,
         relationToTopic: input.relationToTopic,
         additionalInsights: input.additionalInsights,
-        engineStats: input.engineStats,
+        
+        // Pass the structured engine stats fields
+        engineModel: input.engineModel,
+        engineElapsedTime: input.engineElapsedTime,
+        engineRawStats: input.engineRawStats,
+        engineSystemInfo: input.engineSystemInfo,
+        
         similarArticles: input.similarArticles
     )
 }
@@ -92,6 +110,12 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     let argumentQuality = json["argument_quality"] as? Int
     let sourceType = json["source_type"] as? String
 
+    // Extract structured engine stats fields directly from the JSON
+    let engineModel = json["model"] as? String
+    let engineElapsedTime = json["elapsed_time"] as? Double
+    let engineRawStats = json["stats"] as? String
+    let engineSystemInfo = json["system_info"] as? [String: Any]
+    
     return ArticleJSON(
         // Required fields from above guard statement
         title: title, // Maps from local "title" to ArticleJSON.title (originally from "tiny_title")
@@ -131,7 +155,13 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         logicalFallacies: json["logical_fallacies"] as? String, // "logical_fallacies" → "logicalFallacies"
         relationToTopic: json["relation_to_topic"] as? String, // "relation_to_topic" → "relationToTopic"
         additionalInsights: json["additional_insights"] as? String, // "additional_insights" → "additionalInsights"
-        engineStats: json["engine_stats"] as? String, // "engine_stats" → "engineStats"
+        
+        // Structured engine stats fields
+        engineModel: engineModel,
+        engineElapsedTime: engineElapsedTime,
+        engineRawStats: engineRawStats,
+        engineSystemInfo: engineSystemInfo,
+        
         similarArticles: json["similar_articles"] as? String // "similar_articles" → "similarArticles"
     )
 }
