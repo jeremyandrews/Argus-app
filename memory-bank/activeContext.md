@@ -78,6 +78,72 @@
 
 ## Recent Changes
 
+- **Fixed Article Navigation Flicker Issue** (Completed):
+  - Resolved visual issue when navigating between articles using chevron buttons:
+    - Problem symptoms: When navigating to a new article, three different states would display in rapid succession:
+      1. First showing the article as bold/unread
+      2. Then showing it with unformatted content
+      3. Finally showing it with properly formatted content
+    - Root cause: The UI was being updated with unformatted content before formatted blobs were extracted
+  - Implementation details:
+    - Modified `navigateToArticle(direction:)` in `NewsDetailViewModel.swift` to use a content-first approach:
+      ```swift
+      // Extract formatted content from blobs BEFORE updating the UI
+      var extractedTitle: NSAttributedString? = nil
+      var extractedBody: NSAttributedString? = nil
+      var extractedSummary: NSAttributedString? = nil
+      
+      // After extraction is complete, update the UI in a single operation
+      await MainActor.run {
+          // CRITICAL: Set formatted content BEFORE triggering UI refresh
+          titleAttributedString = extractedTitle
+          bodyAttributedString = extractedBody
+          summaryAttributedString = extractedSummary
+          
+          // Force UI refresh AFTER all content is ready
+          contentTransitionID = UUID()
+          scrollToTopTrigger = UUID()
+      }
+      ```
+    - Took advantage of the fact that title and body blobs are always available in the database
+    - Restructured code to extract all blob content first, then update UI only once with fully formatted content
+    - Removed unused variables causing compiler warnings
+  - Results:
+    - Navigation between articles now shows only the final formatted state with no flickering
+    - No intermediate unformatted content is displayed during transitions
+    - Improved user experience with smoother, more professional transitions
+    - Eliminated jarring content changes that were distracting when reviewing multiple articles
+  - Key learnings:
+    - When working with formatted content, it's better to wait until all content is ready before updating UI
+    - The content-first approach (versus UI-first) provides a better user experience for rich content
+    - Taking advantage of pre-generated blobs can significantly improve performance
+    - Single UI updates are less jarring than staged UI updates
+
+- **Fixed Cloud Build String Extension Issue** (Completed):
+  - Resolved build error that occurred in Apple's cloud build but not in local Xcode build:
+    - Error symptoms: `Value of type 'String' has no member 'extractDomain'` in DatabaseCoordinator.swift
+    - Root cause: In cloud builds, String extensions defined in other files may not be visible across file boundaries
+  - Implementation details:
+    - Modified `DatabaseCoordinator.swift` to use the private standalone function instead of calling it as an extension method:
+      ```swift
+      // Before:
+      let domain = url.extractDomain()
+      
+      // After:
+      let domain = extractDomain(from: url)
+      ```
+    - Used the already existing private function implementation in DatabaseCoordinator.swift
+    - Maintained identical functionality while ensuring compatibility with cloud build environments
+  - Results:
+    - App now builds successfully in Apple's cloud build environment
+    - No functional changes, just improved build reliability
+    - Consistent domain extraction behavior between local and cloud builds
+  - Key learnings:
+    - Cloud build environments may process files differently than local Xcode builds
+    - Prefer using local functions over extensions when working across file boundaries in cloud builds
+    - Using standalone functions creates more predictable behavior across different build environments
+    - This pattern aligns with previous fixes for similar issues in other parts of the app
+
 - **Fixed Cloud Build Domain Extraction Scope Error** (Completed):
   - Resolved build error that occurred in Apple's cloud build but not in local Xcode build:
     - Error symptoms: `Cannot find 'extractDomain' in scope` in DatabaseCoordinator.swift and ArticleModels.swift
@@ -458,149 +524,4 @@
   - Added typed key constants to avoid stringly-typed programming
   - Implemented computed properties for all relevant UserDefaults settings
   - Used modern iOS 18+ patterns with Combine publishers for reactive settings updates
-  - Achieved real-time UI updates in response to settings changes without app restart
-  - Fixed inconsistency between SettingsView and NewsViewModel default values
-
-- **Fixed App Badge Count Issues** (Completed):
-  - Resolved issues with the app badge not showing unread count:
-    - Fixed database model mismatch:
-      - Changed NotificationUtils to query ArticleModel through ArticleService instead of querying legacy NotificationData model
-      - Created new `countUnviewedArticles()` method in ArticleService that uses the correct SwiftData model
-      - Added comprehensive error handling and logging to track badge count numbers
-    - Added notification permission check:
-      - Created `hasNotificationPermission()` method to verify if user has granted notification permissions
-      - Added guard clause to prevent badge updates when permissions aren't granted
-      - Implemented warning logs when permissions are missing to aid in debugging
-    - Fixed Swift 6 concurrency issues:
-      - Added @MainActor annotation to countUnviewedArticles() to properly isolate SwiftData context access
-      - Properly accessed SwiftData context from the main actor without crossing actor boundaries
-      - Removed await from main actor-isolated property that would have violated Swift 6 sendability rules
-    - Improved logging with correct components:
-      - Used articleService component instead of non-existent database component in ModernizationLogger
-      - Added detailed logging at each step of the badge update process
-    - Previous fixes (still relevant):
-      - Fixed API methods from previous update: `UNUserNotificationCenter.setBadgeCount(count, withCompletionHandler:)`
-      - Maintained proper debounce logic to prevent excessive badge updates
-      - Ensured updates happen at all required lifecycle events
-  - Key lessons for future development:
-    - Always add @MainActor annotation when accessing SwiftData contexts in methods
-    - Never use await when accessing main actor-isolated properties from @MainActor-annotated code
-    - Always check notification permissions before attempting to update badges
-    - Query the correct database model when models have been migrated
-    - Use comprehensive error handling and logging when working with system APIs
-
-- **Investigated Missing Engine Stats and Related Articles Issues** (In Progress):
-  - Found clues about chevron navigation issues:
-    - Diagnostic logging in ArticleService.swift shows awareness of potential missing fields
-    - Debug checks show that engine_stats and similar_articles might exist in database 
-      but not be properly transferred during conversion between models
-    - NavigationTypes.swift implementation appears correct with shared enum
-    - The NavigationDirection enums are used consistently in the codebase
-  - Potential issue areas:
-    - ArticleModelAdapter conversion between SwiftData ArticleModel and legacy NotificationData
-    - Data handling during NewsDetailViewModel.navigateToArticle method execution
-    - Potential disconnect between what's in the database and what's loaded during navigation
-    - Loading sequence might not preserve all fields when navigating between articles
-  - Further investigation needed:
-    - Trace complete data flow during chevron navigation
-    - Add more diagnostic logging around model conversion
-    - Verify complete article loading during navigation includes all required fields
-
-- **Improved Article Content Loading in NewsDetailView** (In Progress, Partially Successful):
-  - Addressed two key issues with article content display in NewsDetailView:
-    - Problem 1: Body initially showing unformatted text before switching to formatted version
-    - Problem 2: Sections repeatedly converting from Markdown to Blob when closed and reopened
-  - Implemented consistent content loading pattern across all sections:
-    - Modified all section content views to use `getAttributedStringForSection()` helper method
-    - Fixed Summary, Critical Analysis, Logical Fallacies sections to use the standard pattern
-    - Updated both Relevance and Context & Perspective sections to use the same content loading 
-    - Removed redundant cached attributed strings in favor of centralized caching in the ViewModel
-  - Technical implementation:
-    - Fixed cases where we were using local cached variables instead of ViewModel's cached content
-    - Used `replace_in_file` tool to systematically update all content sections with consistent pattern
-    - ViewModel now properly handles content loading and caching for all section types
-    - Consolidated the pattern for both Markdown-to-blob conversion and blob loading
-    - Eliminated inconsistent access patterns that were causing repeated conversions
-  - Current state:
-    - Progress made but not fully resolved yet
-    - Body sometimes still shows unformatted text briefly before formatted version appears
-    - Some sections may still require repeated conversion in certain scenarios
-    - Underlying architectural issues with context preservation and blob management remain
-  - Key learnings:
-    - Content loading should follow a consistent pattern across the app
-    - All content sections should use the same ViewModel-based caching mechanism
-    - The ViewModel should be the single source of truth for formatted content
-    - Section handling benefits from a unified approach rather than section-specific implementations
-
-- **Fixed Article Opening in NewsDetailView** (Completed):
-  - Resolved critical issue where tapping an article would mark it as read but not open the detail view:
-    - Root cause identified: Filter changes occurring between article tap and detail view presentation
-    - Log evidence: `Could not find article index for presentation: [article-id]` appearing after filters were applied
-    - Article was being lost from the filtered list during async operations, preventing its index from being found
-  - Technical implementation:
-    - Modified `openArticle()` method in NewsView+Extensions.swift to use a snapshot-based approach:
-      ```swift
-      // STEP 1: Take a snapshot of the current filtered articles immediately
-      let articlesSnapshot = viewModel.filteredArticles
-      
-      // STEP 2: Find the index in our snapshot (which won't change during async operations)
-      guard let index = articlesSnapshot.firstIndex(where: { $0.id == article.id }) else {
-          AppLogger.database.error("Article not found in filtered articles: \(article.id)")
-          return
-      }
-      
-      // STEP 3: Create view model with our snapshot
-      let detailViewModel = NewsDetailViewModel(
-          articles: articlesSnapshot,
-          allArticles: viewModel.allArticles,
-          currentIndex: index,
-          initiallyExpandedSection: "Summary"
-      )
-      ```
-    - Moved the presentation logic before any async operations to ensure immediate UI response
-    - Kept blob generation and article marking as read in the background after view is presented
-    - Added detailed logging for better diagnostic capability in the future
-  - Results:
-    - Articles now immediately open in NewsDetailView when tapped
-    - Read status is still properly updated in the background
-    - Chevron navigation between articles works correctly
-    - Blob generation happens as a background operation, not blocking the UI
-  - Key learnings:
-    - Async operations in SwiftUI require careful handling of state that might change during awaits
-    - Taking snapshots of state before async operations prevents race conditions
-    - UI operations should be prioritized before background data operations
-    - A viewModel should be configured completely before presenting the associated view
-    - Logging both success and failure paths is essential for debugging future issues
-
-- **Enhanced Empty State Screen with Detailed Information** (Completed):
-  - Improved the "No news is good news" empty state screen to provide helpful context and actionable information:
-    - Original issue: Screen only displayed minimal text ("RSS Fed" and "No unread articles found") without context
-    - Users had no visibility into active subscriptions, filters, or actions they could take to see content
-  - Technical implementation:
-    - Added subscription information section showing active subscriptions or a message if none are found
-    - Added filter status information section showing which filters are currently active
-    - Added explanation text when filters might be hiding content
-    - Added a prominent "Sync Now" button for immediate content retrieval
-    - Created helper method `getActiveSubscriptions()` to extract active subscription data from viewModel
-    - Used consistent visual styling for all informational sections
-  - Results:
-    - Empty state screen now provides comprehensive context about why no articles are showing
-    - Users can see which topics they're subscribed to at a glance
-    - Filter status is clearly visible with indications of active filters
-    - Clear path to action with sync button and filter adjustment suggestions
-  - Key learnings:
-    - Empty states should provide context about the current system state, not just indicate absence
-    - Showing active filters and subscriptions helps users understand why they might not see content
-    - Providing clear actions allows users to resolve the empty state themselves
-    - Helper methods for extracting and formatting data improve code maintainability
-
-## Next Steps
-
-- Continue improving NewsDetailView with further optimizations to content loading
-- Review and fix the remaining blob loading issues in NewsDetailView rendering
-- Continue working on the migration path to fully transition from NotificationData to ArticleModel
-- Fix the remaining concurrency issues in NewsView.swift:
-  - Update asynchronous calls in non-async functions
-  - Address unreachable catch blocks in loadFullContent()
-- Refine the migration process to ensure smooth data transition between models
-- Investigate and fix the issues in ArticleModelAdapter with proper field conversion between models
+  - Achieved real-time

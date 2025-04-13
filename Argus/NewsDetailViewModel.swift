@@ -221,153 +221,121 @@ final class NewsDetailViewModel: ObservableObject {
 
         // Save current index to log the change
         let oldIndex = currentIndex
-
-        // Create a timer to show loading indicator only if operation takes too long
-        let loadingTimerTask = Task {
-            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-            if !Task.isCancelled {
-                await MainActor.run {
-                    isLoadingNextArticle = true
-                }
-            }
-        }
-
-        // Update the index but DON'T clear the current article yet
-        // This ensures the view always has an article to display
-        currentIndex = nextIndex
-
-        // CRITICAL: Update currentArticle immediately with basic version
-        // This ensures the view always has content even while loading better content
-        currentArticle = targetArticle
-
-        // Reset expanded sections
-        expandedSections = Self.getDefaultExpandedSections()
-
-        // Force refresh UI to show the transition
-        contentTransitionID = UUID() // Generate a new transition ID to ensure UI updates properly
-        scrollToTopTrigger = UUID()
-
-        // Reset attributed strings but don't regenerate yet
-        clearRichTextContent()
-
-        // Fetch and display the article - use a high priority task
+        
+        // IMPORTANT: Instead of immediately updating UI with unformatted content,
+        // we'll extract formatted blobs first and only then update the UI
         Task(priority: .userInitiated) {
-            do {
-                // Start timing for diagnostics
-                let startTime = Date()
-
-                // Log for debugging with more context
-                AppLogger.database.debug("🔄 Navigating from index \(oldIndex) to \(nextIndex) (article ID: \(nextArticleId))")
-                AppLogger.database.debug("🔍 Container: \(String(describing: SwiftDataContainer.shared.container))")
-
-                // Get a fresh ArticleModel with valid context for blob persistence
-                let model = await articleOperations.getArticleModelWithContext(byId: nextArticleId)
-
-                // Store the ArticleModel for future blob saving operations
+            // Start timing for diagnostics
+            let startTime = Date()
+            AppLogger.database.debug("🔄 Navigating from index \(oldIndex) to \(nextIndex) (article ID: \(nextArticleId))")
+            AppLogger.database.debug("🔍 Container: \(String(describing: SwiftDataContainer.shared.container))")
+            
+            // Create a loading timer that will only show loading indicator if operation takes too long
+            let loadingTimerTask = Task {
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                if !Task.isCancelled {
+                    await MainActor.run {
+                        isLoadingNextArticle = true
+                    }
+                }
+            }
+            
+            // 1. Get a fresh ArticleModel with valid context
+            let model = await articleOperations.getArticleModelWithContext(byId: nextArticleId)
+            
+            // 2. Extract formatted content from blobs BEFORE updating the UI
+            var extractedTitle: NSAttributedString? = nil
+            var extractedBody: NSAttributedString? = nil
+            var extractedSummary: NSAttributedString? = nil
+            
+            if let model = model {
+                // Log model details for diagnostics
+                AppLogger.database.debug("""
+                ✅ Retrieved ArticleModel with ID: \(model.id)
+                - Has context: \(model.modelContext != nil)
+                - Has title blob: \(model.titleBlob != nil)
+                - Has body blob: \(model.bodyBlob != nil)
+                - Has summary blob: \(model.summaryBlob != nil)
+                """)
+                
+                // Extract title blob (should always be available)
+                if let titleBlob = model.titleBlob {
+                    extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self,
+                        from: titleBlob
+                    )
+                }
+                
+                // Extract body blob (should always be available)
+                if let bodyBlob = model.bodyBlob {
+                    extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self,
+                        from: bodyBlob
+                    )
+                }
+                
+                // Extract summary blob if available
+                if let summaryBlob = model.summaryBlob {
+                    extractedSummary = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self,
+                        from: summaryBlob
+                    )
+                }
+            }
+            
+            // 3. Now that we have all formatted content, update the UI all at once
+            await MainActor.run {
+                // Update the index
+                currentIndex = nextIndex
+                
+                // Clear previous content
+                clearRichTextContent()
+                
+                // Update model references
                 if let model = model {
-                    await MainActor.run {
-                        self.currentArticleModel = model
-                    }
-
-                    // Log model details for diagnostics
-                    AppLogger.database.debug("""
-                    ✅ Retrieved ArticleModel with ID: \(model.id)
-                    - Has context: \(model.modelContext != nil)
-                    - Has title blob: \(model.titleBlob != nil)
-                    - Has body blob: \(model.bodyBlob != nil)
-                    - Has summary blob: \(model.summaryBlob != nil)
-                    """)
-
-                    // Extract blobs immediately - this is critical for formatting
-                    var extractedTitle: NSAttributedString? = nil
-                    var extractedBody: NSAttributedString? = nil
-                    var extractedSummary: NSAttributedString? = nil
-
-                    // Try to get content from blobs
-                    if let titleBlob = model.titleBlob {
-                        extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
-                            ofClass: NSAttributedString.self,
-                            from: titleBlob
-                        )
-                    }
-
-                    if let bodyBlob = model.bodyBlob {
-                        extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
-                            ofClass: NSAttributedString.self,
-                            from: bodyBlob
-                        )
-                    }
-
-                    if let summaryBlob = model.summaryBlob {
-                        extractedSummary = try? NSKeyedUnarchiver.unarchivedObject(
-                            ofClass: NSAttributedString.self,
-                            from: summaryBlob
-                        )
-                    }
-
-                    // Update the UI with all data at once
-                    await MainActor.run {
-                        // Apply extracted blob data - critical for formatted display
-                        titleAttributedString = extractedTitle
-                        bodyAttributedString = extractedBody
-                        summaryAttributedString = extractedSummary
-
-                        // Force refresh
-                        contentTransitionID = UUID()
-                    }
-
-                    // Mark as viewed after we have the article
-                    try? await markAsViewed()
-
-                    // Generate any missing content
-                    if titleAttributedString == nil || bodyAttributedString == nil {
-                        await loadMinimalContent()
-                        AppLogger.database.debug("⚙️ Generated missing title/body content for article \(nextArticleId)")
-                    }
-
-                    // Generate summary if needed - Summary is expanded by default
-                    if expandedSections["Summary"] == true && summaryAttributedString == nil {
-                        loadContentForSection("Summary")
-                        AppLogger.database.debug("⚙️ Generated missing summary content for article \(nextArticleId)")
-                    }
-
-                    // Log timing for diagnostics
-                    let loadTime = Date().timeIntervalSince(startTime)
-                    AppLogger.database.debug("✅ Article \(nextArticleId) loaded in \(String(format: "%.3f", loadTime)) seconds")
+                    currentArticleModel = model
+                    currentArticle = model
                 } else {
-                    // Failed to get article model with context
-                    AppLogger.database.error("❌ Could not retrieve ArticleModel with context for ID: \(nextArticleId)")
-
-                    // Even if we fail to get the complete article, we still have the basic one
-                    await MainActor.run {
-                        // Force refresh with available article
-                        contentTransitionID = UUID()
-                    }
-
-                    // Always generate content for what we have
-                    await loadMinimalContent()
-                }
-            }
-
-            // Final safety check outside any error handling
-            // Ensure we always have an article to display
-            if currentArticle == nil {
-                await MainActor.run {
+                    // Fallback if model retrieval failed
                     currentArticle = targetArticle
-                    AppLogger.database.error("❌ No article after navigation, restored fallback article")
                 }
-
-                // Generate content for what we have as a fallback
-                await loadMinimalContent()
+                
+                // CRITICAL: Set formatted content BEFORE triggering UI refresh
+                titleAttributedString = extractedTitle
+                bodyAttributedString = extractedBody
+                summaryAttributedString = extractedSummary
+                
+                // Reset expanded sections
+                expandedSections = Self.getDefaultExpandedSections()
+                
+                // Force UI refresh AFTER all content is ready
+                contentTransitionID = UUID()
+                scrollToTopTrigger = UUID()
             }
-
-            // Cancel the loading timer task if it's still running
+            
+            // After UI is updated, mark as viewed
+            try? await markAsViewed()
+            
+            // Only generate missing content if extraction failed
+            if titleAttributedString == nil || bodyAttributedString == nil {
+                await loadMinimalContent()
+                AppLogger.database.debug("⚙️ Generated missing title/body content for article \(nextArticleId)")
+            }
+            
+            // Generate summary content if needed and expanded
+            if expandedSections["Summary"] == true && summaryAttributedString == nil {
+                loadContentForSection("Summary")
+                AppLogger.database.debug("⚙️ Generated missing summary content for article \(nextArticleId)")
+            }
+            
+            // Cancel the loading timer task and clear loading state
             loadingTimerTask.cancel()
-
-            // Always clear loading state at the end
             await MainActor.run {
                 isLoadingNextArticle = false
             }
+            
+            let loadTime = Date().timeIntervalSince(startTime)
+            AppLogger.database.debug("✅ Article \(nextArticleId) loaded in \(String(format: "%.3f", loadTime)) seconds")
         }
     }
 
