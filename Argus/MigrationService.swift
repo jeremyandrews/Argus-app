@@ -2,6 +2,37 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+/**
+ * MigrationService - Core implementation of the data migration process
+ *
+ * This service is responsible for migrating data from the legacy SQLite database to
+ * the new SwiftData storage system. It handles the actual migration process, including
+ * batch processing, progress tracking, and error handling.
+ *
+ * ## Primary Responsibilities
+ * - Fetch articles from legacy system
+ * - Convert legacy NotificationData to new ArticleModel format
+ * - Migrate article relationships and metadata
+ * - Preserve rich text blobs during migration
+ * - Track migration progress for resilience against interruptions
+ * - Report migration status and performance metrics
+ *
+ * ## Dependencies
+ * - MigrationAwareArticleService: Provides access to legacy data
+ * - SwiftDataContainer: Provides access to new SwiftData storage
+ * - DatabaseCoordinator: Accesses legacy database
+ * - MigrationTypes: Uses shared data structures for migration state
+ *
+ * ## Removal Considerations
+ * - Contains direct references to legacy database schema
+ * - Handles all database migration logic
+ * - Should be removed after verifying all users have migrated
+ * - Remove after UI components but before MigrationCoordinator
+ * - When removing, verify UserDefaults migration state is properly preserved
+ *
+ * @see migration-removal-plan.md for complete removal strategy
+ */
+
 /// Service responsible for migrating data from the old database to SwiftData
 /// - Note: This service intentionally uses deprecated MigrationAwareArticleService since
 ///         it's specifically designed for the one-time migration process.

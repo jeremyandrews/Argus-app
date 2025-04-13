@@ -1,6 +1,33 @@
 import SwiftData
 import SwiftUI
 
+/**
+ * MigrationView - UI component for displaying and initiating migration
+ *
+ * This view provides the user interface for viewing migration status and manually
+ * triggering the migration process from the Settings screen. It displays migration
+ * progress, status, and allows users to initiate or continue migration.
+ *
+ * ## Primary Responsibilities
+ * - Display migration status and progress
+ * - Provide manual migration trigger in Settings
+ * - Present MigrationModalView when migration is in progress
+ * - Show completion status after migration
+ *
+ * ## Dependencies
+ * - MigrationCoordinator: For migration state and control
+ * - SwiftDataContainer: For database access
+ * - MigrationModalView: Modal UI shown during active migration
+ *
+ * ## Removal Considerations
+ * - Should be removed after the migration system is no longer needed
+ * - Remove along with MigrationModalView in Phase 2 (UI Component Removal)
+ * - Update SettingsView to remove the section that displays this view
+ * - No functionality in this component should be preserved
+ *
+ * @see migration-removal-plan.md for complete removal strategy
+ */
+
 /// View for triggering migration from Settings
 struct MigrationView: View {
     @ObservedObject private var coordinator = MigrationCoordinator.shared

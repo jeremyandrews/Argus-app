@@ -2,6 +2,34 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+/**
+ * MigrationAwareArticleService - Compatibility layer for the migration process
+ *
+ * This service acts as a bridge between the legacy database system and the new ArticleService.
+ * It implements ArticleServiceProtocol but forwards most operations to the regular ArticleService,
+ * while providing migration-specific methods for accessing legacy data during migration.
+ *
+ * ## Primary Responsibilities
+ * - Forward standard operations to ArticleService
+ * - Provide migration-specific methods for legacy data access
+ * - Handle state synchronization during migration
+ * - Ensure data consistency between old and new storage systems
+ *
+ * ## Dependencies
+ * - ArticleService: Handles all standard operations
+ * - MigrationAdapter: Converts between legacy and modern data models
+ * - DatabaseCoordinator: Provides access to legacy database
+ *
+ * ## Removal Considerations
+ * - Already marked with deprecation notices
+ * - All clients should be using ArticleService directly before removal
+ * - May be complex to remove due to potential lingering references
+ * - Remove during Phase 3 (Service Component Removal)
+ * - When removing, verify no external components depend on it
+ *
+ * @see migration-removal-plan.md for complete removal strategy
+ */
+
 /// A specialized ArticleService implementation that handles one-time migration needs
 /// This service acts as a bridge during the one-time migration process
 @available(*, deprecated, message: "Use ArticleService directly. This class exists only for the one-time migration process and will be removed in a future update.")

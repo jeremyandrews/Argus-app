@@ -1,5 +1,30 @@
 import SwiftUI
 
+/**
+ * MigrationOverlay - Visual component for displaying migration progress
+ *
+ * This view provides a semi-transparent overlay that displays migration progress, 
+ * status, and performance metrics during the migration process. It's designed to
+ * be shown on top of other content to indicate migration is in progress.
+ *
+ * ## Primary Responsibilities
+ * - Display migration progress with animations
+ * - Show real-time migration status and metrics
+ * - Present error messages if migration encounters problems
+ * - Auto-dismiss when migration completes
+ *
+ * ## Dependencies
+ * - MigrationService: For migration state, progress and metrics
+ *
+ * ## Removal Considerations
+ * - Should be removed along with other migration UI components
+ * - Remove during Phase 2 (UI Component Removal)
+ * - No functionality needs to be preserved
+ * - Simplest of the UI components to remove as it has no direct references from app bootstrap code
+ *
+ * @see migration-removal-plan.md for complete removal strategy
+ */
+
 /// Migration overlay view for visual progress
 struct MigrationOverlay: View {
     @ObservedObject var migrationService: MigrationService

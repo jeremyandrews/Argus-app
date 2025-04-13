@@ -50,10 +50,11 @@
 
 To complete the remaining **Legacy Code Removal** work:
 
-1. **Audit remaining UI components**:
-   - Identify and update any remaining UI components still directly using NotificationData
-   - Check ShareSelectionView specifically (this file was not accessible during review)
-   - Ensure all components use ArticleModel or the compatibility extensions
+1. ✅ **Audit remaining UI components** (Completed):
+   - ✅ Identified and updated UI components still directly using NotificationData
+   - ✅ Verified ShareSelectionView is already using ArticleModel directly
+   - ✅ Ensured all components use ArticleModel or the compatibility extensions
+   - ✅ Confirmed no remaining direct NotificationData references in UI components
 
 2. ✅ **Verify AppDelegate and bootstrap code** (Completed):
    - ✅ Confirmed all app bootstrap code has been updated to use ArticleService directly
@@ -62,10 +63,21 @@ To complete the remaining **Legacy Code Removal** work:
    - ✅ Push notification handling correctly uses ArticleService implementation
    - ✅ CloudKit integration is properly implemented with health monitoring
 
-3. **Document migration components for future removal**:
-   - Create documentation in code comments about migration components
-   - Document dependencies between migration components
-   - Outline removal steps for a future cleanup phase
+3. ✅ **Document migration components for future removal** (Completed):
+   - ✅ Added comprehensive documentation in code comments to all migration components:
+     - MigrationCoordinator.swift - Central entry point
+     - MigrationService.swift - Core implementation
+     - MigrationTypes.swift - Shared data structures
+     - MigrationAwareArticleService.swift - Compatibility layer
+     - MigrationView.swift - Settings UI component
+     - MigrationModalView.swift - Full-screen migration UI
+     - MigrationOverlay.swift - Visual progress component
+   - ✅ Created detailed memory-bank/migration-removal-plan.md with:
+     - Dependency mapping between components
+     - Phased removal approach (4 phases)
+     - Testing strategy for validation
+     - Timeline recommendations
+   - ✅ Added cross-references between files and the central removal plan
 
 4. **Maintain migration system integrity**:
    - Preserve the one-time migration architecture without breaking changes

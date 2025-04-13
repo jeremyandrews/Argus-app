@@ -1,6 +1,30 @@
 import Foundation
 import SwiftUI
 
+/**
+ * MigrationTypes - Core data structures for the migration system
+ *
+ * This file contains the shared data structures used throughout the migration system.
+ * These types facilitate state tracking, progress reporting, and error handling during
+ * the one-time migration process from legacy storage to SwiftData.
+ *
+ * ## Primary Components
+ * - MigrationState: Enum tracking various migration phases
+ * - MigrationProgress: Structure for storing detailed migration progress
+ * - MigrationError: Migration-specific error types
+ * - MigrationMetrics: Performance tracking for migration operations
+ *
+ * ## Dependencies
+ * - None (this file is imported by other migration components)
+ *
+ * ## Removal Considerations
+ * - Should be removed after all components that reference it are removed
+ * - No types have leaked into public interfaces outside the migration system
+ * - Can be safely removed as part of Phase 4 (Final Cleanup)
+ *
+ * @see migration-removal-plan.md for complete removal strategy
+ */
+
 /// Tracks the state of the data migration process
 enum MigrationState: String, Codable {
     case notStarted

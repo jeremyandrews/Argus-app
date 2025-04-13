@@ -75,10 +75,21 @@ To complete the Legacy Code Removal phase, we should focus on:
    - ✅ Push notification handling uses modern ArticleService implementation
    - ✅ Article presentation and database statistics properly use ArticleModel
 
-3. **Document migration components for future removal**:
-   - Create documentation in code comments about migration components
-   - Document dependencies between migration components
-   - Outline removal steps for a future cleanup phase
+3. ✅ **Document migration components for future removal** (Completed):
+   - ✅ Created comprehensive documentation in code comments across all migration components:
+     - ✅ MigrationCoordinator.swift: Documented as the central entry point with dependencies and removal path
+     - ✅ MigrationService.swift: Documented core implementation and responsibilities
+     - ✅ MigrationTypes.swift: Documented shared data structures used by migration components
+     - ✅ MigrationAwareArticleService.swift: Documented compatibility layer and deprecation strategy
+     - ✅ MigrationView.swift: Documented UI component for displaying migration status
+     - ✅ MigrationModalView.swift: Documented full-screen modal UI during migration
+     - ✅ MigrationOverlay.swift: Documented visual progress component
+   - ✅ Created detailed removal plan in memory-bank/migration-removal-plan.md with:
+     - ✅ Dependency mapping between all migration components
+     - ✅ Phased removal approach with specific steps
+     - ✅ Testing strategy to validate removal doesn't break functionality
+     - ✅ Timeline recommendations for removal
+   - ✅ Added @see references between files pointing to the central removal plan
 
 4. **Maintain migration system integrity**:
    - Preserve the one-time migration architecture without breaking changes
