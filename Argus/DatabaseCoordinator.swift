@@ -1197,7 +1197,7 @@ extension DatabaseCoordinator {
 
         let jsonURL = json["json_url"] as? String ?? ""
         let url = json["url"] as? String ?? json["article_url"] as? String ?? ""
-        let domain = url.extractDomain()
+        let domain = extractDomain(from: url)
 
         // Extract date if available
         var pubDate: Date?
