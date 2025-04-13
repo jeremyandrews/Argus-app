@@ -1,20 +1,21 @@
 # System Patterns: Argus iOS App
 
 ## Architecture Overview
-Argus implements a client-side architecture that focuses on:
-1. Synchronizing with the backend server
+Argus implements a modern MVVM architecture with SwiftData persistence:
+1. Synchronizing with the backend server using async/await
 2. Local data persistence with SwiftData
-3. UI rendering with SwiftUI
-4. Background processing and notifications
+3. UI rendering with SwiftUI and MVVM pattern
+4. Background processing and notifications with modern Swift concurrency
 5. CloudKit integration for cross-device syncing
 
 ```mermaid
 flowchart TD
     Backend["Backend Server"]
     BGTaskManager["BackgroundTaskManager"]
+    ApiClient["APIClient"]
     ArticleSvc["ArticleService"]
-    MigAdapter["MigrationAdapter"]
-    DbCoord["DatabaseCoordinator (Actor)"]
+    ArticleOps["ArticleOperations"]
+    ViewModels["ViewModels"]
     LocalStorage["SwiftData"]
     NotificationSystem["Notification System"]
     UI["SwiftUI Views"]
@@ -23,13 +24,14 @@ flowchart TD
     CloudKitRC["CloudKitRequestCoordinator (Actor)"]
     CloudKit["CloudKit"]
     
+    Backend <--> ApiClient
     Backend <--> BGTaskManager
-    Backend <--> ArticleSvc
-    MigAdapter --> BGTaskManager
-    MigAdapter --> ArticleSvc
+    ApiClient <--> ArticleSvc
     ArticleSvc --> LocalStorage
-    DbCoord <--> LocalStorage
-    LocalStorage --> UI
+    ArticleOps --> ArticleSvc
+    ViewModels --> ArticleOps
+    UI --> ViewModels
+    LocalStorage --> ViewModels
     Backend --> NotificationSystem
     NotificationSystem --> UI
     
@@ -42,89 +44,113 @@ flowchart TD
 ## Key Components
 
 ### Data Flow
-- **APIClient**: Handles all communication with the backend server
-- **SyncManager**: Orchestrates data synchronization between local storage and backend
-- **DatabaseCoordinator**: Thread-safe actor that centralizes all database operations (Swift 6 compliant)
-- **BackgroundContextManager**: Manages background tasks and sync operations
+- **APIClient**: Handles all communication with the backend server using async/await
+- **ArticleService**: Implements ArticleServiceProtocol with full SwiftData integration
+- **ArticleOperations**: Business logic layer for article operations
+- **BackgroundTaskManager**: Manages background tasks and sync operations with modern Swift concurrency
 
-### UI Components
-- **ContentView**: Main container view that handles navigation
-- **NewsView**: Displays the list of news articles
-- **NewsDetailView**: Shows the full article with AI insights
-- **SubscriptionsView**: Manages user subscriptions
-- **SettingsView**: Handles user preferences
+### UI Components (MVVM Pattern)
+- **SwiftUI Views**: 
+  - **ContentView**: Main container view that handles navigation
+  - **NewsView**: Displays the list of news articles
+  - **NewsDetailView**: Shows the full article with AI insights
+  - **SubscriptionsView**: Manages user subscriptions
+  - **SettingsView**: Handles user preferences
+- **ViewModels**:
+  - **NewsViewModel**: Manages article list state and operations
+  - **NewsDetailViewModel**: Handles article detail view state and interactions
+  - Both implement @MainActor and use @Published properties for reactive UI updates
+
+### Data Models
+- **ArticleModel**: SwiftData model with @Model annotation
+- **SeenArticleModel**: SwiftData model for tracking viewed articles
+- **TopicModel**: SwiftData model for topic management
+- All models include proper relationships with appropriate cascade rules
 
 ### Data Processing
 - **MarkdownUtilities**: Converts Markdown content to rich text with synchronized generation
 - **QualityBadges**: Visual indicators for article quality metrics
-- **ArticleModels**: Data models for articles and related entities
+- **ArticleDataModels**: SwiftData models for articles and related entities
 - **ArrayExtensions**: Provides utility extensions like chunking for batch processing
 
 ### System Services
 - **NotificationUtils**: Manages push notifications
 - **Logger**: Handles application logging
+- **ModernizationLogger**: Specialized logging for transition period diagnostics
 
 ## Design Patterns
 
-### Actor Pattern
-The DatabaseCoordinator is implemented as a Swift actor to provide thread-safe access to the database. It ensures proper isolation and prevents concurrent access issues. All database operations are funneled through this coordinator.
-
-```swift
-actor DatabaseCoordinator {
-    // Isolated state and operations
-    
-    func performTransaction<T>(_ operation: String, _ block: @Sendable (isolated DatabaseCoordinator, ModelContext) async throws -> T) async throws -> T {
-        // Transaction handling with proper concurrency
-    }
-}
-```
-
-### Observer Pattern
-Used for reactive UI updates when data changes, primarily through SwiftUI's @Published properties and ObservableObject protocol.
-
-### Repository Pattern
-The SyncManager acts as a repository, abstracting the data source from the UI components. It now delegates to the DatabaseCoordinator for all database operations, creating a clean separation of concerns:
+### MVVM (Model-View-ViewModel)
+The app has been fully refactored to follow the MVVM pattern:
 
 ```mermaid
 flowchart LR
-    UI["UI Components"]
-    SM["SyncManager"]
-    DC["DatabaseCoordinator"]
-    DB["SwiftData"]
-    
-    UI -->|"Requests data"| SM
-    SM -->|"Delegates DB operations"| DC
-    DC -->|"Thread-safe access"| DB
-    UI -->|"Direct optimized queries"| DC
+    subgraph "MVVM Pattern"
+        Model["Model\n(SwiftData)"]
+        ViewModel["ViewModel\n(@Published properties)"]
+        View["View\n(SwiftUI)"]
+        
+        Model <--> ViewModel
+        ViewModel --> View
+        View -- "User Actions" --> ViewModel
+    end
 ```
 
-The ArticleService similarly acts as a repository, but adds CloudKit awareness:
+- **Models**: ArticleModel, SeenArticleModel, and TopicModel with SwiftData annotations
+- **Views**: SwiftUI views like NewsView, NewsDetailView with minimal business logic
+- **ViewModels**: NewsViewModel, NewsDetailViewModel as ObservableObjects with @Published properties
+
+Key MVVM implementations:
+- ViewModels are properly isolated with @MainActor
+- Business logic is located in ViewModels, not in Views
+- Data access is mediated through ArticleOperations
+- State changes are reflected through @Published properties
+- UI updates reactively based on ViewModel changes
+
+### Repository Pattern
+The ArticleService acts as a repository, implementing the ArticleServiceProtocol:
 
 ```mermaid
 flowchart LR
     UI["UI Components"]
     VM["ViewModels"]
+    AO["ArticleOperations"]
     AS["ArticleService"]
     CK["CloudKit"]
     SD["SwiftData"]
-    CKHM["CloudKitHealthMonitor"]
     
     UI --> VM
-    VM --> AS
+    VM --> AO
+    AO --> AS
     AS -->|"Sync data"| CK
     AS -->|"Local storage"| SD
-    CKHM -->|"Health status"| AS
-    AS -->|"Storage mode switch"| SD
 ```
 
-The UI components (particularly NewsView) now have two data access paths:
-1. Through SyncManager for general operations and data synchronization
-2. Directly to DatabaseCoordinator for optimized, filtered queries like topic switching
+Key repository features:
+- Complete implementation of ArticleServiceProtocol
+- Thread-safety using serial dispatch queue for cache operations
+- Comprehensive error handling and error propagation
+- Three-phase loading approach for rich text content
+- Robust caching strategy with proper invalidation
 
-### MVVM (Model-View-ViewModel)
-- **Models**: ArticleModels, representing the core data
-- **Views**: SwiftUI views like NewsView, NewsDetailView
-- **ViewModels**: Implemented as ObservableObjects that prepare data for views
+### Actor Pattern
+CloudKit operations are implemented using the Swift actor pattern to provide thread-safe access:
+
+```swift
+actor CloudKitRequestCoordinator {
+    // Isolated state and operations
+    
+    func enqueueRequest<T>(_ operation: String, priority: OperationPriority, _ block: @Sendable () async throws -> T) async throws -> T {
+        // Request handling with proper concurrency
+    }
+}
+```
+
+### Observer Pattern
+Used for reactive UI updates when data changes, primarily through:
+- SwiftUI's @Published properties
+- ObservableObject protocol conformance
+- Combine-based observation for UserDefaults changes
 
 ### CloudKit Integration Patterns
 
@@ -203,60 +229,21 @@ This pattern ensures:
 - Periodic background checks attempt recovery automatically
 
 ## Background Processing
-Uses Swift's background task framework to perform sync operations when the app is in the background. CloudKit health checks are scheduled using BGTaskScheduler to run periodically when the app is in the background.
+The BackgroundTaskManager implements modern Swift concurrency patterns:
+- Uses Swift's BGTaskScheduler for system background tasks
+- Implements async/await for asynchronous operations
+- Properly handles task timeout and cancellation
+- Manages network connectivity requirements
+- Provides intelligent scheduling based on user activity patterns
 
 ## Concurrency Patterns
 
-### Actor-based Isolation
-- Ensures thread safety for database operations
-- Prevents race conditions and data corruption
-- Compliant with Swift 6's stricter concurrency rules
-- Handles non-Sendable types like NSAttributedString with proper boundaries
-- Implements defensive design patterns to avoid SwiftData context access issues
-
-### Actor Dependency Initialization Pattern
-The project uses a specialized pattern for initializing classes that depend on actors, particularly handling the "self captured before all members were initialized" error:
-
-```mermaid
-flowchart TD
-    A[1. Initialize properties to nil/default values]
-    B[2. Complete initialization of all properties]
-    C[3. Call separate method to create async tasks]
-    D[4. Use weak-strong self pattern in tasks]
-    E[5. Implement timeout-protected accessor methods]
-    
-    A --> B --> C --> D --> E
-```
-
-Implementation steps:
-1. Start with optional properties for async dependencies: `private var actorDependency: SomeActor?`
-2. Complete full initialization with nil values: `self.actorDependency = nil`
-3. Create a separate method for async tasks: `createInitializationTaskIfNeeded()`
-4. Use weak-strong pattern in async tasks to avoid retain cycles:
-   ```swift
-   weak var weakSelf = self
-   Task {
-     let dependency = await SomeActor.shared
-     if let strongSelf = weakSelf {
-       await MainActor.run {
-         strongSelf.actorDependency = dependency
-       }
-     }
-   }
-   ```
-5. Implement accessor methods with timeout protection:
-   ```swift
-   private func getInitializedDependency() async throws -> SomeActor {
-     if let dependency = actorDependency { return dependency }
-     
-     // Wait with timeout for initialization
-     return try await withTimeout(duration: .seconds(5)) {
-       try await initializationTask!.value
-     }
-   }
-   ```
-
-This pattern is used in services like MigrationAwareArticleService to handle DatabaseCoordinator dependencies safely.
+### Modern Swift Concurrency
+- All network operations use async/await instead of completion handlers
+- Background processing uses structured concurrency with task groups
+- Proper timeout and cancellation handling
+- MainActor isolation for UI components
+- Actor-based isolation for shared resources
 
 ### Two-Tier Cache for Topic Switching
 - Uses in-memory caching for immediate UI feedback during topic changes
@@ -266,8 +253,9 @@ This pattern is used in services like MigrationAwareArticleService to handle Dat
 
 ### Main Actor Constraints
 - UI-related operations are explicitly tagged with @MainActor
-- LazyLoadingContentView uses MainActor-constrained tasks for safe UI updates
+- ViewModels use @MainActor annotation for thread safety
 - Prevents "called from background thread" warnings with proper context switching
+- Rich text generation properly isolated to avoid UI thread blocking
 
 ### Task Management
 - Uses structured concurrency with Task groups
@@ -431,7 +419,7 @@ try deletionContext.save()
 This pattern avoids the EXC_BAD_ACCESS crashes and freezes that can occur when SwiftData attempts to maintain relationship integrity during deletion operations.
 
 ## Communication Patterns
-- RESTful API calls to the backend server
+- RESTful API calls to the backend server using async/await
 - Push notifications for high-priority content
 - Local notifications for background sync completion
 - Notification Center for internal app communication
@@ -459,131 +447,76 @@ This pattern avoids the EXC_BAD_ACCESS crashes and freezes that can occur when S
 - Mocked API responses for testing network-dependent features
 - Stress testing for concurrency robustness
 
-## Planned Architectural Evolution
+## Current Architecture Implementation Status
 
-Argus is scheduled for a significant architectural modernization to address existing limitations and improve overall performance and maintainability.
+The Argus app has successfully implemented most of the planned architectural modernization, with only the final legacy code removal step remaining.
 
-### From Current Architecture to MVVM + SwiftData
-
-The current architecture will evolve from its current state to a more modern implementation:
-
-```mermaid
-flowchart TD
-    subgraph "Current Architecture"
-        Backend1["Backend Server"]
-        SyncManager1["SyncManager"]
-        DbCoord1["DatabaseCoordinator (Actor)"]
-        LocalStorage1["SwiftData"]
-        UI1["SwiftUI Views with\nEmbedded Logic"]
-    end
-    
-    subgraph "Target Architecture"
-        Backend2["Backend Server"]
-        ApiClient["API Client\n(async/await)"]
-        ArticleService["ArticleService\n(Repository)"]
-        SwiftData["SwiftData"]
-        ViewModel["ViewModels"]
-        UI2["SwiftUI Views"]
-    end
-    
-    Backend1 --> SyncManager1
-    SyncManager1 --> DbCoord1
-    DbCoord1 --> LocalStorage1
-    LocalStorage1 --> UI1
-    
-    Backend2 --> ApiClient
-    ApiClient --> ArticleService
-    ArticleService --> SwiftData
-    SwiftData --> ViewModel
-    ViewModel --> UI2
-```
-
-### Key Architectural Changes
-
-#### 1. MVVM Pattern Implementation
-
-The current architecture follows a pattern closer to MVC with SwiftUI, where views contain significant amounts of business logic. This will be refactored to a proper MVVM (Model-View-ViewModel) pattern:
-
-- **Models**: SwiftData models representing core data structures
-- **Views**: SwiftUI views with minimal logic, focused on presentation
-- **ViewModels**: New layer that will manage state, business logic, and data preparation for views
+### Completed Modernization Steps
 
 ```mermaid
 flowchart LR
-    subgraph "MVVM Pattern"
-        Model["Model\n(SwiftData)"]
-        ViewModel["ViewModel\n(@Published properties)"]
-        View["View\n(SwiftUI)"]
-        
-        Model <--> ViewModel
-        ViewModel --> View
-        View -- "User Actions" --> ViewModel
-    end
-```
-
-#### 2. SwiftData Migration
-
-The current database implementation will be migrated to SwiftData, Apple's declarative persistence framework:
-
-- Current models will be annotated with SwiftData's `@Model` macro
-- Fetch descriptors will be replaced with SwiftData queries
-- `DatabaseCoordinator` will be phased out in favor of SwiftData's context management
-- Model relationships will be explicitly defined with SwiftData annotations
-
-#### 3. Modern Swift Concurrency
-
-The current architecture uses a mix of completion handlers, Combine, and actors. The modernization will standardize on Swift's concurrency model:
-
-- All network calls will use `async/await` instead of completion handlers
-- Background tasks will use structured concurrency with task groups
-- Proper cancellation handling for background tasks
-- Elimination of callback-based code in favor of await expressions
-
-```mermaid
-flowchart TD
-    subgraph "Current" 
-        A1[API Call] --> B1[Completion Handler]
-        B1 --> C1[Update Database]
-        C1 --> D1[Notify UI]
+    subgraph "Completed Steps"
+        A[1. SwiftData Model Definition]
+        B[2. Repository Layer Implementation]
+        C[3. UI Refactoring to MVVM]
+        D[4. Background Processing Modernization]
     end
     
-    subgraph "Modern"
-        A2[API Call] --> B2[await Result]
-        B2 --> C2[Update Database]
-        C2 --> D2[Return Value]
-        D2 --> E2[Update @Published Properties]
+    subgraph "In Progress"
+        E[5. Legacy Code Removal]
     end
+    
+    A --> B --> C --> D --> E
+    
+    style A fill:#9cf,stroke:#333
+    style B fill:#9cf,stroke:#333
+    style C fill:#9cf,stroke:#333
+    style D fill:#9cf,stroke:#333
+    style E fill:#fc9,stroke:#333
 ```
 
-#### 4. Repository Pattern Enhancement
+#### 1. SwiftData Model Definition ✅
+- Implemented `ArticleModel`, `SeenArticleModel`, and `TopicModel` with @Model annotations
+- Defined relationships with appropriate cascade rules
+- Added CloudKit compatibility with default values for required properties
+- Created API compatibility extensions to bridge between old and new models
 
-The current SyncManager acts as a repository but will be replaced with a more focused ArticleService:
+#### 2. Repository Layer Implementation ✅
+- Created complete implementation of `ArticleServiceProtocol` with modern Swift concurrency
+- Implemented thread-safety using serial dispatch queue for cache operations
+- Added comprehensive error handling with proper error types and propagation
+- Developed blob storage and retrieval with three-phase loading approach
 
-- Clear separation between API communication and data persistence
-- Simplified interface for ViewModels to access data
-- Consistent error handling and retry policies
-- Better separation of concerns for different data types
+#### 3. UI Refactoring to MVVM ✅
+- Implemented well-structured ViewModels with @MainActor annotations
+- Added reactive UI updates using @Published properties
+- Created Combine integration for settings observation
+- Implemented proper dependency injection patterns
+- Established clean separation of UI logic from business logic
 
-### Component Mapping
+#### 4. Background Processing Modernization ✅
+- Implemented modern Swift concurrency with async/await
+- Added structured concurrency with task groups
+- Implemented proper timeout and cancellation handling
+- Created network-aware scheduling with proper power requirements
+- Developed BGTaskScheduler implementation with proper expiration handling
 
-| Current Component | New Architecture Equivalent |
-|-------------------|----------------------------|
-| SyncManager | ArticleService |
-| DatabaseCoordinator | SwiftData ModelContainer + ModelContext |
-| NotificationCenter-based updates | @Published properties + ObservableObject |
-| Direct UI database access | ViewModel-mediated access |
-| BackgroundContextManager | Task + UNUserNotificationCenter |
-| Push notification handling in AppDelegate | Focused async notification handlers |
-| Manual CloudKit checks | CloudKitHealthMonitor + CloudKitRequestCoordinator |
+#### 5. Legacy Code Removal (In Progress) ⏳
+- Transition from `MigrationAwareArticleService` to `ArticleService` (Partially Complete)
+- Remove remaining `NotificationData` references (Partially Complete)
+- Clean up temporary migration bridges
+- Remove redundant compatibility code
 
-### Implementation Phases
+### Component Transformation
 
-The modernization will follow a phased approach:
+| Original Component | Transformed To | Status |
+|-------------------|----------------------------|--------|
+| SyncManager | ArticleService | ✅ Complete |
+| DatabaseCoordinator | SwiftData ModelContainer + ModelContext | ✅ Complete |
+| NotificationCenter-based updates | @Published properties + ObservableObject | ✅ Complete |
+| Direct UI database access | ViewModel-mediated access | ✅ Complete |
+| BackgroundContextManager | BackgroundTaskManager with Task groups | ✅ Complete |
+| Manual CloudKit checks | CloudKitHealthMonitor + CloudKitRequestCoordinator | ✅ Complete |
+| Completion handler-based API client | Async/await APIClient | ✅ Complete |
 
-1. **SwiftData Model Definition**: Create all data models using SwiftData annotations
-2. **API Client Refactoring**: Update the networking layer to use async/await
-3. **Repository Layer**: Implement ArticleService to bridge API and persistence
-4. **ViewModel Creation**: Develop ViewModels for all major views
-5. **UI Refactoring**: Update SwiftUI views to use ViewModels
-6. **Background Processing**: Modernize background tasks and push handling
-7. **Legacy Code Removal**: Remove outdated components once functionality is verified
+This architectural transformation has significantly improved code quality, maintainability, and performance while setting the foundation for future development.
