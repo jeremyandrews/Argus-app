@@ -66,26 +66,58 @@ class MigrationService: ObservableObject {
         loadMigrationProgress()
     }
 
-    /// Main migration function that orchestrates the entire process
-    func migrateAllData() async -> Bool {
-        // Start performance metrics tracking
-        startMetricsTimer()
+/// Simple check to determine if migration can proceed
+/// @returns true if old database appears valid, false if migration should be skipped
+private func canMigrationProceed() -> Bool {
+    // Get path to the old SQLite database
+    let fileManager = FileManager.default
+    guard let appSupportDir = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+        return false
+    }
+    
+    // Check if the old database file exists
+    let oldDbPath = appSupportDir.appendingPathComponent("Argus.sqlite").path
+    if !fileManager.fileExists(atPath: oldDbPath) {
+        ModernizationLogger.log(.warning, component: .migration,
+                               message: "Old database not found, migration cannot proceed")
+        return false
+    }
+    
+    // Simple validity check - if we need more comprehensive validation,
+    // we could expand this later
+    return true
+}
 
-        // Reset counters for this migration run
-        didFindExistingRecords = false
-        updatedRecordCount = 0
-        newRecordCount = 0
-        progressSaveCounter = 0
+/// Main migration function that orchestrates the entire process
+func migrateAllData() async -> Bool {
+    // Start performance metrics tracking
+    startMetricsTimer()
 
-        // Check if migration is already completed
-        if migrationProgress.state == .completed {
-            status = "Migration already completed"
-            progress = 1.0
-            return true
-        }
+    // Reset counters for this migration run
+    didFindExistingRecords = false
+    updatedRecordCount = 0
+    newRecordCount = 0
+    progressSaveCounter = 0
 
-        // Register for background task
-        registerBackgroundTask()
+    // Check if migration is already completed
+    if migrationProgress.state == .completed {
+        status = "Migration already completed"
+        progress = 1.0
+        return true
+    }
+    
+    // Quick check if migration can proceed
+    if !canMigrationProceed() {
+        status = "Migration failed. Please delete and reinstall this application with TestFlight."
+        progress = 0
+        migrationProgress.state = .failed
+        self.error = MigrationError.dataError("Migration failed. Please delete and reinstall this application with TestFlight.")
+        saveMigrationProgress()
+        return false
+    }
+
+    // Register for background task
+    registerBackgroundTask()
 
         // Update state
         migrationProgress.state = .inProgress
