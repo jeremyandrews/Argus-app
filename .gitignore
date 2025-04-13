@@ -1,0 +1,6 @@
+.qodo
+.build/
+Argus/com*
+AuthKey_*
+Argus.xcodeproj/xcuserdata/
+Argus.xcodeproj/xcshareddata/

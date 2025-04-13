@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Open Xcode Project",
+      "type": "shell",
+      "command": "open ${workspaceFolder}/Argus.xcodeproj",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Clean VSCode Swift Cache",
+      "type": "shell",
+      "command": "rm -rf ~/.cache/sourcekit-lsp && rm -rf .build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Restart SourceKit-LSP",
+      "type": "shell",
+      "command": "echo 'To restart SourceKit-LSP, use the Command Palette (Cmd+Shift+P) and select \"Developer: Reload Window\"'",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always"
+      }
+    }
+  ]
+}

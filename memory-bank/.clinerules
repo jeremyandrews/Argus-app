@@ -15,6 +15,44 @@ This file captures important patterns, preferences, and project intelligence tha
 - Extract reusable components into separate views
 - Use preview providers for all UI components
 - Avoid excessive view modifiers that can impact performance
+- Use updated onChange API (iOS 17+) with two parameters:
+  ```swift
+  // Deprecated in iOS 17 (single parameter version):
+  .onChange(of: someValue) { newValue in
+      // Handle change
+  }
+  
+  // New API (two parameter version):
+  .onChange(of: someValue) { oldValue, newValue in
+      // Handle change with access to both values
+  }
+  ```
+
+### Rich Text Display Component Selection
+- Always use `NonSelectableRichTextView` for rich text display in list views and detail views for consistent rendering
+- Never use `AccessibleAttributedText` for article body content in list views (causes text wrapping issues)
+- The internal implementation differences between these components affect:
+  - Text wrapping behavior (NonSelectableRichTextView uses proper width constraints)
+  - Font handling (NonSelectableRichTextView forces body font style on all content)
+  - Text container configuration (different padding values: 32px vs 40px)
+- Each UIComponent has specific use cases:
+  - `NonSelectableRichTextView`: Article body content in lists and detail views
+  - `AccessibleAttributedText`: Accessibility-focused content where selection isn't needed
+  - `RichTextView`: Content where text selection is required
+- When implementing new views with rich text content, maintain component consistency:
+  ```swift
+  // CORRECT: Using NonSelectableRichTextView for article content
+  if let bodyBlobData = article.bodyBlob,
+     let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+         ofClass: NSAttributedString.self,
+         from: bodyBlobData
+     ) {
+      NonSelectableRichTextView(attributedString: attributedString)
+          .foregroundColor(.secondary)
+          .padding(.top, 5)
+          .textSelection(.disabled)
+  }
+  ```
 
 ## Project-Specific Patterns
 
@@ -27,6 +65,33 @@ This file captures important patterns, preferences, and project intelligence tha
 - The SyncManager handles all data synchronization with the backend
 - The DatabaseCoordinator centralizes all database operations using the actor model
 - View models observe data changes and update the UI accordingly
+- ArticleModelAdapter handles bidirectional conversion between ArticleModel and NotificationData
+- All fields in ArticleModel, including JSON fields (engineStats, similarArticles), must be transferred in both directions
+- Both "from" conversion method and "updateBlobs" method need complete field mapping for proper app functionality
+
+### View-ViewModel Integration
+- ViewModels and Views may define their own enum types with the same names - always check for type compatibility
+- When calling ViewModel methods that take enum parameters, always ensure proper type conversion:
+  ```swift
+  // Convert View's NavigationDirection enum to ViewModel's NavigationDirection enum
+  let viewModelDirection: NewsDetailViewModel.NavigationDirection = 
+      direction == .next ? .next : .previous
+      
+  // Then call the ViewModel method with the converted enum
+  viewModel.navigateToArticle(direction: viewModelDirection)
+  ```
+- Use ViewModel properties directly for UI state management (button enabled/disabled states):
+  ```swift
+  // Previous button - disabled when at first article
+  .disabled(viewModel.currentIndex == 0)
+  .foregroundColor(viewModel.currentIndex > 0 ? .primary : .gray)
+  ```
+- Ensure UI state stays synchronized with ViewModel after operations:
+  ```swift
+  // After navigation, update UI state with ViewModel state
+  currentIndex = viewModel.currentIndex
+  clearCache() // Reset any view-specific cached content
+  ```
 
 ### Known Implementation Paths
 - Push notifications are set up using the Apple Push Notification Service and the AuthKey_KKR79MB4FW.p8 file
@@ -100,10 +165,113 @@ This file captures important patterns, preferences, and project intelligence tha
   ```
 - Use Swift's TaskGroup for concurrent processing while controlling maximum concurrency
 
-### NSCache Usage
+### NSCache Usage and Thread Safety
 - NSCache is not Sendable - avoid directly accessing actor-isolated NSCache properties from closures
 - Instead, read values from caches at the beginning of functions, then use locals in closures
 - Update caches after transaction completion, not within transaction blocks
+- For caching services (like ArticleService), implement comprehensive thread safety:
+  - Use dedicated serial dispatch queue for all cache operations:
+    ```swift
+    private let cacheQueue = DispatchQueue(label: "com.argus.articleservice.cache")
+    ```
+  - Make read operations synchronous on the queue to ensure data consistency:
+    ```swift
+    func checkCache(for key: String) -> [SomeType]? {
+        return cacheQueue.sync {
+            // Access cache state safely here
+            if let result = cache.object(forKey: key as NSString) as? [SomeType] {
+                return result
+            }
+            return nil
+        }
+    }
+    ```
+  - Make write operations asynchronous for better performance:
+    ```swift
+    func cacheResults(_ results: [SomeType], for key: String) {
+        cacheQueue.async {
+            // Update cache state safely here
+            self.cache.setObject(results as NSArray, forKey: key as NSString)
+            self.lastCacheUpdate = Date()
+            self.cacheKeys.insert(key)
+        }
+    }
+    ```
+  - Create helper methods for safer cache state access:
+    ```swift
+    private func withSafeCache<T>(_ operation: @escaping () -> T) -> T {
+        return cacheQueue.sync {
+            return operation()
+        }
+    }
+    
+    private func hasCacheKey(_ key: String) -> Bool {
+        return cacheQueue.sync {
+            return self.cacheKeys.contains(key)
+        }
+    }
+    ```
+  - For async methods that need to call cache operations, use withCheckedContinuation:
+    ```swift
+    // Example: clearCache needs to be called from an async method
+    await withCheckedContinuation { continuation in
+        clearCache()  // This runs asynchronously on the cacheQueue
+        continuation.resume()
+    }
+    ```
+  - Add comprehensive logging for cache operations to diagnose issues
+  - Add clear thread-safety documentation to class and method comments
+
+### Actor Initialization and Self Capture
+- Never capture self in a task or closure before all properties are initialized
+- Use a two-step initialization pattern for actors with async dependencies:
+  ```swift
+  // Initialize properties to nil/default values first
+  private var asyncDependency: AsyncDependency?
+  
+  init() {
+    // Set all required properties
+    self.asyncDependency = nil
+    
+    // After full initialization, create the task
+    createInitializationTaskIfNeeded()
+  }
+  
+  private func createInitializationTaskIfNeeded() {
+    if asyncDependency != nil { return }
+    
+    // Use weak self to avoid retain cycles
+    weak var weakSelf = self
+    
+    Task {
+      let dependency = await AsyncDependency.shared
+      
+      // Update stored reference on the main actor
+      if let strongSelf = weakSelf {
+        await MainActor.run {
+          strongSelf.asyncDependency = dependency
+        }
+      }
+    }
+  }
+  ```
+- For accessor methods that need the async dependency, implement wait-with-timeout pattern:
+  ```swift
+  private func getInitializedDependency() async throws -> AsyncDependency {
+    // Try direct access first
+    if let dependency = asyncDependency {
+      return dependency
+    }
+    
+    // Create the initialization task if needed
+    createInitializationTaskIfNeeded()
+    
+    // Wait with timeout
+    return try await withTimeout(duration: .seconds(5)) {
+      try await initializationTask!.value
+    }
+  }
+  ```
 
 ### SwiftData Context Safety Patterns
 - Always implement a fallback mechanism when using direct DatabaseCoordinator methods
@@ -131,20 +299,160 @@ This file captures important patterns, preferences, and project intelligence tha
 - Avoid context.save() inside complex asynchronous operations that might cause EXC_BAD_ACCESS
 - When DatabaseCoordinator methods fail with context issues, catch the error and use established filtering methods
 
+### SwiftData and Main Actor Patterns
+- Always add @MainActor annotation to methods that access SwiftData contexts:
+  ```swift
+  // WRONG: Missing @MainActor annotation
+  func countUnviewedArticles() async throws -> Int {
+      let context = container.mainContext // This will fail in Swift 6
+      let count = try context.fetchCount(descriptor)
+      return count
+  }
+  
+  // CORRECT: With @MainActor annotation
+  @MainActor
+  func countUnviewedArticles() async throws -> Int {
+      let context = container.mainContext // This is now safe
+      let count = try context.fetchCount(descriptor)
+      return count
+  }
+  ```
+- Never use await when accessing main actor-isolated properties from @MainActor-annotated code:
+  ```swift
+  // WRONG: Using await in @MainActor-annotated method
+  @MainActor
+  func getContext() async -> ModelContext {
+      let context = await container.mainContext // This will fail in Swift 6
+      return context
+  }
+  
+  // CORRECT: Direct access in @MainActor-annotated method
+  @MainActor
+  func getContext() -> ModelContext {
+      let context = container.mainContext // This is correct
+      return context
+  }
+  ```
+- Ensure proper error handling in all database operations:
+  ```swift
+  @MainActor
+  func countUnviewedArticles() async throws -> Int {
+      do {
+          let context = container.mainContext
+          let descriptor = FetchDescriptor<ArticleModel>(
+              predicate: #Predicate<ArticleModel> { !$0.isViewed }
+          )
+          
+          let count = try context.fetchCount(descriptor)
+          ModernizationLogger.log(.debug, component: .articleService, 
+              message: "Fetched unviewed article count: \(count)")
+          return count
+      } catch {
+          ModernizationLogger.log(.error, component: .articleService, 
+              message: "Error fetching unviewed articles: \(error)")
+          throw ArticleServiceError.databaseError(error)
+      }
+  }
+  ```
+- Query the correct database model when models have been migrated:
+  ```swift
+  // WRONG: Querying legacy model after migration
+  let descriptor = FetchDescriptor<NotificationData>(
+      predicate: #Predicate<NotificationData> { !$0.isViewed }
+  )
+  
+  // CORRECT: Querying current model
+  let descriptor = FetchDescriptor<ArticleModel>(
+      predicate: #Predicate<ArticleModel> { !$0.isViewed }
+  )
+  ```
+- Always check permissions before attempting operations that require them:
+  ```swift
+  // For notification permissions
+  @MainActor
+  private static func hasNotificationPermission() async -> Bool {
+      let settings = await UNUserNotificationCenter.current().notificationSettings()
+      return settings.authorizationStatus == .authorized
+  }
+  
+  @MainActor
+  private static func performBadgeUpdate() async {
+      // Check permission first
+      guard await hasNotificationPermission() else {
+          AppLogger.ui.warning("Cannot update badge: notification permission not granted")
+          return
+      }
+      
+      // Proceed with badge update
+  }
+  ```
+
 ## Modernization Strategy
 
+### Three-Tier Architecture Pattern
+- Implement a three-tiered architecture to maximize code reuse:
+  1. **Data Layer**: ArticleService handles API and SwiftData operations
+  2. **Business Logic Layer**: ArticleOperations contains shared operations
+  3. **View Models Layer**: ViewModels specific to each view
+
+- ArticleServiceProtocol enables dependency injection and testing:
+  ```swift
+  protocol ArticleServiceProtocol {
+      func fetchArticles(topic: String?, isRead: Bool?, isBookmarked: Bool?, isArchived: Bool?) async throws -> [NotificationData]
+      func fetchArticle(byId id: UUID) async throws -> NotificationData?
+      func markArticle(id: UUID, asRead: Bool) async throws
+      func markArticle(id: UUID, asBookmarked: Bool) async throws
+      func markArticle(id: UUID, asArchived: Bool) async throws
+      func deleteArticle(id: UUID) async throws
+      // Other methods...
+  }
+  ```
+
+- ArticleOperations provides shared functionality:
+  ```swift
+  class ArticleOperations {
+      private let articleService: ArticleServiceProtocol
+      
+      init(articleService: ArticleServiceProtocol = ArticleService.shared) {
+          self.articleService = articleService
+      }
+      
+      // Shared operations for both NewsViewModel and NewsDetailViewModel
+      func toggleReadStatus(for article: NotificationData) async throws {
+          try await articleService.markArticle(id: article.id, asRead: !article.isViewed)
+          NotificationUtils.updateAppBadgeCount()
+      }
+      
+      func toggleBookmark(for article: NotificationData) async throws {
+          try await articleService.markArticle(id: article.id, asBookmarked: !article.isBookmarked)
+      }
+      
+      func getAttributedContent(for article: NotificationData, field: RichTextField) async -> NSAttributedString? {
+          await MainActor.run {
+              return getAttributedString(for: field, from: article, createIfMissing: true)
+          }
+      }
+  }
+  ```
+
 ### MVVM Pattern Implementation
-- Each SwiftUI view should have a corresponding ViewModel class:
+- ViewModels should use the shared ArticleOperations for common functionality:
   ```swift
   class NewsViewModel: ObservableObject {
+    private let articleOperations: ArticleOperations
+    
     @Published var articles: [Article] = []
     @Published var isLoading: Bool = false
     @Published var error: Error? = nil
     
+    init(articleOperations: ArticleOperations = ArticleOperations()) {
+        self.articleOperations = articleOperations
+    }
+    
     func refreshArticles() async {
         await MainActor.run { isLoading = true }
         do {
-            let articles = try await articleService.fetchArticles()
+            let articles = try await articleOperations.fetchArticles(topic: selectedTopic)
             await MainActor.run { 
                 self.articles = articles
                 self.isLoading = false
@@ -155,6 +463,10 @@ This file captures important patterns, preferences, and project intelligence tha
                 self.isLoading = false
             }
         }
+    }
+    
+    func toggleReadStatus(for article: Article) async {
+        try? await articleOperations.toggleReadStatus(for: article)
     }
   }
   ```
@@ -177,24 +489,111 @@ This file captures important patterns, preferences, and project intelligence tha
 - UI state should be represented by @Published properties in ViewModels
 - Use a dependency injection approach for services accessed by ViewModels
 
+### SwiftData and CloudKit Integration
+- Avoid creating multiple ModelContainer instances with different schemas:
+  ```swift
+  // INCORRECT: Creating multiple containers with different schemas
+  static let legacyContainer = ModelContainer(for: [LegacyModel.self])
+  static let newContainer = ModelContainer(for: [NewModel.self])
+  
+  // CORRECT: One unified container with all models
+  static let sharedContainer = ModelContainer(for: Schema([
+      // Legacy models
+      LegacyModel.self,
+      // New models
+      NewModel.self
+  ]))
+  ```
+- Use a singleton container pattern to ensure consistent database access:
+  ```swift
+  class SwiftDataContainer {
+      static let shared = SwiftDataContainer()
+      let container: ModelContainer
+      
+      private init() {
+          // Initialize container with all models in a single schema
+      }
+  }
+  
+  // In your app struct:
+  @MainActor
+  static var sharedModelContainer: ModelContainer {
+      return SwiftDataContainer.shared.container
+  }
+  ```
+- Implement proper fallback mechanisms for CloudKit errors:
+  ```swift
+  do {
+      // First try CloudKit integration
+      let cloudKitConfig = ModelConfiguration(schema: schema)
+      container = try ModelContainer(for: schema, configurations: [cloudKitConfig])
+  } catch {
+      // Log CloudKit error details
+      logger.error("CloudKit container creation failed: \(error)")
+      
+      // Fall back to local persistent storage
+      do {
+          let localConfig = ModelConfiguration(url: localDbPath)
+          container = try ModelContainer(for: schema, configurations: [localConfig])
+      } catch {
+          // Last resort - in-memory container
+          logger.critical("All persistent storage attempts failed: \(error)")
+          let fallbackConfig = ModelConfiguration(isStoredInMemoryOnly: true)
+          container = try ModelContainer(for: schema, configurations: [fallbackConfig])
+      }
+  }
+  ```
+- Ensure database table creation works for all required tables, adding direct SQL for legacy tables:
+  ```swift
+  // Direct SQL creation for legacy tables as fallback
+  if tableCount == 0 || legacyTablesCount == 0 {
+      let createTableSQL = """
+      CREATE TABLE IF NOT EXISTS ZLEGACYTABLE (
+          Z_PK INTEGER PRIMARY KEY AUTOINCREMENT,
+          ZFIELD TEXT NOT NULL
+      );
+      """
+      sqlite3_exec(db, createTableSQL, nil, nil, nil)
+  }
+  ```
+- Use consistent URL paths for database access across all components
+- Add table existence verification before operations:
+  ```swift
+  func verifyDatabaseTablesExist() -> Bool {
+      // Check if required tables exist using SQLite directly
+      let tableCheckQuery = """
+          SELECT count(*) FROM sqlite_master
+          WHERE type='table' AND (name LIKE '%REQUIREDTABLE');
+      """
+      // Execute query and verify result
+  }
+  ```
+- Document CloudKit container identifiers in your code for clarity:
+  ```swift
+  // CloudKit container identifier from app entitlements
+  private let cloudKitContainerIdentifier = "iCloud.com.company.AppName"
+  ```
+
 ### SwiftData Implementation
 - Use the @Model macro for all persistent model types:
   ```swift
   @Model
   class Article {
-      @Attribute(.unique) var id: String
-      var title: String
-      var body: String
-      var publishDate: Date
-      @Relationship(.cascade) var topics: [Topic]
+      // CloudKit compatibility: default values for all required properties
+      var id: String = ""
+      var title: String = ""
+      var body: String = ""
+      var publishDate: Date = Date()
+      @Relationship(.cascade) var topics: [Topic]? = []
       
       // Additional fields for tracking state
       var isRead: Bool = false
       var isBookmarked: Bool = false
   }
   ```
-- Mark unique identifiers with @Attribute(.unique) to prevent duplicates
-- Configure proper relationships between models
+- Ensure all required properties have default values for CloudKit compatibility
+- Do not use @Attribute(.unique) constraints (not supported by CloudKit)
+- Implement application-level uniqueness validation in repository layer
 - Define the model container at the app level:
   ```swift
   @main
@@ -271,30 +670,317 @@ This file captures important patterns, preferences, and project intelligence tha
 - Ensure background tasks are properly scheduled and managed
 - Implement proper push notification handling with async/await
 
+## Article Section Loading Best Practices
+
+### Sequential Loading Process
+- Implement a three-phase loading approach for article section content:
+  ```swift
+  // PHASE 1: BLOB LOADING (fastest path)
+  let blobs = article.getBlobsForField(field)
+  if let blob = blobs?.first {
+      do {
+          let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+              ofClass: NSAttributedString.self,
+              from: blob
+          )
+          if let content = attributedString {
+              // Use blob content immediately
+              return content
+          }
+      } catch {
+          AppLogger.database.error("Error unarchiving blob: \(error)")
+      }
+  }
+  
+  // PHASE 2: RICH TEXT GENERATION (only if blob loading fails)
+  do {
+      let attributedString = try await withTimeout(duration: .seconds(3)) {
+          let textContent = self.getTextContentForField(field, from: article)
+          return self.articleOperations.getAttributedContent(
+              for: field,
+              from: article,
+              createIfMissing: true
+          )
+      }
+      if let content = attributedString {
+          return content
+      }
+  } catch {
+      AppLogger.database.error("Error during rich text generation: \(error)")
+  }
+  
+  // PHASE 3: PLAIN TEXT FALLBACK (when all else fails)
+  if let rawText = getTextContentForField(field, from: article), !rawText.isEmpty {
+      return NSAttributedString(
+          string: rawText,
+          attributes: [
+              .font: UIFont.preferredFont(forTextStyle: .body),
+              .foregroundColor: UIColor.label
+          ]
+      )
+  }
+  ```
+
+### Comprehensive Logging for Section Loading
+- Add detailed phase-based logging to track content loading:
+  ```swift
+  AppLogger.database.debug("🔍 SECTION LOAD START: \(section) for article \(article.id)")
+  
+  // Log blob check timing
+  let blobStart = Date()
+  let blobs = article.getBlobsForField(field)
+  let blobCheckTime = Date().timeIntervalSince(blobStart)
+  AppLogger.database.debug("⏱️ Blob check took \(String(format: "%.4f", blobCheckTime))s, hasBlob: \(blobs?.first != nil)")
+  
+  // Log extraction timing
+  let extractStart = Date()
+  let attributedString = try NSKeyedUnarchiver.unarchivedObject(...)
+  let extractTime = Date().timeIntervalSince(extractStart)
+  AppLogger.database.debug("⏱️ Extraction took \(String(format: "%.4f", extractTime))s")
+  
+  // Log generation timing
+  let genStart = Date()
+  let result = getAttributedContent(...)
+  let genTime = Date().timeIntervalSince(genStart)
+  AppLogger.database.debug("⏱️ Generation took \(String(format: "%.4f", genTime))s")
+  
+  // Log total time
+  let totalTime = Date().timeIntervalSince(startTime)
+  AppLogger.database.debug("✅ SECTION LOAD SUCCESS via METHOD in \(String(format: "%.4f", totalTime))s")
+  ```
+
+### User Experience During Loading
+- Always provide loading status indicators for long operations:
+  ```swift
+  // Show temporary conversion status
+  @MainActor
+  private func provideTempContent(_ section: String, _ field: RichTextField, _ message: String) {
+      // Create a temporary attributed string to show status
+      let tempString = NSAttributedString(
+          string: message,
+          attributes: [
+              .font: UIFont.italicSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize),
+              .foregroundColor: UIColor.secondaryLabel
+          ]
+      )
+      
+      // Store in the appropriate property and notify UI
+      sectionAttributedStrings[section] = tempString
+      objectWillChange.send()
+  }
+  
+  // When starting rich text generation
+  await MainActor.run {
+      provideTempContent(section, field, "Converting markdown to rich text...")
+  }
+  ```
+
+### Diagnostic Content Logging
+- Add content diagnostics when generation fails:
+  ```swift
+  private func logGenerationDetails(_ field: RichTextField, _ article: NotificationData) {
+      // Get text content to analyze
+      let textContent = getTextContentForField(field, from: article)
+      
+      // Log basic details
+      AppLogger.database.debug("📊 Generation Diagnostic:")
+      AppLogger.database.debug("- Field: \(String(describing: field))")
+      AppLogger.database.debug("- Has content: \(textContent != nil)")
+      AppLogger.database.debug("- Content length: \(textContent?.count ?? 0)")
+      AppLogger.database.debug("- Article ID: \(article.id)")
+      AppLogger.database.debug("- JSON URL: \(article.json_url)")
+      
+      // Log content sample if available
+      if let content = textContent, !content.isEmpty {
+          let sampleLength = min(150, content.count)
+          let sample = String(content.prefix(sampleLength))
+          AppLogger.database.debug("📝 Content sample: \"\(sample)\"...")
+      }
+  }
+  ```
+
+### Robust Timeout Handling
+- Use Swift's structured concurrency with timeouts:
+  ```swift
+  private func withTimeout<T>(duration: Duration, operation: @escaping () async throws -> T) async throws -> T {
+      return try await withThrowingTaskGroup(of: T.self) { group in
+          // Add the actual operation
+          group.addTask {
+              return try await operation()
+          }
+          
+          // Add a timeout task
+          group.addTask {
+              try await Task.sleep(for: duration)
+              throw TimeoutError()
+          }
+          
+          // Return the first completed result or throw
+          guard let result = try await group.next() else {
+              throw TimeoutError()
+          }
+          
+          // Cancel any remaining tasks
+          group.cancelAll()
+          
+          return result
+      }
+  }
+  ```
+
+### Swift Type Safety for Logging
+- Handle Swift 6 type-safety requirements in logging:
+  ```swift
+  // Avoid ambiguous type expression errors with explicit conversion:
+  AppLogger.database.debug("Field: \(String(describing: field))")
+  
+  // Avoid nil coalescing on non-optional types:
+  // WRONG:
+  AppLogger.database.debug("JSON URL: \(article.json_url ?? "none")")
+  // CORRECT:
+  AppLogger.database.debug("JSON URL: \(article.json_url)")
+  
+  // Break multi-line strings into individual log statements:
+  // WRONG:
+  AppLogger.database.debug("""
+  Multi-line debug info:
+  Line 1: \(value1)
+  Line 2: \(value2)
+  """)
+  // CORRECT:
+  AppLogger.database.debug("Multi-line debug info:")
+  AppLogger.database.debug("Line 1: \(value1)")
+  AppLogger.database.debug("Line 2: \(value2)")
+  ```
+
+## Code Duplication Issues and Method Redeclaration
+
+### Avoiding Duplicate Method Implementations
+- Carefully scan both the current file and any newly added files for method signatures before adding new functions:
+  ```swift
+  // WRONG: Adding a duplicate method with same signature
+  private func verifyBlobInDatabase(field: RichTextField, articleId: UUID) async -> Bool {
+      // Implementation A
+  }
+  
+  // Same file, later section
+  private func verifyBlobInDatabase(field: RichTextField, articleId: UUID) async -> Bool {
+      // Implementation B  
+  }
+  ```
+- When implementing fixes that modify existing methods, always:
+  1. Use `grep` or code search to find all instances of the method name across files
+  2. Check the class/struct implementation for existing versions of the method
+  3. If adding enhanced verification, modify the existing method rather than creating a duplicate
+  4. Review file for semantic duplication (methods with different names but same purpose)
+- When multiple implementations of similar functionality exist:
+  - Keep the most robust, complete implementation
+  - Consolidate any unique features from other implementations into the kept version
+  - Document the consolidated changes in commit messages
+  - Include validation and error checking from all implementations
+
+### Thorough File Review Process
+- Before modifying a file, review it completely to understand its structure and existing methods:
+  - Scan for existing methods matching the same purpose
+  - Look for similarly named methods that might cause confusion
+  - Check for helper methods related to the functionality you're modifying
+- Use IDE navigation features to find all declarations and references before adding new methods
+- When importing code from external sources or other parts of the project, verify it doesn't duplicate existing functionality
+- Add comprehensive documentation to explain why certain implementation approaches were chosen
+
+### Swift Compiler Duplicate Declaration Errors
+- Swift error `Invalid redeclaration of '...'` indicates a method with the same signature exists:
+  ```
+  /path/to/file.swift:1146:18 Invalid redeclaration of 'verifyBlobInDatabase(field:articleId:)'
+  ```
+- When encountering this error:
+  1. Use grep or Find in Files to locate all occurrences: `grep "func methodName" path/to/files/*swift`
+  2. Compare implementations to determine which is most complete
+  3. Remove the duplicate and consolidate any unique functionality into the kept version
+  4. Review call sites to ensure they use the correct implementation
+
 ## Known Challenges
 - UI becomes jittery during sync operations - will be addressed with MVVM refactoring
 - Duplicate content issues occur during synchronization - will be resolved by SwiftData's unique constraints
 - Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - will be eliminated with proper async/await implementation
 - SwiftData context access issues can cause EXC_BAD_ACCESS crashes - will be addressed by using SwiftData's native context management instead of custom DatabaseCoordinator
+- Code duplication can cause compile errors or unexpected behavior - resolved by thorough file review and proper refactoring
+
+## Argus API Server Endpoints and Behavior
+
+### API Endpoints
+- **Base URL**: `https://api.arguspulse.com`
+- **Authentication**: `/authenticate` (POST)
+  - Requires device token in request body: `{"device_id": "token"}`
+  - Device token must be 64-character hex string
+  - Returns JWT token valid for 1 hour: `{"token": "jwt_token_value"}`
+- **Status Check**: `/status` (POST)
+  - Can be called with or without JWT authentication
+  - Returns simple "OK" response
+- **Topic Management**:
+  - `/subscriptions` (POST) - Get device's topic subscriptions
+  - `/subscribe` (POST) - Subscribe device to a topic
+    - Requires valid topic name and optional priority
+    - Returns 409 CONFLICT if already subscribed
+  - `/unsubscribe` (POST) - Unsubscribe device from a topic
+    - Returns 404 NOT_FOUND if subscription doesn't exist
+- **Articles Sync**: `/articles/sync` (POST)
+  - Takes list of seen article URLs: `{"seen_articles": ["url1", "url2", ...]}`
+  - Returns list of unseen article URLs: `{"unseen_articles": ["url1", "url2", ...]}`
+  - This is the only endpoint for article management in the backend
+
+### Important Implementation Notes
+- **JWT Authentication**:
+  - All endpoints except `/status` require Bearer token authentication
+  - Tokens expire after 1 hour and must be refreshed
+- **Topic Validation**:
+  - Server has a predefined list of valid topics from environment variables
+  - Default topics include "Alert: Direct", "Alert: Near", and "Test"
+- **Client-Side Assumptions**:
+  - Client code assumes additional endpoints that don't exist in server:
+    - `/articles/{id}` for fetching a specific article (not implemented on server)
+    - Direct article content fetching (not provided by server)
+  - Client must handle these discrepancies with appropriate error handling
+- **Missing Server Features**:
+  - No direct endpoint to fetch article content by ID or URL
+  - Client must implement workarounds for these limitations
+
+### Resilience Patterns
+- **Timeout Handling**: Client uses increased timeouts (15s connection, 60s resource)
+- **Network Monitoring**: Client uses NWPathMonitor to track connectivity status
+- **Exponential Backoff**: Client implements retries with increasing delays
+- **Graceful Degradation**: Client returns empty arrays for 404 responses
 
 ## Modernization Component Mapping
-- **SyncManager → ArticleService**:
-  - ArticleService will handle all synchronization operations using async/await
-  - Will interact directly with SwiftData rather than through DatabaseCoordinator
-  - Will implement proper error handling and retry logic
+- **SyncManager → BackgroundTaskManager + ArticleService** (✅ Completed):
+  - ArticleService handles all data synchronization operations using async/await
+  - BackgroundTaskManager handles all background task scheduling and execution
+  - MigrationAdapter provides backward compatibility for legacy code during transition
+  - CommonUtilities contains shared utility functions extracted from SyncManager
+
 - **DatabaseCoordinator → SwiftData ModelContext**:
   - Direct use of SwiftData ModelContext will replace DatabaseCoordinator
   - Transaction management will be handled by SwiftData's built-in mechanisms
   - Complex queries will be handled by SwiftData's query DSL
+
+- **Shared UI Logic → ArticleOperations**:
+  - Common operations between NewsView and NewsDetailView extracted to shared layer
+  - State management (read/bookmark/archive) handled consistently
+  - Rich text processing consolidated in shared component
+  - Consistent error handling across both views
+
 - **NotificationCenter → Observable Properties**:
   - State updates will be communicated via @Published properties
   - Views will observe ViewModels through ObservableObject conformance
   - No more manual subscription/unsubscription management
+
 - **Background Tasks → .backgroundTask or BGTaskScheduler**:
   - Modern background task APIs will replace custom background task handling
   - Proper task cancellation will be implemented for all background operations
 
 ## Modernization Strategy Guidelines
+- Implement shared components first to establish foundation for ViewModels
+- Prioritize code reuse to eliminate duplication between similar views
 - Implement features incrementally, following the phased approach
 - Maintain feature parity throughout the modernization process
 - Test each component thoroughly before moving to the next phase
@@ -302,6 +988,15 @@ This file captures important patterns, preferences, and project intelligence tha
 - Keep comprehensive documentation of architectural decisions
 - Use Swift's newest features where appropriate, but maintain compatibility with iOS 18
 - Prioritize user experience over implementation elegance
+
+## Shared Component Best Practices
+- **Interface-Based Design**: Use protocols to define service interfaces
+- **Dependency Injection**: Make dependencies injectable for testing
+- **Clear Responsibilities**: Each layer should have well-defined responsibilities
+- **Thin View Models**: Keep view models focused on UI state, delegate business logic to ArticleOperations
+- **Consistent Error Handling**: Implement unified error types across components
+- **State Synchronization**: Ensure shared state is consistent between components
+- **Testing Strategy**: Test shared components independently from ViewModels
 
 ## User Workflow Preferences
 - Focus on fixing critical bugs before adding new features

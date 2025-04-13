@@ -6,22 +6,37 @@ Argus implements a client-side architecture that focuses on:
 2. Local data persistence with SwiftData
 3. UI rendering with SwiftUI
 4. Background processing and notifications
+5. CloudKit integration for cross-device syncing
 
 ```mermaid
 flowchart TD
     Backend["Backend Server"]
-    SyncManager["SyncManager"]
+    BGTaskManager["BackgroundTaskManager"]
+    ArticleSvc["ArticleService"]
+    MigAdapter["MigrationAdapter"]
     DbCoord["DatabaseCoordinator (Actor)"]
     LocalStorage["SwiftData"]
     NotificationSystem["Notification System"]
     UI["SwiftUI Views"]
     
-    Backend <--> SyncManager
-    SyncManager --> DbCoord
+    CloudKitHM["CloudKitHealthMonitor"]
+    CloudKitRC["CloudKitRequestCoordinator (Actor)"]
+    CloudKit["CloudKit"]
+    
+    Backend <--> BGTaskManager
+    Backend <--> ArticleSvc
+    MigAdapter --> BGTaskManager
+    MigAdapter --> ArticleSvc
+    ArticleSvc --> LocalStorage
     DbCoord <--> LocalStorage
     LocalStorage --> UI
     Backend --> NotificationSystem
     NotificationSystem --> UI
+    
+    CloudKit <--> CloudKitRC
+    CloudKitRC --> LocalStorage
+    CloudKitHM --> CloudKitRC
+    CloudKitHM --> LocalStorage
 ```
 
 ## Key Components
@@ -83,6 +98,25 @@ flowchart LR
     UI -->|"Direct optimized queries"| DC
 ```
 
+The ArticleService similarly acts as a repository, but adds CloudKit awareness:
+
+```mermaid
+flowchart LR
+    UI["UI Components"]
+    VM["ViewModels"]
+    AS["ArticleService"]
+    CK["CloudKit"]
+    SD["SwiftData"]
+    CKHM["CloudKitHealthMonitor"]
+    
+    UI --> VM
+    VM --> AS
+    AS -->|"Sync data"| CK
+    AS -->|"Local storage"| SD
+    CKHM -->|"Health status"| AS
+    AS -->|"Storage mode switch"| SD
+```
+
 The UI components (particularly NewsView) now have two data access paths:
 1. Through SyncManager for general operations and data synchronization
 2. Directly to DatabaseCoordinator for optimized, filtered queries like topic switching
@@ -92,8 +126,84 @@ The UI components (particularly NewsView) now have two data access paths:
 - **Views**: SwiftUI views like NewsView, NewsDetailView
 - **ViewModels**: Implemented as ObservableObjects that prepare data for views
 
-### Background Processing
-Uses Swift's background task framework to perform sync operations when the app is in the background.
+### CloudKit Integration Patterns
+
+### Health Monitoring State Machine
+The CloudKit integration uses a state machine pattern to track and manage CloudKit operational health:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unknown
+    Unknown --> Healthy: 2+ Successful operations
+    Unknown --> Degraded: Initial failure
+    Healthy --> Degraded: Any operation failure
+    Degraded --> Failed: 3+ Consecutive failures 
+    Degraded --> Healthy: 2+ Successful operations
+    Failed --> Degraded: Any successful operation
+    Degraded --> Failed: Additional failures
+```
+
+This state machine:
+- Tracks CloudKit operational health through successive operations
+- Allows for immediate degradation but requires multiple successes for recovery
+- Enables threshold-based decisions for fallback to local storage
+- Provides clear state transitions for UI notifications
+
+### CloudKit Request Coordination
+The CloudKit request coordination uses a priority queue system with type isolation:
+
+```mermaid
+flowchart TD
+    CKOp1["CloudKit Operation"] --> RC["RequestCoordinator (Actor)"]
+    CKOp2["CloudKit Operation"] --> RC
+    CKOp3["CloudKit Operation"] --> RC
+    
+    subgraph "RequestCoordinator"
+        TypeQueues["Type-specific Queues"]
+        ActiveOps["Active Operations"]
+    end
+    
+    RC --> TypeQueues
+    TypeQueues --> ActiveOps
+    ActiveOps --> CK["CloudKit"]
+    CK --> HM["HealthMonitor"]
+    HM --> SM["Storage Mode"]
+```
+
+Key aspects:
+- Operations are categorized by type (export, import, setup, fetch, modify)
+- Only one operation of each type can run at a time
+- Pending operations are queued based on priority
+- Results feed back to the health monitoring system
+- Proper error handling with consistent reporting
+
+### Graceful Degradation Pattern
+The system implements a graceful degradation pattern for CloudKit failures:
+
+```mermaid
+flowchart TD
+    Start[App Start] --> Check{CloudKit Available?}
+    Check -->|Yes| UseCloudKit[Use CloudKit Storage]
+    Check -->|No| UseLocal[Use Local Storage]
+    
+    UseCloudKit --> Monitor{Health Monitor}
+    Monitor -->|"Health Degraded"| Degrade[Switch to Local]
+    Monitor -->|"Health Improved"| Recover[Switch to CloudKit]
+    
+    UseLocal --> BGCheck{Background Check}
+    BGCheck -->|"Available Again"| AttemptRecover[Attempt Recovery]
+    AttemptRecover --> Check
+```
+
+This pattern ensures:
+- System always starts in an operational state regardless of CloudKit availability
+- Runtime failures trigger graceful mode switching without data loss
+- Transparent recovery when conditions improve
+- Users are notified of important state changes
+- Periodic background checks attempt recovery automatically
+
+## Background Processing
+Uses Swift's background task framework to perform sync operations when the app is in the background. CloudKit health checks are scheduled using BGTaskScheduler to run periodically when the app is in the background.
 
 ## Concurrency Patterns
 
@@ -103,6 +213,50 @@ Uses Swift's background task framework to perform sync operations when the app i
 - Compliant with Swift 6's stricter concurrency rules
 - Handles non-Sendable types like NSAttributedString with proper boundaries
 - Implements defensive design patterns to avoid SwiftData context access issues
+
+### Actor Dependency Initialization Pattern
+The project uses a specialized pattern for initializing classes that depend on actors, particularly handling the "self captured before all members were initialized" error:
+
+```mermaid
+flowchart TD
+    A[1. Initialize properties to nil/default values]
+    B[2. Complete initialization of all properties]
+    C[3. Call separate method to create async tasks]
+    D[4. Use weak-strong self pattern in tasks]
+    E[5. Implement timeout-protected accessor methods]
+    
+    A --> B --> C --> D --> E
+```
+
+Implementation steps:
+1. Start with optional properties for async dependencies: `private var actorDependency: SomeActor?`
+2. Complete full initialization with nil values: `self.actorDependency = nil`
+3. Create a separate method for async tasks: `createInitializationTaskIfNeeded()`
+4. Use weak-strong pattern in async tasks to avoid retain cycles:
+   ```swift
+   weak var weakSelf = self
+   Task {
+     let dependency = await SomeActor.shared
+     if let strongSelf = weakSelf {
+       await MainActor.run {
+         strongSelf.actorDependency = dependency
+       }
+     }
+   }
+   ```
+5. Implement accessor methods with timeout protection:
+   ```swift
+   private func getInitializedDependency() async throws -> SomeActor {
+     if let dependency = actorDependency { return dependency }
+     
+     // Wait with timeout for initialization
+     return try await withTimeout(duration: .seconds(5)) {
+       try await initializationTask!.value
+     }
+   }
+   ```
+
+This pattern is used in services like MigrationAwareArticleService to handle DatabaseCoordinator dependencies safely.
 
 ### Two-Tier Cache for Topic Switching
 - Uses in-memory caching for immediate UI feedback during topic changes
@@ -139,6 +293,143 @@ Uses Swift's background task framework to perform sync operations when the app i
 - NSCache for in-memory caching of frequently accessed data
 - Batch processing for efficient handling of multiple articles
 
+### One-Time Migration Architecture
+
+The migration system uses a coordinator pattern to ensure clean isolation and future removability, with an emphasis on running exactly once per device:
+
+```mermaid
+flowchart TD
+    App[ArgusApp] --> Coordinator[MigrationCoordinator]
+    Coordinator --> UserDefaults[UserDefaults State]
+    Coordinator --> Service[MigrationService]
+    Service --> DBOld[Old Database]
+    Service --> DBNew[SwiftData]
+    
+    subgraph "Self-Contained Migration Module"
+        Coordinator
+        Service
+        UI[MigrationModalView]
+        Types[MigrationTypes]
+    end
+    
+    Coordinator --> UI
+```
+
+This architecture ensures:
+1. Single entry point through the MigrationCoordinator
+2. Complete isolation of migration logic
+3. Minimal touch points with the main application
+4. One-time execution with persistent state tracking
+5. Easy removal when migration is complete for all users
+
+#### One-Time Migration Flow
+
+```mermaid
+flowchart TD
+    Start[App Launch] --> CheckDefault{Migration Completed\nin UserDefaults?}
+    CheckDefault -->|Yes| Continue[Continue App Flow]
+    CheckDefault -->|No| CheckInterrupted{Was Migration\nInterrupted?}
+    CheckInterrupted -->|No| ShowModal[Show Migration Modal UI]
+    CheckInterrupted -->|Yes| ShowModal
+    ShowModal --> ProcessBatch[Process Article Batch]
+    ProcessBatch --> Exists{Article Exists?}
+    Exists -->|Yes| Update[Update Status Only]
+    Exists -->|No| Create[Create New Entry]
+    Update --> NextBatch{More Batches?}
+    Create --> NextBatch
+    NextBatch -->|Yes| ProcessBatch
+    NextBatch -->|No| Complete[Complete Migration]
+    Complete --> MarkCompleted[Set Migration Completed\nin UserDefaults]
+    MarkCompleted --> HideModal[Hide Modal UI]
+    HideModal --> Continue
+```
+
+The migration now operates with a true one-time approach, where it:
+1. Checks if migration is already completed using UserDefaults
+2. Only runs once per device, even after app updates or reinstalls
+3. Uses blocking modal UI to prevent user interaction during migration
+4. Creates a read-only view of the legacy database for migration purposes
+5. Maintains resilience for interrupted migrations with progress tracking
+6. Can be completely removed from the codebase in a future update once all users have migrated
+
+### SwiftData Relationship Management
+
+SwiftData's relationship handling requires special attention, particularly with bidirectional relationships and cascade delete rules:
+
+```mermaid
+flowchart TD
+    subgraph "Entity Deletion Pattern"
+        A[1. Nullify Relationships]
+        B[2. Use Isolation Context]
+        C[3. Process in Small Batches]
+        D[4. Save After Each Batch]
+        E[5. Delete Parent Entities Last]
+        
+        A --> B --> C --> D --> E
+    end
+```
+
+#### Deletion Best Practices
+
+1. **Break Circular References**:
+   - Nullify relationships before deletion: `entity.relationships = []`
+   - Save changes to commit relationship removal
+   - Then proceed with actual entity deletion
+   
+2. **Dedicated Isolation Context**:
+   - Create a fresh ModelContext specifically for deletion operations
+   - Prevents context interference with UI-bound contexts
+   - Avoids EXC_BAD_ACCESS crashes during complex operations
+
+3. **Batched Processing**:
+   - Process entities in small batches (5-10 items)
+   - Perform intermediate saves between batches
+   - Allows tracking progress and prevents memory buildup
+   
+4. **Deletion Order**:
+   - Delete child entities before parent entities
+   - Handle SeenArticle records first (no relationships)
+   - Then handle Topics with cascade rules
+   - Finally clean up any orphaned Articles
+   
+5. **Diagnostic Tracking**:
+   - Log timing information at each step
+   - Track relationship counts and entity states
+   - Monitor for unexpected conditions
+
+#### Example Implementation
+
+```swift
+// 1. Create isolated context
+let deletionContext = container.newContext()
+
+// 2. Break circular references
+let articles = try deletionContext.fetch(FetchDescriptor<ArticleModel>())
+for article in articles {
+    article.topics = []
+}
+try deletionContext.save()
+
+// 3. Delete in small batches with separate context
+let topics = try deletionContext.fetch(FetchDescriptor<TopicModel>())
+for batch in stride(from: 0, to: topics.count, by: 5) {
+    let end = min(batch + 5, topics.count)
+    for i in batch..<end {
+        deletionContext.delete(topics[i])
+    }
+    try deletionContext.save()
+}
+
+// 4. Cleanup any orphaned entities
+let remainingArticles = try deletionContext.fetch(FetchDescriptor<ArticleModel>())
+for article in remainingArticles {
+    deletionContext.delete(article)
+}
+try deletionContext.save()
+```
+
+This pattern avoids the EXC_BAD_ACCESS crashes and freezes that can occur when SwiftData attempts to maintain relationship integrity during deletion operations.
+
 ## Communication Patterns
 - RESTful API calls to the backend server
 - Push notifications for high-priority content
@@ -155,6 +446,12 @@ Uses Swift's background task framework to perform sync operations when the app i
   1. First try optimized database method
   2. Fall back to cache if database operation fails
   3. Final fallback to traditional filtering for guaranteed results
+- CloudKit error handling with state-based recovery:
+  1. Detect CloudKit issues using health monitoring state machine
+  2. Switch to local storage when CloudKit fails repeatedly
+  3. Provide user feedback through notifications
+  4. Attempt automatic recovery when conditions improve
+  5. Monitor system events (account changes, network availability) for recovery triggers
 
 ## Testing Approach
 - Unit tests for core business logic
@@ -277,6 +574,7 @@ The current SyncManager acts as a repository but will be replaced with a more fo
 | Direct UI database access | ViewModel-mediated access |
 | BackgroundContextManager | Task + UNUserNotificationCenter |
 | Push notification handling in AppDelegate | Focused async notification handlers |
+| Manual CloudKit checks | CloudKitHealthMonitor + CloudKitRequestCoordinator |
 
 ### Implementation Phases
 

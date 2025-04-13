@@ -3,7 +3,7 @@ import OSLog
 /// Application-wide logging facility
 enum AppLogger {
     // Main application subsystems
-    static let sync = Logger(subsystem: "com.arguspulse", category: "SyncManager")
+    static let sync = Logger(subsystem: "com.arguspulse", category: "Sync") // Changed from SyncManager
     static let api = Logger(subsystem: "com.arguspulse", category: "APIClient")
     static let notifications = Logger(subsystem: "com.arguspulse", category: "Notifications")
     static let database = Logger(subsystem: "com.arguspulse", category: "Database")

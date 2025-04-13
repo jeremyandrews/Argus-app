@@ -2,6 +2,12 @@ import SwiftData
 import UIKit
 import UserNotifications
 
+// Custom notification names (moved from SyncManager)
+extension Notification.Name {
+    static let articleProcessingCompleted = Notification.Name("ArticleProcessingCompleted")
+    static let syncStatusChanged = Notification.Name("SyncStatusChanged")
+}
+
 class NotificationUtils {
     // Badge count caching
     private static var cachedUnviewedCount: Int = -1
@@ -52,8 +58,20 @@ class NotificationUtils {
     }
 
     @MainActor
+    private static func hasNotificationPermission() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        return settings.authorizationStatus == .authorized
+    }
+
+    @MainActor
     private static func performBadgeUpdate() async {
         updateScheduled = false
+
+        // Check notification permissions first
+        guard await hasNotificationPermission() else {
+            AppLogger.ui.warning("Cannot update badge: notification permission not granted")
+            return
+        }
 
         // Check badge setting
         guard UserDefaults.standard.bool(forKey: "showBadge") else {
@@ -64,28 +82,34 @@ class NotificationUtils {
             return
         }
 
-        // Use DatabaseCoordinator for thread-safe database access
-        let unviewedCount = await DatabaseCoordinator.shared.countArticles(
-            matching: #Predicate<NotificationData> { article in
-                !article.isViewed && !article.isArchived
-            }
-        )
+        do {
+            // Use ArticleService to query ArticleModel instead of DatabaseCoordinator with NotificationData
+            let unviewedCount = try await ArticleService.shared.countUnviewedArticles()
 
-        // Only update if the count actually changed
-        if unviewedCount != cachedUnviewedCount {
-            await setBadgeCount(unviewedCount)
-            cachedUnviewedCount = unviewedCount
-            AppLogger.database.debug("Badge count updated to \(unviewedCount)")
+            // Log the query result for diagnostics
+            AppLogger.database.debug("Badge count query returned \(unviewedCount) unviewed articles")
+
+            // Only update if the count actually changed
+            if unviewedCount != cachedUnviewedCount {
+                await setBadgeCount(unviewedCount)
+                cachedUnviewedCount = unviewedCount
+                AppLogger.database.debug("Badge count updated to \(unviewedCount)")
+            }
+        } catch {
+            AppLogger.database.error("Failed to query unviewed articles: \(error)")
         }
     }
 
-    // Helper function to set badge count using the modern API
+    // Helper function to set badge count using the modern UNUserNotificationCenter API
     @MainActor
     private static func setBadgeCount(_ count: Int) async {
+        // Use the proper non-deprecated API from UNUserNotificationCenter
         return await withCheckedContinuation { continuation in
             UNUserNotificationCenter.current().setBadgeCount(count) { error in
                 if let error = error {
                     AppLogger.ui.error("Failed to update badge count: \(error)")
+                } else {
+                    AppLogger.ui.debug("Badge count set to \(count)")
                 }
                 continuation.resume()
             }
@@ -101,10 +125,9 @@ class NotificationUtils {
 
 // Extension to maintain compatibility with SettingsView
 extension UNUserNotificationCenter {
+    // This method is called directly from SettingsView.swift
     func updateBadgeCount(_ count: Int, completion: ((Error?) -> Void)? = nil) {
-        // Use the modern API for iOS 18.3+
-        setBadgeCount(count) { error in
-            completion?(error)
-        }
+        // Use the native UNUserNotificationCenter method
+        setBadgeCount(count, withCompletionHandler: completion)
     }
 }

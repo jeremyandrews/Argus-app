@@ -84,6 +84,7 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     }
 
     let url = json["url"] as? String // Extract the URL but don't make it required
+    // Use a local domain extraction function for cloud build compatibility
     let domain = extractDomain(from: url ?? "")
 
     // Include quality badge information in the first pass
@@ -135,10 +136,29 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     )
 }
 
-func extractDomain(from urlString: String) -> String {
-    // 1) Remove scheme (e.g. http://, https://)
-    // 2) Remove leading "www."
-    // 3) Return the rest (the domain)
+// Domain extraction function duplicated directly in this file for cloud build compatibility
+/// Helper function to extract the domain from a URL
+///
+/// This extracts the domain portion from a URL string by:
+/// 1. Removing the scheme (http://, https://)
+/// 2. Removing any "www." prefix
+/// 3. Keeping only the domain part (removing paths)
+/// 4. Trimming whitespace
+///
+/// - Parameter urlString: The URL to extract domain from
+/// - Returns: The domain string, or nil if the URL is invalid or malformed
+func extractDomain(from urlString: String) -> String? {
+    // Early check for empty or nil URLs
+    guard !urlString.isEmpty else {
+        return nil
+    }
+
+    // Try the URL-based approach first for properly formatted URLs
+    if let url = URL(string: urlString), let host = url.host {
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+
+    // Fallback manual parsing for URLs that might not parse with URL initializer
     var working = urlString.lowercased()
 
     // Strip scheme
@@ -158,6 +178,9 @@ func extractDomain(from urlString: String) -> String {
         working = String(working[..<slashIndex])
     }
 
-    // Trim whitespace, just in case
-    return working.trimmingCharacters(in: .whitespacesAndNewlines)
+    // Trim whitespace
+    working = working.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // Return nil if we ended up with an empty string
+    return working.isEmpty ? nil : working
 }

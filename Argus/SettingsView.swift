@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @AppStorage("autoDeleteDays") private var autoDeleteDays: Int = UserDefaults.standard.object(forKey: "autoDeleteDays") == nil ? 3 : UserDefaults.standard.integer(forKey: "autoDeleteDays")
@@ -140,6 +141,51 @@ struct SettingsView: View {
                 } header: {
                     Text("About Argus")
                 }
+
+                // Development section for testing SwiftData
+                #if DEBUG
+                    Section {
+                        NavigationLink(destination: TopicDiagnosticView()) {
+                            HStack {
+                                Image(systemName: "chart.bar.fill")
+                                    .foregroundColor(.green)
+                                Text("Topic Statistics")
+                            }
+                        }
+                        .foregroundColor(.primary)
+
+                        Button(action: {
+                            Task {
+                                let viewModel = NewsViewModel()
+                                let removedCount = await viewModel.removeDuplicateArticles()
+                                // Show alert with results
+                                let message = "Successfully removed \(removedCount) duplicate articles."
+                                #if os(iOS)
+                                    let alert = UIAlertController(title: "Cleanup Complete", message: message, preferredStyle: .alert)
+                                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                       let rootViewController = windowScene.windows.first?.rootViewController
+                                    {
+                                        rootViewController.present(alert, animated: true)
+                                    }
+                                #endif
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "delete.left.fill")
+                                    .foregroundColor(.red)
+                                Text("Remove Duplicate Articles")
+                            }
+                        }
+                        .foregroundColor(.primary)
+
+                        Text("This section provides diagnostic and maintenance tools for the application.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    } header: {
+                        Text("Development")
+                    }
+                #endif
             }
             .navigationTitle("Settings")
         }

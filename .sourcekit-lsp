@@ -1,0 +1,22 @@
+{
+  "completion": {
+    "enable": true,
+    "includeStandardLibrary": true
+  },
+  "index": {
+    "enable": true,
+    "indexOnLoad": true
+  },
+  "xcodeProjectBuildSettings": {
+    "enable": true,
+    "derived": true
+  },
+  "server": {
+    "clientCapabilities": {
+      "snippetSupport": true
+    }
+  },
+  "clangd": {
+    "fallbackFlags": []
+  }
+}

@@ -102,6 +102,9 @@ struct NonSelectableRichTextView: UIViewRepresentable {
         // Ensure the text always starts at the same left margin
         textView.textAlignment = .left
 
+        // Make sure text view expands to fit content
+        textView.setContentCompressionResistancePriority(.required, for: .vertical)
+
         // Force `UITextView` to wrap by constraining its width
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.setContentHuggingPriority(.required, for: .horizontal)
@@ -115,15 +118,51 @@ struct NonSelectableRichTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context _: Context) {
+        // Create a mutable copy to preserve formatting but ensure proper font size
         let mutableString = NSMutableAttributedString(attributedString: attributedString)
-
+        
+        // Apply system body font size to all text while preserving other attributes
         let bodyFont = UIFont.preferredFont(forTextStyle: .body)
-        mutableString.addAttribute(.font, value: bodyFont, range: NSRange(location: 0, length: mutableString.length))
+        mutableString.enumerateAttributes(in: NSRange(location: 0, length: mutableString.length)) { attributes, range, _ in
+            if let existingFont = attributes[.font] as? UIFont {
+                // Create a new font with the same characteristics but body font size
+                let newFont = existingFont.withSize(bodyFont.pointSize)
+                mutableString.addAttribute(.font, value: newFont, range: range)
+                
+                // Preserve paragraph style if it exists (affects spacing)
+                if let paragraphStyle = attributes[.paragraphStyle] {
+                    mutableString.addAttribute(.paragraphStyle, value: paragraphStyle, range: range)
+                }
+                
+                // Preserve character spacing (kerning) if it exists
+                if let kerning = attributes[.kern] {
+                    mutableString.addAttribute(.kern, value: kerning, range: range)
+                }
+            } else {
+                // If no font exists, add the body font
+                mutableString.addAttribute(.font, value: bodyFont, range: range)
+            }
+        }
 
         uiView.attributedText = mutableString
         uiView.textAlignment = .left
         uiView.invalidateIntrinsicContentSize()
         uiView.layoutIfNeeded()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize {
+        // If a width is provided, use that, otherwise use screen width minus padding
+        let width = proposal.width ?? UIScreen.main.bounds.width - 40
+        uiView.textContainer.size.width = width
+        uiView.layoutIfNeeded()
+
+        // Calculate height that fits all content
+        let fittingSize = uiView.sizeThatFits(CGSize(
+            width: width,
+            height: UIView.layoutFittingExpandedSize.height
+        ))
+
+        return fittingSize
     }
 }
 
@@ -174,22 +213,7 @@ struct RichTextView: UIViewRepresentable {
 
 // MARK: - Visual Label Components
 
-struct ArchivedPill: View {
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "archivebox.fill")
-                .font(.caption2)
-            Text("Archived")
-                .font(.caption2)
-                .bold()
-        }
-        .foregroundColor(.primary)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(Color(uiColor: .systemOrange).opacity(0.3))
-        .cornerRadius(8)
-    }
-}
+// ArchivedPill removed - Archive functionality has been deprecated
 
 struct TopicPill: View {
     let topic: String

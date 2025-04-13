@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var tabBarHeight: CGFloat = 0
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var showSwiftDataTest = false
 
     var body: some View {
         if horizontalSizeClass == .regular {

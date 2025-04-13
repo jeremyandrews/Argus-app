@@ -10,169 +10,243 @@ enum TabTransitionState {
 }
 
 struct NewsDetailView: View {
-    @State private var notifications: [NotificationData]
-    @State private var allNotifications: [NotificationData]
-    @State private var currentIndex: Int
+    // MARK: - View Model
+
+    /// The view model that manages article data and operations
+    @ObservedObject private var viewModel: NewsDetailViewModel
+
+    // MARK: - UI State Properties
+
+    /// Computed property to check if current index is valid
+    private var isCurrentIndexValid: Bool {
+        viewModel.currentIndex >= 0 && viewModel.currentIndex < viewModel.articles.count
+    }
+
+    /// Access to the model context for database operations
+    @Environment(\.modelContext) private var modelContext
+    // Removed legacy preloaded notification state
+
+    /// Convert article content to attributed string
+    private func getAttributedString(
+        for field: RichTextField,
+        from article: ArticleModel,
+        createIfMissing: Bool = false,
+        customFontSize: CGFloat? = nil
+    ) -> NSAttributedString? {
+        // Call directly to MarkdownUtilities since the customFontSize parameter is needed
+        // but not available in the ArticleOperations API
+        if let textContent = getTextContentForField(field, from: article) {
+            return markdownToAttributedString(
+                textContent,
+                textStyle: "UIFontTextStyleBody",
+                customFontSize: customFontSize
+            )
+        } else if createIfMissing {
+            // If we should create missing content, use placeholder text
+            let fieldName = SectionNaming.nameForField(field).lowercased()
+            let placeholder = "No \(fieldName) content available."
+            return markdownToAttributedString(
+                placeholder,
+                textStyle: "UIFontTextStyleBody",
+                customFontSize: customFontSize
+            )
+        }
+        return nil
+    }
+
+    /// Gets the text content for a specific rich text field from an ArticleModel
+    private func getTextContentForField(_ field: RichTextField, from article: ArticleModel) -> String? {
+        switch field {
+        case .title:
+            return article.title
+        case .body:
+            return article.body
+        case .summary:
+            return article.summary
+        case .criticalAnalysis:
+            return article.criticalAnalysis
+        case .logicalFallacies:
+            return article.logicalFallacies
+        case .sourceAnalysis:
+            return article.sourceAnalysis
+        case .relationToTopic:
+            return article.relationToTopic
+        case .additionalInsights:
+            return article.additionalInsights
+        }
+    }
+
+    /// Gets the text content for a specific rich text field
+    // Removed legacy NotificationData getTextContentForField method - using ArticleModel version instead
+
+    @State private var titleAttributedString: NSAttributedString? = nil
+    @State private var bodyAttributedString: NSAttributedString? = nil
+    @State private var summaryAttributedString: NSAttributedString? = nil
+    @State private var criticalAnalysisAttributedString: NSAttributedString? = nil
+    @State private var logicalFallaciesAttributedString: NSAttributedString? = nil
+    @State private var sourceAnalysisAttributedString: NSAttributedString? = nil
+    @State private var cachedContentBySection: [String: NSAttributedString] = [:]
+    @State private var expandedSections: [String: Bool] = Self.getDefaultExpandedSections()
+    @State private var contentTransitionID = UUID()
+    @State private var isLoadingNextArticle = false
+    @State private var sectionLoadingTasks: [String: Task<Void, Never>] = [:]
+    @State private var tabChangeTask: Task<Void, Never>? = nil
     @State private var deletedIDs: Set<UUID> = []
-    @State private var batchSize: Int = 50
+    @State private var scrollToSection: String? = nil
+
+    /// Proxy for scrolling to specific sections
     @State private var scrollViewProxy: ScrollViewProxy? = nil
+
+    /// Used to trigger scroll to top
     @State private var scrollToTopTrigger = UUID()
 
-    @State private var titleAttributedString: NSAttributedString?
-    @State private var bodyAttributedString: NSAttributedString?
-    @State private var summaryAttributedString: NSAttributedString?
-    @State private var criticalAnalysisAttributedString: NSAttributedString?
-    @State private var logicalFallaciesAttributedString: NSAttributedString?
-    @State private var sourceAnalysisAttributedString: NSAttributedString?
-
-    @State private var tabTransitionState: TabTransitionState = .idle
-    @State private var tabChangeTask: Task<Void, Never>? = nil
-    @State private var cachedContentBySection: [String: NSAttributedString] = [:]
-    @State private var visibleTabIndex: Int? = nil
-    @State private var preloadedNotification: NotificationData?
-    @State private var isLoadingNextArticle = false
-    @State private var contentTransitionID = UUID()
-    // Store loading tasks per section to be able to cancel them during navigation
-    @State private var sectionLoadingTasks: [String: Task<Void, Never>] = [:]
-
-    private var isCurrentIndexValid: Bool {
-        currentIndex >= 0 && currentIndex < notifications.count
-    }
-
-    private var currentNotification: NotificationData? {
-        if let preloaded = preloadedNotification {
-            return preloaded
-        }
-        guard isCurrentIndexValid else { return nil }
-        return notifications[currentIndex]
-    }
-
-    @State private var scrollToSection: String? = nil
-    let initiallyExpandedSection: String?
+    /// Whether to show the delete confirmation dialog
     @State private var showDeleteConfirmation = false
+
+    /// Additional content dictionary for sections
     @State private var additionalContent: [String: Any]? = nil
-    @State private var isLoadingAdditionalContent = false
-    @State private var expandedSections: [String: Bool] = getDefaultExpandedSections()
+
+    /// Whether to show the share sheet
     @State private var isSharePresented = false
+
+    /// Sections selected for sharing
     @State private var selectedSections: Set<String> = []
-    @State private var articleContent: String? = nil
-    @Environment(\.modelContext) private var modelContext
+
+    /// The initially expanded section, if any
+    let initiallyExpandedSection: String?
+
+    /// Current article being displayed
+    private var currentNotification: ArticleModel? {
+        viewModel.currentArticle
+    }
+
     @Environment(\.dismiss) private var dismiss
 
-    // Define a private static helper to provide default section states
+    /// Returns default section expansion states
     private static func getDefaultExpandedSections() -> [String: Bool] {
         return [
             "Summary": true,
-            "Relevance": false,
             "Critical Analysis": false,
             "Logical Fallacies": false,
             "Source Analysis": false,
+            "Relevance": false,
             "Context & Perspective": false,
             "Argus Engine Stats": false,
+            "Preview": false,
             "Related Articles": false,
         ]
     }
 
-    init(
-        notification: NotificationData? = nil,
-        preloadedTitle: NSAttributedString? = nil,
-        preloadedBody: NSAttributedString? = nil,
-        notifications: [NotificationData],
-        allNotifications: [NotificationData],
-        currentIndex: Int,
-        initiallyExpandedSection: String? = nil
-    ) {
-        // Apply uniqueness to prevent duplicate IDs in collections
-        let uniqueNotifications = notifications.uniqued()
-        let uniqueAllNotifications = allNotifications.uniqued()
+    // MARK: - Initialization
 
-        _notifications = State(initialValue: uniqueNotifications)
-        _allNotifications = State(initialValue: uniqueAllNotifications)
-        _currentIndex = State(initialValue: min(currentIndex, uniqueNotifications.count - 1))
-        // If we have a direct notification, initialize our state with it
-        _preloadedNotification = State(initialValue: notification)
-        _titleAttributedString = State(initialValue: preloadedTitle)
-        _bodyAttributedString = State(initialValue: preloadedBody)
-        self.initiallyExpandedSection = initiallyExpandedSection
+    /// Initializes the view with a pre-configured view model
+    /// This approach ensures that we maintain the SwiftData context throughout
+    init(viewModel: NewsDetailViewModel) {
+        // Initialize with the provided view model
+        _viewModel = ObservedObject(initialValue: viewModel)
+
+        // Get the initially expanded section from the view model's state
+        initiallyExpandedSection = viewModel.initiallyExpandedSection
     }
 
     var body: some View {
+        mainView
+    }
+
+    // Breaking the body into smaller components to help the compiler
+    private var mainView: some View {
         NavigationStack {
-            Group {
-                if let _ = currentNotification {
-                    VStack(spacing: 0) {
-                        topBar
-                        ScrollView {
-                            ScrollViewReader { proxy in
-                                VStack {
-                                    // Invisible anchor to scroll to top
-                                    Color.clear
-                                        .frame(height: 1)
-                                        .id("top")
-
-                                    // Immediately show header with minimal data
-                                    articleHeaderStyle
-
-                                    // All sections below, default collapsed
-                                    additionalSectionsView
-                                        .opacity(isLoadingNextArticle ? 0.3 : 1.0) // Fade sections during transitions
-                                        .animation(.easeInOut(duration: 0.2), value: isLoadingNextArticle)
-                                }
-                                .onAppear {
-                                    scrollViewProxy = proxy
-                                }
-                            }
-                        }
-                        .onChange(of: scrollToTopTrigger) { _, _ in
-                            withAnimation {
-                                scrollViewProxy?.scrollTo("top", anchor: .top)
-                            }
-                        }
-                        bottomToolbar
+            articleContentView
+                .navigationBarHidden(true)
+                .onAppear(perform: handleOnAppear)
+                .onChange(of: viewModel.articles) { _, _ in
+                    validateAndAdjustIndex()
+                }
+                .alert("Are you sure you want to delete this article?", isPresented: $showDeleteConfirmation) {
+                    Button("Delete", role: .destructive) {
+                        deleteNotification()
                     }
-                } else {
-                    Text("Article no longer available")
-                        .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                                dismiss()
-                            }
-                        }
+                    Button("Cancel", role: .cancel) {}
                 }
-            }
-            .navigationBarHidden(true)
-            .onAppear {
-                setupDeletionHandling()
-                markAsViewed()
-                loadInitialMinimalContent()
-                if let section = initiallyExpandedSection {
-                    expandedSections[section] = true
+                .sheet(isPresented: $isSharePresented) {
+                    ShareSelectionView(
+                        content: additionalContent,
+                        notification: currentNotification ?? viewModel.articles[0],
+                        selectedSections: $selectedSections,
+                        isPresented: $isSharePresented
+                    )
                 }
-            }
-            .onChange(of: notifications) { _, _ in
-                validateAndAdjustIndex()
-            }
-            .alert("Are you sure you want to delete this article?", isPresented: $showDeleteConfirmation) {
-                Button("Delete", role: .destructive) {
-                    deleteNotification()
-                }
-                Button("Cancel", role: .cancel) {}
-            }
-            .sheet(isPresented: $isSharePresented) {
-                ShareSelectionView(
-                    content: additionalContent,
-                    notification: currentNotification ?? notifications[0],
-                    selectedSections: $selectedSections,
-                    isPresented: $isSharePresented
-                )
-            }
-            .gesture(
-                DragGesture()
-                    .onEnded { value in
-                        if value.translation.width > 100 {
+                .gesture(createDismissGesture())
+        }
+    }
+
+    private var articleContentView: some View {
+        Group {
+            if let _ = currentNotification {
+                articleDetailContent
+            } else {
+                Text("Article no longer available")
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                             dismiss()
                         }
                     }
-            )
+            }
+        }
+    }
+
+    private var articleDetailContent: some View {
+        VStack(spacing: 0) {
+            topBar
+            articleScrollView
+            bottomToolbar
+        }
+    }
+
+    private var articleScrollView: some View {
+        ScrollView {
+            ScrollViewReader { proxy in
+                VStack {
+                    // Invisible anchor to scroll to top
+                    Color.clear
+                        .frame(height: 1)
+                        .id("top")
+
+                    // Immediately show header with minimal data
+                    articleHeaderStyle
+
+                    // All sections below, default collapsed
+                    additionalSectionsView
+                        .opacity(isLoadingNextArticle ? 0.3 : 1.0) // Fade sections during transitions
+                        .animation(.easeInOut(duration: 0.2), value: isLoadingNextArticle)
+                }
+                .onAppear {
+                    scrollViewProxy = proxy
+                }
+            }
+        }
+        .onChange(of: scrollToTopTrigger) { _, _ in
+            withAnimation {
+                scrollViewProxy?.scrollTo("top", anchor: .top)
+            }
+        }
+    }
+
+    private func createDismissGesture() -> some Gesture {
+        DragGesture()
+            .onEnded { value in
+                if value.translation.width > 100 {
+                    dismiss()
+                }
+            }
+    }
+
+    private func handleOnAppear() {
+        setupDeletionHandling()
+        markAsViewed()
+        loadInitialMinimalContent()
+        if let section = initiallyExpandedSection {
+            expandedSections[section] = true
         }
     }
 
@@ -201,7 +275,8 @@ struct NewsDetailView: View {
                         .font(.system(size: 24))
                         .frame(width: 44, height: 44)
                 }
-                .disabled(!isCurrentIndexValid || currentIndex == 0)
+                .disabled(viewModel.currentIndex == 0)
+                .foregroundColor(viewModel.currentIndex > 0 ? .blue : .gray)
 
                 Button {
                     navigateToArticle(direction: .next)
@@ -210,7 +285,8 @@ struct NewsDetailView: View {
                         .font(.system(size: 24))
                         .frame(width: 44, height: 44)
                 }
-                .disabled(!isCurrentIndexValid || currentIndex == notifications.count - 1)
+                .disabled(viewModel.currentIndex >= viewModel.articles.count - 1)
+                .foregroundColor(viewModel.currentIndex < viewModel.articles.count - 1 ? .blue : .gray)
             }
             .padding(.trailing, 8)
         }
@@ -236,12 +312,6 @@ struct NewsDetailView: View {
 
             toolbarButton(icon: "square.and.arrow.up", label: "Share") {
                 isSharePresented = true
-            }
-
-            Spacer()
-
-            toolbarButton(icon: currentNotification?.isArchived ?? false ? "tray.and.arrow.up.fill" : "archivebox", label: "Archive") {
-                toggleArchive()
             }
 
             Spacer()
@@ -287,8 +357,6 @@ struct NewsDetailView: View {
             return notification.isViewed ? .primary : Color.blue.opacity(0.6)
         case "Bookmark":
             return notification.isBookmarked ? .blue : .primary
-        case "Archive":
-            return notification.isArchived ? .orange : .primary
         default:
             return .primary
         }
@@ -308,20 +376,20 @@ struct NewsDetailView: View {
         sections.append(ContentSection(header: "Summary", content: summaryContent))
 
         // 2) “Relevance” section
-        let relevanceContent = n.relation_to_topic ?? (json["relation_to_topic"] as? String ?? "")
+        let relevanceContent = n.relationToTopic ?? (json["relationToTopic"] as? String ?? "")
         sections.append(ContentSection(header: "Relevance", content: relevanceContent))
 
         // 3) “Critical Analysis” section
-        let criticalContent = n.critical_analysis ?? (json["critical_analysis"] as? String ?? "")
+        let criticalContent = n.criticalAnalysis ?? (json["criticalAnalysis"] as? String ?? "")
         sections.append(ContentSection(header: "Critical Analysis", content: criticalContent))
 
         // 4) “Logical Fallacies” section
-        let fallaciesContent = n.logical_fallacies ?? (json["logical_fallacies"] as? String ?? "")
+        let fallaciesContent = n.logicalFallacies ?? (json["logicalFallacies"] as? String ?? "")
         sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
 
         // 5) “Source Analysis” section
-        let sourceAnalysisText = n.source_analysis ?? (json["source_analysis"] as? String ?? "")
-        let sourceType = n.source_type ?? (json["source_type"] as? String ?? "")
+        let sourceAnalysisText = n.sourceAnalysis ?? (json["sourceAnalysis"] as? String ?? "")
+        let sourceType = n.sourceType ?? (json["sourceType"] as? String ?? "")
         let sourceAnalysisData: [String: Any] = [
             "text": sourceAnalysisText,
             "sourceType": sourceType,
@@ -329,20 +397,20 @@ struct NewsDetailView: View {
         sections.append(ContentSection(header: "Source Analysis", content: sourceAnalysisData))
 
         // 6) “Context & Perspective” (aka “additional_insights”)
-        let insights = n.additional_insights ?? (json["additional_insights"] as? String ?? "")
+        let insights = n.additionalInsights ?? (json["additionalInsights"] as? String ?? "")
         if !insights.isEmpty {
             sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
 
         // 7) “Argus Engine Stats” (argus_details)
-        if let engineString = n.engine_stats {
+        if let engineString = n.engineStats {
             // parseEngineStatsJSON returns an ArgusDetailsData if valid
             if let parsed = parseEngineStatsJSON(engineString, fallbackDate: n.date) {
                 sections.append(ContentSection(header: "Argus Engine Stats", content: parsed))
             } else {}
         } else if
             let model = json["model"] as? String,
-            let elapsed = json["elapsed_time"] as? Double,
+            let elapsed = json["elapsedTime"] as? Double,
             let stats = json["stats"] as? String
         {
             // Create ArgusDetailsData for fallback
@@ -351,7 +419,7 @@ struct NewsDetailView: View {
                 elapsedTime: elapsed,
                 date: n.date,
                 stats: stats,
-                systemInfo: json["system_info"] as? [String: Any]
+                systemInfo: json["systemInfo"] as? [String: Any]
             )
             sections.append(ContentSection(header: "Argus Engine Stats", content: dataObject))
         }
@@ -362,11 +430,11 @@ struct NewsDetailView: View {
         }
 
         // 9) “Related Articles” (similar_articles)
-        if let localSimilar = n.similar_articles {
+        if let localSimilar = n.similarArticles {
             if let parsedArray = parseSimilarArticlesJSON(localSimilar) {
                 sections.append(ContentSection(header: "Related Articles", content: parsedArray))
             }
-        } else if let fallbackArr = json["similar_articles"] as? [[String: Any]], !fallbackArr.isEmpty {
+        } else if let fallbackArr = json["similarArticles"] as? [[String: Any]], !fallbackArr.isEmpty {
             sections.append(ContentSection(header: "Related Articles", content: fallbackArr))
         }
 
@@ -379,11 +447,11 @@ struct NewsDetailView: View {
     private func validateAndAdjustIndex() {
         if !isCurrentIndexValid {
             if let targetID = currentNotification?.id,
-               let newIndex = notifications.firstIndex(where: { $0.id == targetID })
+               let newIndex = viewModel.articles.firstIndex(where: { $0.id == targetID })
             {
-                currentIndex = newIndex
+                viewModel.currentIndex = newIndex
             } else {
-                currentIndex = max(0, notifications.count - 1)
+                viewModel.currentIndex = max(0, viewModel.articles.count - 1)
             }
         }
     }
@@ -391,10 +459,10 @@ struct NewsDetailView: View {
     private func tryNavigateToValidArticle() {
         if let currentNotification {
             let currentID = currentNotification.id
-            if let newIndex = notifications.firstIndex(where: {
+            if let newIndex = viewModel.articles.firstIndex(where: {
                 $0.id != currentID && !deletedIDs.contains($0.id)
             }) {
-                currentIndex = newIndex
+                viewModel.currentIndex = newIndex
                 return
             }
         }
@@ -418,219 +486,131 @@ struct NewsDetailView: View {
 
     // Make sure we clean up properly when navigating between articles
     private func navigateToArticle(direction: NavigationDirection) {
-        // Cancel any ongoing tasks
+        // Cancel any local ongoing tasks
         tabChangeTask?.cancel()
         for (_, task) in sectionLoadingTasks {
             task.cancel()
         }
         sectionLoadingTasks = [:]
 
-        // Get the next valid index
-        guard let nextIndex = getNextValidIndex(direction: direction),
-              nextIndex >= 0 && nextIndex < notifications.count
-        else {
-            return
+        // Log navigation action for debugging
+        if let currentArticle = currentNotification {
+            AppLogger.database.debug("NewsDetailView - Navigating from article ID: \(currentArticle.id), direction: \(direction == .next ? "next" : "previous")")
         }
 
-        // Store the notification we're navigating to
-        let nextNotification = notifications[nextIndex]
+        // Delegate to view model for navigation using shared NavigationDirection
+        viewModel.navigateToArticle(direction: direction)
 
-        // Extract title and body blobs synchronously
-        var extractedTitle: NSAttributedString? = nil
-        var extractedBody: NSAttributedString? = nil
+        // No need to synchronize anymore since we're using viewModel values directly
 
-        if let titleBlob = nextNotification.title_blob {
-            extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
-                ofClass: NSAttributedString.self, from: titleBlob
-            )
-        }
-
-        if let bodyBlob = nextNotification.body_blob {
-            extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
-                ofClass: NSAttributedString.self, from: bodyBlob
-            )
-        }
-
-        // Update state with the pre-loaded content
-        currentIndex = nextIndex
-        titleAttributedString = extractedTitle
-        bodyAttributedString = extractedBody
-
-        // Reset other content
-        summaryAttributedString = nil
-        criticalAnalysisAttributedString = nil
-        logicalFallaciesAttributedString = nil
-        sourceAnalysisAttributedString = nil
-        cachedContentBySection = [:]
-        preloadedNotification = nil
-
-        // Reset expanded sections
+        // Reset expanded sections - Summary stays expanded by default
         expandedSections = Self.getDefaultExpandedSections()
 
-        // Force refresh
-        contentTransitionID = UUID()
+        // Force refresh UI
+        contentTransitionID = viewModel.contentTransitionID
         scrollToTopTrigger = UUID()
 
-        // Mark as viewed
-        if !nextNotification.isViewed {
-            nextNotification.isViewed = true
-            Task(priority: .background) {
-                try? modelContext.save()
-                NotificationUtils.updateAppBadgeCount()
-            }
-        }
+        // Now update with the new article if available
+        if let newArticle = viewModel.currentArticle {
+            // No need to set the article - currentNotification is computed from viewModel.currentArticle
+            // But we do make sure our UI state is updated
 
-        // Load the Summary in a completely separate process
-        if expandedSections["Summary"] == true {
-            // This is decoupled to ensure navigation remains responsive
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                self.loadContentForSection("Summary")
-            }
-        }
-    }
+            // Explicitly mark as viewed
+            markAsViewed()
 
-    // This function handles the processing of rich text on a background thread
-    // while keeping data access on the MainActor
-    private func processRichText(for notification: NotificationData) async {
-        // Title processing - all UI updates on MainActor
-        await MainActor.run {
-            // Stay on MainActor for this potentially expensive operation
-            // to avoid Sendable issues with NSAttributedString and NotificationData
-            let titleResult = getAttributedString(for: .title, from: notification)
+            // Log the new article state
+            let hasEngineStats = newArticle.engineStats != nil
+            let hasSimilarArticles = newArticle.similarArticles != nil
+            let hasTitleBlob = newArticle.titleBlob != nil
+            let hasBodyBlob = newArticle.bodyBlob != nil
 
-            // Check if task is cancelled before updating UI
-            if !Task.isCancelled {
-                titleAttributedString = titleResult
-            }
-        }
+            AppLogger.database.debug("""
+            NewsDetailView - After navigation to article ID: \(newArticle.id)
+            - Has title blob: \(hasTitleBlob)
+            - Has body blob: \(hasBodyBlob)
+            - Has engine stats: \(hasEngineStats)
+            - Has similar articles: \(hasSimilarArticles)
+            """)
 
-        // Body processing - all UI updates on MainActor
-        await MainActor.run {
-            let bodyResult = getAttributedString(for: .body, from: notification)
-
-            if !Task.isCancelled {
-                bodyAttributedString = bodyResult
-            }
-        }
-
-        // Check if Summary section is expanded before processing it
-        let isSummaryExpanded = await MainActor.run { expandedSections["Summary"] == true }
-
-        if isSummaryExpanded {
-            await MainActor.run {
-                // Process summary (which might be more expensive)
-                let summaryResult = getAttributedString(
-                    for: .summary,
-                    from: notification,
-                    createIfMissing: true
-                )
-
-                if !Task.isCancelled {
-                    summaryAttributedString = summaryResult
+            // Load the Summary if it's expanded - with slight delay to allow UI to refresh
+            if expandedSections["Summary"] == true {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.loadContentForSection("Summary")
                 }
             }
+        } else {
+            // If we somehow don't have an article after navigation, log error
+            // This is just a safety check that should never happen in normal operation
+            AppLogger.database.error("NewsDetailView - No article after navigation")
         }
     }
+
+    // Removed legacy processRichText method - we now use the ArticleOperations and ViewModel
 
     // Fix the loadContentForSection function to properly handle section loading
+    // Function removed - using SectionNaming.normalizedKey directly at call sites
+
     private func loadContentForSection(_ section: String) {
-        guard currentNotification != nil else { return }
+        // Simply delegate section loading to the ViewModel
+        // The ViewModel now has improved logging and sequential loading
 
-        // Check if content is already loaded
-        if getAttributedStringForSection(section) != nil {
-            return // Already loaded, nothing to do
-        }
+        // Get normalized key for better diagnostics
+        let normalizedKey = SectionNaming.normalizedKey(section)
 
-        // Cancel any existing task for this section
+        // Log that we're requesting content for this section
+        AppLogger.database.debug("NewsDetailView requesting content for section: \(section) (key: \(normalizedKey))")
+
+        // Cancel any existing task
         sectionLoadingTasks[section]?.cancel()
 
-        let field = getRichTextFieldForSection(section)
-
-        // Create a new task to load this section's content
-        let task = Task { @MainActor in
-            guard let notification = currentNotification else { return }
-
-            // First check if we have a pre-formatted blob for this section
-            var attributedString: NSAttributedString? = nil
-
-            // Try to get content from blob first
-            switch field {
-            case .summary:
-                if let blob = notification.summary_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            case .criticalAnalysis:
-                if let blob = notification.critical_analysis_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            case .logicalFallacies:
-                if let blob = notification.logical_fallacies_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            case .sourceAnalysis:
-                if let blob = notification.source_analysis_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            case .relationToTopic:
-                if let blob = notification.relation_to_topic_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            case .additionalInsights:
-                if let blob = notification.additional_insights_blob {
-                    attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self, from: blob
-                    )
-                }
-            default:
-                break
+        // Create a task that will handle loading and state management
+        let loadingTask = Task {
+            // First mark this section as loading in our local state
+            await MainActor.run {
+                sectionLoadingTasks[section] = Task {}  // Just a placeholder task to indicate loading
             }
-
-            // If no blob or couldn't unarchive, generate new content
-            if attributedString == nil && !Task.isCancelled {
-                attributedString = getAttributedString(
-                    for: field,
-                    from: notification,
-                    createIfMissing: true
-                )
-            }
-
-            // If task wasn't cancelled, update UI state
-            if !Task.isCancelled, let attributedString = attributedString {
-                // Store the result in the appropriate property
-                switch field {
-                case .summary:
-                    summaryAttributedString = attributedString
-                case .criticalAnalysis:
-                    criticalAnalysisAttributedString = attributedString
-                case .logicalFallacies:
-                    logicalFallaciesAttributedString = attributedString
-                case .sourceAnalysis:
-                    sourceAnalysisAttributedString = attributedString
-                case .relationToTopic:
-                    cachedContentBySection["Relevance"] = attributedString
-                case .additionalInsights:
-                    cachedContentBySection["Context & Perspective"] = attributedString
-                default:
+            
+            // Delegate to ViewModel which handles the actual loading and persistence
+            viewModel.loadContentForSection(section)
+            
+            // Check if content is available after a short delay (give time for loading)
+            try? await Task.sleep(for: .seconds(0.5))
+            
+            // Monitor loading until either content is available or timeout occurs
+            let startTime = Date()
+            let timeout = 10.0 // seconds
+            
+            while !Task.isCancelled {
+                if Date().timeIntervalSince(startTime) > timeout {
+                    // Timeout occurred, stop monitoring
                     break
                 }
-
-                // Clear loading state
-                sectionLoadingTasks[section] = nil
+                
+                // Check if content is now available
+                let hasContent = await MainActor.run {
+                    return viewModel.getAttributedStringForSection(section) != nil
+                }
+                
+                if hasContent {
+                    // Content loaded successfully
+                    break
+                }
+                
+                // Wait before checking again
+                try? await Task.sleep(for: .seconds(0.5))
+            }
+            
+            // Update loading state only if this task wasn't cancelled
+            if !Task.isCancelled {
+                await MainActor.run {
+                    // Clear loading state
+                    sectionLoadingTasks[section] = nil
+                }
             }
         }
 
-        // Store the task so we can cancel it if needed
-        sectionLoadingTasks[section] = task
+        // Store the loading task
+        sectionLoadingTasks[section] = loadingTask
     }
 
     private func clearSectionContent() {
@@ -645,38 +625,9 @@ struct NewsDetailView: View {
         cachedContentBySection = [:]
     }
 
-    private func getNextValidIndex(direction: NavigationDirection) -> Int? {
-        // In the notifications array, lower indices are newer articles (when sorted by "newest")
-        // So for "next" we actually want to go to older articles (increase index)
-        // And for "previous" we want to go to newer articles (decrease index)
-        var newIndex = direction == .next ? currentIndex + 1 : currentIndex - 1
+    // This function is now handled by the ViewModel and no longer needed
 
-        // Check if the index is valid and not deleted
-        while newIndex >= 0 && newIndex < notifications.count {
-            let candidate = notifications[newIndex]
-            if !deletedIDs.contains(candidate.id) {
-                return newIndex
-            }
-            newIndex += (direction == .next ? 1 : -1)
-        }
-
-        return nil
-    }
-
-    private func moveToNextValidArticle(direction: NavigationDirection) async -> Bool {
-        var newIndex = direction == .next ? currentIndex + 1 : currentIndex - 1
-        while newIndex >= 0 && newIndex < notifications.count {
-            let candidate = notifications[newIndex]
-            if !deletedIDs.contains(candidate.id) {
-                await MainActor.run {
-                    currentIndex = newIndex
-                }
-                return true
-            }
-            newIndex += (direction == .next ? 1 : -1)
-        }
-        return false
-    }
+    // This function is now handled by the ViewModel and no longer needed
 
     private func clearCurrentContent() {
         titleAttributedString = nil
@@ -692,24 +643,18 @@ struct NewsDetailView: View {
         }
     }
 
-    enum NavigationDirection {
-        case next
-        case previous
-    }
+    // Using shared NavigationDirection enum
 
     // MARK: - Article Header
 
     // In articleHeaderStyle computed property
     private var articleHeaderStyle: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Topic pill + "Archived" pill
+            // Topic pill
             HStack(spacing: 8) {
                 if let n = currentNotification {
                     if let topic = n.topic, !topic.isEmpty {
                         TopicPill(topic: topic)
-                    }
-                    if n.isArchived {
-                        ArchivedPill()
                     }
                 }
                 Spacer()
@@ -718,7 +663,7 @@ struct NewsDetailView: View {
             if let n = currentNotification {
                 // Title - use rich text if available, otherwise fall back to plain text
                 Group {
-                    if let titleAttrString = titleAttributedString {
+                    if let titleAttrString = viewModel.titleAttributedString {
                         NonSelectableRichTextView(attributedString: titleAttrString)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -732,16 +677,15 @@ struct NewsDetailView: View {
                 }
 
                 // Publication Date
-                if let pubDate = n.pub_date {
-                    Text("Published: \(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                // n.pub_date from ArticleModel's compatibility API returns Date not optional
+                Text("Published: \(n.pub_date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Body - use rich text if available, otherwise fall back to plain text
                 Group {
-                    if let bodyAttrString = bodyAttributedString {
+                    if let bodyAttrString = viewModel.bodyAttributedString {
                         NonSelectableRichTextView(attributedString: bodyAttrString)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundColor(.secondary)
@@ -768,7 +712,7 @@ struct NewsDetailView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         DomainSourceView(
                             domain: domain,
-                            sourceType: n.source_type,
+                            sourceType: n.sourceType,
                             onTap: {
                                 // Default tap behavior for domain
                                 if let url = URL(string: "https://\(domain)") {
@@ -794,8 +738,11 @@ struct NewsDetailView: View {
                         )
 
                         // Remaining quality badges (Proof, Logic, Context)
-                        LazyLoadingQualityBadges(
-                            notification: n,
+                        QualityBadges(
+                            sourcesQuality: n.sources_quality,
+                            argumentQuality: n.argument_quality,
+                            sourceType: n.sourceType,
+                            scrollToSection: $scrollToSection,
                             onBadgeTap: { section in
                                 // First ensure the section is expanded
                                 expandedSections[section] = true
@@ -906,58 +853,42 @@ struct NewsDetailView: View {
     // MARK: - Actions
 
     private func toggleReadStatus() {
-        guard let notification = currentNotification else { return }
-        notification.isViewed.toggle()
-        saveModel()
-        NotificationUtils.updateAppBadgeCount()
+        Task {
+            await viewModel.toggleReadStatus()
 
-        // Post notification that read status changed with additional info
-        NotificationCenter.default.post(
-            name: Notification.Name("ArticleReadStatusChanged"),
-            object: nil,
-            userInfo: ["articleID": notification.id, "isViewed": notification.isViewed]
-        )
-    }
+            // Force an immediate UI refresh of the article header
+            contentTransitionID = UUID()
 
-    private func toggleBookmark() {
-        guard let notification = currentNotification else { return }
-        notification.isBookmarked.toggle()
-        saveModel()
-        NotificationUtils.updateAppBadgeCount()
-    }
-
-    private func toggleArchive() {
-        guard let notification = currentNotification else { return }
-        let wasArchived = notification.isArchived
-        notification.isArchived.toggle()
-        saveModel()
-        NotificationUtils.updateAppBadgeCount()
-
-        if !wasArchived {
-            if currentIndex < notifications.count - 1 {
-                currentIndex += 1
-                markAsViewed()
-            } else {
-                dismiss()
-            }
+            // Post notification for UI updates elsewhere in the app
+            NotificationCenter.default.post(
+                name: Notification.Name("ArticleReadStatusChanged"),
+                object: nil,
+                userInfo: [
+                    "articleID": viewModel.currentArticle?.id ?? UUID(),
+                    "isViewed": viewModel.currentArticle?.isViewed ?? false,
+                ]
+            )
         }
     }
 
-    private func deleteNotification() {
-        guard let notification = currentNotification else { return }
-        modelContext.delete(notification)
-        do {
-            try modelContext.save()
-            NotificationUtils.updateAppBadgeCount()
+    private func toggleBookmark() {
+        Task {
+            await viewModel.toggleBookmark()
+        }
+    }
 
-            if currentIndex < notifications.count - 1 {
-                currentIndex += 1
-                markAsViewed()
+    // Archive functionality removed
+
+    private func deleteNotification() {
+        Task {
+            await viewModel.deleteArticle()
+
+            // Navigate to next article or dismiss
+            if viewModel.currentIndex < viewModel.articles.count - 1 {
+                navigateToArticle(direction: .next)
             } else {
                 dismiss()
             }
-        } catch {
-            AppLogger.database.error("Failed to delete notification: \(error)")
         }
     }
 
@@ -973,15 +904,15 @@ struct NewsDetailView: View {
         return similarArticles
     }
 
-    // Helper to build source analysis content
-    private func buildSourceAnalysis(_ notification: NotificationData) -> String {
+    // Helper to build source analysis content - using ArticleModel instead of NotificationData
+    private func buildSourceAnalysis(_ article: ArticleModel) -> String {
         var content = ""
 
-        if let sourceType = notification.source_type {
+        if let sourceType = article.sourceType {
             content += "Source Type: \(sourceType)\n\n"
         }
 
-        if let sourcesQuality = notification.sources_quality {
+        if let sourcesQuality = article.sourcesQuality {
             let qualityLabel: String
             switch sourcesQuality {
             case 1: qualityLabel = "Poor"
@@ -993,8 +924,8 @@ struct NewsDetailView: View {
             content += "Source Quality: \(qualityLabel)\n\n"
         }
 
-        // Add more details if available in the notification
-        if let domain = notification.domain {
+        // Add more details if available in the article
+        if let domain = article.domain {
             content += "Domain: \(domain)\n\n"
         }
 
@@ -1006,61 +937,68 @@ struct NewsDetailView: View {
         return content
     }
 
-    // In NewsDetailView.swift, add after marking an article as viewed:
+    // Mark article as viewed using the view model
     private func markAsViewed() {
-        guard let notification = currentNotification else { return }
-        if !notification.isViewed {
-            notification.isViewed = true
-            saveModel()
-            NotificationUtils.updateAppBadgeCount()
-            AppDelegate().removeNotificationIfExists(jsonURL: notification.json_url)
+        Task {
+            do {
+                try await viewModel.markAsViewed()
+
+                // Post notification when article is viewed
+                NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
+
+                // Update app badge count and remove notification if exists
+                NotificationUtils.updateAppBadgeCount()
+                if let notification = currentNotification {
+                    AppDelegate().removeNotificationIfExists(jsonURL: notification.jsonURL)
+                }
+            } catch {
+                AppLogger.database.error("Failed to mark article as viewed: \(error)")
+            }
         }
-        // Post notification when article is viewed
-        NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
     }
 
-    private func hasRequiredContent(_ notification: NotificationData) -> Bool {
-        return notification.summary != nil &&
-            notification.critical_analysis != nil &&
-            notification.logical_fallacies != nil
+    private func hasRequiredContent(_ article: ArticleModel) -> Bool {
+        return article.summary != nil &&
+            article.criticalAnalysis != nil &&
+            article.logicalFallacies != nil
     }
 
-    // Helper function to build content dictionary from notification
-    private func buildContentDictionary(from notification: NotificationData) -> [String: Any] {
+    // Helper function to build content dictionary from article model
+    private func buildContentDictionary(from article: ArticleModel) -> [String: Any] {
         var content: [String: Any] = [:]
 
         // Add URL if available
-        if let domain = notification.domain {
+        if let domain = article.domain {
             content["url"] = "https://\(domain)"
         }
 
         // Transfer metadata fields directly without processing
-        content["sources_quality"] = notification.sources_quality
-        content["argument_quality"] = notification.argument_quality
-        content["source_type"] = notification.source_type
+        content["sources_quality"] = article.sourcesQuality
+        content["argument_quality"] = article.argument_quality
+        content["sourceType"] = article.sourceType
 
         // Just check if these fields exist without converting to attributed strings
-        content["summary"] = notification.summary
-        content["critical_analysis"] = notification.critical_analysis
-        content["logical_fallacies"] = notification.logical_fallacies
-        content["relation_to_topic"] = notification.relation_to_topic
-        content["additional_insights"] = notification.additional_insights
+        content["summary"] = article.summary
+        content["criticalAnalysis"] = article.criticalAnalysis
+        content["logicalFallacies"] = article.logicalFallacies
+        content["relationToTopic"] = article.relationToTopic
+        content["additionalInsights"] = article.additionalInsights
 
         // For source analysis, just create a basic dictionary without processing the text
-        if let sourceAnalysis = notification.source_analysis {
-            content["source_analysis"] = [
+        if let sourceAnalysis = article.sourceAnalysis {
+            content["sourceAnalysis"] = [
                 "text": sourceAnalysis,
-                "sourceType": notification.source_type ?? "",
+                "sourceType": article.sourceType ?? "",
             ]
         } else {
-            content["source_analysis"] = [
+            content["sourceAnalysis"] = [
                 "text": "",
-                "sourceType": notification.source_type ?? "",
+                "sourceType": article.sourceType ?? "",
             ]
         }
 
         // Transfer engine stats and similar articles as is
-        if let engineStatsJson = notification.engine_stats,
+        if let engineStatsJson = article.engineStats,
            let engineStatsData = engineStatsJson.data(using: .utf8),
            let engineStats = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
         {
@@ -1080,7 +1018,7 @@ struct NewsDetailView: View {
         }
 
         // Transfer similar articles as is
-        if let similarArticlesJson = notification.similar_articles,
+        if let similarArticlesJson = article.similarArticles,
            let similarArticlesData = similarArticlesJson.data(using: .utf8),
            let similarArticles = try? JSONSerialization.jsonObject(with: similarArticlesData) as? [[String: Any]]
         {
@@ -1089,6 +1027,8 @@ struct NewsDetailView: View {
 
         return content
     }
+
+    // Helper function for NotificationData removed as we now use ArticleModel directly
 
     enum ContentLoadType {
         case minimal // Just title and body (minimum needed for header)
@@ -1214,27 +1154,7 @@ struct NewsDetailView: View {
         }
     }
 
-    // Helper function to load attributed string asynchronously with better error handling
-    private func loadAttributedStringAsync(for field: RichTextField, from notification: NotificationData) async -> NSAttributedString? {
-        // Use actor isolation to safely perform the operation
-        return await withTaskCancellationHandler {
-            // The actual task
-            await withCheckedContinuation { continuation in
-                // Use the main queue for simplicity and to avoid Sendable issues
-                DispatchQueue.main.async {
-                    // This is the synchronous function that generates the attributed string
-                    let result = getAttributedString(
-                        for: field,
-                        from: notification,
-                        createIfMissing: true
-                    )
-                    continuation.resume(returning: result)
-                }
-            }
-        } onCancel: {
-            // Nothing to do on cancellation - the continuation won't be resumed
-        }
-    }
+    // Removed legacy loadAttributedStringAsync method - we now use ArticleOperations and ViewModel
 
     private func saveModel() {
         do {
@@ -1322,15 +1242,25 @@ struct NewsDetailView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                 } else {
-                    // Fallback for plain text - NO ANIMATIONS
-                    Text(section.content as? String ?? "No content available")
-                        .font(.callout)
-                        .padding(.top, 6)
-                        .lineSpacing(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
+                    // IMPROVEMENT: Never regenerate blobs on-the-fly, show fallback UI instead
+                    // The previous code was causing blob regeneration even though a blob exists
+                    VStack(spacing: 8) {
+                        Text("Unable to display formatted content")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            
+                        // Last resort display of raw content without conversion
+                        let rawContent = section.content as? String ?? "No content available"
+                        Text(rawContent)
+                            .font(.callout)
+                            .lineSpacing(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
                 }
             }
         }
@@ -1338,13 +1268,13 @@ struct NewsDetailView: View {
 
     // Helper function to get cached attributed string for a section
     private func getAttributedStringForSection(_ section: String) -> NSAttributedString? {
-        switch section {
-        case "Summary": return summaryAttributedString
-        case "Critical Analysis": return criticalAnalysisAttributedString
-        case "Logical Fallacies": return logicalFallaciesAttributedString
-        case "Source Analysis": return sourceAnalysisAttributedString
-        default: return cachedContentBySection[section]
+        let cachedContent = viewModel.getAttributedStringForSection(section)
+        
+        if cachedContent == nil && !isSectionLoading(section) {
+            AppLogger.database.warning("⚠️ View requested cached content for \(section) but it was nil despite being reported as loaded")
         }
+        
+        return cachedContent
     }
 
     // Helper function to check if section content is being loaded
@@ -1369,7 +1299,6 @@ struct NewsDetailView: View {
         logicalFallaciesAttributedString = nil
         sourceAnalysisAttributedString = nil
         cachedContentBySection = [:]
-        preloadedNotification = nil
 
         // Generate a new transition ID
         contentTransitionID = UUID()
@@ -1383,7 +1312,7 @@ struct NewsDetailView: View {
         case "Summary":
             SectionContentView(
                 section: section,
-                attributedString: summaryAttributedString,
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
 
@@ -1435,7 +1364,7 @@ struct NewsDetailView: View {
                 if let sourceData = section.content as? [String: Any] {
                     SectionContentView(
                         section: ContentSection(header: section.header, content: sourceData["text"] ?? ""),
-                        attributedString: sourceAnalysisAttributedString,
+                        attributedString: getAttributedStringForSection(section.header),
                         isLoading: isSectionLoading(section.header)
                     )
                 }
@@ -1450,49 +1379,40 @@ struct NewsDetailView: View {
         case "Critical Analysis":
             SectionContentView(
                 section: section,
-                attributedString: criticalAnalysisAttributedString,
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
-            .onAppear {
-                // Ensure content is loaded when this section appears
-                loadContentForSection("Critical Analysis")
-            }
+            // Removed onAppear handler - content loading now only triggered by section expansion
 
         // MARK: - Logical Fallacies
 
         case "Logical Fallacies":
             SectionContentView(
                 section: section,
-                attributedString: logicalFallaciesAttributedString,
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
-            .onAppear {
-                loadContentForSection("Logical Fallacies")
-            }
+            // Removed onAppear handler - content loading now only triggered by section expansion
 
         // MARK: - Relevance
 
         case "Relevance":
             SectionContentView(
                 section: section,
-                attributedString: cachedContentBySection["Relevance"],
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
-            .onAppear {
-                loadContentForSection("Relevance")
-            }
+            // Removed onAppear handler - content loading now only triggered by section expansion
 
         // MARK: - Context & Perspective
 
         case "Context & Perspective":
             SectionContentView(
                 section: section,
-                attributedString: cachedContentBySection["Context & Perspective"],
+                attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
-            .onAppear {
-                loadContentForSection("Context & Perspective")
-            }
+            // Removed onAppear handler - content loading now only triggered by section expansion
 
         // MARK: - Related Articles
 
@@ -1505,8 +1425,6 @@ struct NewsDetailView: View {
                                 ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
                                     SimilarArticleRow(
                                         articleDict: article,
-                                        notifications: $notifications,
-                                        currentIndex: $currentIndex,
                                         isLastItem: index == similarArticles.count - 1
                                     )
                                 }
@@ -1616,38 +1534,35 @@ struct NewsDetailView: View {
     }
 
     private func loadInitialMinimalContent() {
-        // Load just the basics for the current notification (if it’s valid)
-        guard let n = currentNotification else { return }
+        // Only proceed if we have a notification
+        guard let article = currentNotification else { return }
+
+        // Log the loading attempt
+        AppLogger.database.debug("Loading initial content for article ID: \(article.id)")
+
+        // Ensure the Summary section is expanded
+        expandedSections["Summary"] = true
+
+        // IMPROVEMENT: Use synchronous loading for critical above-the-fold content
+        // to prevent showing unformatted content first
         Task {
-            // Only load title/body if they weren't preloaded
-            if titleAttributedString == nil {
-                let newTitle = getAttributedString(for: .title, from: n)
-                await MainActor.run {
-                    titleAttributedString = newTitle
-                }
-            }
+            // First, let's load the title and body synchronously to prevent flashing of unformatted content
+            await viewModel.loadMinimalContent()
 
-            if bodyAttributedString == nil {
-                let newBody = getAttributedString(for: .body, from: n)
-                await MainActor.run {
-                    bodyAttributedString = newBody
-                }
-            }
+            // Log minimal content load completion
+            AppLogger.database.debug("✅ Minimal content loaded for article ID: \(article.id)")
 
-            // If “Summary” is open by default, do that in background:
-            if expandedSections["Summary"] == true {
-                let newSummary = getAttributedString(for: .summary, from: n, createIfMissing: true)
+            // After minimal content is loaded, force load the Summary section
+            // This ensures proper context preservation via the centralized mechanism
+            loadContentForSection("Summary")
 
-                // Update the UI on the main actor:
-                await MainActor.run {
-                    summaryAttributedString = newSummary
-                }
-            }
+            // Log that we've explicitly loaded the Summary section
+            AppLogger.database.debug("✅ Summary section load triggered for initial view")
         }
     }
 
     struct LazyLoadingContentView<Content: View>: View {
-        let notification: NotificationData
+        let article: ArticleModel
         let field: RichTextField
         let placeholder: String
         var fontSize: CGFloat = 16
@@ -1657,6 +1572,8 @@ struct NewsDetailView: View {
         @State private var loadedAttributedString: NSAttributedString?
         @State private var isLoading = true
         @State private var loadTask: Task<Void, Never>? = nil
+        @State private var loadStartTime = Date()
+        @State private var retryCount = 0
 
         var body: some View {
             Group {
@@ -1665,29 +1582,50 @@ struct NewsDetailView: View {
                     content(attributedString)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if isLoading {
-                    // Loading placeholder
+                    // Show loading with elapsed time if taking too long
                     VStack {
                         ProgressView()
-                        Text("Loading \(placeholder)...")
-                            .font(.callout)
-                            .italic()
-                            .foregroundColor(.secondary)
+                            .id(retryCount) // Force refresh of spinner when retrying
+
+                        // Show elapsed time after 1 second
+                        if Date().timeIntervalSince(loadStartTime) > 1.0 {
+                            Text("Loading \(placeholder)... (\(Int(Date().timeIntervalSince(loadStartTime)))s)")
+                                .font(.callout)
+                                .italic()
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Loading \(placeholder)...")
+                                .font(.callout)
+                                .italic()
+                                .foregroundColor(.secondary)
+                        }
                     }
+                    .frame(minHeight: 50) // Ensure consistent size to prevent layout shifts
                     .padding(.vertical, 10)
                     .onAppear {
+                        loadStartTime = Date()
                         loadContent()
                     }
                     .onDisappear {
                         loadTask?.cancel()
-                        // Notify that the detail view was closed, which might require a list refresh
-                        NotificationCenter.default.post(name: Notification.Name("DetailViewClosed"), object: nil)
                     }
                 } else {
-                    // Fallback if loading fails
-                    Text("Unable to format \(placeholder)")
+                    // Fallback with retry button if loading fails
+                    Button {
+                        // Reset state and retry loading
+                        isLoading = true
+                        loadStartTime = Date()
+                        retryCount += 1
+                        loadContent()
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Unable to load \(placeholder). Tap to retry.")
+                        }
                         .font(.callout)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.red)
                         .padding(.top, 6)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1697,6 +1635,10 @@ struct NewsDetailView: View {
             // Cancel any previous task
             loadTask?.cancel()
 
+            // Track start time for diagnostics
+            let startTime = Date()
+            AppLogger.database.debug("LazyLoadingContentView: Loading content for \(SectionNaming.nameForField(field).lowercased())")
+
             // Only load if we don't already have the content
             if loadedAttributedString != nil {
                 isLoading = false
@@ -1705,40 +1647,99 @@ struct NewsDetailView: View {
 
             // Use a MainActor-constrained task to handle NSAttributedString
             loadTask = Task { @MainActor in
-                // Since we're now on the MainActor, we can directly call getAttributedString
-                // without needing to await MainActor.run
-                let attributedString = getAttributedString(
-                    for: field,
-                    from: notification,
-                    createIfMissing: true,
-                    customFontSize: fontSize
-                )
+                // Try to get content from blob first
+                var loadedFromBlob = false
+                var attributedString: NSAttributedString? = nil
 
-                // We're already on the MainActor, so no need for another MainActor.run
-                // Check if the task was cancelled
-                if Task.isCancelled { return }
+                // Check if we can get this from a blob
+                if let blob = field.getBlob(from: article), !blob.isEmpty {
+                    do {
+                        attributedString = try NSKeyedUnarchiver.unarchivedObject(
+                            ofClass: NSAttributedString.self,
+                            from: blob
+                        )
+                        loadedFromBlob = attributedString != nil
 
-                self.loadedAttributedString = attributedString
-                self.isLoading = false
-                if let attributedString = attributedString {
-                    onLoad?(attributedString)
+                        if loadedFromBlob {
+                            AppLogger.database.debug("LazyLoadingContentView: Loaded \(SectionNaming.nameForField(field).lowercased()) from blob")
+                        }
+                    } catch {
+                        AppLogger.database.error("LazyLoadingContentView: Failed to unarchive blob: \(error)")
+                    }
+                }
+
+                // If blob failed, generate from markdown
+                if attributedString == nil && !Task.isCancelled {
+                    let textContent = getTextContentFor(field, from: article)
+
+                    if let content = textContent, !content.isEmpty {
+                        attributedString = markdownToAttributedString(
+                            content,
+                            textStyle: "UIFontTextStyleBody",
+                            customFontSize: fontSize
+                        )
+
+                        if attributedString != nil {
+                            AppLogger.database.debug("LazyLoadingContentView: Generated \(SectionNaming.nameForField(field).lowercased()) from markdown")
+                        }
+                    } else {
+                        // Create placeholder content if needed
+                        let fieldName = SectionNaming.nameForField(field).lowercased()
+                        let placeholder = "No \(fieldName) content available."
+                        attributedString = markdownToAttributedString(
+                            placeholder,
+                            textStyle: "UIFontTextStyleBody",
+                            customFontSize: fontSize
+                        )
+                    }
+                }
+
+                // Update UI immediately when content is available
+                if !Task.isCancelled {
+                    // Update our state
+                    self.loadedAttributedString = attributedString
+                    self.isLoading = false
+
+                    // Log completion
+                    let loadTime = Date().timeIntervalSince(startTime)
+                    if let _ = attributedString {
+                        AppLogger.database.debug("LazyLoadingContentView: Completed loading \(SectionNaming.nameForField(field).lowercased()) in \(loadTime) seconds")
+                        if let callback = onLoad, let content = attributedString {
+                            callback(content)
+                        }
+                    } else {
+                        AppLogger.database.error("LazyLoadingContentView: Failed to load \(SectionNaming.nameForField(field).lowercased()) after \(loadTime) seconds")
+                    }
                 }
             }
         }
+
+        // Helper function to extract text content from article
+        private func getTextContentFor(_ field: RichTextField, from article: ArticleModel) -> String? {
+            switch field {
+            case .title:
+                return article.title
+            case .body:
+                return article.body
+            case .summary:
+                return article.summary
+            case .criticalAnalysis:
+                return article.criticalAnalysis
+            case .logicalFallacies:
+                return article.logicalFallacies
+            case .sourceAnalysis:
+                return article.sourceAnalysis
+            case .relationToTopic:
+                return article.relationToTopic
+            case .additionalInsights:
+                return article.additionalInsights
+            }
+        }
+
+        // Function removed - using SectionNaming.nameForField directly at call sites
     }
 
-    // This explicitly maps section names to field types, addressing potential mismatches
-    private func getRichTextFieldForSection(_ header: String) -> RichTextField {
-        switch header {
-        case "Summary": return .summary
-        case "Critical Analysis": return .criticalAnalysis
-        case "Logical Fallacies": return .logicalFallacies
-        case "Source Analysis": return .sourceAnalysis
-        case "Relevance": return .relationToTopic
-        case "Context & Perspective": return .additionalInsights
-        default: return .body
-        }
-    }
+    // Function removed - using SectionNaming.fieldForSection directly at call sites
 
     private func loadRelatedArticles() {
         // Only load if we haven't already loaded the content
@@ -1810,15 +1811,11 @@ struct NewsDetailView: View {
 
     private func updateArticleHeaderStyle() -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Existing topic pill + "Archived" pill code
+            // Topic pill only
             HStack(spacing: 8) {
                 if let notification = currentNotification {
                     if let topic = notification.topic, !topic.isEmpty {
                         TopicPill(topic: topic)
-                    }
-
-                    if notification.isArchived {
-                        ArchivedPill()
                     }
                 }
             }
@@ -1860,10 +1857,8 @@ struct NewsDetailView: View {
             }
 
             // Publication Date
-            if let notification = currentNotification,
-               let pubDate = notification.pub_date
-            {
-                Text("Published: \(pubDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
+            if let notification = currentNotification {
+                Text("Published: \(notification.pub_date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
@@ -1926,7 +1921,7 @@ struct NewsDetailView: View {
                             QualityBadges(
                                 sourcesQuality: content["sources_quality"] as? Int,
                                 argumentQuality: content["argument_quality"] as? Int,
-                                sourceType: content["source_type"] as? String,
+                                sourceType: content["sourceType"] as? String,
                                 scrollToSection: $scrollToSection
                             )
                         }
@@ -1969,14 +1964,15 @@ struct NewsDetailView: View {
 
 struct SimilarArticleRow: View {
     let articleDict: [String: Any]
-    @Binding var notifications: [NotificationData]
-    @Binding var currentIndex: Int
+    // Using the view model directly to get articles and set current index
+    // rather than binding to local variables that don't exist anymore
+    @State private var viewModelForRow: NewsDetailViewModel? = nil
     var isLastItem: Bool = false // Add this parameter
 
     @Environment(\.modelContext) private var modelContext
     @State private var showError = false
     @State private var showDetailView = false
-    @State private var selectedNotification: NotificationData?
+    @State private var selectedArticle: ArticleModel?
 
     // Cache for processed content
     @State private var processedTitle: String = ""
@@ -2047,14 +2043,18 @@ struct SimilarArticleRow: View {
             Button("OK", role: .cancel) {}
         }
         .sheet(isPresented: $showDetailView, onDismiss: {
-            selectedNotification = nil
+            selectedArticle = nil
         }) {
-            if let notification = selectedNotification {
-                NewsDetailView(
-                    notifications: [notification],
-                    allNotifications: [notification],
-                    currentIndex: 0
+            if let article = selectedArticle {
+                // Create a view model with the article
+                let articleViewModel = NewsDetailViewModel(
+                    articles: [article],
+                    allArticles: [article],
+                    currentIndex: 0,
+                    initiallyExpandedSection: "Summary"
                 )
+                // Use the new initializer with the view model
+                NewsDetailView(viewModel: articleViewModel)
             }
         }
         .onAppear {
@@ -2107,26 +2107,25 @@ struct SimilarArticleRow: View {
         let urlToFetch = jsonURL
 
         Task {
-            do {
-                // Perform the fetch on the main actor since ModelContext is main actor-isolated
-                let results = try await MainActor.run {
-                    try modelContext.fetch(FetchDescriptor<NotificationData>(
-                        predicate: #Predicate { $0.json_url == urlToFetch }
+            // Perform the fetch directly on the MainActor (MainActor.run doesn't throw errors)
+            await MainActor.run {
+                do {
+                    // Use modelContext directly on the MainActor
+                    let foundArticles = try modelContext.fetch(FetchDescriptor<ArticleModel>(
+                        predicate: #Predicate<ArticleModel> { article in
+                            article.jsonURL == urlToFetch
+                        }
                     ))
-                }
 
-                // Update UI on main thread
-                await MainActor.run {
-                    if let foundArticle = results.first {
-                        selectedNotification = foundArticle
+                    // Process results immediately within the MainActor context
+                    if let foundArticle = foundArticles.first {
+                        selectedArticle = foundArticle
                         showDetailView = true
                     } else {
                         showError = true
                     }
-                }
-            } catch {
-                AppLogger.sync.error("Failed to fetch similar article: \(error)")
-                await MainActor.run {
+                } catch {
+                    AppLogger.sync.error("Failed to fetch similar article: \(error)")
                     showError = true
                 }
             }
@@ -2339,7 +2338,7 @@ struct ArgusDetailsView: View {
 
 struct ShareSelectionView: View {
     let content: [String: Any]?
-    let notification: NotificationData
+    let notification: ArticleModel
     @Binding var selectedSections: Set<String>
     @Binding var isPresented: Bool
     @State private var formatText = true
@@ -2442,19 +2441,19 @@ struct ShareSelectionView: View {
                     sectionContent = notification.summary
 
                 case "Critical Analysis":
-                    sectionContent = notification.critical_analysis
+                    sectionContent = notification.criticalAnalysis
 
                 case "Logical Fallacies":
-                    sectionContent = notification.logical_fallacies
+                    sectionContent = notification.logicalFallacies
 
                 case "Source Analysis":
-                    sectionContent = notification.source_analysis
+                    sectionContent = notification.sourceAnalysis
 
                 case "Relevance":
-                    sectionContent = notification.relation_to_topic
+                    sectionContent = notification.relationToTopic
 
                 case "Context & Perspective":
-                    sectionContent = notification.additional_insights
+                    sectionContent = notification.additionalInsights
 
                 case "Argus Engine Stats":
                     if let details = section.argusDetails {
@@ -2468,7 +2467,7 @@ struct ShareSelectionView: View {
                         if let systemInfo = details.systemInfo {
                             sectionContent! += formatSystemInfo(systemInfo)
                         }
-                    } else if let engineStats = notification.engine_stats {
+                    } else if let engineStats = notification.engineStats {
                         sectionContent = "Engine Stats: \(engineStats)"
                     }
 
@@ -2558,21 +2557,21 @@ struct ShareSelectionView: View {
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
         var sections = [
-            ContentSection(header: "Title", content: json["tiny_title"] as? String ?? ""),
-            ContentSection(header: "Brief Summary", content: json["tiny_summary"] as? String ?? ""),
+            ContentSection(header: "Title", content: json["tinyTitle"] as? String ?? ""),
+            ContentSection(header: "Brief Summary", content: json["tinySummary"] as? String ?? ""),
             ContentSection(header: "Article URL", content: json["url"] as? String ?? ""),
             ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
-            ContentSection(header: "Relevance", content: json["relation_to_topic"] as? String ?? ""),
-            ContentSection(header: "Critical Analysis", content: json["critical_analysis"] as? String ?? ""),
-            ContentSection(header: "Logical Fallacies", content: json["logical_fallacies"] as? String ?? ""),
-            ContentSection(header: "Source Analysis", content: json["source_analysis"] as? String ?? ""),
+            ContentSection(header: "Relevance", content: json["relationToTopic"] as? String ?? ""),
+            ContentSection(header: "Critical Analysis", content: json["criticalAnalysis"] as? String ?? ""),
+            ContentSection(header: "Logical Fallacies", content: json["logicalFallacies"] as? String ?? ""),
+            ContentSection(header: "Source Analysis", content: json["sourceAnalysis"] as? String ?? ""),
         ]
 
-        let insights = json["additional_insights"] as? String ?? notification.additional_insights ?? ""
+        let insights = json["additionalInsights"] as? String ?? notification.additionalInsights ?? ""
         sections.append(ContentSection(header: "Context & Perspective", content: insights))
 
         if let model = json["model"] as? String,
-           let elapsedTime = json["elapsed_time"] as? Double,
+           let elapsedTime = json["elapsedTime"] as? Double,
            let stats = json["stats"] as? String
         {
             sections.append(ContentSection(
@@ -2582,7 +2581,7 @@ struct ShareSelectionView: View {
                     elapsedTime: elapsedTime,
                     date: notification.date,
                     stats: stats,
-                    systemInfo: json["system_info"] as? [String: Any]
+                    systemInfo: json["systemInfo"] as? [String: Any]
                 )
             ))
         }

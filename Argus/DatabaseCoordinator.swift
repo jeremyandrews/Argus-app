@@ -144,11 +144,11 @@ actor DatabaseCoordinator {
     /// Find an article by its ID
     /// - Parameter id: The UUID of the article
     /// - Returns: The article if found, nil otherwise
-    func findArticle(by id: UUID) async -> NotificationData? {
+    func findArticle(by id: UUID) async -> ArticleModel? {
         try? await performTransaction { _, context in
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { article in
-                    article.id == id
+            let descriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { article in
+                    article.id.uuidString == id.uuidString
                 }
             )
 
@@ -159,11 +159,11 @@ actor DatabaseCoordinator {
     /// Find an article by its JSON URL
     /// - Parameter jsonURL: The JSON URL of the article
     /// - Returns: The article if found, nil otherwise
-    func findArticle(by jsonURL: String) async -> NotificationData? {
+    func findArticle(by jsonURL: String) async -> ArticleModel? {
         try? await performTransaction { _, context in
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { article in
-                    article.json_url == jsonURL
+            let descriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { article in
+                    article.jsonURL == jsonURL
                 }
             )
 
@@ -177,13 +177,13 @@ actor DatabaseCoordinator {
     ///   - id: Optional UUID of the article
     ///   - articleURL: Optional article URL
     /// - Returns: The article if found, nil otherwise
-    func findArticle(jsonURL: String, id: UUID? = nil, articleURL: String? = nil) async -> NotificationData? {
+    func findArticle(jsonURL: String, id: UUID? = nil, articleURL: String? = nil) async -> ArticleModel? {
         try? await performTransaction { _, context in
             // First priority - check by ID if provided
             if let id = id {
-                let idDescriptor = FetchDescriptor<NotificationData>(
-                    predicate: #Predicate<NotificationData> { article in
-                        article.id == id
+                let idDescriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { article in
+                        article.id.uuidString == id.uuidString
                     }
                 )
 
@@ -195,9 +195,9 @@ actor DatabaseCoordinator {
 
             // Second priority - check by jsonURL
             if !jsonURL.isEmpty {
-                let urlDescriptor = FetchDescriptor<NotificationData>(
-                    predicate: #Predicate<NotificationData> { article in
-                        article.json_url == jsonURL
+                let urlDescriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { article in
+                        article.jsonURL == jsonURL
                     }
                 )
 
@@ -209,9 +209,9 @@ actor DatabaseCoordinator {
 
             // Last priority - check by article URL
             if let articleURL = articleURL, !articleURL.isEmpty {
-                let articleURLDescriptor = FetchDescriptor<NotificationData>(
-                    predicate: #Predicate<NotificationData> { article in
-                        article.article_url == articleURL
+                let articleURLDescriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { article in
+                        article.url == articleURL
                     }
                 )
 
@@ -244,9 +244,9 @@ actor DatabaseCoordinator {
 
         // Optimized database lookup with fetchLimit=1
         let exists = (try? await performTransaction { _, context in
-            var descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { article in
-                    article.id == id
+            var descriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { article in
+                    article.id.uuidString == id.uuidString
                 }
             )
             // Only need to know if any exist, not fetch the whole record
@@ -281,9 +281,9 @@ actor DatabaseCoordinator {
 
         // Optimized database lookup with fetchLimit=1
         let exists = (try? await performTransaction { _, context in
-            var descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { article in
-                    article.json_url == jsonURL
+            var descriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { article in
+                    article.jsonURL == jsonURL
                 }
             )
             // Only need to know if any exist, not fetch the whole record
@@ -322,9 +322,9 @@ actor DatabaseCoordinator {
 
             // Optimized database lookup for ID
             let existsById = (try? await performTransaction { _, context in
-                var descriptor = FetchDescriptor<NotificationData>(
-                    predicate: #Predicate<NotificationData> { article in
-                        article.id == id
+                var descriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { article in
+                        article.id.uuidString == id.uuidString
                     }
                 )
                 descriptor.fetchLimit = 1
@@ -353,9 +353,9 @@ actor DatabaseCoordinator {
 
             // Optimized database lookup for URL
             let existsByUrl = (try? await performTransaction { _, context in
-                var descriptor = FetchDescriptor<NotificationData>(
-                    predicate: #Predicate<NotificationData> { article in
-                        article.json_url == jsonURL
+                var descriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { article in
+                        article.jsonURL == jsonURL
                     }
                 )
                 descriptor.fetchLimit = 1
@@ -373,9 +373,9 @@ actor DatabaseCoordinator {
         if let articleURL = articleURL, !articleURL.isEmpty {
             // Don't cache article URL lookups as they're less common
             return (try? await performTransaction { _, context in
-                var descriptor = FetchDescriptor<NotificationData>(
-                    predicate: #Predicate<NotificationData> { article in
-                        article.article_url == articleURL
+                var descriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { article in
+                        article.url == articleURL
                     }
                 )
                 descriptor.fetchLimit = 1
@@ -389,61 +389,87 @@ actor DatabaseCoordinator {
     /// Find existing articles in a batch by IDs
     /// - Parameter ids: Array of UUIDs to check
     /// - Returns: Dictionary mapping UUIDs to found articles
-    func findExistingArticles(ids: [UUID]) async -> [UUID: NotificationData] {
+    func findExistingArticles(ids: [UUID]) async -> [UUID: ArticleModel] {
         guard !ids.isEmpty else { return [:] }
 
-        // Collect all results as an array first to avoid concurrent mutation
-        let pairs = await withTaskGroup(of: (UUID, NotificationData?).self, returning: [(UUID, NotificationData)].self) { group in
-            // Add all tasks to the group
-            for id in ids {
-                group.addTask {
-                    let article = await self.findArticle(by: id)
-                    return (id, article)
+        // Use a transaction to avoid Sendable issues with PersistentModel
+        if let results = try? await performTransaction("findExistingArticles", { _, context -> [UUID: ArticleModel] in
+            // Create a dictionary to store results
+            var results = [UUID: ArticleModel]()
+
+            // Process IDs in batches for better performance
+            for idBatch in ids.chunked(into: 25) {
+                // Build OR predicates for each ID
+                var orPredicates: [Predicate<ArticleModel>] = []
+
+                for id in idBatch {
+                    orPredicates.append(#Predicate<ArticleModel> { article in
+                        article.id.uuidString == id.uuidString
+                    })
+                }
+
+                // Combine predicates with OR
+                let combinedPredicate = orPredicates.reduce(Predicate<ArticleModel>.false) { result, predicate in
+                    #Predicate<ArticleModel> { article in
+                        result.evaluate(article) || predicate.evaluate(article)
+                    }
+                }
+
+                // Fetch matching articles
+                let descriptor = FetchDescriptor<ArticleModel>(predicate: combinedPredicate)
+                let articles = try context.fetch(descriptor)
+
+                // Add articles to results dictionary
+                for article in articles {
+                    results[article.id] = article
                 }
             }
 
-            // Safely collect non-nil results
-            var validResults: [(UUID, NotificationData)] = []
-            for await (id, articleOption) in group {
-                if let article = articleOption {
-                    validResults.append((id, article))
-                }
-            }
-
-            return validResults
+            return results
+        }) {
+            return results
+        } else {
+            return [:]
         }
-
-        // Convert the array to a dictionary once all tasks are complete
-        var results = [UUID: NotificationData]()
-        for (id, article) in pairs {
-            results[id] = article
-        }
-
-        return results
     }
 
     /// Find existing articles in a batch by JSON URLs
     /// - Parameter jsonURLs: Array of JSON URLs to check
     /// - Returns: Dictionary mapping JSON URLs to found articles
-    func findExistingArticles(jsonURLs: [String]) async -> [String: NotificationData] {
+    func findExistingArticles(jsonURLs: [String]) async -> [String: ArticleModel] {
         guard !jsonURLs.isEmpty else { return [:] }
 
         // Use a transaction that returns the result dictionary to avoid Swift 6 concurrency errors
         let results = try? await performTransaction { _, context in
             // Create a local dictionary inside the transaction
-            var localResults = [String: NotificationData]()
+            var localResults = [String: ArticleModel]()
 
-            let descriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { article in
-                    jsonURLs.contains(article.json_url)
+            // We need to use a different approach that works with Swift 6
+            // Process URLs in batches of 25 for more efficient queries
+            for urlBatch in jsonURLs.chunked(into: 25) {
+                // Instead of using a predicate with contains, we'll use OR conditions
+                var orPredicates: [Predicate<ArticleModel>] = []
+
+                for url in urlBatch {
+                    orPredicates.append(#Predicate<ArticleModel> { article in
+                        article.jsonURL == url
+                    })
                 }
-            )
 
-            let articles = try context.fetch(descriptor)
+                // Combine the predicates with OR
+                let combinedPredicate = orPredicates.reduce(Predicate<ArticleModel>.false) { result, predicate in
+                    #Predicate<ArticleModel> { article in
+                        result.evaluate(article) || predicate.evaluate(article)
+                    }
+                }
 
-            // Populate the local dictionary
-            for article in articles {
-                localResults[article.json_url] = article
+                let descriptor = FetchDescriptor<ArticleModel>(predicate: combinedPredicate)
+                let articles = try context.fetch(descriptor)
+
+                // Populate the local dictionary
+                for article in articles {
+                    localResults[article.jsonURL] = article
+                }
             }
 
             // Return the local results dictionary from the transaction
@@ -514,76 +540,112 @@ actor DatabaseCoordinator {
 
             // Process URLs in batches of 100 for more efficient queries
             if !urlsToCheck.isEmpty {
-                for urlBatch in urlsToCheck.chunked(into: 100) {
-                    // Check NotificationData
-                    var urlDescriptor = FetchDescriptor<NotificationData>(
-                        predicate: #Predicate<NotificationData> { article in
-                            urlBatch.contains(article.json_url)
+                for urlBatch in urlsToCheck.chunked(into: 25) {
+                    // We need to use OR conditions instead of contains for Swift 6 compatibility
+                    var orPredicates: [Predicate<ArticleModel>] = []
+
+                    for url in urlBatch {
+                        orPredicates.append(#Predicate<ArticleModel> { article in
+                            article.jsonURL == url
+                        })
+                    }
+
+                    // Combine the predicates with OR
+                    let combinedPredicate = orPredicates.reduce(Predicate<ArticleModel>.false) { result, predicate in
+                        #Predicate<ArticleModel> { article in
+                            result.evaluate(article) || predicate.evaluate(article)
                         }
-                    )
+                    }
+
+                    var urlDescriptor = FetchDescriptor<ArticleModel>(predicate: combinedPredicate)
 
                     // Only fetch the specific properties we need
-                    urlDescriptor.propertiesToFetch = [\.id, \.json_url]
+                    urlDescriptor.propertiesToFetch = [\.id, \.jsonURL]
 
                     let articles = try context.fetch(urlDescriptor)
                     for article in articles {
-                        existingURLs.insert(article.json_url)
+                        existingURLs.insert(article.jsonURL)
                         existingIDs.insert(article.id)
-
-                        // Already inserted above - no further action needed
                     }
 
-                    // Also check SeenArticle table
-                    var seenDescriptor = FetchDescriptor<SeenArticle>(
-                        predicate: #Predicate<SeenArticle> { seen in
-                            urlBatch.contains(seen.json_url)
+                    // Also check SeenArticle table with the same approach
+                    var seenOrPredicates: [Predicate<SeenArticle>] = []
+
+                    for url in urlBatch {
+                        seenOrPredicates.append(#Predicate<SeenArticle> { seen in
+                            seen.jsonURL == url
+                        })
+                    }
+
+                    // Combine the predicates with OR
+                    let seenCombinedPredicate = seenOrPredicates.reduce(Predicate<SeenArticle>.false) { result, predicate in
+                        #Predicate<SeenArticle> { seen in
+                            result.evaluate(seen) || predicate.evaluate(seen)
                         }
-                    )
-                    seenDescriptor.propertiesToFetch = [\.id, \.json_url]
+                    }
+
+                    var seenDescriptor = FetchDescriptor<SeenArticle>(predicate: seenCombinedPredicate)
+                    seenDescriptor.propertiesToFetch = [\.id, \.jsonURL]
 
                     let seenArticles = try context.fetch(seenDescriptor)
                     for seen in seenArticles {
-                        existingURLs.insert(seen.json_url)
+                        existingURLs.insert(seen.jsonURL)
                         existingIDs.insert(seen.id)
-
-                        // Already added to the sets above
                     }
                 }
             }
 
             // Process IDs in batches if provided
             if !idsToCheck.isEmpty {
-                for idBatch in idsToCheck.chunked(into: 100) {
-                    // Check NotificationData
-                    var idDescriptor = FetchDescriptor<NotificationData>(
-                        predicate: #Predicate<NotificationData> { article in
-                            idBatch.contains(article.id)
+                for idBatch in idsToCheck.chunked(into: 25) {
+                    // Use OR conditions for ID comparison to work with Swift 6
+                    var idOrPredicates: [Predicate<ArticleModel>] = []
+
+                    for id in idBatch {
+                        idOrPredicates.append(#Predicate<ArticleModel> { article in
+                            article.id.uuidString == id.uuidString
+                        })
+                    }
+
+                    // Combine the predicates with OR
+                    let combinedIdPredicate = idOrPredicates.reduce(Predicate<ArticleModel>.false) { result, predicate in
+                        #Predicate<ArticleModel> { article in
+                            result.evaluate(article) || predicate.evaluate(article)
                         }
-                    )
-                    idDescriptor.propertiesToFetch = [\.id, \.json_url]
+                    }
+
+                    var idDescriptor = FetchDescriptor<ArticleModel>(predicate: combinedIdPredicate)
+                    idDescriptor.propertiesToFetch = [\.id, \.jsonURL]
 
                     let articles = try context.fetch(idDescriptor)
                     for article in articles {
                         existingIDs.insert(article.id)
-                        existingURLs.insert(article.json_url)
-
-                        // Already added to the sets above
+                        existingURLs.insert(article.jsonURL)
                     }
 
-                    // Also check SeenArticle table
-                    var seenDescriptor = FetchDescriptor<SeenArticle>(
-                        predicate: #Predicate<SeenArticle> { seen in
-                            idBatch.contains(seen.id)
+                    // Also check SeenArticle table with same approach
+                    var seenIdOrPredicates: [Predicate<SeenArticle>] = []
+
+                    for id in idBatch {
+                        seenIdOrPredicates.append(#Predicate<SeenArticle> { seen in
+                            seen.id.uuidString == id.uuidString
+                        })
+                    }
+
+                    // Combine the predicates with OR
+                    let seenCombinedIdPredicate = seenIdOrPredicates.reduce(Predicate<SeenArticle>.false) { result, predicate in
+                        #Predicate<SeenArticle> { seen in
+                            result.evaluate(seen) || predicate.evaluate(seen)
                         }
-                    )
-                    seenDescriptor.propertiesToFetch = [\.id, \.json_url]
+                    }
+
+                    var seenDescriptor = FetchDescriptor<SeenArticle>(predicate: seenCombinedIdPredicate)
+                    seenDescriptor.propertiesToFetch = [\.id, \.jsonURL]
 
                     let seenArticles = try context.fetch(seenDescriptor)
                     for seen in seenArticles {
                         existingIDs.insert(seen.id)
-                        existingURLs.insert(seen.json_url)
-
-                        // Already added to the sets above
+                        existingURLs.insert(seen.jsonURL)
                     }
                 }
             }
@@ -596,8 +658,8 @@ actor DatabaseCoordinator {
 
     /// Save an article to the database
     /// - Parameter articleJSON: The article data to save
-    /// - Returns: The saved NotificationData object
-    func saveArticle(_ articleJSON: ArticleJSON) async throws -> NotificationData {
+    /// - Returns: The saved ArticleModel object
+    func saveArticle(_ articleJSON: ArticleJSON) async throws -> ArticleModel {
         // Extract UUID from the URL filename if possible
         let fileName = articleJSON.jsonURL.split(separator: "/").last ?? ""
         var extractedID: UUID? = nil
@@ -629,51 +691,46 @@ actor DatabaseCoordinator {
         return try await performTransaction { _, context in
             let date = Date()
 
-            // Extract additional data from the article JSON
-            let engineStatsJSON = articleJSON.engineStats
-            let similarArticlesJSON = articleJSON.similarArticles
-
-            // Create notification data
-            let notification = NotificationData(
+            // Create an ArticleModel instead of NotificationData
+            let article = ArticleModel(
                 id: articleID,
-                date: date,
+                jsonURL: articleJSON.jsonURL,
+                url: articleJSON.url,
                 title: articleJSON.title,
                 body: articleJSON.body,
-                json_url: articleJSON.jsonURL,
-                article_url: articleJSON.url,
-                topic: articleJSON.topic,
-                article_title: articleJSON.articleTitle,
-                affected: articleJSON.affected,
                 domain: articleJSON.domain,
-                pub_date: articleJSON.pubDate ?? date,
+                articleTitle: articleJSON.articleTitle,
+                affected: articleJSON.affected,
+                publishDate: articleJSON.pubDate ?? date,
+                addedDate: date,
+                topic: articleJSON.topic,
                 isViewed: false,
                 isBookmarked: false,
-                isArchived: false,
-                sources_quality: articleJSON.sourcesQuality,
-                argument_quality: articleJSON.argumentQuality,
-                source_type: articleJSON.sourceType,
-                source_analysis: articleJSON.sourceAnalysis,
+                sourcesQuality: articleJSON.sourcesQuality,
+                argumentQuality: articleJSON.argumentQuality,
+                sourceType: articleJSON.sourceType,
+                sourceAnalysis: articleJSON.sourceAnalysis,
                 quality: articleJSON.quality,
                 summary: articleJSON.summary,
-                critical_analysis: articleJSON.criticalAnalysis,
-                logical_fallacies: articleJSON.logicalFallacies,
-                relation_to_topic: articleJSON.relationToTopic,
-                additional_insights: articleJSON.additionalInsights,
-                engine_stats: engineStatsJSON,
-                similar_articles: similarArticlesJSON
+                criticalAnalysis: articleJSON.criticalAnalysis,
+                logicalFallacies: articleJSON.logicalFallacies,
+                relationToTopic: articleJSON.relationToTopic,
+                additionalInsights: articleJSON.additionalInsights,
+                engineStats: articleJSON.engineStats,
+                similarArticles: articleJSON.similarArticles
             )
 
             // Create seen article record
             let seenArticle = SeenArticle(
                 id: articleID,
-                json_url: articleJSON.jsonURL,
+                jsonURL: articleJSON.jsonURL,
                 date: date
             )
 
             // Double-check there's no article with this ID
-            let finalIDCheck = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { existing in
-                    existing.id == articleID
+            let finalIDCheck = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { existing in
+                    existing.id.uuidString == articleID.uuidString
                 }
             )
 
@@ -685,7 +742,7 @@ actor DatabaseCoordinator {
                 // Only insert the SeenArticle record if it doesn't exist
                 let existingSeenCheck = FetchDescriptor<SeenArticle>(
                     predicate: #Predicate<SeenArticle> { seen in
-                        seen.id == articleID
+                        seen.id.uuidString == articleID.uuidString
                     }
                 )
 
@@ -693,26 +750,43 @@ actor DatabaseCoordinator {
                     context.insert(seenArticle)
                 }
 
-                // Generate rich text synchronously for the duplicate
+                // Generate rich text synchronously for the duplicate - use ID to avoid capturing non-Sendable model
+                let duplicateId = existingDuplicate.id
+                // Create descriptor outside the MainActor closure to avoid capturing context
+                let descriptor = FetchDescriptor<ArticleModel>(predicate: #Predicate<ArticleModel> { $0.id == duplicateId })
                 await MainActor.run {
-                    _ = getAttributedString(for: .title, from: existingDuplicate, createIfMissing: true)
-                    _ = getAttributedString(for: .body, from: existingDuplicate, createIfMissing: true)
+                    // Get a fresh context on the MainActor to avoid crossing actor boundaries
+                    let mainContext = ModelContext(self.container)
+                    if let article = try? mainContext.fetch(descriptor).first {
+                        _ = getAttributedString(for: .title, from: article, createIfMissing: true)
+                        _ = getAttributedString(for: .body, from: article, createIfMissing: true)
+                    }
                 }
 
                 return existingDuplicate
             } else {
                 // Insert both records
-                context.insert(notification)
+                context.insert(article)
                 context.insert(seenArticle)
+
+                // Extract the UUID which is Sendable before the closure to avoid capturing the non-Sendable ArticleModel
+                let articleIdForClosure = article.id
+
+                // Create descriptor outside the MainActor closure to avoid capturing context
+                let descriptor = FetchDescriptor<ArticleModel>(predicate: #Predicate<ArticleModel> { $0.id == articleIdForClosure })
 
                 // Generate rich text attributes synchronously on the main actor
                 // This ensures rich text is created before the article is saved
                 await MainActor.run {
-                    _ = getAttributedString(for: .title, from: notification, createIfMissing: true)
-                    _ = getAttributedString(for: .body, from: notification, createIfMissing: true)
+                    // Get a fresh context on the MainActor to avoid crossing actor boundaries
+                    let mainContext = ModelContext(self.container)
+                    if let article = try? mainContext.fetch(descriptor).first {
+                        _ = getAttributedString(for: .title, from: article, createIfMissing: true)
+                        _ = getAttributedString(for: .body, from: article, createIfMissing: true)
+                    }
                 }
 
-                return notification
+                return article
             }
         }
     }
@@ -722,15 +796,15 @@ actor DatabaseCoordinator {
     ///   - article: The article to update
     ///   - data: The new data to apply
     /// - Returns: The updated article
-    func updateArticle(_ article: NotificationData, with data: ArticleJSON) async throws -> NotificationData {
-        try await performTransaction { _, context in
-            // Store the ID as a regular UUID to avoid context issues
-            let articleId = article.id
+    func updateArticle(_ article: ArticleModel, with data: ArticleJSON) async throws -> ArticleModel {
+        // Extract the ID before the transaction to avoid capturing the non-Sendable article in a @Sendable closure
+        let articleIdForTransaction = article.id
 
-            // Fetch a fresh copy of the article in this context
-            let fetchDescriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { article in
-                    article.id == articleId
+        return try await performTransaction { _, context in
+            // Use the extracted ID (which is Sendable) within the transaction
+            let fetchDescriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { notificationArticle in
+                    notificationArticle.id.uuidString == articleIdForTransaction.uuidString
                 }
             )
 
@@ -747,24 +821,31 @@ actor DatabaseCoordinator {
             // Ensure the SeenArticle record exists
             let seenCheckDescriptor = FetchDescriptor<SeenArticle>(
                 predicate: #Predicate<SeenArticle> { seen in
-                    seen.id == freshArticleId
+                    seen.id.uuidString == freshArticleId.uuidString
                 }
             )
 
             if (try? context.fetch(seenCheckDescriptor).first) == nil {
                 let seenArticle = SeenArticle(
                     id: freshArticle.id,
-                    json_url: freshArticle.json_url,
+                    jsonURL: freshArticle.jsonURL, // Using ArticleModel's property name
                     date: Date()
                 )
                 context.insert(seenArticle)
             }
 
-            // Generate rich text attributes synchronously on the main actor
+            // Generate rich text attributes synchronously on the main actor - use ID to avoid capturing non-Sendable model
             // This ensures rich text is created before the transaction completes
+            // We reuse the freshArticleId that was already defined earlier
+            // Create descriptor outside the MainActor closure to avoid capturing context
+            let descriptor = FetchDescriptor<ArticleModel>(predicate: #Predicate<ArticleModel> { $0.id == freshArticleId })
             await MainActor.run {
-                _ = getAttributedString(for: .title, from: freshArticle, createIfMissing: true)
-                _ = getAttributedString(for: .body, from: freshArticle, createIfMissing: true)
+                // Get a fresh context on the MainActor to avoid crossing actor boundaries
+                let mainContext = ModelContext(self.container)
+                if let article = try? mainContext.fetch(descriptor).first {
+                    _ = getAttributedString(for: .title, from: article, createIfMissing: true)
+                    _ = getAttributedString(for: .body, from: article, createIfMissing: true)
+                }
             }
 
             return freshArticle
@@ -772,6 +853,49 @@ actor DatabaseCoordinator {
     }
 
     /// Helper method to update the fields of an article
+    /// - Parameters:
+    ///   - article: The article to update
+    ///   - data: The new data to apply
+    private func updateFields(of article: ArticleModel, with data: ArticleJSON) async {
+        // Update article fields
+        article.title = data.title
+        article.body = data.body
+        article.jsonURL = data.jsonURL
+        article.url = data.url
+        article.topic = data.topic
+        article.articleTitle = data.articleTitle
+        article.affected = data.affected
+        article.domain = data.domain
+
+        // Only update the pubDate if the new one has a value
+        if let pubDate = data.pubDate {
+            article.publishDate = pubDate
+        }
+
+        // Don't override user-specific flags
+        // article.isViewed remains unchanged
+        // article.isBookmarked remains unchanged
+
+        // Update quality indicators
+        article.sourcesQuality = data.sourcesQuality
+        article.argumentQuality = data.argumentQuality
+        article.sourceType = data.sourceType
+        article.sourceAnalysis = data.sourceAnalysis
+        article.quality = data.quality
+
+        // Update content analysis
+        article.summary = data.summary
+        article.criticalAnalysis = data.criticalAnalysis
+        article.logicalFallacies = data.logicalFallacies
+        article.relationToTopic = data.relationToTopic
+        article.additionalInsights = data.additionalInsights
+
+        // Update metadata
+        article.engineStats = data.engineStats
+        article.similarArticles = data.similarArticles
+    }
+
+    /// Helper method to update the fields of a NotificationData article
     /// - Parameters:
     ///   - article: The article to update
     ///   - data: The new data to apply
@@ -794,7 +918,6 @@ actor DatabaseCoordinator {
         // Don't override user-specific flags
         // article.isViewed remains unchanged
         // article.isBookmarked remains unchanged
-        // article.isArchived remains unchanged
 
         // Update quality indicators
         article.sources_quality = data.sourcesQuality
@@ -822,34 +945,32 @@ actor DatabaseCoordinator {
     ///   - topic: The topic to filter by, or "All" for all topics
     ///   - showUnreadOnly: Whether to show only unread articles
     ///   - showBookmarkedOnly: Whether to show only bookmarked articles
-    ///   - showArchivedContent: Whether to show archived content
     /// - Returns: Array of filtered notifications
     func fetchArticlesForTopic(
         _ topic: String,
         showUnreadOnly: Bool,
-        showBookmarkedOnly: Bool,
-        showArchivedContent: Bool
-    ) async -> [NotificationData] {
+        showBookmarkedOnly: Bool
+    ) async -> [ArticleModel] {
         // Use a transaction that returns the result array directly
         let results = try? await performTransaction { _, context in
             // Build an optimized predicate based on filter combination
-            var predicate: Predicate<NotificationData>?
+            var predicate: Predicate<ArticleModel>?
 
             // 1. Apply topic filter if not "All"
             if topic != "All" {
-                predicate = #Predicate<NotificationData> { article in
+                predicate = #Predicate<ArticleModel> { article in
                     article.topic == topic
                 }
             }
 
             // 2. Apply unread filter if needed
             if showUnreadOnly {
-                let unreadPredicate = #Predicate<NotificationData> { article in
+                let unreadPredicate = #Predicate<ArticleModel> { article in
                     !article.isViewed
                 }
 
                 if let existingPredicate = predicate {
-                    predicate = #Predicate<NotificationData> { article in
+                    predicate = #Predicate<ArticleModel> { article in
                         existingPredicate.evaluate(article) && unreadPredicate.evaluate(article)
                     }
                 } else {
@@ -859,12 +980,12 @@ actor DatabaseCoordinator {
 
             // 3. Apply bookmarked filter if needed
             if showBookmarkedOnly {
-                let bookmarkedPredicate = #Predicate<NotificationData> { article in
+                let bookmarkedPredicate = #Predicate<ArticleModel> { article in
                     article.isBookmarked
                 }
 
                 if let existingPredicate = predicate {
-                    predicate = #Predicate<NotificationData> { article in
+                    predicate = #Predicate<ArticleModel> { article in
                         existingPredicate.evaluate(article) && bookmarkedPredicate.evaluate(article)
                     }
                 } else {
@@ -872,25 +993,10 @@ actor DatabaseCoordinator {
                 }
             }
 
-            // 4. Apply archived filter if needed
-            if !showArchivedContent {
-                let notArchivedPredicate = #Predicate<NotificationData> { article in
-                    !article.isArchived
-                }
-
-                if let existingPredicate = predicate {
-                    predicate = #Predicate<NotificationData> { article in
-                        existingPredicate.evaluate(article) && notArchivedPredicate.evaluate(article)
-                    }
-                } else {
-                    predicate = notArchivedPredicate
-                }
-            }
-
             // Create the fetch descriptor with our optimized predicate
-            let descriptor = FetchDescriptor<NotificationData>(
+            let descriptor = FetchDescriptor<ArticleModel>(
                 predicate: predicate,
-                sortBy: [SortDescriptor(\.pub_date, order: .reverse)]
+                sortBy: [SortDescriptor(\.publishDate, order: .reverse)]
             )
 
             // Fetch and return in a single transaction for better performance
@@ -919,13 +1025,36 @@ actor DatabaseCoordinator {
         return results ?? []
     }
 
+    /// Fetch just the JSON URLs from recent articles since a specified date
+    /// - Parameter date: The date to fetch URLs from
+    /// - Returns: Array of JSON URLs (strings, which are Sendable)
+    func fetchRecentArticleURLs(since date: Date = Calendar.current.date(byAdding: .hour, value: -24, to: Date())!) async -> [String] {
+        // Use a transaction that returns just the URLs to avoid Swift 6 Sendability issues
+        let urls = try? await performTransaction { _, context in
+            var descriptor = FetchDescriptor<SeenArticle>(
+                predicate: #Predicate<SeenArticle> { seenArticle in
+                    seenArticle.date >= date
+                }
+            )
+
+            // Only fetch the JSON URL property to minimize data transfer
+            descriptor.propertiesToFetch = [\.jsonURL]
+
+            // Fetch the seen articles and extract just the URLs
+            let articles = try context.fetch(descriptor)
+            return articles.map { $0.jsonURL }
+        }
+
+        return urls ?? []
+    }
+
     /// Fetch articles matching a predicate
     /// - Parameter predicate: The predicate to match
     /// - Returns: Array of matching articles
-    func fetchArticles(matching predicate: Predicate<NotificationData>) async -> [NotificationData] {
+    func fetchArticles(matching predicate: Predicate<ArticleModel>) async -> [ArticleModel] {
         // Use a transaction that returns the results directly to avoid Swift 6 concurrency errors
         let results = try? await performTransaction { _, context in
-            let descriptor = FetchDescriptor<NotificationData>(predicate: predicate)
+            let descriptor = FetchDescriptor<ArticleModel>(predicate: predicate)
             return try context.fetch(descriptor)
         }
 
@@ -935,10 +1064,10 @@ actor DatabaseCoordinator {
     /// Count articles matching a predicate
     /// - Parameter predicate: The predicate to match
     /// - Returns: The number of matching articles
-    func countArticles(matching predicate: Predicate<NotificationData>) async -> Int {
+    func countArticles(matching predicate: Predicate<ArticleModel>) async -> Int {
         // Use a transaction that returns the count directly to avoid Swift 6 concurrency errors
         let count = try? await performTransaction { _, context in
-            let descriptor = FetchDescriptor<NotificationData>(predicate: predicate)
+            let descriptor = FetchDescriptor<ArticleModel>(predicate: predicate)
             return try context.fetchCount(descriptor)
         }
 
@@ -980,7 +1109,7 @@ actor DatabaseCoordinator {
             var localStats = [String: Any]()
 
             // Count all articles
-            let articleCount = try context.fetchCount(FetchDescriptor<NotificationData>())
+            let articleCount = try context.fetchCount(FetchDescriptor<ArticleModel>())
             localStats["articleCount"] = articleCount
 
             // Count seen articles
@@ -988,8 +1117,8 @@ actor DatabaseCoordinator {
             localStats["seenCount"] = seenCount
 
             // Count unread articles
-            let unreadDescriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { article in
+            let unreadDescriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { article in
                     !article.isViewed
                 }
             )
@@ -997,8 +1126,8 @@ actor DatabaseCoordinator {
             localStats["unreadCount"] = unreadCount
 
             // Count bookmarked articles
-            let bookmarkedDescriptor = FetchDescriptor<NotificationData>(
-                predicate: #Predicate<NotificationData> { article in
+            let bookmarkedDescriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { article in
                     article.isBookmarked
                 }
             )
@@ -1116,13 +1245,54 @@ extension DatabaseCoordinator {
         )
     }
 
-    // Helper method to extract the domain from a URL
+    // We're moving the domain extraction function directly into this file to avoid cloud build issues
+    
+    /// Helper function to extract the domain from a URL
+    ///
+    /// This extracts the domain portion from a URL string by:
+    /// 1. Removing the scheme (http://, https://)
+    /// 2. Removing any "www." prefix
+    /// 3. Keeping only the domain part (removing paths)
+    /// 4. Trimming whitespace
+    ///
+    /// - Parameter urlString: The URL to extract domain from
+    /// - Returns: The domain string, or nil if the URL is invalid or malformed
     private func extractDomain(from urlString: String) -> String? {
-        guard let url = URL(string: urlString) else {
+        // Early check for empty or nil URLs
+        guard !urlString.isEmpty else {
             return nil
         }
 
-        return url.host?.replacingOccurrences(of: "www.", with: "")
+        // Try the URL-based approach first for properly formatted URLs
+        if let url = URL(string: urlString), let host = url.host {
+            return host.replacingOccurrences(of: "www.", with: "")
+        }
+
+        // Fallback manual parsing for URLs that might not parse with URL initializer
+        var working = urlString.lowercased()
+
+        // Strip scheme
+        if working.hasPrefix("http://") {
+            working.removeFirst("http://".count)
+        } else if working.hasPrefix("https://") {
+            working.removeFirst("https://".count)
+        }
+
+        // Strip any leading "www."
+        if working.hasPrefix("www.") {
+            working.removeFirst("www.".count)
+        }
+
+        // Now split on first slash to remove any path
+        if let slashIndex = working.firstIndex(of: "/") {
+            working = String(working[..<slashIndex])
+        }
+
+        // Trim whitespace
+        working = working.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Return nil if we ended up with an empty string
+        return working.isEmpty ? nil : working
     }
 
     // Helper to extract engine stats from JSON
