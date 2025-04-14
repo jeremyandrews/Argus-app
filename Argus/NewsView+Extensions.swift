@@ -109,7 +109,9 @@ extension NewsView {
         } else if viewModel.showBookmarkedOnly {
             return "No bookmarked articles found."
         } else if viewModel.selectedTopic != "All" {
-            return "No articles found for topic '\(viewModel.selectedTopic)'."
+            // This case should rarely happen now due to auto-redirect,
+            // but include it for completeness
+            return "No articles found for topic '\(viewModel.selectedTopic)'. Redirecting to All topics..."
         } else {
             return "Sync to load articles."
         }

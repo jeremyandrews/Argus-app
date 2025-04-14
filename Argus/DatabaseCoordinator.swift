@@ -720,7 +720,7 @@ actor DatabaseCoordinator {
                 engineElapsedTime: articleJSON.engineElapsedTime,
                 engineRawStats: articleJSON.engineRawStats,
                 engineSystemInfo: articleJSON.engineSystemInfo,
-                similarArticles: articleJSON.similarArticles
+                relatedArticles: articleJSON.relatedArticles
             )
 
             // Create seen article record
@@ -901,7 +901,7 @@ actor DatabaseCoordinator {
         if let sysInfo = data.engineSystemInfo {
             article.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
         }
-        article.similarArticles = data.similarArticles
+        article.relatedArticles = data.relatedArticles
     }
 
     /// Helper method to update the fields of a NotificationData article
@@ -965,7 +965,19 @@ actor DatabaseCoordinator {
             }
         }
         
-        article.similar_articles = data.similarArticles
+        // Convert RelatedArticles to JSON string if needed
+        if let relatedArticles = data.relatedArticles {
+            do {
+                let jsonData = try JSONEncoder().encode(relatedArticles)
+                if let jsonString = String(data: jsonData, encoding: .utf8) {
+                    article.similar_articles = jsonString
+                }
+            } catch {
+                self.logger.error("Failed to encode relatedArticles to JSON: \(error)")
+            }
+        } else {
+            article.similar_articles = nil
+        }
     }
 
     // MARK: - Query Operations
@@ -1280,7 +1292,7 @@ extension DatabaseCoordinator {
             engineElapsedTime: engineElapsedTime,
             engineRawStats: engineRawStats,
             engineSystemInfo: engineSystemInfo,
-            similarArticles: extractSimilarArticles(from: json)
+            relatedArticles: extractSimilarArticles(from: json)
         )
     }
 
@@ -1361,13 +1373,29 @@ extension DatabaseCoordinator {
         return try? String(data: JSONSerialization.data(withJSONObject: engineStatsDict), encoding: .utf8)
     }
 
-    // Helper to extract similar articles from JSON
-    private func extractSimilarArticles(from json: [String: Any]) -> String? {
+    // Helper to extract similar articles from JSON and convert to RelatedArticle array
+    private func extractSimilarArticles(from json: [String: Any]) -> [RelatedArticle]? {
         guard let similarArticles = json["similar_articles"] as? [[String: Any]], !similarArticles.isEmpty else {
             return nil
         }
 
-        return try? String(data: JSONSerialization.data(withJSONObject: similarArticles), encoding: .utf8)
+        do {
+            // Convert dictionaries to JSON data
+            let data = try JSONSerialization.data(withJSONObject: similarArticles)
+            
+            // Decode to RelatedArticle array
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            
+            let relatedArticles = try decoder.decode([RelatedArticle].self, from: data)
+            if !relatedArticles.isEmpty {
+                return relatedArticles
+            }
+        } catch {
+            self.logger.error("Failed to decode similar articles: \(error)")
+        }
+        
+        return nil
     }
 }
 

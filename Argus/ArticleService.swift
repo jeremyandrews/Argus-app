@@ -129,7 +129,7 @@ final class ArticleService: ArticleServiceProtocol {
             if let articleModel = results.first {
                 // Log diagnostics info for debugging
                 let hasEngineStats = articleModel.engine_stats != nil || articleModel.engineDetails != nil
-                let hasSimilarArticles = articleModel.similarArticles != nil
+                let hasSimilarArticles = articleModel.relatedArticles != nil
                 let hasTitleBlob = articleModel.titleBlob != nil
                 let hasBodyBlob = articleModel.bodyBlob != nil
                 let hasSummaryBlob = articleModel.summaryBlob != nil
@@ -944,8 +944,13 @@ final class ArticleService: ArticleServiceProtocol {
                         engineRawStats: article.engineRawStats,
                         engineSystemInfo: article.engineSystemInfo,
                         
-                        similarArticles: article.similarArticles
+                        relatedArticles: article.relatedArticles
                     )
+                    
+                    // Add logging for related articles
+                    if let relatedArticles = article.relatedArticles, !relatedArticles.isEmpty {
+                        AppLogger.database.debug("Transferring \(relatedArticles.count) related articles to ArticleModel for \(article.jsonURL)")
+                    }
 
                     context.insert(newArticle)
                     

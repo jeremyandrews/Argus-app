@@ -136,17 +136,17 @@ struct NewsView: View {
                 // Notification handling
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleViewed"))) { _ in
                     Task {
-                        await viewModel.refreshArticles()
+                        await viewModel.refreshWithAutoRedirectIfNeeded()
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DetailViewClosed"))) { _ in
                     Task {
-                        await viewModel.refreshArticles()
+                        await viewModel.refreshWithAutoRedirectIfNeeded()
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleReadStatusChanged"))) { _ in
                     Task {
-                        await viewModel.refreshArticles()
+                        await viewModel.refreshWithAutoRedirectIfNeeded()
                     }
                 }
                 // Initial setup
@@ -857,7 +857,15 @@ struct NewsView: View {
                 showBookmarkedOnly: Binding(
                     get: { viewModel.showBookmarkedOnly },
                     set: { viewModel.showBookmarkedOnly = $0 }
-                )
+                ),
+                onFilterChanged: {
+                    Task {
+                        await viewModel.applyFilters(
+                            showUnreadOnly: viewModel.showUnreadOnly,
+                            showBookmarkedOnly: viewModel.showBookmarkedOnly
+                        )
+                    }
+                }
             )
             .frame(height: filterViewHeight)
             .background(Color(UIColor.systemBackground))
@@ -1007,6 +1015,7 @@ struct NewsView: View {
     private struct FilterView: View {
         @Binding var showUnreadOnly: Bool
         @Binding var showBookmarkedOnly: Bool
+        var onFilterChanged: () -> Void
         
         var body: some View {
             VStack(alignment: .leading, spacing: 20) {
@@ -1018,9 +1027,15 @@ struct NewsView: View {
                     Toggle(isOn: $showUnreadOnly) {
                         Label("Unread Only", systemImage: "envelope.badge")
                     }
+                    .onChange(of: showUnreadOnly) { _, _ in
+                        onFilterChanged()
+                    }
                     
                     Toggle(isOn: $showBookmarkedOnly) {
                         Label("Bookmarked Only", systemImage: "bookmark.fill")
+                    }
+                    .onChange(of: showBookmarkedOnly) { _, _ in
+                        onFilterChanged()
                     }
                 }
                 

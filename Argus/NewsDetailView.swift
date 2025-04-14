@@ -429,13 +429,13 @@ struct NewsDetailView: View {
             sections.append(ContentSection(header: "Preview", content: fullURL))
         }
 
-        // 9) "Related Articles" (similar_articles)
-        if let localSimilar = n.similarArticles {
-            if let parsedArray = parseSimilarArticlesJSON(localSimilar) {
-                sections.append(ContentSection(header: "Related Articles", content: parsedArray))
-            }
-        } else if let fallbackArr = json["similarArticles"] as? [[String: Any]], !fallbackArr.isEmpty {
-            sections.append(ContentSection(header: "Related Articles", content: fallbackArr))
+        // 9) "Related Articles" - Direct approach using only the model data
+        if let relatedArticles = n.relatedArticles, !relatedArticles.isEmpty {
+            AppLogger.database.debug("Found \(relatedArticles.count) related articles in article: \(n.id)")
+            sections.append(ContentSection(header: "Related Articles", content: relatedArticles))
+        } else {
+            AppLogger.database.debug("No related articles found for article: \(n.id)")
+            // Don't add a section for related articles if there are none
         }
 
         return sections
@@ -520,7 +520,7 @@ struct NewsDetailView: View {
 
             // Log the new article state
             let hasEngineStats = newArticle.engine_stats != nil
-            let hasSimilarArticles = newArticle.similarArticles != nil
+            let hasSimilarArticles = newArticle.relatedArticles != nil
             let hasTitleBlob = newArticle.titleBlob != nil
             let hasBodyBlob = newArticle.bodyBlob != nil
 
@@ -1033,25 +1033,25 @@ struct NewsDetailView: View {
         // MARK: - Related Articles
         case "Related Articles":
             VStack(alignment: .leading, spacing: 8) {
-                if let similarArticles = section.content as? [[String: Any]], !similarArticles.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 10) {
-                                ForEach(Array(similarArticles.enumerated()), id: \.offset) { index, article in
-                                    SimilarArticleRow(
-                                        articleDict: article,
-                                        isLastItem: index == similarArticles.count - 1
-                                    )
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 400)
+                if let relatedArticles = section.content as? [RelatedArticle], !relatedArticles.isEmpty {
+                    RelatedArticlesView(articles: relatedArticles) { jsonURL in
+                        loadRelatedArticle(jsonURL: jsonURL)
                     }
+                } else if let relatedArticles = section.content as? [[String: Any]], !relatedArticles.isEmpty {
+                    // Legacy fallback for compatibility during transition
+                    VStack(spacing: 6) {
+                        ProgressView()
+                            .padding()
+                        Text("Converting related articles data...")
+                            .font(.callout)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
                 } else {
                     VStack(spacing: 6) {
                         ProgressView()
                             .padding()
-                        Text("Loading similar articles...")
+                        Text("Loading related articles...")
                             .font(.callout)
                     }
                     .frame(maxWidth: .infinity)
@@ -1197,15 +1197,59 @@ struct NewsDetailView: View {
         )
     }
     
-    /// Helper function to parse similar articles JSON
-    private func parseSimilarArticlesJSON(_ jsonString: String) -> [[String: Any]]? {
-        if let data = jsonString.data(using: .utf8),
-           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-           !arr.isEmpty
-        {
-            return arr
+    // This function has been replaced by direct JSON decoding with RelatedArticle
+
+// This struct needs to be deleted from here as we're moving it outside the NewsDetailView struct
+    
+    /// Load a related article using its JSON URL
+    private func loadRelatedArticle(jsonURL: String) {
+        AppLogger.database.debug("Loading related article with jsonURL: \(jsonURL)")
+        
+        Task {
+            // Perform the fetch directly on the MainActor
+            await MainActor.run {
+                do {
+                    // Use modelContext to find the article
+                    let foundArticles = try modelContext.fetch(FetchDescriptor<ArticleModel>(
+                        predicate: #Predicate<ArticleModel> { article in
+                            article.jsonURL == jsonURL
+                        }
+                    ))
+                    
+                    // Process results
+                    if let foundArticle = foundArticles.first {
+                        // Create a dedicated view model for this article
+                        let articleViewModel = NewsDetailViewModel(
+                            articles: [foundArticle],
+                            allArticles: [foundArticle],
+                            currentIndex: 0,
+                            initiallyExpandedSection: "Summary"
+                        )
+                        
+                        // Present the detail view
+                        let detailView = NewsDetailView(viewModel: articleViewModel)
+                        let hostingController = UIHostingController(rootView: detailView)
+                        
+                        // Get the top view controller to present from
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let window = windowScene.windows.first,
+                           let rootVC = window.rootViewController {
+                            var topVC = rootVC
+                            while let presentedVC = topVC.presentedViewController {
+                                topVC = presentedVC
+                            }
+                            
+                            // Present the view controller
+                            topVC.present(hostingController, animated: true)
+                        }
+                    } else {
+                        AppLogger.database.error("Related article not found with jsonURL: \(jsonURL)")
+                    }
+                } catch {
+                    AppLogger.database.error("Failed to fetch related article: \(error)")
+                }
+            }
         }
-        return nil
     }
     
     /// Helper function to build content dictionary from an article
@@ -1264,12 +1308,18 @@ struct NewsDetailView: View {
             content["systemInfo"] = details.systemInfo
         }
 
-        // Transfer similar articles as is
-        if let similarArticlesJson = article.similarArticles,
-           let similarArticlesData = similarArticlesJson.data(using: .utf8),
-           let similarArticles = try? JSONSerialization.jsonObject(with: similarArticlesData) as? [[String: Any]]
-        {
-            content["similarArticles"] = similarArticles
+        // Transfer related articles as structured data - with logging
+        if let relatedArticles = article.relatedArticles {
+            // Convert to JSON array for content dictionary
+            if let data = try? JSONEncoder().encode(relatedArticles),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                content["similarArticles"] = json
+                AppLogger.database.debug("Added \(json.count) related articles to content dictionary")
+            } else {
+                AppLogger.database.error("Failed to encode related articles for content dictionary")
+            }
+        } else {
+            AppLogger.database.debug("No related articles found in article \(article.id)")
         }
 
         return content
@@ -1979,6 +2029,107 @@ struct ActivityViewController: UIViewControllerRepresentable {
 
     func updateUIViewController(_: UIActivityViewController, context _: Context) {}
 }
+
+/// RelatedArticlesView - Dedicated view for displaying related articles
+struct RelatedArticlesView: View {
+    let articles: [RelatedArticle]
+    let onArticleSelected: (String) -> Void
+    
+    @State private var showError = false
+    @State private var errorMessage = "Sorry, this article doesn't exist."
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(articles) { article in
+                        VStack(alignment: .leading, spacing: 4) {
+                            // Title button
+                            Button(action: {
+                                if !article.jsonURL.isEmpty {
+                                    AppLogger.database.debug("Selected related article: ID: \(article.id), URL: \(article.jsonURL)")
+                                    onArticleSelected(article.jsonURL)
+                                } else {
+                                    errorMessage = "This related article has an empty URL and cannot be opened."
+                                    showError = true
+                                    AppLogger.database.error("Related article has empty URL: ID: \(article.id), Title: \(article.title)")
+                                }
+                            }) {
+                                Text(article.title)
+                                    .font(.headline)
+                                    .foregroundColor(.blue)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            
+                            // Date if available
+                            if !article.formattedDate.isEmpty {
+                                Text("Published: \(article.formattedDate)")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            // Category pill
+                            if !article.category.isEmpty {
+                                Text(article.category.uppercased())
+                                    .font(.caption)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.gray.opacity(0.6))
+                                    .foregroundColor(.white)
+                                    .cornerRadius(8)
+                            }
+                            
+                            // Summary
+                            if !article.tinySummary.isEmpty {
+                                Text(article.tinySummary)
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            // Quality
+                            if article.qualityScore > 0 {
+                                Text("Quality: \(article.qualityDescription)")
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                            }
+                            
+                            // Similarity
+                            Text("Similarity: \(article.similarityPercent)")
+                                .font(.caption)
+                                .foregroundColor(article.isSimilarityHigh ? .red : .secondary)
+                                .fontWeight(article.isSimilarityVeryHigh ? .bold : .regular)
+                            
+                            Divider()
+                                .padding(.vertical, 4)
+                        }
+                    }
+                    .padding(8)
+                    .background(Color(uiColor: .systemGray6))
+                    .cornerRadius(8)
+                }
+            }
+            .frame(maxHeight: 400)
+            
+            // Display diagnostic info about the related articles
+            Text("Found \(articles.count) related articles")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
+        }
+        .alert(errorMessage, isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        }
+        .onAppear {
+            // Log the related articles for debugging
+            AppLogger.database.debug("RelatedArticlesView displaying \(articles.count) articles")
+            for (index, article) in articles.enumerated() {
+                AppLogger.database.debug("Article \(index + 1): ID \(article.id), Title: \(article.title), URL: \(article.jsonURL.isEmpty ? "EMPTY" : article.jsonURL)")
+            }
+        }
+    }
+}
+
 
 /// SafariView for displaying web content
 struct SafariView: UIViewControllerRepresentable {

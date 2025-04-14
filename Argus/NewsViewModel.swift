@@ -109,8 +109,23 @@ final class NewsViewModel: ObservableObject {
 
         // Setup observers for settings changes
         setupUserDefaultsObservers()
+        
+        // Add observer for background sync completion
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleBackgroundSyncCompleted),
+            name: Notification.Name.articleProcessingCompleted,
+            object: nil
+        )
 
         AppLogger.database.debug("NewsViewModel initialized with container: \(String(describing: SwiftDataContainer.shared.container))")
+    }
+    
+    /// Handler for background sync completion notification
+    @objc private func handleBackgroundSyncCompleted() {
+        Task {
+            await refreshAfterBackgroundSync()
+        }
     }
 
     deinit {
@@ -175,6 +190,54 @@ final class NewsViewModel: ObservableObject {
             self.error = error
             isLoading = false
             AppLogger.database.error("❌ Error refreshing articles: \(error)")
+        }
+    }
+    
+    /// Refreshes articles and performs auto-redirect if the current topic has no content
+    @MainActor
+    func refreshWithAutoRedirectIfNeeded() async {
+        // First do the normal refresh
+        await refreshArticles()
+        
+        // Then check if we need to redirect
+        if filteredArticles.isEmpty && selectedTopic != "All" {
+            AppLogger.database.debug("No content for topic '\(self.selectedTopic)', auto-redirecting to 'All'")
+            
+            // Revert to "All" topic
+            selectedTopic = "All"
+            
+            // Save the preference
+            saveUserPreferences()
+            
+            // Refresh with "All" topics
+            await refreshArticles()
+        }
+    }
+    
+    /// Refreshes the view after background sync completes
+    @MainActor
+    func refreshAfterBackgroundSync() async {
+        // Refresh with current filters
+        await refreshArticles()
+        
+        // Check for empty topic and auto-redirect if needed
+        if filteredArticles.isEmpty && selectedTopic != "All" {
+            selectedTopic = "All"
+            saveUserPreferences()
+            await refreshArticles()
+        }
+        
+        // Check for new topics that might have appeared
+        // and update the topic bar
+        do {
+            allArticles = try await articleOperations.fetchArticles(
+                topic: "All", 
+                showUnreadOnly: showUnreadOnly,
+                showBookmarkedOnly: showBookmarkedOnly
+            )
+        } catch {
+            AppLogger.database.error("Error refreshing all articles: \(error)")
+            // Keep existing articles if fetch fails
         }
     }
 
@@ -295,9 +358,6 @@ final class NewsViewModel: ObservableObject {
     /// Applies a new topic filter
     /// - Parameter topic: The topic to filter by
     func applyTopicFilter(_ topic: String) async {
-        // Store the previous topic for transition if needed in the future
-        // let previousTopic = selectedTopic (removed - unused)
-
         // Update the topic filter
         selectedTopic = topic
 
@@ -309,6 +369,20 @@ final class NewsViewModel: ObservableObject {
             await refreshArticles()
         } else {
             // If cache miss, do a full refresh
+            await refreshArticles()
+        }
+        
+        // Auto-redirect to "All" if no content is available for the selected topic
+        if filteredArticles.isEmpty && topic != "All" {
+            AppLogger.database.debug("No content for topic '\(topic)', auto-redirecting to 'All'")
+            
+            // Revert to "All" topic
+            selectedTopic = "All"
+            
+            // Save the preference
+            saveUserPreferences()
+            
+            // Refresh with "All" topics
             await refreshArticles()
         }
     }

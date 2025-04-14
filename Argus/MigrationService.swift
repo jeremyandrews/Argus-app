@@ -475,7 +475,7 @@ func migrateAllData() async -> Bool {
             relationToTopic: notification.relation_to_topic,
             additionalInsights: notification.additional_insights,
             engineStats: notification.engine_stats,
-            similarArticles: notification.similar_articles,
+            relatedArticles: parseSimilarArticles(notification.similar_articles),
             titleBlob: validateBlob(notification.title_blob, name: "title"),
             bodyBlob: validateBlob(notification.body_blob, name: "body"),
             summaryBlob: validateBlob(notification.summary_blob, name: "summary"),
@@ -489,6 +489,31 @@ func migrateAllData() async -> Bool {
         return article
     }
 
+    /// Parse similar articles string to RelatedArticle array
+    private func parseSimilarArticles(_ similarArticles: String?) -> [RelatedArticle]? {
+        guard let similarArticles = similarArticles, !similarArticles.isEmpty else {
+            return nil
+        }
+        
+        // Attempt to decode the JSON string to RelatedArticle array
+        if let data = similarArticles.data(using: .utf8) {
+            do {
+                // First try parsing as JSON array
+                if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                    // Re-serialize to ensure proper JSON format
+                    let serializedData = try JSONSerialization.data(withJSONObject: jsonArray)
+                    return try JSONDecoder().decode([RelatedArticle].self, from: serializedData)
+                }
+                // Alternatively, try direct decoding if the string is proper JSON
+                return try JSONDecoder().decode([RelatedArticle].self, from: data)
+            } catch {
+                AppLogger.database.error("Failed to parse similar articles string: \(error)")
+            }
+        }
+        
+        return nil
+    }
+    
     /// Validates a blob to ensure it's usable
     private func validateBlob(_ blob: Data?, name: String) -> Data? {
         guard let blob = blob, !blob.isEmpty else {
