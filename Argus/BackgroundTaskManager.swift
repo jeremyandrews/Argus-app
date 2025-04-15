@@ -263,6 +263,14 @@ final class BackgroundTaskManager {
         }
 
         AppLogger.sync.debug("Completed processing \(processedCount) articles in \(uniqueUrls.count) batches")
+        
+        // Post notification that articles have been processed
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: Notification.Name.articleProcessingCompleted,
+                object: nil
+            )
+        }
     }
 
     /// Helper function for timeout operations

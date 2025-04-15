@@ -87,7 +87,7 @@ final class ArticleOperations {
                 let hasBodyBlob = model.bodyBlob != nil
                 let hasSummaryBlob = model.summaryBlob != nil
                 let hasEngineStats = model.engineDetails != nil
-                let hasSimilarArticles = model.similarArticles != nil
+                let hasSimilarArticles = model.relatedArticles != nil
 
                 AppLogger.database.debug("""
                 Fetched complete ArticleModel \(id):

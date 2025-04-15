@@ -800,7 +800,7 @@ extension NotificationData {
             relation_to_topic_blob: articleModel.relationToTopicBlob,
             additional_insights_blob: articleModel.additionalInsightsBlob,
             engine_stats: articleModel.engine_stats,
-            similar_articles: articleModel.similarArticles
+            similar_articles: articleModel.similar_articles
         )
 
         return notification

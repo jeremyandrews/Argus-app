@@ -149,8 +149,68 @@ final class ArticleModel: Equatable {
     /// Serialized system information (JSON data)
     var engineSystemInfoData: Data?
 
-    /// Related articles data
-    var similarArticles: String?
+    /// Related articles serialized Data
+    var relatedArticlesData: Data?
+    
+    /// Computed property to access structured related articles
+    var relatedArticles: [RelatedArticle]? {
+        get {
+            guard let data = relatedArticlesData, !data.isEmpty else { 
+                AppLogger.database.debug("No related articles data found for article \(self.id)")
+                return nil 
+            }
+            
+            do {
+                // Create decoder with explicit date strategy
+                let decoder = JSONDecoder()
+                // Use seconds since 1970 format (default for JSONEncoder)
+                decoder.dateDecodingStrategy = .secondsSince1970
+                
+                let decodedArticles = try decoder.decode([RelatedArticle].self, from: data)
+                AppLogger.database.debug("Successfully decoded \(decodedArticles.count) related articles for article \(self.id)")
+                
+                // Validate that the related articles have valid data
+                if !decodedArticles.isEmpty {
+                    let firstArticle = decodedArticles[0]
+                    AppLogger.database.debug("First related article - ID: \(firstArticle.id), Title: '\(firstArticle.title)', URL: '\(firstArticle.jsonURL)'")
+                    if let date = firstArticle.publishedDate {
+                        AppLogger.database.debug("Published date: \(date.formatted())")
+                    }
+                }
+                
+                return decodedArticles
+            } catch {
+                AppLogger.database.error("Failed to decode relatedArticlesData for article \(self.id): \(error)")
+                return nil
+            }
+        }
+        set {
+            if let newValue = newValue, !newValue.isEmpty {
+                do {
+                    // Check if the articles have valid data
+                    for article in newValue {
+                        if article.jsonURL.isEmpty {
+                            AppLogger.database.warning("Related article with empty jsonURL: ID: \(article.id), Title: '\(article.title)'")
+                        }
+                    }
+                    
+                    // Create encoder with explicit date strategy
+                    let encoder = JSONEncoder()
+                    // Use seconds since 1970 format (default, but being explicit)
+                    encoder.dateEncodingStrategy = .secondsSince1970
+                    
+                    relatedArticlesData = try encoder.encode(newValue)
+                    AppLogger.database.debug("Stored \(newValue.count) related articles for article \(self.id)")
+                } catch {
+                    AppLogger.database.error("Failed to encode related articles for article \(self.id): \(error)")
+                    relatedArticlesData = nil
+                }
+            } else {
+                relatedArticlesData = nil
+                AppLogger.database.debug("Cleared related articles for article \(self.id)")
+            }
+        }
+    }
 
     // MARK: - Relationships
 
@@ -190,7 +250,7 @@ final class ArticleModel: Equatable {
         engineElapsedTime: Double? = nil,
         engineRawStats: String? = nil,
         engineSystemInfo: [String: Any]? = nil,
-        similarArticles: String? = nil,
+        relatedArticles: [RelatedArticle]? = nil,
         titleBlob: Data? = nil,
         bodyBlob: Data? = nil,
         summaryBlob: Data? = nil,
@@ -251,7 +311,8 @@ final class ArticleModel: Equatable {
             }
         }
         
-        self.similarArticles = similarArticles
+        // Store related articles as encoded data
+        self.relatedArticles = relatedArticles
         self.titleBlob = titleBlob
         self.bodyBlob = bodyBlob
         self.summaryBlob = summaryBlob
@@ -571,7 +632,43 @@ extension ArticleModel {
 
     /// The similar_articles property of the notification data (renamed to match NotificationData)
     var similar_articles: String? {
-        get { return similarArticles }
-        set { similarArticles = newValue }
+        get {
+            if let relatedArticles = relatedArticles {
+                // Use consistent encoder with explicit date strategy
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .secondsSince1970
+                
+                if let data = try? encoder.encode(relatedArticles),
+                   let jsonString = String(data: data, encoding: .utf8) {
+                    return jsonString
+                }
+            }
+            return nil
+        }
+        set {
+            if let newValue = newValue, let data = newValue.data(using: .utf8) {
+                do {
+                    // Create decoder with explicit date strategy
+                    let decoder = JSONDecoder()
+                    decoder.dateDecodingStrategy = .secondsSince1970
+                    
+                    // First try to parse as an array of RelatedArticle
+                    self.relatedArticles = try decoder.decode([RelatedArticle].self, from: data)
+                } catch {
+                    // If that fails, try to parse as a raw JSON array
+                    if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                        let serializedData = try? JSONSerialization.data(withJSONObject: jsonArray)
+                        if let serializedData = serializedData {
+                            // Use the same decoder with date strategy here too
+                            let decoder = JSONDecoder()
+                            decoder.dateDecodingStrategy = .secondsSince1970
+                            self.relatedArticles = try? decoder.decode([RelatedArticle].self, from: serializedData)
+                        }
+                    }
+                }
+            } else {
+                self.relatedArticles = nil
+            }
+        }
     }
 }

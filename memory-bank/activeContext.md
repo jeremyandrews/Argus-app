@@ -98,6 +98,163 @@ To complete the Legacy Code Removal phase, we should focus on:
 
 ## Current Work Focus
 
+- **Fixed UI Update Issue for Empty Topics and Filters** (Completed):
+  - Resolved multiple related issues with UI updates:
+    1. When reading the only article in a topic and closing it, the view didn't refresh to "All"
+    2. Enabling/disabling filters didn't update the article list properly
+    3. Background syncs required manual topic switching to see new articles
+  - Root cause analysis:
+    - Disconnected UI components didn't properly update the ViewModel:
+      1. Article detail view closure only called basic refresh without auto-redirect logic
+      2. Filter toggles didn't trigger article refresh in the ViewModel
+      3. Background sync completion didn't notify the UI about new content
+  - Implementation details:
+    - Added a dedicated auto-redirect method in NewsViewModel:
+      ```swift
+      // Refreshes articles and performs auto-redirect if needed
+      @MainActor
+      func refreshWithAutoRedirectIfNeeded() async {
+          // First do the normal refresh
+          await refreshArticles()
+          
+          // Then check if we need to redirect
+          if filteredArticles.isEmpty && selectedTopic != "All" {
+              // Revert to "All" topic and refresh again
+              selectedTopic = "All"
+              saveUserPreferences()
+              await refreshArticles()
+          }
+      }
+      ```
+    - Implemented callback-based filter updates in FilterView:
+      ```swift
+      private struct FilterView: View {
+          @Binding var showUnreadOnly: Bool
+          @Binding var showBookmarkedOnly: Bool
+          var onFilterChanged: () -> Void  // New callback for filter changes
+          
+          var body: some View {
+              // View content with onChange handlers that call the callback
+              Toggle(isOn: $showUnreadOnly) {
+                  Label("Unread Only", systemImage: "envelope.badge")
+              }
+              .onChange(of: showUnreadOnly) { _, _ in
+                  onFilterChanged()
+              }
+          }
+      }
+      ```
+    - Added notification posting in BackgroundTaskManager to signal UI updates:
+      ```swift
+      // Post notification that articles have been processed
+      await MainActor.run {
+          NotificationCenter.default.post(
+              name: Notification.Name.articleProcessingCompleted,
+              object: nil
+          )
+      }
+      ```
+    - Implemented a refreshAfterBackgroundSync method in NewsViewModel
+    - Fixed Swift 6 compliance issues with explicit self references and proper error handling
+  - Benefits:
+    - User experience is more intuitive with automatic redirection from empty topics
+    - UI promptly reflects filter changes without requiring manual refresh
+    - New articles appear automatically after background sync completes
+    - Better Swift 6 compatibility with explicit self references and proper error handling
+  - Patterns documented in .clinerules for future implementation reference
+
+- **Fixed Related Articles Display Issue** (Improved Implementation):
+  - Addressed recurring issue with related articles display where format mismatch caused errors:
+    ```
+    Failed to parse similar_articles: Swift.DecodingError.typeMismatch(Swift.Double, Swift.DecodingError.Context(..., debugDescription: "Expected to decode Double but found a string instead.")
+    ```
+  - Root cause analysis:
+    - The original fix didn't fully solve the problem because we had a fundamental design issue:
+      1. In API responses, `published_date` is always an ISO8601 string (e.g., "2025-04-08T05:53:15+00:00")
+      2. In database storage, the date is stored as a numeric timestamp
+      3. Using a single shared decoder for both contexts was error-prone and fragile
+  - Implementation details:
+    - Created a dedicated API model with proper type expectations:
+      ```swift
+      /// Struct specifically for decoding related articles from API responses with ISO8601 date strings
+      struct APIRelatedArticle: Codable {
+          let id: Int
+          let category: String
+          let jsonURL: String
+          let publishedDate: String? // API provides this as an ISO8601 string
+          let qualityScore: Int
+          let similarityScore: Double
+          let tinySummary: String
+          let title: String
+          
+          // ... CodingKeys ...
+          
+          /// Converts API model to database model with proper date conversion
+          func toRelatedArticle() -> RelatedArticle {
+              return RelatedArticle(
+                  id: id,
+                  category: category,
+                  jsonURL: jsonURL,
+                  publishedDate: publishedDate != nil ? ISO8601DateFormatter().date(from: publishedDate!) : nil,
+                  qualityScore: qualityScore,
+                  similarityScore: similarityScore,
+                  tinySummary: tinySummary,
+                  title: title
+              )
+          }
+      }
+      ```
+    - Modified the parsing workflow for clear separation of concerns:
+      ```swift
+      // First decode using the API model that handles ISO8601 string dates from the API
+      let decoder = JSONDecoder()
+      let apiRelatedArticles = try decoder.decode([APIRelatedArticle].self, from: data)
+      
+      // Convert API models to database models with proper date conversion
+      parsedRelatedArticles = apiRelatedArticles.map { $0.toRelatedArticle() }
+      ```
+    - Added a standard initializer to RelatedArticle for creating instances directly:
+      ```swift
+      /// Standard initializer for creating instances directly
+      init(id: Int, category: String, jsonURL: String, publishedDate: Date?,
+           qualityScore: Int, similarityScore: Double, tinySummary: String, title: String) {
+          self.id = id
+          self.category = category
+          self.jsonURL = jsonURL
+          self.publishedDate = publishedDate
+          self.qualityScore = qualityScore
+          self.similarityScore = similarityScore
+          self.tinySummary = tinySummary
+          self.title = title
+      }
+      ```
+    - Kept the decoder initializer in RelatedArticle focused solely on database loading:
+      ```swift
+      /// Decoder initializer for database loading where dates are stored as timestamps
+      init(from decoder: Decoder) throws {
+          // ... existing implementation ...
+          
+          // When loaded from database, published_date is stored as a timestamp
+          let timestamp = try container.decodeIfPresent(Double.self, forKey: .publishedDate)
+          if let timestamp = timestamp {
+              publishedDate = Date(timeIntervalSince1970: timestamp)
+          } else {
+              publishedDate = nil
+          }
+      }
+      ```
+  - The solution follows clean architecture principles:
+    - Separation of concerns with dedicated models for different contexts
+    - Clear data transformation flow from API model to database model
+    - Self-documented code with explicit type handling for each data source
+    - No ambiguity about expected data formats in each context
+  - Benefits:
+    - Completely eliminates the format mismatch errors for related articles
+    - More maintainable codebase with clear separation of API and database concerns
+    - Self-documenting code structure that makes the data flow obvious
+    - Reduced risk of similar issues recurring in the future
+    - Pattern can be reused for other similar data transformation needs
+
 - **Fixed Argus Engine Stats Display** (Completed):
   - Resolved issues with engine stats display in NewsDetailView:
     - Fixed JSON field parsing for proper data extraction from API responses
@@ -219,6 +376,82 @@ To complete the Legacy Code Removal phase, we should focus on:
 
 ## Recent Changes
 
+- **Implemented Auto-Redirect for Empty Topics** (Completed):
+  - Resolved issue where users saw "No news is good news" when selecting a topic with no content:
+    - Problem: When a user selected a topic with no content, they would see an empty state view suggesting there was no news at all
+    - This created a suboptimal user experience, as content might be available in other topics
+  - Implementation details:
+    - Modified `applyTopicFilter` method in `NewsViewModel` to auto-redirect to "All" when a selected topic has no content:
+      ```swift
+      // Auto-redirect to "All" if no content is available for the selected topic
+      if filteredArticles.isEmpty && topic != "All" {
+          AppLogger.database.debug("No content for topic '\(topic)', auto-redirecting to 'All'")
+          
+          // Revert to "All" topic
+          selectedTopic = "All"
+          
+          // Save the preference
+          saveUserPreferences()
+          
+          // Refresh with "All" topics
+          await refreshArticles()
+      }
+      ```
+    - Updated the empty state message in `NewsView+Extensions.swift` to provide better context during transition:
+      ```swift
+      // This case should rarely happen now due to auto-redirect,
+      // but include it for completeness
+      return "No articles found for topic '\(viewModel.selectedTopic)'. Redirecting to All topics..."
+      ```
+  - Results:
+    - Users now automatically see content from "All" topics if their selected topic is empty
+    - Eliminates the confusing user experience of suggesting there's no news when content exists
+    - Maintains user preferences by saving the redirected selection to UserDefaults
+    - Provides clear logging for debugging purposes
+  - Key learnings:
+    - Smart defaults and automatic fallbacks can significantly improve user experience
+    - Always provide a path to content when possible instead of showing empty states
+    - Consider the full context of user selections when designing UI flows
+    - Small UX improvements can have a significant impact on overall app usability
+
+- **Simplified Related Content Implementation** (Completed):
+  - Streamlined and simplified the Related Content implementation using the same pattern as Engine Stats:
+    - Problem: The previous implementation used raw dictionaries with complex state management
+    - Approach: Refactored to use a structured data model with clean separation of concerns
+  - Implementation details:
+    - Created a dedicated `RelatedArticleData` struct to hold strongly-typed data:
+      ```swift
+      struct RelatedArticleData {
+          let title: String
+          let summary: String
+          let publishedDate: Date?
+          let category: String
+          let qualityScore: Int
+          let similarityScore: Double
+          let jsonURL: String
+          
+          // Computed properties for formatting
+          var formattedDate: String {...}
+          var qualityDescription: String {...}
+          var similarityPercent: String {...}
+      }
+      ```
+    - Implemented a structured JSON parser (`parseRelatedArticlesJSON`) with proper error handling
+    - Created a dedicated view component (`RelatedArticlesView`) for displaying related articles
+    - Added a clean navigation flow with `loadRelatedArticle` function for handling article selection
+    - Used proper type-safe programming patterns throughout
+  - Results:
+    - Consistent implementation pattern between Engine Stats and Related Content sections
+    - Better type safety with structured data instead of raw dictionaries
+    - Clean separation between data, parsing, and UI components
+    - Improved maintainability with localized changes in modular components
+    - More predictable behavior and error handling
+  - Key learnings:
+    - Structured data types with computed properties simplify both processing and display logic
+    - Dedicated view components with clear responsibilities make code more maintainable
+    - Moving implementation components to the proper scope prevents compiler errors
+    - Following consistent patterns across the codebase improves developer experience
+
 - **Fixed Article Navigation Flicker Issue** (Completed):
   - Resolved visual issue when navigating between articles using chevron buttons:
     - Problem symptoms: When navigating to a new article, three different states would display in rapid succession:
@@ -309,76 +542,54 @@ To complete the Legacy Code Removal phase, we should focus on:
     - Sometimes direct duplication is more reliable than elegant centralization for build systems
     - Each file containing all its dependencies makes it more resilient to build order issues
 
-- **Fixed Swift 6 String Interpolation Issues with RichTextField** (Completed):
-  - Resolved compiler errors related to RichTextField enum in string interpolation:
-    - Problem: Swift 6 is more strict about type safety and requires CustomStringConvertible for string interpolation
-    - Error symptoms: "Type of expression is ambiguous without a type annotation" when using RichTextField in strings
+- **Fixed Progress Indicator Duplication Issue** (Completed):
+  - Resolved issue where the sync status display duplicated the progress numbers:
+    - Problem: SyncStatusIndicator was showing `"Downloading X of Y articles... X/Y"` with redundant numbers
+    - The UI was inconsistent with standard iOS patterns for progress indicators
+  - Research into iOS 18+ standard patterns:
+    - Apple's native apps (Files, Mail, App Store) follow consistent patterns:
+      1. Icon or activity indicator appears first (left side)
+      2. Descriptive text follows with embedded count information
+      3. Circular progress indicators for indeterminate operations
+      4. Parenthetical count format: "Operation... (X of Y)"
+      5. No separate numerical display outside the descriptive text
   - Implementation details:
-    - Identified that RichTextField enum was used in string interpolation but didn't conform to CustomStringConvertible
-    - Added explicit String conversion using `String(describing:)` in all places where RichTextField was used:
+    - Updated `SyncStatusIndicator.swift` to follow standard iOS patterns:
       ```swift
-      // Before:
-      AppLogger.database.debug("Generating rich text content for field: \(field) on article \(articleId)")
-      
-      // After:
-      AppLogger.database.debug("Generating rich text content for field: \(String(describing: field)) on article \(articleId)")
+      HStack(spacing: 8) {
+          // Activity indicator first (standard iOS pattern)
+          if status.isActive {
+              ProgressView()
+                  .progressViewStyle(CircularProgressViewStyle())
+                  .scaleEffect(0.8)
+          } else if status.shouldDisplay {
+              Image(systemName: status.systemImage)
+                  .foregroundColor(colorForStatus)
+          }
+          
+          // Status text follows (standard iOS pattern)
+          if status.shouldDisplay {
+              Text(status.message)
+                  .font(.footnote)
+                  .foregroundColor(.secondary)
+          }
+      }
       ```
-    - Fixed multiple similar issues throughout ArticleService.swift
-    - Made body text loading in ArticleService more robust with safe unwrapping
-  - Specific fixes included:
-    - Corrected `bodyText = article.body` to handle non-optional String properly
-    - Fixed all string interpolation instances using `String(describing:)` wrapper
-    - Made RichTextField enum conform to CaseIterable to enable iteration in diagnostic functions
+    - Modified status message format in `SyncStatus.swift` to use standard format:
+      ```swift
+      // Format matches standard iOS progress indicators
+      // Example: "Downloading articles... (4 of 10)"
+      return "Downloading articles... (\(current) of \(total))"
+      ```
+    - Removed redundant separate text element showing "X/Y"
+    - Increased standard spacing from 6 to 8 points to match iOS 18 UI patterns
   - Results:
-    - All compiler errors related to string interpolation resolved
-    - ArticleService now builds successfully in Swift 6 mode
-    - Type-safety warning messages eliminated
-    - Section blobs now properly save to the database with context
+    - Clean, standard iOS progress indicator that matches Apple's native apps
+    - Non-redundant progress display following iOS conventions
+    - Consistent user experience with other iOS applications
+    - Better visual flow with proper spacing and animations
   - Key learnings:
-    - Swift 6 requires explicit CustomStringConvertible for string interpolation of custom types
-    - The `String(describing:)` wrapper provides a clean solution without modifying enum definitions
-    - When working with enums in string contexts, it's important to provide proper string conversion
-
-- **Fixed Article Content Display Issue in NewsView** (Completed):
-  - Successfully resolved the display issue where formatted article content wasn't properly displayed in NewsView:
-    - Initial problem: Text appeared as faint gray with improper formatting and was wrapping off screen edges in NewsView
-    - Text displayed correctly in NewsDetailView but not in NewsView despite using the same data
-  - Root cause identified:
-    - NewsView and NewsDetailView used completely different UI components to render rich text:
-      - NewsView was using `AccessibleAttributedText` component
-      - NewsDetailView was using `NonSelectableRichTextView` component 
-    - These components have fundamental internal differences:
-      - Different width constraints (32px vs 40px padding)
-      - Different font handling (`NonSelectableRichTextView` forces body font on all text)
-      - Different text container configurations
-  - Solution implemented:
-    - Modified `summaryContent` method in NewsView.swift to use `NonSelectableRichTextView` instead of `AccessibleAttributedText`
-    - Kept the secondary text color for visual consistency
-    - Removed any modifiers that might interfere with proper text wrapping
-  - Results:
-    - Text now displays consistently in both views with proper formatting and wrapping
-    - Article body content is fully visible and formatted correctly
-    - No text stretches off screen edges
-  - Key learnings:
-    - Component selection is critical - seemingly similar UI components can have very different rendering behaviors
-    - Consistency between views should extend to the actual UI components used, not just visual styling
-    - When rich text rendering issues occur, investigate the fundamental component differences first
-    - Use the same UI component across the app for the same type of content display
-
-- **Fixed Swift 6 Equatable Conformance Issue** (Completed):
-  - Successfully resolved Equatable conformance issues with SwiftData models in Swift 6:
-    - Identified a complex interaction between SwiftData's `@Model` macro and Swift 6's handling of Equatable conformances
-    - Cleaned up NewsDetailViewModel.swift by removing obsolete comment about moved Equatable implementation
-    - Kept the necessary `hash(into:)` implementation which is important for collections
-    - Updated ArgusApp.swift to use ArticleModel instead of NotificationData in all FetchDescriptor instances
-    - Fixed field name references in predicates to match ArticleModel (e.g., date → addedDate)
-  - Implemented solution confirmed that in-class Equatable implementation in model classes is the correct approach:
-    - The SwiftData models in ArticleDataModels.swift (ArticleModel, SeenArticleModel, TopicModel) were already 
-      using the correct pattern with in-class Equatable implementation
-    - Conflicts arose from remnants of previous implementations in other files
-    - The `@Model` macro in Swift 6 generates partial Equatable machinery that conflicts with explicit implementations
-  - Key learnings for SwiftData models in Swift 6:
-    - Use in-class Equatable conformance and implementation for SwiftData models
-    - Avoid duplicate implementations across files (extensions, etc.)
-    - Maintain Hashable support through proper `hash(into:)` implementations where needed
-    - Be cautious about using NotificationData (legacy class) with SwiftData contexts
+    - iOS provides standard UI patterns that users intuitively understand
+    - Following platform conventions improves usability and reduces cognitive load
+    - In iOS progress indicators, the status message typically includes the progress numbers
+    - Circular progress indicators are preferred for navigation bar operations

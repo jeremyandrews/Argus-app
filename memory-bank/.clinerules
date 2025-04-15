@@ -28,6 +28,73 @@ This file captures important patterns, preferences, and project intelligence tha
   }
   ```
 
+### UI Update Patterns
+- Connect UI controls to view model updates using onChange:
+  ```swift
+  Toggle(isOn: $showUnreadOnly) {
+      Label("Unread Only", systemImage: "envelope.badge")
+  }
+  .onChange(of: showUnreadOnly) { _, _ in
+      onFilterChanged() // Call a callback to update the ViewModel
+  }
+  ```
+- Use callback-based components for UI updates:
+  ```swift
+  // Define components with callbacks
+  private struct FilterView: View {
+      @Binding var showUnreadOnly: Bool
+      @Binding var showBookmarkedOnly: Bool
+      var onFilterChanged: () -> Void // Callback for when filters change
+      
+      var body: some View {
+          // View implementation that calls onFilterChanged when needed
+      }
+  }
+  
+  // Use components with explicit callbacks
+  FilterView(
+      showUnreadOnly: $viewModel.showUnreadOnly,
+      showBookmarkedOnly: $viewModel.showBookmarkedOnly,
+      onFilterChanged: {
+          Task {
+              await viewModel.applyFilters(...)
+          }
+      }
+  )
+  ```
+- Auto-redirect empty topics using a dedicated method:
+  ```swift
+  // Check if the current topic has content and redirect if needed
+  @MainActor
+  func refreshWithAutoRedirectIfNeeded() async {
+      // First do the normal refresh
+      await refreshArticles()
+      
+      // Then check if we need to redirect
+      if filteredArticles.isEmpty && selectedTopic != "All" {
+          // Revert to "All" topic
+          selectedTopic = "All"
+          saveUserPreferences()
+          await refreshArticles()
+      }
+  }
+  ```
+- Use NotificationCenter for cross-component communication:
+  ```swift
+  // Post notifications when state changes
+  NotificationCenter.default.post(
+      name: Notification.Name.articleProcessingCompleted,
+      object: nil
+  )
+  
+  // Observe notifications to update UI
+  .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleProcessingCompleted"))) { _ in
+      Task {
+          await viewModel.refreshAfterBackgroundSync()
+      }
+  }
+  ```
+
 ### Rich Text Display Component Selection
 - Always use `NonSelectableRichTextView` for rich text display in list views and detail views for consistent rendering
 - Never use `AccessibleAttributedText` for article body content in list views (causes text wrapping issues)
@@ -96,10 +163,49 @@ This file captures important patterns, preferences, and project intelligence tha
 ### Known Implementation Paths
 - Push notifications are set up using the Apple Push Notification Service and the AuthKey_KKR79MB4FW.p8 file
 - Markdown conversion happens in MarkdownUtilities.swift
-- Background sync operations are managed in BackgroundContextManager.swift
+- Background sync operations are managed in BackgroundTaskManager.swift
 - Array chunking utilities are in ArrayExtensions.swift
+- Auto-redirect from empty topics is implemented in NewsViewModel.refreshWithAutoRedirectIfNeeded()
+- Filter updating happens through the FilterView's onFilterChanged callback
+- Background sync notifications are posted from BackgroundTaskManager.processArticlesInBatches()
 
 ## Swift 6 Concurrency Patterns
+
+### iOS 18+ Progress Indicator Patterns
+- Follow standard iOS 18+ patterns for progress indicators in navigation bars:
+  - Place icon or activity indicator first (left side)
+  - Text should follow the indicator (standard iOS convention)
+  - Use circular progress indicators for navigation bar operations (not linear)
+  - Format progress count in parentheses within the message: "Operation... (X of Y)"
+  - Avoid redundant information display (only show count once)
+  - Use 8-point spacing between elements for proper visual flow
+  - Example implementation:
+    ```swift
+    HStack(spacing: 8) {
+        // Activity indicator first (standard iOS pattern)
+        if status.isActive {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle())
+                .scaleEffect(0.8)
+        } else if status.shouldDisplay {
+            Image(systemName: status.systemImage)
+                .foregroundColor(colorForStatus)
+        }
+        
+        // Status text follows (standard iOS pattern)
+        if status.shouldDisplay {
+            Text(status.message)
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+    }
+    ```
+  - Format status messages to include progress information:
+    ```swift
+    // Standard iOS format: "Operation... (X of Y)"
+    return "Downloading articles... (\(current) of \(total))"
+    ```
+  - This pattern matches Apple's native apps (Files, Mail, App Store) for consistent user experience
 
 ### NSAttributedString and Sendable Constraints
 - NSAttributedString is not Sendable and requires special handling in async contexts
@@ -127,6 +233,33 @@ This file captures important patterns, preferences, and project intelligence tha
   await MainActor.run {
       _ = getAttributedString(for: .title, from: article)
       _ = getAttributedString(for: .body, from: article)
+  }
+  ```
+
+### Swift 6 Closure Capture Requirements
+- Use explicit self references in closure context in Swift 6:
+  ```swift
+  // WRONG - Swift 6 will generate errors:
+  if filteredArticles.isEmpty && selectedTopic != "All" {
+      AppLogger.database.debug("No content for topic '\(selectedTopic)'")
+  }
+  
+  // CORRECT - Swift 6 compliant:
+  if filteredArticles.isEmpty && selectedTopic != "All" {
+      AppLogger.database.debug("No content for topic '\(self.selectedTopic)'")
+  }
+  ```
+- Replace optional chaining with proper do-catch error handling:
+  ```swift
+  // WRONG - Swift 6 will generate warnings:
+  allArticles = try? await articleOperations.fetchArticles(...) ?? []
+  
+  // CORRECT - Swift 6 compliant:
+  do {
+      allArticles = try await articleOperations.fetchArticles(...)
+  } catch {
+      AppLogger.database.error("Error fetching articles: \(error)")
+      // Fallback handling
   }
   ```
 
@@ -756,256 +889,3 @@ This file captures important patterns, preferences, and project intelligence tha
   @MainActor
   private func provideTempContent(_ section: String, _ field: RichTextField, _ message: String) {
       // Create a temporary attributed string to show status
-      let tempString = NSAttributedString(
-          string: message,
-          attributes: [
-              .font: UIFont.italicSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize),
-              .foregroundColor: UIColor.secondaryLabel
-          ]
-      )
-      
-      // Store in the appropriate property and notify UI
-      sectionAttributedStrings[section] = tempString
-      objectWillChange.send()
-  }
-  
-  // When starting rich text generation
-  await MainActor.run {
-      provideTempContent(section, field, "Converting markdown to rich text...")
-  }
-  ```
-
-### Diagnostic Content Logging
-- Add content diagnostics when generation fails:
-  ```swift
-  private func logGenerationDetails(_ field: RichTextField, _ article: NotificationData) {
-      // Get text content to analyze
-      let textContent = getTextContentForField(field, from: article)
-      
-      // Log basic details
-      AppLogger.database.debug("📊 Generation Diagnostic:")
-      AppLogger.database.debug("- Field: \(String(describing: field))")
-      AppLogger.database.debug("- Has content: \(textContent != nil)")
-      AppLogger.database.debug("- Content length: \(textContent?.count ?? 0)")
-      AppLogger.database.debug("- Article ID: \(article.id)")
-      AppLogger.database.debug("- JSON URL: \(article.json_url)")
-      
-      // Log content sample if available
-      if let content = textContent, !content.isEmpty {
-          let sampleLength = min(150, content.count)
-          let sample = String(content.prefix(sampleLength))
-          AppLogger.database.debug("📝 Content sample: \"\(sample)\"...")
-      }
-  }
-  ```
-
-### Robust Timeout Handling
-- Use Swift's structured concurrency with timeouts:
-  ```swift
-  private func withTimeout<T>(duration: Duration, operation: @escaping () async throws -> T) async throws -> T {
-      return try await withThrowingTaskGroup(of: T.self) { group in
-          // Add the actual operation
-          group.addTask {
-              return try await operation()
-          }
-          
-          // Add a timeout task
-          group.addTask {
-              try await Task.sleep(for: duration)
-              throw TimeoutError()
-          }
-          
-          // Return the first completed result or throw
-          guard let result = try await group.next() else {
-              throw TimeoutError()
-          }
-          
-          // Cancel any remaining tasks
-          group.cancelAll()
-          
-          return result
-      }
-  }
-  ```
-
-### Swift Type Safety for Logging
-- Handle Swift 6 type-safety requirements in logging:
-  ```swift
-  // Avoid ambiguous type expression errors with explicit conversion:
-  AppLogger.database.debug("Field: \(String(describing: field))")
-  
-  // Avoid nil coalescing on non-optional types:
-  // WRONG:
-  AppLogger.database.debug("JSON URL: \(article.json_url ?? "none")")
-  // CORRECT:
-  AppLogger.database.debug("JSON URL: \(article.json_url)")
-  
-  // Break multi-line strings into individual log statements:
-  // WRONG:
-  AppLogger.database.debug("""
-  Multi-line debug info:
-  Line 1: \(value1)
-  Line 2: \(value2)
-  """)
-  // CORRECT:
-  AppLogger.database.debug("Multi-line debug info:")
-  AppLogger.database.debug("Line 1: \(value1)")
-  AppLogger.database.debug("Line 2: \(value2)")
-  ```
-
-## Code Duplication Issues and Method Redeclaration
-
-### Avoiding Duplicate Method Implementations
-- Carefully scan both the current file and any newly added files for method signatures before adding new functions:
-  ```swift
-  // WRONG: Adding a duplicate method with same signature
-  private func verifyBlobInDatabase(field: RichTextField, articleId: UUID) async -> Bool {
-      // Implementation A
-  }
-  
-  // Same file, later section
-  private func verifyBlobInDatabase(field: RichTextField, articleId: UUID) async -> Bool {
-      // Implementation B  
-  }
-  ```
-- When implementing fixes that modify existing methods, always:
-  1. Use `grep` or code search to find all instances of the method name across files
-  2. Check the class/struct implementation for existing versions of the method
-  3. If adding enhanced verification, modify the existing method rather than creating a duplicate
-  4. Review file for semantic duplication (methods with different names but same purpose)
-- When multiple implementations of similar functionality exist:
-  - Keep the most robust, complete implementation
-  - Consolidate any unique features from other implementations into the kept version
-  - Document the consolidated changes in commit messages
-  - Include validation and error checking from all implementations
-
-### Thorough File Review Process
-- Before modifying a file, review it completely to understand its structure and existing methods:
-  - Scan for existing methods matching the same purpose
-  - Look for similarly named methods that might cause confusion
-  - Check for helper methods related to the functionality you're modifying
-- Use IDE navigation features to find all declarations and references before adding new methods
-- When importing code from external sources or other parts of the project, verify it doesn't duplicate existing functionality
-- Add comprehensive documentation to explain why certain implementation approaches were chosen
-
-### Swift Compiler Duplicate Declaration Errors
-- Swift error `Invalid redeclaration of '...'` indicates a method with the same signature exists:
-  ```
-  /path/to/file.swift:1146:18 Invalid redeclaration of 'verifyBlobInDatabase(field:articleId:)'
-  ```
-- When encountering this error:
-  1. Use grep or Find in Files to locate all occurrences: `grep "func methodName" path/to/files/*swift`
-  2. Compare implementations to determine which is most complete
-  3. Remove the duplicate and consolidate any unique functionality into the kept version
-  4. Review call sites to ensure they use the correct implementation
-
-## Known Challenges
-- UI becomes jittery during sync operations - will be addressed with MVVM refactoring
-- Duplicate content issues occur during synchronization - will be resolved by SwiftData's unique constraints
-- Swift 6 concurrency warnings for non-Sendable types like NSAttributedString in async contexts - will be eliminated with proper async/await implementation
-- SwiftData context access issues can cause EXC_BAD_ACCESS crashes - will be addressed by using SwiftData's native context management instead of custom DatabaseCoordinator
-- Code duplication can cause compile errors or unexpected behavior - resolved by thorough file review and proper refactoring
-
-## Argus API Server Endpoints and Behavior
-
-### API Endpoints
-- **Base URL**: `https://api.arguspulse.com`
-- **Authentication**: `/authenticate` (POST)
-  - Requires device token in request body: `{"device_id": "token"}`
-  - Device token must be 64-character hex string
-  - Returns JWT token valid for 1 hour: `{"token": "jwt_token_value"}`
-- **Status Check**: `/status` (POST)
-  - Can be called with or without JWT authentication
-  - Returns simple "OK" response
-- **Topic Management**:
-  - `/subscriptions` (POST) - Get device's topic subscriptions
-  - `/subscribe` (POST) - Subscribe device to a topic
-    - Requires valid topic name and optional priority
-    - Returns 409 CONFLICT if already subscribed
-  - `/unsubscribe` (POST) - Unsubscribe device from a topic
-    - Returns 404 NOT_FOUND if subscription doesn't exist
-- **Articles Sync**: `/articles/sync` (POST)
-  - Takes list of seen article URLs: `{"seen_articles": ["url1", "url2", ...]}`
-  - Returns list of unseen article URLs: `{"unseen_articles": ["url1", "url2", ...]}`
-  - This is the only endpoint for article management in the backend
-
-### Important Implementation Notes
-- **JWT Authentication**:
-  - All endpoints except `/status` require Bearer token authentication
-  - Tokens expire after 1 hour and must be refreshed
-- **Topic Validation**:
-  - Server has a predefined list of valid topics from environment variables
-  - Default topics include "Alert: Direct", "Alert: Near", and "Test"
-- **Client-Side Assumptions**:
-  - Client code assumes additional endpoints that don't exist in server:
-    - `/articles/{id}` for fetching a specific article (not implemented on server)
-    - Direct article content fetching (not provided by server)
-  - Client must handle these discrepancies with appropriate error handling
-- **Missing Server Features**:
-  - No direct endpoint to fetch article content by ID or URL
-  - Client must implement workarounds for these limitations
-
-### Resilience Patterns
-- **Timeout Handling**: Client uses increased timeouts (15s connection, 60s resource)
-- **Network Monitoring**: Client uses NWPathMonitor to track connectivity status
-- **Exponential Backoff**: Client implements retries with increasing delays
-- **Graceful Degradation**: Client returns empty arrays for 404 responses
-
-## Modernization Component Mapping
-- **SyncManager → BackgroundTaskManager + ArticleService** (✅ Completed):
-  - ArticleService handles all data synchronization operations using async/await
-  - BackgroundTaskManager handles all background task scheduling and execution
-  - MigrationAdapter provides backward compatibility for legacy code during transition
-  - CommonUtilities contains shared utility functions extracted from SyncManager
-
-- **DatabaseCoordinator → SwiftData ModelContext**:
-  - Direct use of SwiftData ModelContext will replace DatabaseCoordinator
-  - Transaction management will be handled by SwiftData's built-in mechanisms
-  - Complex queries will be handled by SwiftData's query DSL
-
-- **Shared UI Logic → ArticleOperations**:
-  - Common operations between NewsView and NewsDetailView extracted to shared layer
-  - State management (read/bookmark/archive) handled consistently
-  - Rich text processing consolidated in shared component
-  - Consistent error handling across both views
-
-- **NotificationCenter → Observable Properties**:
-  - State updates will be communicated via @Published properties
-  - Views will observe ViewModels through ObservableObject conformance
-  - No more manual subscription/unsubscription management
-
-- **Background Tasks → .backgroundTask or BGTaskScheduler**:
-  - Modern background task APIs will replace custom background task handling
-  - Proper task cancellation will be implemented for all background operations
-
-## Modernization Strategy Guidelines
-- Implement shared components first to establish foundation for ViewModels
-- Prioritize code reuse to eliminate duplication between similar views
-- Implement features incrementally, following the phased approach
-- Maintain feature parity throughout the modernization process
-- Test each component thoroughly before moving to the next phase
-- Focus on fixing existing issues during the modernization process
-- Keep comprehensive documentation of architectural decisions
-- Use Swift's newest features where appropriate, but maintain compatibility with iOS 18
-- Prioritize user experience over implementation elegance
-
-## Shared Component Best Practices
-- **Interface-Based Design**: Use protocols to define service interfaces
-- **Dependency Injection**: Make dependencies injectable for testing
-- **Clear Responsibilities**: Each layer should have well-defined responsibilities
-- **Thin View Models**: Keep view models focused on UI state, delegate business logic to ArticleOperations
-- **Consistent Error Handling**: Implement unified error types across components
-- **State Synchronization**: Ensure shared state is consistent between components
-- **Testing Strategy**: Test shared components independently from ViewModels
-
-## User Workflow Preferences
-- Focus on fixing critical bugs before adding new features
-- Prioritize performance improvements in the sync process
-- Document important decisions and their rationale
-- Ensure smooth user experience during the transition to the new architecture
-
-## Testing Approach
-- UI tests are located in ArgusUITests directory
-- Use TestHelpers.swift for common test utilities
-- Critical user flows should have dedicated UI tests
-- Add stress tests for DatabaseCoordinator to verify concurrency safety

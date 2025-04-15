@@ -25,7 +25,9 @@ enum SyncStatus: Equatable {
         case .searching:
             return "Checking for new articles..."
         case .downloading(let current, let total):
-            return "Downloading \(current) of \(total) articles..."
+            // Format matches standard iOS progress indicators
+            // Example: "Downloading articles... (4 of 10)"
+            return "Downloading articles... (\(current) of \(total))"
         case .complete:
             return "Articles updated"
         case .error(let message):

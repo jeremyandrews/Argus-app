@@ -542,7 +542,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 relationToTopic: "This article is highly relevant to the topic.",
                 additionalInsights: "Here are some additional contextual insights.",
                 engineStats: nil,
-                similarArticles: nil
+                relatedArticles: nil
             )
 
             context.insert(testArticle)

@@ -7,9 +7,10 @@ struct SyncStatusIndicator: View {
     @Binding var status: SyncStatus
     
     var body: some View {
-        HStack(spacing: 6) {
-            // Standard iOS activity indicator
+        HStack(spacing: 8) {
+            // Standard iOS pattern: status icon or activity indicator first
             if status.isActive {
+                // Use circular progress indicator (standard iOS pattern)
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle())
                     .scaleEffect(0.8)
@@ -19,17 +20,12 @@ struct SyncStatusIndicator: View {
                     .foregroundColor(colorForStatus)
             }
             
-            // Only show text if there's a message to display
+            // Status text follows the indicator (standard iOS pattern)
             if status.shouldDisplay {
+                // In iOS native apps, status message is clear and includes count
+                // We're following the pattern from Files, Mail, and other Apple apps
                 Text(status.message)
                     .font(.footnote)
-                    .foregroundColor(.secondary)
-            }
-            
-            // For downloading state, show the count
-            if case .downloading(let current, let total) = status {
-                Text("\(current)/\(total)")
-                    .font(.footnote.monospacedDigit())
                     .foregroundColor(.secondary)
             }
         }

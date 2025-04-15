@@ -1,5 +1,126 @@
 import Foundation
 
+/// Struct specifically for decoding related articles from API responses with ISO8601 date strings
+struct APIRelatedArticle: Codable {
+    let id: Int
+    let category: String
+    let jsonURL: String
+    let publishedDate: String? // API provides this as an ISO8601 string
+    let qualityScore: Int
+    let similarityScore: Double
+    let tinySummary: String
+    let title: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case category
+        case jsonURL = "json_url"
+        case publishedDate = "published_date"
+        case qualityScore = "quality_score"
+        case similarityScore = "similarity_score"
+        case tinySummary = "tiny_summary"
+        case title
+    }
+    
+    /// Converts API model to database model with proper date conversion
+    func toRelatedArticle() -> RelatedArticle {
+        return RelatedArticle(
+            id: id,
+            category: category,
+            jsonURL: jsonURL,
+            publishedDate: publishedDate != nil ? ISO8601DateFormatter().date(from: publishedDate!) : nil,
+            qualityScore: qualityScore,
+            similarityScore: similarityScore,
+            tinySummary: tinySummary,
+            title: title
+        )
+    }
+}
+
+/// Struct for representing a related article in the database
+struct RelatedArticle: Codable, Identifiable, Hashable {
+    let id: Int
+    let category: String
+    let jsonURL: String
+    let publishedDate: Date?
+    let qualityScore: Int
+    let similarityScore: Double
+    let tinySummary: String
+    let title: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case category
+        case jsonURL = "json_url"
+        case publishedDate = "published_date"
+        case qualityScore = "quality_score"
+        case similarityScore = "similarity_score"
+        case tinySummary = "tiny_summary"
+        case title
+    }
+    
+    /// Standard initializer for creating instances directly
+    init(id: Int, category: String, jsonURL: String, publishedDate: Date?,
+         qualityScore: Int, similarityScore: Double, tinySummary: String, title: String) {
+        self.id = id
+        self.category = category
+        self.jsonURL = jsonURL
+        self.publishedDate = publishedDate
+        self.qualityScore = qualityScore
+        self.similarityScore = similarityScore
+        self.tinySummary = tinySummary
+        self.title = title
+    }
+    
+    /// Decoder initializer for database loading where dates are stored as timestamps
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        category = try container.decodeIfPresent(String.self, forKey: .category) ?? ""
+        jsonURL = try container.decodeIfPresent(String.self, forKey: .jsonURL) ?? ""
+        qualityScore = try container.decodeIfPresent(Int.self, forKey: .qualityScore) ?? 0
+        similarityScore = try container.decodeIfPresent(Double.self, forKey: .similarityScore) ?? 0.0
+        tinySummary = try container.decodeIfPresent(String.self, forKey: .tinySummary) ?? ""
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Unknown Title"
+        
+        // When loaded from database, published_date is stored as a timestamp
+        let timestamp = try container.decodeIfPresent(Double.self, forKey: .publishedDate)
+        if let timestamp = timestamp {
+            publishedDate = Date(timeIntervalSince1970: timestamp)
+        } else {
+            publishedDate = nil
+        }
+    }
+    
+    // Computed properties for UI display
+    var formattedDate: String {
+        guard let date = publishedDate else { return "" }
+        return date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+    
+    var qualityDescription: String {
+        switch qualityScore {
+        case 1: return "Poor"
+        case 2: return "Fair"
+        case 3: return "Good"
+        case 4: return "Excellent"
+        default: return "Unknown"
+        }
+    }
+    
+    var similarityPercent: String {
+        String(format: "%.1f%%", similarityScore * 100)
+    }
+    
+    var isSimilarityHigh: Bool {
+        similarityScore >= 0.95
+    }
+    
+    var isSimilarityVeryHigh: Bool {
+        similarityScore >= 0.98
+    }
+}
+
 struct ArticleJSON {
     let title: String // tiny_title
     let body: String // tiny_summary
@@ -27,7 +148,8 @@ struct ArticleJSON {
     let engineRawStats: String?
     let engineSystemInfo: [String: Any]?
     
-    let similarArticles: String?
+    // Related articles stored as structured data instead of a string
+    let relatedArticles: [RelatedArticle]?
 }
 
 struct PreparedArticle {
@@ -57,7 +179,8 @@ struct PreparedArticle {
     let engineRawStats: String?
     let engineSystemInfo: [String: Any]?
     
-    let similarArticles: String?
+    // Related articles stored as structured data
+    let relatedArticles: [RelatedArticle]?
 }
 
 func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
@@ -88,7 +211,7 @@ func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
         engineRawStats: input.engineRawStats,
         engineSystemInfo: input.engineSystemInfo,
         
-        similarArticles: input.similarArticles
+        relatedArticles: input.relatedArticles
     )
 }
 
@@ -115,6 +238,33 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     let engineElapsedTime = json["elapsed_time"] as? Double
     let engineRawStats = json["stats"] as? String
     let engineSystemInfo = json["system_info"] as? [String: Any]
+    
+    // Parse similar articles if available
+    var parsedRelatedArticles: [RelatedArticle]? = nil
+    if let similarArticlesArray = json["similar_articles"] as? [[String: Any]], !similarArticlesArray.isEmpty {
+        do {
+            AppLogger.database.debug("Found \(similarArticlesArray.count) related articles in API response")
+            let data = try JSONSerialization.data(withJSONObject: similarArticlesArray)
+            
+            // First decode using the API model that handles ISO8601 string dates from the API
+            let decoder = JSONDecoder()
+            let apiRelatedArticles = try decoder.decode([APIRelatedArticle].self, from: data)
+            
+            // Convert API models to database models with proper date conversion
+            parsedRelatedArticles = apiRelatedArticles.map { $0.toRelatedArticle() }
+            
+            AppLogger.database.debug("Successfully parsed \(parsedRelatedArticles?.count ?? 0) related articles from API")
+            
+            // Verify parsed data has valid content
+            if let articles = parsedRelatedArticles, !articles.isEmpty {
+                // Log the first article to help with debugging
+                let firstArticle = articles[0]
+                AppLogger.database.debug("Sample related article - ID: \(firstArticle.id), Title: '\(firstArticle.title)', URL: '\(firstArticle.jsonURL)'")
+            }
+        } catch {
+            AppLogger.database.error("Failed to parse similar_articles: \(error)")
+        }
+    }
     
     return ArticleJSON(
         // Required fields from above guard statement
@@ -162,7 +312,8 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         engineRawStats: engineRawStats,
         engineSystemInfo: engineSystemInfo,
         
-        similarArticles: json["similar_articles"] as? String // "similar_articles" → "similarArticles"
+        // Add structured related articles - use our parsed result
+        relatedArticles: parsedRelatedArticles
     )
 }
 
