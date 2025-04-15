@@ -1,6 +1,43 @@
 import Foundation
 
-/// Struct for representing a related article
+/// Struct specifically for decoding related articles from API responses with ISO8601 date strings
+struct APIRelatedArticle: Codable {
+    let id: Int
+    let category: String
+    let jsonURL: String
+    let publishedDate: String? // API provides this as an ISO8601 string
+    let qualityScore: Int
+    let similarityScore: Double
+    let tinySummary: String
+    let title: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case category
+        case jsonURL = "json_url"
+        case publishedDate = "published_date"
+        case qualityScore = "quality_score"
+        case similarityScore = "similarity_score"
+        case tinySummary = "tiny_summary"
+        case title
+    }
+    
+    /// Converts API model to database model with proper date conversion
+    func toRelatedArticle() -> RelatedArticle {
+        return RelatedArticle(
+            id: id,
+            category: category,
+            jsonURL: jsonURL,
+            publishedDate: publishedDate != nil ? ISO8601DateFormatter().date(from: publishedDate!) : nil,
+            qualityScore: qualityScore,
+            similarityScore: similarityScore,
+            tinySummary: tinySummary,
+            title: title
+        )
+    }
+}
+
+/// Struct for representing a related article in the database
 struct RelatedArticle: Codable, Identifiable, Hashable {
     let id: Int
     let category: String
@@ -22,6 +59,20 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         case title
     }
     
+    /// Standard initializer for creating instances directly
+    init(id: Int, category: String, jsonURL: String, publishedDate: Date?,
+         qualityScore: Int, similarityScore: Double, tinySummary: String, title: String) {
+        self.id = id
+        self.category = category
+        self.jsonURL = jsonURL
+        self.publishedDate = publishedDate
+        self.qualityScore = qualityScore
+        self.similarityScore = similarityScore
+        self.tinySummary = tinySummary
+        self.title = title
+    }
+    
+    /// Decoder initializer for database loading where dates are stored as timestamps
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)
@@ -194,10 +245,14 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         do {
             AppLogger.database.debug("Found \(similarArticlesArray.count) related articles in API response")
             let data = try JSONSerialization.data(withJSONObject: similarArticlesArray)
-            // Create decoder with explicit date strategy for API format (ISO8601 strings)
+            
+            // First decode using the API model that handles ISO8601 string dates from the API
             let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            parsedRelatedArticles = try decoder.decode([RelatedArticle].self, from: data)
+            let apiRelatedArticles = try decoder.decode([APIRelatedArticle].self, from: data)
+            
+            // Convert API models to database models with proper date conversion
+            parsedRelatedArticles = apiRelatedArticles.map { $0.toRelatedArticle() }
+            
             AppLogger.database.debug("Successfully parsed \(parsedRelatedArticles?.count ?? 0) related articles from API")
             
             // Verify parsed data has valid content

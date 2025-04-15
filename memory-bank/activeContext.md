@@ -163,42 +163,97 @@ To complete the Legacy Code Removal phase, we should focus on:
     - Better Swift 6 compatibility with explicit self references and proper error handling
   - Patterns documented in .clinerules for future implementation reference
 
-- **Fixed Related Articles Display Issue** (Completed):
-  - Resolved issue where related articles weren't displaying properly, with error:
+- **Fixed Related Articles Display Issue** (Improved Implementation):
+  - Addressed recurring issue with related articles display where format mismatch caused errors:
     ```
-    Failed to decode relatedArticlesData: Swift.DecodingError.typeMismatch(Swift.String, Swift.DecodingError.Context(..., debugDescription: "Expected to decode String but found number instead.")
+    Failed to parse similar_articles: Swift.DecodingError.typeMismatch(Swift.Double, Swift.DecodingError.Context(..., debugDescription: "Expected to decode Double but found a string instead.")
     ```
   - Root cause analysis:
-    - Related articles data flow had a format mismatch:
-      1. Data originally comes from API as JSON with `published_date` as ISO8601 string format
-      2. When stored in the database via JSONEncoder, dates are automatically converted to numeric timestamps
-      3. When retrieved later, the RelatedArticle decoder was still trying to parse `published_date` as a string
+    - The original fix didn't fully solve the problem because we had a fundamental design issue:
+      1. In API responses, `published_date` is always an ISO8601 string (e.g., "2025-04-08T05:53:15+00:00")
+      2. In database storage, the date is stored as a numeric timestamp
+      3. Using a single shared decoder for both contexts was error-prone and fragile
   - Implementation details:
-    - Modified the RelatedArticle decoder in ArticleModels.swift to expect numeric timestamps:
+    - Created a dedicated API model with proper type expectations:
       ```swift
-      // When loaded from database, published_date is stored as a timestamp
-      let timestamp = try container.decodeIfPresent(Double.self, forKey: .publishedDate)
-      if let timestamp = timestamp {
-          publishedDate = Date(timeIntervalSince1970: timestamp)
+      /// Struct specifically for decoding related articles from API responses with ISO8601 date strings
+      struct APIRelatedArticle: Codable {
+          let id: Int
+          let category: String
+          let jsonURL: String
+          let publishedDate: String? // API provides this as an ISO8601 string
+          let qualityScore: Int
+          let similarityScore: Double
+          let tinySummary: String
+          let title: String
+          
+          // ... CodingKeys ...
+          
+          /// Converts API model to database model with proper date conversion
+          func toRelatedArticle() -> RelatedArticle {
+              return RelatedArticle(
+                  id: id,
+                  category: category,
+                  jsonURL: jsonURL,
+                  publishedDate: publishedDate != nil ? ISO8601DateFormatter().date(from: publishedDate!) : nil,
+                  qualityScore: qualityScore,
+                  similarityScore: similarityScore,
+                  tinySummary: tinySummary,
+                  title: title
+              )
+          }
       }
       ```
-    - Enhanced the initial API JSON parsing to use explicit ISO8601 date strategy:
+    - Modified the parsing workflow for clear separation of concerns:
       ```swift
-      // Create decoder with explicit date strategy for API format
+      // First decode using the API model that handles ISO8601 string dates from the API
       let decoder = JSONDecoder()
-      decoder.dateDecodingStrategy = .iso8601
-      parsedRelatedArticles = try decoder.decode([RelatedArticle].self, from: data)
+      let apiRelatedArticles = try decoder.decode([APIRelatedArticle].self, from: data)
+      
+      // Convert API models to database models with proper date conversion
+      parsedRelatedArticles = apiRelatedArticles.map { $0.toRelatedArticle() }
       ```
-  - The solution matches our design approach:
-    - We load data from the API (string dates)
-    - We convert to our preferred format for storage (numeric timestamps)
-    - We read from storage using the format we chose (numeric timestamps)
-    - No format guessing or conversion back to original format
+    - Added a standard initializer to RelatedArticle for creating instances directly:
+      ```swift
+      /// Standard initializer for creating instances directly
+      init(id: Int, category: String, jsonURL: String, publishedDate: Date?,
+           qualityScore: Int, similarityScore: Double, tinySummary: String, title: String) {
+          self.id = id
+          self.category = category
+          self.jsonURL = jsonURL
+          self.publishedDate = publishedDate
+          self.qualityScore = qualityScore
+          self.similarityScore = similarityScore
+          self.tinySummary = tinySummary
+          self.title = title
+      }
+      ```
+    - Kept the decoder initializer in RelatedArticle focused solely on database loading:
+      ```swift
+      /// Decoder initializer for database loading where dates are stored as timestamps
+      init(from decoder: Decoder) throws {
+          // ... existing implementation ...
+          
+          // When loaded from database, published_date is stored as a timestamp
+          let timestamp = try container.decodeIfPresent(Double.self, forKey: .publishedDate)
+          if let timestamp = timestamp {
+              publishedDate = Date(timeIntervalSince1970: timestamp)
+          } else {
+              publishedDate = nil
+          }
+      }
+      ```
+  - The solution follows clean architecture principles:
+    - Separation of concerns with dedicated models for different contexts
+    - Clear data transformation flow from API model to database model
+    - Self-documented code with explicit type handling for each data source
+    - No ambiguity about expected data formats in each context
   - Benefits:
-    - Related articles now display properly in article detail view
-    - Clean implementation with direct use of expected data formats
-    - No error-prone format detection or conversion logic
-    - Consistent approach through the entire data pipeline
+    - Completely eliminates the format mismatch errors for related articles
+    - More maintainable codebase with clear separation of API and database concerns
+    - Self-documenting code structure that makes the data flow obvious
+    - Reduced risk of similar issues recurring in the future
+    - Pattern can be reused for other similar data transformation needs
 
 - **Fixed Argus Engine Stats Display** (Completed):
   - Resolved issues with engine stats display in NewsDetailView:
