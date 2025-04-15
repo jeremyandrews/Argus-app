@@ -171,6 +171,42 @@ This file captures important patterns, preferences, and project intelligence tha
 
 ## Swift 6 Concurrency Patterns
 
+### iOS 18+ Progress Indicator Patterns
+- Follow standard iOS 18+ patterns for progress indicators in navigation bars:
+  - Place icon or activity indicator first (left side)
+  - Text should follow the indicator (standard iOS convention)
+  - Use circular progress indicators for navigation bar operations (not linear)
+  - Format progress count in parentheses within the message: "Operation... (X of Y)"
+  - Avoid redundant information display (only show count once)
+  - Use 8-point spacing between elements for proper visual flow
+  - Example implementation:
+    ```swift
+    HStack(spacing: 8) {
+        // Activity indicator first (standard iOS pattern)
+        if status.isActive {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle())
+                .scaleEffect(0.8)
+        } else if status.shouldDisplay {
+            Image(systemName: status.systemImage)
+                .foregroundColor(colorForStatus)
+        }
+        
+        // Status text follows (standard iOS pattern)
+        if status.shouldDisplay {
+            Text(status.message)
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+    }
+    ```
+  - Format status messages to include progress information:
+    ```swift
+    // Standard iOS format: "Operation... (X of Y)"
+    return "Downloading articles... (\(current) of \(total))"
+    ```
+  - This pattern matches Apple's native apps (Files, Mail, App Store) for consistent user experience
+
 ### NSAttributedString and Sendable Constraints
 - NSAttributedString is not Sendable and requires special handling in async contexts
 - Always use @MainActor for functions that generate or manipulate NSAttributedString for UI

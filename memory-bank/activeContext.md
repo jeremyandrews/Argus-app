@@ -541,3 +541,55 @@ To complete the Legacy Code Removal phase, we should focus on:
     - Functions defined in one file may not be visible to other files during cloud builds
     - Sometimes direct duplication is more reliable than elegant centralization for build systems
     - Each file containing all its dependencies makes it more resilient to build order issues
+
+- **Fixed Progress Indicator Duplication Issue** (Completed):
+  - Resolved issue where the sync status display duplicated the progress numbers:
+    - Problem: SyncStatusIndicator was showing `"Downloading X of Y articles... X/Y"` with redundant numbers
+    - The UI was inconsistent with standard iOS patterns for progress indicators
+  - Research into iOS 18+ standard patterns:
+    - Apple's native apps (Files, Mail, App Store) follow consistent patterns:
+      1. Icon or activity indicator appears first (left side)
+      2. Descriptive text follows with embedded count information
+      3. Circular progress indicators for indeterminate operations
+      4. Parenthetical count format: "Operation... (X of Y)"
+      5. No separate numerical display outside the descriptive text
+  - Implementation details:
+    - Updated `SyncStatusIndicator.swift` to follow standard iOS patterns:
+      ```swift
+      HStack(spacing: 8) {
+          // Activity indicator first (standard iOS pattern)
+          if status.isActive {
+              ProgressView()
+                  .progressViewStyle(CircularProgressViewStyle())
+                  .scaleEffect(0.8)
+          } else if status.shouldDisplay {
+              Image(systemName: status.systemImage)
+                  .foregroundColor(colorForStatus)
+          }
+          
+          // Status text follows (standard iOS pattern)
+          if status.shouldDisplay {
+              Text(status.message)
+                  .font(.footnote)
+                  .foregroundColor(.secondary)
+          }
+      }
+      ```
+    - Modified status message format in `SyncStatus.swift` to use standard format:
+      ```swift
+      // Format matches standard iOS progress indicators
+      // Example: "Downloading articles... (4 of 10)"
+      return "Downloading articles... (\(current) of \(total))"
+      ```
+    - Removed redundant separate text element showing "X/Y"
+    - Increased standard spacing from 6 to 8 points to match iOS 18 UI patterns
+  - Results:
+    - Clean, standard iOS progress indicator that matches Apple's native apps
+    - Non-redundant progress display following iOS conventions
+    - Consistent user experience with other iOS applications
+    - Better visual flow with proper spacing and animations
+  - Key learnings:
+    - iOS provides standard UI patterns that users intuitively understand
+    - Following platform conventions improves usability and reduces cognitive load
+    - In iOS progress indicators, the status message typically includes the progress numbers
+    - Circular progress indicators are preferred for navigation bar operations
