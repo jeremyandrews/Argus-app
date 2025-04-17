@@ -373,6 +373,30 @@ To complete the Legacy Code Removal phase, we should focus on:
 - **API Connectivity**: Implemented graceful degradation patterns for API connectivity issues
 - **Simplified Implementation**: Removed dual-implementation pattern by simplifying MigrationAwareArticleService
 - **Settings Functionality**: Fixed issues with settings updates using Combine-based observation in ViewModels
+- **Enhanced Related Articles**: Added additional vector and entity similarity metrics to provide deeper insight into article relationships
+
+## Current Work Focus
+
+- **Enhanced Related Articles with Similarity Metrics** (Completed):
+  - Added new fields to provide increased transparency about why articles are considered related:
+    - **Vector Quality Fields**: Added vector similarity metrics (`vector_score`, `vector_active_dimensions`, `vector_magnitude`)
+    - **Entity Similarity Fields**: Added entity overlap metrics (`entity_overlap_count`, `primary_overlap_count`, `person_overlap`, etc.)
+    - **Similarity Formula**: Added human-readable explanation of similarity calculation
+  - Implementation details:
+    - Extended both `APIRelatedArticle` and `RelatedArticle` structures with new fields
+    - Enhanced conversion between API and database models
+    - Added computed properties for formatting values for UI display
+    - Created comprehensive documentation in `memory-bank/related-articles-fields.md`
+  - Technical approach:
+    - Maintained separation between API model (with ISO8601 date strings) and database model (with Date objects)
+    - Added proper CodingKeys mapping for snake_case to camelCase conversion
+    - Added null-safety with optional fields for backward compatibility
+    - Implemented helper methods for formatted display values
+  - Benefits:
+    - Greater transparency in why articles are considered related
+    - More detailed metrics for debugging similarity matching issues
+    - Better user understanding of article relationships
+    - Improved UI for displaying similarity information
 
 ## Recent Changes
 

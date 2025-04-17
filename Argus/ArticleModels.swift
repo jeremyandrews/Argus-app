@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Struct specifically for decoding related articles from API responses with ISO8601 date strings
 struct APIRelatedArticle: Codable {
@@ -11,6 +12,23 @@ struct APIRelatedArticle: Codable {
     let tinySummary: String
     let title: String
     
+    // New vector quality fields
+    let vectorScore: Double?
+    let vectorActiveDimensions: Int?
+    let vectorMagnitude: Double?
+    
+    // New entity similarity fields
+    let entityOverlapCount: Int?
+    let primaryOverlapCount: Int?
+    let personOverlap: Double?
+    let orgOverlap: Double?
+    let locationOverlap: Double?
+    let eventOverlap: Double?
+    let temporalProximity: Double?
+    
+    // Formula explanation
+    let similarityFormula: String?
+    
     enum CodingKeys: String, CodingKey {
         case id
         case category
@@ -20,6 +38,23 @@ struct APIRelatedArticle: Codable {
         case similarityScore = "similarity_score"
         case tinySummary = "tiny_summary"
         case title
+        
+        // New vector quality fields
+        case vectorScore = "vector_score"
+        case vectorActiveDimensions = "vector_active_dimensions"
+        case vectorMagnitude = "vector_magnitude"
+        
+        // New entity similarity fields
+        case entityOverlapCount = "entity_overlap_count"
+        case primaryOverlapCount = "primary_overlap_count"
+        case personOverlap = "person_overlap"
+        case orgOverlap = "org_overlap"
+        case locationOverlap = "location_overlap"
+        case eventOverlap = "event_overlap"
+        case temporalProximity = "temporal_proximity"
+        
+        // Formula explanation
+        case similarityFormula = "similarity_formula"
     }
     
     /// Converts API model to database model with proper date conversion
@@ -32,7 +67,21 @@ struct APIRelatedArticle: Codable {
             qualityScore: qualityScore,
             similarityScore: similarityScore,
             tinySummary: tinySummary,
-            title: title
+            title: title,
+            // New vector quality fields
+            vectorScore: vectorScore,
+            vectorActiveDimensions: vectorActiveDimensions,
+            vectorMagnitude: vectorMagnitude,
+            // New entity similarity fields
+            entityOverlapCount: entityOverlapCount,
+            primaryOverlapCount: primaryOverlapCount,
+            personOverlap: personOverlap,
+            orgOverlap: orgOverlap,
+            locationOverlap: locationOverlap,
+            eventOverlap: eventOverlap,
+            temporalProximity: temporalProximity,
+            // Formula explanation
+            similarityFormula: similarityFormula
         )
     }
 }
@@ -48,6 +97,23 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
     let tinySummary: String
     let title: String
     
+    // New vector quality fields
+    let vectorScore: Double?
+    let vectorActiveDimensions: Int?
+    let vectorMagnitude: Double?
+    
+    // New entity similarity fields
+    let entityOverlapCount: Int?
+    let primaryOverlapCount: Int?
+    let personOverlap: Double?
+    let orgOverlap: Double?
+    let locationOverlap: Double?
+    let eventOverlap: Double?
+    let temporalProximity: Double?
+    
+    // Formula explanation
+    let similarityFormula: String?
+    
     enum CodingKeys: String, CodingKey {
         case id
         case category
@@ -57,11 +123,42 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         case similarityScore = "similarity_score"
         case tinySummary = "tiny_summary"
         case title
+        
+        // New vector quality fields
+        case vectorScore = "vector_score"
+        case vectorActiveDimensions = "vector_active_dimensions"
+        case vectorMagnitude = "vector_magnitude"
+        
+        // New entity similarity fields
+        case entityOverlapCount = "entity_overlap_count"
+        case primaryOverlapCount = "primary_overlap_count"
+        case personOverlap = "person_overlap"
+        case orgOverlap = "org_overlap"
+        case locationOverlap = "location_overlap"
+        case eventOverlap = "event_overlap"
+        case temporalProximity = "temporal_proximity"
+        
+        // Formula explanation
+        case similarityFormula = "similarity_formula"
     }
     
     /// Standard initializer for creating instances directly
     init(id: Int, category: String, jsonURL: String, publishedDate: Date?,
-         qualityScore: Int, similarityScore: Double, tinySummary: String, title: String) {
+         qualityScore: Int, similarityScore: Double, tinySummary: String, title: String,
+         // New vector quality fields
+         vectorScore: Double? = nil,
+         vectorActiveDimensions: Int? = nil,
+         vectorMagnitude: Double? = nil,
+         // New entity similarity fields
+         entityOverlapCount: Int? = nil,
+         primaryOverlapCount: Int? = nil,
+         personOverlap: Double? = nil,
+         orgOverlap: Double? = nil,
+         locationOverlap: Double? = nil,
+         eventOverlap: Double? = nil,
+         temporalProximity: Double? = nil,
+         // Formula explanation
+         similarityFormula: String? = nil) {
         self.id = id
         self.category = category
         self.jsonURL = jsonURL
@@ -70,6 +167,23 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         self.similarityScore = similarityScore
         self.tinySummary = tinySummary
         self.title = title
+        
+        // New vector quality fields
+        self.vectorScore = vectorScore
+        self.vectorActiveDimensions = vectorActiveDimensions
+        self.vectorMagnitude = vectorMagnitude
+        
+        // New entity similarity fields
+        self.entityOverlapCount = entityOverlapCount
+        self.primaryOverlapCount = primaryOverlapCount
+        self.personOverlap = personOverlap
+        self.orgOverlap = orgOverlap
+        self.locationOverlap = locationOverlap
+        self.eventOverlap = eventOverlap
+        self.temporalProximity = temporalProximity
+        
+        // Formula explanation
+        self.similarityFormula = similarityFormula
     }
     
     /// Decoder initializer for database loading where dates are stored as timestamps
@@ -90,6 +204,23 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         } else {
             publishedDate = nil
         }
+        
+        // New vector quality fields
+        vectorScore = try container.decodeIfPresent(Double.self, forKey: .vectorScore)
+        vectorActiveDimensions = try container.decodeIfPresent(Int.self, forKey: .vectorActiveDimensions)
+        vectorMagnitude = try container.decodeIfPresent(Double.self, forKey: .vectorMagnitude)
+        
+        // New entity similarity fields
+        entityOverlapCount = try container.decodeIfPresent(Int.self, forKey: .entityOverlapCount)
+        primaryOverlapCount = try container.decodeIfPresent(Int.self, forKey: .primaryOverlapCount)
+        personOverlap = try container.decodeIfPresent(Double.self, forKey: .personOverlap)
+        orgOverlap = try container.decodeIfPresent(Double.self, forKey: .orgOverlap)
+        locationOverlap = try container.decodeIfPresent(Double.self, forKey: .locationOverlap)
+        eventOverlap = try container.decodeIfPresent(Double.self, forKey: .eventOverlap)
+        temporalProximity = try container.decodeIfPresent(Double.self, forKey: .temporalProximity)
+        
+        // Formula explanation
+        similarityFormula = try container.decodeIfPresent(String.self, forKey: .similarityFormula)
     }
     
     // Computed properties for UI display
@@ -118,6 +249,123 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
     
     var isSimilarityVeryHigh: Bool {
         similarityScore >= 0.98
+    }
+    
+    // MARK: - Vector Quality Computed Properties
+    
+    /// Formatted vector score as percentage
+    var formattedVectorScore: String? {
+        guard let score = vectorScore else { return nil }
+        return String(format: "%.1f%%", score * 100)
+    }
+    
+    /// Formatted vector active dimensions
+    var formattedVectorDimensions: String? {
+        guard let dimensions = vectorActiveDimensions else { return nil }
+        return "\(dimensions)"
+    }
+    
+    /// Formatted vector magnitude
+    var formattedVectorMagnitude: String? {
+        guard let magnitude = vectorMagnitude else { return nil }
+        return String(format: "%.2f", magnitude)
+    }
+    
+    // MARK: - Entity Similarity Computed Properties
+    
+    /// Whether this article has any entity similarity data
+    var hasEntityData: Bool {
+        return personOverlap != nil || orgOverlap != nil || 
+               locationOverlap != nil || eventOverlap != nil ||
+               temporalProximity != nil
+    }
+    
+    /// Entity overlap count as formatted string
+    var formattedEntityOverlapCount: String? {
+        guard let count = entityOverlapCount else { return nil }
+        return "\(count) shared entities"
+    }
+    
+    /// Primary overlap count as formatted string
+    var formattedPrimaryOverlapCount: String? {
+        guard let count = primaryOverlapCount else { return nil }
+        return "\(count) primary entities"
+    }
+    
+    /// Person overlap as percentage
+    var formattedPersonOverlap: String? {
+        guard let overlap = personOverlap else { return nil }
+        return String(format: "%.0f%%", overlap * 100)
+    }
+    
+    /// Organization overlap as percentage
+    var formattedOrgOverlap: String? {
+        guard let overlap = orgOverlap else { return nil }
+        return String(format: "%.0f%%", overlap * 100)
+    }
+    
+    /// Location overlap as percentage
+    var formattedLocationOverlap: String? {
+        guard let overlap = locationOverlap else { return nil }
+        return String(format: "%.0f%%", overlap * 100)
+    }
+    
+    /// Event overlap as percentage
+    var formattedEventOverlap: String? {
+        guard let overlap = eventOverlap else { return nil }
+        return String(format: "%.0f%%", overlap * 100)
+    }
+    
+    /// Temporal proximity as percentage
+    var formattedTemporalProximity: String? {
+        guard let proximity = temporalProximity else { return nil }
+        return String(format: "%.0f%%", proximity * 100)
+    }
+    
+    /// Concise summary of entity similarity for UI display
+    var entitySimilaritySummary: String? {
+        guard hasEntityData else { return nil }
+        
+        var components: [String] = []
+        
+        if let personOverlap = personOverlap, personOverlap > 0 {
+            components.append("Persons: \(formattedPersonOverlap!)")
+        }
+        
+        if let orgOverlap = orgOverlap, orgOverlap > 0 {
+            components.append("Orgs: \(formattedOrgOverlap!)")
+        }
+        
+        if let locationOverlap = locationOverlap, locationOverlap > 0 {
+            components.append("Locations: \(formattedLocationOverlap!)")
+        }
+        
+        if let eventOverlap = eventOverlap, eventOverlap > 0 {
+            components.append("Events: \(formattedEventOverlap!)")
+        }
+        
+        if let temporalProximity = temporalProximity, temporalProximity > 0 {
+            components.append("Temporal: \(formattedTemporalProximity!)")
+        }
+        
+        if components.isEmpty {
+            return "No significant entity overlap"
+        }
+        
+        return components.joined(separator: ", ")
+    }
+    
+    /// Get a color representing the overall similarity strength
+    var similarityColor: Color {
+        if similarityScore >= 0.98 {
+            return .red      // Extremely high similarity
+        } else if similarityScore >= 0.95 {
+            return .orange   // Very high similarity
+        } else if similarityScore >= 0.85 {
+            return .blue     // High similarity
+        } else {
+            return .gray     // Moderate similarity
+        }
     }
 }
 
