@@ -1030,42 +1030,37 @@ struct NewsDetailView: View {
                 isLoading: isSectionLoading(section.header)
             )
             
-        // MARK: - Related Articles
-        case "Related Articles":
-            VStack(alignment: .leading, spacing: 8) {
-                if let relatedArticles = section.content as? [RelatedArticle], !relatedArticles.isEmpty {
-                    RelatedArticlesView(articles: relatedArticles) { jsonURL in
-                        loadRelatedArticle(jsonURL: jsonURL)
-                    }
-                } else if let relatedArticles = section.content as? [[String: Any]], !relatedArticles.isEmpty {
-                    // Legacy fallback for compatibility during transition
-                    VStack(spacing: 6) {
-                        ProgressView()
-                            .padding()
-                        Text("Converting related articles data...")
-                            .font(.callout)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                } else {
-                    VStack(spacing: 6) {
-                        ProgressView()
-                            .padding()
-                        Text("Loading related articles...")
-                            .font(.callout)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                }
-
-                Text("This work-in-progress will impact the entire Argus experience when it's reliably working.")
-                    .font(.footnote)
-                    .padding(.top, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+// MARK: - Related Articles
+case "Related Articles":
+    VStack(alignment: .leading, spacing: 8) {
+        if let relatedArticles = section.content as? [RelatedArticle], !relatedArticles.isEmpty {
+            EnhancedRelatedArticlesView(articles: relatedArticles) { jsonURL in
+                loadRelatedArticle(jsonURL: jsonURL)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
+        } else if let relatedArticles = section.content as? [[String: Any]], !relatedArticles.isEmpty {
+            // Legacy fallback for compatibility during transition
+            VStack(spacing: 6) {
+                ProgressView()
+                    .padding()
+                Text("Converting related articles data...")
+                    .font(.callout)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+        } else {
+            VStack(spacing: 6) {
+                ProgressView()
+                    .padding()
+                Text("Loading related articles...")
+                    .font(.callout)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+        }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 12)
+    .padding(.top, 6)
             
         // MARK: - Argus Engine Stats
         case "Argus Engine Stats":
@@ -2028,106 +2023,6 @@ struct ActivityViewController: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_: UIActivityViewController, context _: Context) {}
-}
-
-/// RelatedArticlesView - Dedicated view for displaying related articles
-struct RelatedArticlesView: View {
-    let articles: [RelatedArticle]
-    let onArticleSelected: (String) -> Void
-    
-    @State private var showError = false
-    @State private var errorMessage = "Sorry, this article doesn't exist."
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(articles) { article in
-                        VStack(alignment: .leading, spacing: 4) {
-                            // Title button
-                            Button(action: {
-                                if !article.jsonURL.isEmpty {
-                                    AppLogger.database.debug("Selected related article: ID: \(article.id), URL: \(article.jsonURL)")
-                                    onArticleSelected(article.jsonURL)
-                                } else {
-                                    errorMessage = "This related article has an empty URL and cannot be opened."
-                                    showError = true
-                                    AppLogger.database.error("Related article has empty URL: ID: \(article.id), Title: \(article.title)")
-                                }
-                            }) {
-                                Text(article.title)
-                                    .font(.headline)
-                                    .foregroundColor(.blue)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            
-                            // Date if available
-                            if !article.formattedDate.isEmpty {
-                                Text("Published: \(article.formattedDate)")
-                                    .font(.footnote)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            // Category pill
-                            if !article.category.isEmpty {
-                                Text(article.category.uppercased())
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.gray.opacity(0.6))
-                                    .foregroundColor(.white)
-                                    .cornerRadius(8)
-                            }
-                            
-                            // Summary
-                            if !article.tinySummary.isEmpty {
-                                Text(article.tinySummary)
-                                    .font(.footnote)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            // Quality
-                            if article.qualityScore > 0 {
-                                Text("Quality: \(article.qualityDescription)")
-                                    .font(.caption)
-                                    .foregroundColor(.primary)
-                            }
-                            
-                            // Similarity
-                            Text("Similarity: \(article.similarityPercent)")
-                                .font(.caption)
-                                .foregroundColor(article.isSimilarityHigh ? .red : .secondary)
-                                .fontWeight(article.isSimilarityVeryHigh ? .bold : .regular)
-                            
-                            Divider()
-                                .padding(.vertical, 4)
-                        }
-                    }
-                    .padding(8)
-                    .background(Color(uiColor: .systemGray6))
-                    .cornerRadius(8)
-                }
-            }
-            .frame(maxHeight: 400)
-            
-            // Display diagnostic info about the related articles
-            Text("Found \(articles.count) related articles")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.top, 4)
-        }
-        .alert(errorMessage, isPresented: $showError) {
-            Button("OK", role: .cancel) {}
-        }
-        .onAppear {
-            // Log the related articles for debugging
-            AppLogger.database.debug("RelatedArticlesView displaying \(articles.count) articles")
-            for (index, article) in articles.enumerated() {
-                AppLogger.database.debug("Article \(index + 1): ID \(article.id), Title: \(article.title), URL: \(article.jsonURL.isEmpty ? "EMPTY" : article.jsonURL)")
-            }
-        }
-    }
 }
 
 
