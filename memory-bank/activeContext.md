@@ -163,97 +163,88 @@ To complete the Legacy Code Removal phase, we should focus on:
     - Better Swift 6 compatibility with explicit self references and proper error handling
   - Patterns documented in .clinerules for future implementation reference
 
-- **Fixed Related Articles Display Issue** (Improved Implementation):
-  - Addressed recurring issue with related articles display where format mismatch caused errors:
+- **Fixed Related Articles Implementation** (Completed):
+  - Resolved recurring issues with related articles by completely redesigning the feature:
     ```
     Failed to parse similar_articles: Swift.DecodingError.typeMismatch(Swift.Double, Swift.DecodingError.Context(..., debugDescription: "Expected to decode Double but found a string instead.")
     ```
-  - Root cause analysis:
-    - The original fix didn't fully solve the problem because we had a fundamental design issue:
-      1. In API responses, `published_date` is always an ISO8601 string (e.g., "2025-04-08T05:53:15+00:00")
-      2. In database storage, the date is stored as a numeric timestamp
-      3. Using a single shared decoder for both contexts was error-prone and fragile
+  - Root cause analysis identified multiple incorrect assumptions:
+    - Data format assumption: Same date format (ISO8601 strings) assumed in both API and database
+    - Decoder assumption: A single decoder could handle both API responses and database retrieval
+    - Format consistency assumption: Related articles data would be consistent across sources
+    - Error handling assumption: Parsing errors were exceptional rather than common
+  
   - Implementation details:
-    - Created a dedicated API model with proper type expectations:
+    - Created separate context-specific models:
       ```swift
-      /// Struct specifically for decoding related articles from API responses with ISO8601 date strings
+      /// API Model - specifically for API responses with ISO8601 dates
       struct APIRelatedArticle: Codable {
-          let id: Int
-          let category: String
-          let jsonURL: String
-          let publishedDate: String? // API provides this as an ISO8601 string
-          let qualityScore: Int
-          let similarityScore: Double
-          let tinySummary: String
-          let title: String
-          
-          // ... CodingKeys ...
+          let publishedDate: String? // API provides as ISO8601 string
+          // Additional fields and proper CodingKeys...
           
           /// Converts API model to database model with proper date conversion
           func toRelatedArticle() -> RelatedArticle {
               return RelatedArticle(
-                  id: id,
-                  category: category,
-                  jsonURL: jsonURL,
-                  publishedDate: publishedDate != nil ? ISO8601DateFormatter().date(from: publishedDate!) : nil,
-                  qualityScore: qualityScore,
-                  similarityScore: similarityScore,
-                  tinySummary: tinySummary,
-                  title: title
+                  // Properties with date conversion...
+                  publishedDate: publishedDate != nil ? 
+                      ISO8601DateFormatter().date(from: publishedDate!) : nil,
               )
           }
       }
-      ```
-    - Modified the parsing workflow for clear separation of concerns:
-      ```swift
-      // First decode using the API model that handles ISO8601 string dates from the API
-      let decoder = JSONDecoder()
-      let apiRelatedArticles = try decoder.decode([APIRelatedArticle].self, from: data)
       
-      // Convert API models to database models with proper date conversion
-      parsedRelatedArticles = apiRelatedArticles.map { $0.toRelatedArticle() }
-      ```
-    - Added a standard initializer to RelatedArticle for creating instances directly:
-      ```swift
-      /// Standard initializer for creating instances directly
-      init(id: Int, category: String, jsonURL: String, publishedDate: Date?,
-           qualityScore: Int, similarityScore: Double, tinySummary: String, title: String) {
-          self.id = id
-          self.category = category
-          self.jsonURL = jsonURL
-          self.publishedDate = publishedDate
-          self.qualityScore = qualityScore
-          self.similarityScore = similarityScore
-          self.tinySummary = tinySummary
-          self.title = title
+      /// Database Model - for storage and UI with Date objects
+      struct RelatedArticle: Codable, Identifiable, Hashable {
+          // Properties including Date objects
+          // Explicit Codable implementation
+          // Computed formatting properties for UI
       }
       ```
-    - Kept the decoder initializer in RelatedArticle focused solely on database loading:
+    
+    - Implemented two-phase decoding workflow:
       ```swift
-      /// Decoder initializer for database loading where dates are stored as timestamps
-      init(from decoder: Decoder) throws {
-          // ... existing implementation ...
-          
-          // When loaded from database, published_date is stored as a timestamp
-          let timestamp = try container.decodeIfPresent(Double.self, forKey: .publishedDate)
-          if let timestamp = timestamp {
-              publishedDate = Date(timeIntervalSince1970: timestamp)
-          } else {
-              publishedDate = nil
+      // Phase 1: Decode API Response (handles ISO8601 strings)
+      let apiRelatedArticles = try decoder.decode([APIRelatedArticle].self, from: data)
+      
+      // Phase 2: Convert to database model with proper date conversion
+      let databaseArticles = apiRelatedArticles.map { $0.toRelatedArticle() }
+      
+      // Phase 3: Store with explicit date encoding strategy
+      let encoder = JSONEncoder()
+      encoder.dateEncodingStrategy = .secondsSince1970
+      relatedArticlesData = try encoder.encode(databaseArticles)
+      ```
+      
+    - Created comprehensive error handling with fallbacks:
+      ```swift
+      // Attempt structured decoding first
+      do {
+          decodedArticles = try decoder.decode([RelatedArticle].self, from: data)
+      } catch {
+          // Fallback to more flexible parsing if structured decode fails
+          AppLogger.database.error("Primary decoding failed: \(error)")
+          if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+              // Alternative parsing approach
           }
       }
       ```
-  - The solution follows clean architecture principles:
-    - Separation of concerns with dedicated models for different contexts
-    - Clear data transformation flow from API model to database model
-    - Self-documented code with explicit type handling for each data source
-    - No ambiguity about expected data formats in each context
+      
+  - Enhanced UI with progressive disclosure pattern:
+    - Created dedicated `RelatedArticlesComponents.swift` with modular components
+    - Implemented expandable details with `DisclosureGroup`
+    - Added visual metric bars and color-coded badges
+    - Included tooltips for explaining technical metrics
+  
+  - Comprehensive documentation:
+    - Detailed in `memory-bank/related-articles-implementation.md`
+    - Field definitions in `memory-bank/related-articles-fields.md`
+    - Test implementation in `EnhancedRelatedArticlesTest.swift`
+  
   - Benefits:
-    - Completely eliminates the format mismatch errors for related articles
-    - More maintainable codebase with clear separation of API and database concerns
-    - Self-documenting code structure that makes the data flow obvious
-    - Reduced risk of similar issues recurring in the future
-    - Pattern can be reused for other similar data transformation needs
+    - Complete elimination of parsing errors across all data sources
+    - Clear separation of API and database concerns
+    - Self-documenting code with explicit context handling
+    - Enhanced user experience with intuitive UI
+    - Reusable pattern for handling other complex data transformations
 
 - **Fixed Argus Engine Stats Display** (Completed):
   - Resolved issues with engine stats display in NewsDetailView:
@@ -378,25 +369,50 @@ To complete the Legacy Code Removal phase, we should focus on:
 ## Current Work Focus
 
 - **Enhanced Related Articles with Similarity Metrics** (Completed):
-  - Added new fields to provide increased transparency about why articles are considered related:
-    - **Vector Quality Fields**: Added vector similarity metrics (`vector_score`, `vector_active_dimensions`, `vector_magnitude`)
-    - **Entity Similarity Fields**: Added entity overlap metrics (`entity_overlap_count`, `primary_overlap_count`, `person_overlap`, etc.)
-    - **Similarity Formula**: Added human-readable explanation of similarity calculation
-  - Implementation details:
-    - Extended both `APIRelatedArticle` and `RelatedArticle` structures with new fields
-    - Enhanced conversion between API and database models
-    - Added computed properties for formatting values for UI display
-    - Created comprehensive documentation in `memory-bank/related-articles-fields.md`
-  - Technical approach:
-    - Maintained separation between API model (with ISO8601 date strings) and database model (with Date objects)
-    - Added proper CodingKeys mapping for snake_case to camelCase conversion
-    - Added null-safety with optional fields for backward compatibility
-    - Implemented helper methods for formatted display values
-  - Benefits:
-    - Greater transparency in why articles are considered related
-    - More detailed metrics for debugging similarity matching issues
-    - Better user understanding of article relationships
-    - Improved UI for displaying similarity information
+  - Implemented comprehensive similarity metrics to explain why articles are related:
+    - **Vector Similarity**: 
+      - `vectorScore`: Raw cosine similarity between article embeddings
+      - `vectorActiveDimensions`: Embedding dimensions contributing to similarity
+      - `vectorMagnitude`: Vector strength indicator (L2 norm)
+    
+    - **Entity Similarity**:
+      - `entityOverlapCount`: Total shared entities between articles
+      - `primaryOverlapCount`: Primary (most important) shared entities
+      - `personOverlap`: People/persons similarity score
+      - `orgOverlap`: Organizations similarity score
+      - `locationOverlap`: Locations similarity score
+      - `eventOverlap`: Events similarity score
+      - `temporalProximity`: Time closeness score
+      
+    - **Formula Explanation**:
+      - Human-readable explanation of the similarity calculation
+      - Example: "60% vector similarity (0.85) + 40% entity similarity (0.70), where entity similarity combines person (30%), organization (20%), location (15%), event (15%), and temporal (20%) factors"
+      
+  - UI Implementation:
+    - Designed with progressive disclosure pattern to prevent information overload
+    - Main components in `RelatedArticlesComponents.swift`:
+      - `EnhancedRelatedArticlesView`: Main container for article list
+      - `EnhancedRelatedArticleRow`: Individual article with expandable details  
+      - `SimilarityBadge`: Visual indicator of similarity strength
+      - `MetricBarView`: Visual bar for comparing metrics
+      - `InfoTooltip`: Context-sensitive help for technical metrics
+    
+    - Specialized detail components:
+      - `VectorDetailsView`: For displaying embedding similarity
+      - `EntityDetailsView`: For displaying entity overlap metrics
+      - `FormulaExplanationView`: For explaining calculation formula
+    
+  - Key improvements:
+    - Transparency into the "why" behind article relationships
+    - Educational elements explaining AI similarity concepts
+    - Interactive elements allowing users to explore details as desired
+    - Consistent visual language with rest of the application
+    - Robust error handling with fallbacks for missing data
+    
+  - Documentation and testing:
+    - Full implementation details in `memory-bank/related-articles-implementation.md`
+    - Field descriptions in `memory-bank/related-articles-fields.md`
+    - Test implementation with sample data in `EnhancedRelatedArticlesTest.swift`
 
 ## Recent Changes
 
@@ -590,30 +606,3 @@ To complete the Legacy Code Removal phase, we should focus on:
               Image(systemName: status.systemImage)
                   .foregroundColor(colorForStatus)
           }
-          
-          // Status text follows (standard iOS pattern)
-          if status.shouldDisplay {
-              Text(status.message)
-                  .font(.footnote)
-                  .foregroundColor(.secondary)
-          }
-      }
-      ```
-    - Modified status message format in `SyncStatus.swift` to use standard format:
-      ```swift
-      // Format matches standard iOS progress indicators
-      // Example: "Downloading articles... (4 of 10)"
-      return "Downloading articles... (\(current) of \(total))"
-      ```
-    - Removed redundant separate text element showing "X/Y"
-    - Increased standard spacing from 6 to 8 points to match iOS 18 UI patterns
-  - Results:
-    - Clean, standard iOS progress indicator that matches Apple's native apps
-    - Non-redundant progress display following iOS conventions
-    - Consistent user experience with other iOS applications
-    - Better visual flow with proper spacing and animations
-  - Key learnings:
-    - iOS provides standard UI patterns that users intuitively understand
-    - Following platform conventions improves usability and reduces cognitive load
-    - In iOS progress indicators, the status message typically includes the progress numbers
-    - Circular progress indicators are preferred for navigation bar operations
