@@ -215,14 +215,28 @@ To complete the remaining work in the **Stabilization and Refinement** phase:
     - Added fields to `ArticleJSON` and `PreparedArticle` structs in ArticleModels.swift
     - Added properties and blob storage fields in ArticleDataModels.swift
     - Created API compatibility extensions for snake_case to camelCase conversion
-    - Updated MarkdownUtilities.swift to handle the new fields as rich text
-    - Added section naming mappings and text style configuration
-    - Included the fields in verification and regeneration functions
+    - Updated MarkdownUtilities.swift to handle the new fields as rich text:
+      - Added new cases to `RichTextField` enum
+      - Implemented section naming and mapping
+      - Added text style configuration
+      - Updated blob storage, retrieval, verification and regeneration functions
+    - Updated ArticleService.swift with proper handling in:
+      - `regenerateRichTextForField` method to include the new fields
+      - `generateRichTextContent` to support the new fields
+    - Modified NewsDetailView.swift to display the new sections:
+      - Added sections to the UI in the `getSections` methods
+      - Updated the default expanded sections list
+      - Added the fields to `needsConversion` for proper Markdown formatting
+      - Updated `getTextContentForField` to extract values for the new fields
   - Key improvements:
     - Users can now receive practical, actionable recommendations for each article
     - Facilitates deeper engagement with content through curated talking points
     - Transforms passive news consumption into opportunities for action and discussion
     - Maintains consistent rich text rendering across all content types
+  - Documentation:
+    - Created detailed documentation in `memory-bank/related-articles-fields.md`
+    - Updated `activeContext.md` with technical implementation details
+    - Added to product differentiation points in `productContext.md`
 
 - ✅ **Fixed Article Content Display Issue in NewsView** (Completed):
   - Resolved display issue where text formatting was inconsistent between views

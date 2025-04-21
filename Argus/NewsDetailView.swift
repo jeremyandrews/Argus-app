@@ -1286,6 +1286,8 @@ case "Related Articles":
         content["logicalFallacies"] = article.logicalFallacies
         content["relationToTopic"] = article.relationToTopic
         content["additionalInsights"] = article.additionalInsights
+        content["actionRecommendations"] = article.actionRecommendations
+        content["talkingPoints"] = article.talkingPoints
 
         // For source analysis, create a dictionary with the text and source type
         if let sourceAnalysis = article.sourceAnalysis {
@@ -1882,6 +1884,12 @@ struct ShareSelectionView: View {
 
                 case "Context & Perspective":
                     sectionContent = notification.additionalInsights
+                    
+                case "Action Recommendations":
+                    sectionContent = notification.actionRecommendations
+                    
+                case "Talking Points":
+                    sectionContent = notification.talkingPoints
 
                 case "Argus Engine Stats":
                     if let details = section.argusDetails {

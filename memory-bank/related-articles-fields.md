@@ -1,127 +1,113 @@
-# Related Articles Fields
+# R2 URL JSON New Fields
 
 ## Overview
 
-This document details the new fields added to the similar articles section of the JSON payload. These fields provide deeper insights into the similarity calculation between articles, enhancing transparency and user understanding of why articles are considered related.
+Two new fields have been added to the JSON payload sent to the R2 URL for the iOS application that transform passive news consumption into active engagement:
 
-## API Response Structure
+1. `action_recommendations`: Concrete, actionable steps users can take based on article content
+2. `talking_points`: Thought-provoking discussion points to facilitate sharing and conversation
 
-Each article in the `similar_articles` array now includes the following additional fields:
+These fields provide users with practical ways to engage with content beyond simply reading it.
+
+## Field Specifications
+
+### action_recommendations
+
+**Description**:
+Contains 3-5 concrete, actionable recommendations based on the article content. These are practical steps a user could take in response to the information in the article.
+
+**Format**:
+- **Type**: String
+- **Structure**: Markdown-formatted text with bullet points
+- **Length**: Typically 3-5 bullet points, each 25-40 words
+- **Style**: Each point starts with a strong action verb highlighted in bold
+
+**Example**:
+```markdown
+- **Download the security patch** released by Microsoft immediately, as it addresses the critical Windows vulnerability that has already compromised over 100,000 systems worldwide.
+- **Enable two-factor authentication** on all cloud services mentioned in the article, particularly those handling sensitive data like financial or healthcare information.
+- **Review your organization's response plan** for ransomware attacks, ensuring it addresses the specific threats detailed by the security researchers at Black Hat 2024.
+```
+
+**Implementation Notes**:
+- Action recommendations are tied directly to article content, not generic advice
+- Each recommendation begins with a bold action verb
+- Recommendations vary based on article type (news events, technology, policy changes, etc.)
+- iOS app preserves formatting, particularly the bold highlighting of initial verbs
+
+### talking_points
+
+**Description**:
+Contains 3-5 thought-provoking discussion points that facilitate sharing and conversation about the article's content. These help users engage others in meaningful dialogue about the topic.
+
+**Format**:
+- **Type**: String
+- **Structure**: Markdown-formatted text with bullet points
+- **Length**: Typically 3-5 bullet points, each 30-50 words
+- **Style**: Each point is either a discussion-starter question OR a bold statement + follow-up question
+
+**Example**:
+```markdown
+- **How might the facial recognition limitations** described in the article affect different demographic groups unequally, given the researchers found a 35% higher error rate for certain populations?
+- **The article suggests that companies are rushing AI deployment before adequate testing.** How should we balance innovation speed with safety in emerging technologies?
+- **Is the 5-year timeline for quantum computing breakthroughs** realistic given the technical challenges outlined by the MIT researchers, or are the commercial predictions overly optimistic?
+```
+
+**Implementation Notes**:
+- Talking points often highlight implications, controversies, or nuances in the article
+- Points contain specific references to article content
+- Format varies between discussion questions and statement/question combinations
+- iOS app preserves formatting, particularly the bold highlighting of key phrases
+
+## JSON Structure Example
 
 ```json
 {
-  "similar_articles": [
-    {
-      // Existing fields
-      "id": 123,
-      "json_url": "https://r2.example.com/abc123.json",
-      "title": "Article Title",
-      "tiny_summary": "Brief summary...",
-      "category": "Technology",
-      "published_date": "2025-04-15",
-      "quality_score": 3,
-      "similarity_score": 0.87,
-      
-      // New vector quality fields
-      "vector_score": 0.85,
-      "vector_active_dimensions": 768,
-      "vector_magnitude": 1.23,
-      
-      // New entity similarity fields
-      "entity_overlap_count": 7,
-      "primary_overlap_count": 3,
-      "person_overlap": 0.75,
-      "org_overlap": 0.60,
-      "location_overlap": 0.40,
-      "event_overlap": 0.80,
-      "temporal_proximity": 0.95,
-      
-      // Formula explanation
-      "similarity_formula": "60% vector similarity (0.85) + 40% entity similarity (0.70), where entity similarity combines person (30%), organization (20%), location (15%), event (15%), and temporal (20%) factors"
-    }
-  ]
+  "topic": "Technology",
+  "title": "New Security Vulnerability Found in Windows",
+  "url": "https://example.com/article-url",
+  "article_body": "Full article text...",
+  "pub_date": "2025-04-15",
+  "summary": "...",
+  "critical_analysis": "...",
+  "logical_fallacies": "...",
+  
+  "action_recommendations": "- **Download the security patch** released by Microsoft immediately, as it addresses the critical Windows vulnerability that has already compromised over 100,000 systems worldwide.\n- **Enable two-factor authentication** on all cloud services mentioned in the article, particularly those handling sensitive data.\n- **Review your organization's response plan** for ransomware attacks, ensuring it addresses the specific threats detailed.",
+  
+  "talking_points": "- **How might the exploitation methods** described in the article affect different types of organizations, given that healthcare institutions were shown to be particularly vulnerable?\n- **The security researchers waited 90 days before disclosure.** Is this standard timeline appropriate for critical vulnerabilities like this one?\n- **What responsibility do software vendors have** to ensure security in legacy systems that are still widely used but officially unsupported?",
+  
+  "additional_insights": "...",
+  "sources_quality": 3,
+  "argument_quality": 3,
+  "quality": 4,
+  "source_type": "press",
+  "elapsed_time": 4.52,
+  "model": "llama3"
 }
 ```
 
-## Field Descriptions
+## Technical Implementation
 
-### Vector Quality Fields
+1. **Data Models**:
+   - Added fields to `ArticleJSON` and `PreparedArticle` structs
+   - Added properties and blob storage fields to `ArticleModel`
+   - Created API compatibility extensions
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `vector_score` | FloatNullable | The raw vector similarity score (cosine similarity) between this article and the query article, before any weighting is applied. Range: 0-1, where 1 indicates identical vectors. May be null if only entity matching was performed. |
-| `vector_active_dimensions` | IntegerNullable | The number of dimensions in the embedding vector that are actively contributing to the similarity calculation. Higher numbers can indicate more nuanced embedding. May be null if this data isn't available. |
-| `vector_magnitude` | FloatNullable | The L2 norm (magnitude) of the article's embedding vector. Indicates the "strength" of the vector representation. May be null if this data isn't available. |
+2. **Data Processing**:
+   - Modified `DatabaseCoordinator.syncProcessArticleJSON()` to extract fields
+   - Updated the `ArticleModel` constructor
+   - Updated `updateFields()` to properly handle the new fields
 
-### Entity Similarity Fields
+3. **Rich Text Handling**:
+   - Added cases to `RichTextField` enum in MarkdownUtilities.swift
+   - Implemented section naming and mapping
+   - Updated all affected methods to handle the new fields
+   - Included in verification and regeneration functions
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `entity_overlap_count` | IntegerNullable | The total number of entities (people, organizations, locations, events) that appear in both the query article and this article, regardless of importance level. May be null if no entity matching was performed. |
-| `primary_overlap_count` | IntegerNullable | The number of PRIMARY importance entities that appear in both articles. PRIMARY entities are the main subjects of the article and have greater weight in similarity calculations. May be null if no entity matching was performed. |
-| `person_overlap` | FloatNullable | Similarity score (0-1) based specifically on people/persons mentioned in both articles. Higher values indicate more shared key people. May be null if no entity matching was performed or no person entities were found. |
-| `org_overlap` | FloatNullable | Similarity score (0-1) based on organizations mentioned in both articles. Higher values indicate more shared key organizations. May be null if no entity matching was performed or no organization entities were found. |
-| `location_overlap` | FloatNullable | Similarity score (0-1) based on locations mentioned in both articles. Higher values indicate more shared key locations. May be null if no entity matching was performed or no location entities were found. |
-| `event_overlap` | FloatNullable | Similarity score (0-1) based on events mentioned in both articles. Higher values indicate more shared key events. May be null if no entity matching was performed or no event entities were found. |
-| `temporal_proximity` | FloatNullable | Similarity score (0-1) based on how close the articles' event dates are to each other. 1.0 means same date, with decreasing values for more temporally distant events. May be null if no event dates were available or extracted. |
+4. **UI Integration**:
+   - Added sections to NewsDetailView
+   - Updated default expanded sections list
+   - Modified getTextContentForField to extract values
+   - Updated needsConversion for Markdown formatting
 
-### Formula Explanation
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `similarity_formula` | StringNullable | A human-readable explanation of how the final similarity score was calculated, including the weights and component scores used. Format is consistent but the actual values will vary per article match. May be null if similarity calculation details aren't available. |
-
-## Formula Calculation Details
-
-The final `similarity_score` is calculated using this formula:
-
-```
-similarity_score = (0.6 * vector_score) + (0.4 * entity_similarity)
-```
-
-Where `entity_similarity` is calculated as:
-
-```
-entity_similarity = (0.3 * person_overlap) + 
-                   (0.2 * org_overlap) + 
-                   (0.15 * location_overlap) + 
-                   (0.15 * event_overlap) + 
-                   (0.2 * temporal_proximity)
-```
-
-## Field Availability Notes
-
-- All new fields are optional and may be null in certain scenarios
-- Pure vector matches will have vector fields but may lack entity fields
-- Entity-only matches may have limited vector fields
-- The similarity_formula provides context about which components contributed to the final score
-- Always check for null values before using these fields in calculations or displays
-
-## Implementation Strategy
-
-### Data Model Updates
-
-1. Update `APIRelatedArticle` struct:
-   - Add all new fields with appropriate Swift types
-   - Update CodingKeys enum to map snake_case API names to camelCase Swift properties
-
-2. Update `RelatedArticle` struct:
-   - Add the same new fields
-   - Update the initializer to accept and store the new fields from APIRelatedArticle
-   - Add computed properties for formatting values for display
-
-### UI Display Recommendations
-
-1. **Progressive Disclosure**:
-   - Show basic similarity score by default
-   - Use expandable sections for detailed vector and entity metrics
-   - Keep the formula explanation in a dedicated expandable section
-
-2. **Visual Indicators**:
-   - Use color-coded bars for similarity percentages
-   - Consider small icons for entity types (person, organization, location)
-   - Use mini-charts for comparing the different overlap types
-
-3. **Explanatory Text**:
-   - Add brief tooltips explaining what each metric means
-   - Make the similarity formula human-readable with proper formatting
+These new fields provide actionable value to users, helping them move from passive consumption to active engagement with article content.
