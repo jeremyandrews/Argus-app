@@ -409,13 +409,13 @@ struct NewsDetailView: View {
         }
         
         // 7) "Action Recommendations"
-        let recommendations = n.actionRecommendations ?? (json["actionRecommendations"] as? String ?? "")
+        let recommendations = n.actionRecommendations ?? (json["action_recommendations"] as? String ?? "")
         if !recommendations.isEmpty {
             sections.append(ContentSection(header: "Action Recommendations", content: recommendations))
         }
         
         // 8) "Talking Points"
-        let talkingPoints = n.talkingPoints ?? (json["talkingPoints"] as? String ?? "")
+        let talkingPoints = n.talkingPoints ?? (json["talking_points"] as? String ?? "")
         if !talkingPoints.isEmpty {
             sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
         }
