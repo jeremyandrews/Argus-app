@@ -408,15 +408,23 @@ struct NewsDetailView: View {
             sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
         
-        // 7) "Action Recommendations"
-        let recommendations = n.actionRecommendations ?? (json["actionRecommendations"] as? String ?? "")
+        // 7) "Action Recommendations" 
+        // Look for snake_case key in JSON first (as received from backend)
+        // Then fall back to camelCase key (as stored in content dictionary)
+        let recommendations = n.actionRecommendations ?? 
+                             (json["action_recommendations"] as? String ?? 
+                              json["actionRecommendations"] as? String ?? "")
         // Only add the section if there's content
         if !recommendations.isEmpty {
             sections.append(ContentSection(header: "Action Recommendations", content: recommendations))
         }
         
         // 8) "Talking Points"
-        let talkingPoints = n.talkingPoints ?? (json["talkingPoints"] as? String ?? "")
+        // Look for snake_case key in JSON first (as received from backend)
+        // Then fall back to camelCase key (as stored in content dictionary)
+        let talkingPoints = n.talkingPoints ?? 
+                           (json["talking_points"] as? String ?? 
+                            json["talkingPoints"] as? String ?? "")
         // Only add the section if there's content
         if !talkingPoints.isEmpty {
             sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
@@ -1341,8 +1349,6 @@ case "Related Articles":
         content["logicalFallacies"] = article.logicalFallacies
         content["relationToTopic"] = article.relationToTopic
         content["additionalInsights"] = article.additionalInsights
-        content["actionRecommendations"] = article.actionRecommendations
-        content["talkingPoints"] = article.talkingPoints
         content["actionRecommendations"] = article.actionRecommendations
         content["talkingPoints"] = article.talkingPoints
 
