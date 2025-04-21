@@ -13,6 +13,8 @@ enum RichTextField: String, CaseIterable {
     case sourceAnalysis
     case relationToTopic
     case additionalInsights
+    case actionRecommendations
+    case talkingPoints
 }
 
 // Centralized section naming system to ensure consistency
@@ -26,6 +28,8 @@ public enum SectionNaming {
         case "Source Analysis": return .sourceAnalysis
         case "Relevance": return .relationToTopic
         case "Context & Perspective": return .additionalInsights
+        case "Action Recommendations": return .actionRecommendations
+        case "Talking Points": return .talkingPoints
         default: return .body
         }
     }
@@ -41,6 +45,8 @@ public enum SectionNaming {
         case .sourceAnalysis: return "Source Analysis"
         case .relationToTopic: return "Relevance"
         case .additionalInsights: return "Context & Perspective"
+        case .actionRecommendations: return "Action Recommendations"
+        case .talkingPoints: return "Talking Points"
         }
     }
 
@@ -53,6 +59,8 @@ public enum SectionNaming {
         case "Source Analysis": return "sourceAnalysis"
         case "Relevance": return "relationToTopic"
         case "Context & Perspective": return "additionalInsights"
+        case "Action Recommendations": return "actionRecommendations"
+        case "Talking Points": return "talkingPoints"
         default: return section.lowercased()
         }
     }
@@ -66,7 +74,8 @@ extension RichTextField {
             return "UIFontTextStyleHeadline"
         case .body, .summary, .criticalAnalysis,
              .logicalFallacies, .sourceAnalysis,
-             .relationToTopic, .additionalInsights:
+             .relationToTopic, .additionalInsights,
+             .actionRecommendations, .talkingPoints:
             return "UIFontTextStyleBody"
         }
     }
@@ -84,6 +93,8 @@ extension RichTextField {
         case .sourceAnalysis: return article.sourceAnalysis
         case .relationToTopic: return article.relationToTopic
         case .additionalInsights: return article.additionalInsights
+        case .actionRecommendations: return article.actionRecommendations
+        case .talkingPoints: return article.talkingPoints
         }
     }
 
@@ -98,6 +109,8 @@ extension RichTextField {
         case .sourceAnalysis: return article.sourceAnalysisBlob
         case .relationToTopic: return article.relationToTopicBlob
         case .additionalInsights: return article.additionalInsightsBlob
+        case .actionRecommendations: return article.actionRecommendationsBlob
+        case .talkingPoints: return article.talkingPointsBlob
         }
     }
 
@@ -120,6 +133,10 @@ extension RichTextField {
             article.relationToTopicBlob = data
         case .additionalInsights:
             article.additionalInsightsBlob = data
+        case .actionRecommendations:
+            article.actionRecommendationsBlob = data
+        case .talkingPoints:
+            article.talkingPointsBlob = data
         }
     }
 
@@ -468,7 +485,7 @@ func verifyAllBlobs(in article: ArticleModel) -> Bool {
     let fields: [RichTextField] = [
         .title, .body, .summary, .criticalAnalysis,
         .logicalFallacies, .sourceAnalysis, .relationToTopic,
-        .additionalInsights,
+        .additionalInsights, .actionRecommendations, .talkingPoints
     ]
 
     AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(article.id):")
@@ -513,7 +530,7 @@ func regenerateAllBlobs(for article: ArticleModel, force: Bool = false) -> Int {
     let fields: [RichTextField] = [
         .title, .body, .summary, .criticalAnalysis,
         .logicalFallacies, .sourceAnalysis, .relationToTopic,
-        .additionalInsights,
+        .additionalInsights, .actionRecommendations, .talkingPoints
     ]
 
     var regeneratedCount = 0

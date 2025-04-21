@@ -207,6 +207,23 @@ To complete the remaining work in the **Stabilization and Refinement** phase:
   - Made the function private to each file to avoid potential naming conflicts
   - Ensured app builds successfully in both local Xcode and Apple's cloud build environment
 
+- ✅ **Implemented R2 URL JSON New Fields** (Completed):
+  - Added support for two new fields in the JSON payload:
+    - `action_recommendations`: Concrete, actionable steps based on article content
+    - `talking_points`: Thought-provoking discussion points to facilitate sharing
+  - Implementation details:
+    - Added fields to `ArticleJSON` and `PreparedArticle` structs in ArticleModels.swift
+    - Added properties and blob storage fields in ArticleDataModels.swift
+    - Created API compatibility extensions for snake_case to camelCase conversion
+    - Updated MarkdownUtilities.swift to handle the new fields as rich text
+    - Added section naming mappings and text style configuration
+    - Included the fields in verification and regeneration functions
+  - Key improvements:
+    - Users can now receive practical, actionable recommendations for each article
+    - Facilitates deeper engagement with content through curated talking points
+    - Transforms passive news consumption into opportunities for action and discussion
+    - Maintains consistent rich text rendering across all content types
+
 - ✅ **Fixed Article Content Display Issue in NewsView** (Completed):
   - Resolved display issue where text formatting was inconsistent between views
   - Modified NewsView to use the same UI component (NonSelectableRichTextView) as NewsDetailView

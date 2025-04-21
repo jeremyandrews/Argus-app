@@ -108,6 +108,12 @@ final class ArticleModel: Equatable {
 
     /// Additional AI insights about the article
     var additionalInsights: String?
+    
+    /// Action recommendations based on the article content
+    var actionRecommendations: String?
+    
+    /// Talking points for facilitating discussions about the article
+    var talkingPoints: String?
 
     // MARK: - Rich Text Blobs
 
@@ -134,6 +140,12 @@ final class ArticleModel: Equatable {
 
     /// Rich text blob for additional insights
     var additionalInsightsBlob: Data?
+    
+    /// Rich text blob for action recommendations
+    var actionRecommendationsBlob: Data?
+    
+    /// Rich text blob for talking points
+    var talkingPointsBlob: Data?
 
     // MARK: - Additional Metadata
     
@@ -243,6 +255,8 @@ final class ArticleModel: Equatable {
         logicalFallacies: String? = nil,
         relationToTopic: String? = nil,
         additionalInsights: String? = nil,
+        actionRecommendations: String? = nil,
+        talkingPoints: String? = nil,
         // Legacy field - we'll parse it if provided
         engineStats: String? = nil,
         // New engine stats fields
@@ -258,7 +272,9 @@ final class ArticleModel: Equatable {
         logicalFallaciesBlob: Data? = nil,
         sourceAnalysisBlob: Data? = nil,
         relationToTopicBlob: Data? = nil,
-        additionalInsightsBlob: Data? = nil
+        additionalInsightsBlob: Data? = nil,
+        actionRecommendationsBlob: Data? = nil,
+        talkingPointsBlob: Data? = nil
     ) {
         self.id = id
         self.jsonURL = jsonURL
@@ -284,6 +300,8 @@ final class ArticleModel: Equatable {
         self.logicalFallacies = logicalFallacies
         self.relationToTopic = relationToTopic
         self.additionalInsights = additionalInsights
+        self.actionRecommendations = actionRecommendations
+        self.talkingPoints = talkingPoints
         // Handle new engine stats fields:
         self.engineModel = engineModel
         self.engineElapsedTime = engineElapsedTime
@@ -321,6 +339,8 @@ final class ArticleModel: Equatable {
         self.sourceAnalysisBlob = sourceAnalysisBlob
         self.relationToTopicBlob = relationToTopicBlob
         self.additionalInsightsBlob = additionalInsightsBlob
+        self.actionRecommendationsBlob = actionRecommendationsBlob
+        self.talkingPointsBlob = talkingPointsBlob
     }
 
     // Convenience initializer will be implemented after ArticleJSON is available
@@ -579,6 +599,18 @@ extension ArticleModel {
     var additional_insights: String? {
         get { return additionalInsights }
         set { additionalInsights = newValue }
+    }
+    
+    /// The action_recommendations property of the notification data (snake_case format)
+    var action_recommendations: String? {
+        get { return actionRecommendations }
+        set { actionRecommendations = newValue }
+    }
+    
+    /// The talking_points property of the notification data (snake_case format)
+    var talking_points: String? {
+        get { return talkingPoints }
+        set { talkingPoints = newValue }
     }
 
     /// The engine_stats property of the notification data (renamed to match NotificationData)

@@ -98,6 +98,65 @@ To complete the Legacy Code Removal phase, we should focus on:
 
 ## Current Work Focus
 
+- **Implemented R2 URL JSON New Fields** (Completed):
+  - Added support for two new fields in the JSON payload from the R2 URL:
+    - `action_recommendations`: Concrete, actionable steps based on article content
+    - `talking_points`: Thought-provoking discussion points to facilitate conversation
+  - Technical implementation:
+    - Added fields to `ArticleJSON` and `PreparedArticle` structs in ArticleModels.swift:
+      ```swift
+      struct ArticleJSON {
+          // Existing fields...
+          
+          // New fields for R2 URL JSON payload
+          let actionRecommendations: String?
+          let talkingPoints: String?
+      }
+      ```
+    - Added corresponding properties and blob storage fields in ArticleDataModels.swift:
+      ```swift
+      @Model
+      final class ArticleModel: Equatable {
+          // Existing fields...
+          
+          // New fields
+          var actionRecommendations: String?
+          var talkingPoints: String?
+          
+          // Blob storage fields for rich text
+          var actionRecommendationsBlob: Data?
+          var talkingPointsBlob: Data?
+          
+          // API compatibility extensions
+          var action_recommendations: String? {
+              get { return actionRecommendations }
+              set { actionRecommendations = newValue }
+          }
+          
+          var talking_points: String? {
+              get { return talkingPoints }
+              set { talkingPoints = newValue }
+          }
+      }
+      ```
+    - Updated MarkdownUtilities.swift for rich text handling:
+      - Added new cases to `RichTextField` enum
+      - Implemented section naming and mapping
+      - Added text style configuration
+      - Updated blob storage and retrieval
+      - Included fields in verification and regeneration functions
+    
+  - Format and structure:
+    - `action_recommendations`: 3-5 bullet points, each starting with a bold action verb
+    - `talking_points`: 3-5 discussion points with either questions or statement/question combinations
+    - Both fields use Markdown formatting for rich text display
+  
+  - User benefits:
+    - Provides practical, actionable steps users can take based on article content
+    - Facilitates sharing and conversation about articles with prepared discussion points
+    - Transitions from passive consumption to active engagement with news content
+    - Maintains consistent rich text rendering across all content types
+
 - **Fixed UI Update Issue for Empty Topics and Filters** (Completed):
   - Resolved multiple related issues with UI updates:
     1. When reading the only article in a topic and closing it, the view didn't refresh to "All"

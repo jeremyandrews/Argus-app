@@ -398,6 +398,10 @@ struct ArticleJSON {
     
     // Related articles stored as structured data instead of a string
     let relatedArticles: [RelatedArticle]?
+    
+    // New fields for R2 URL JSON payload
+    let actionRecommendations: String?
+    let talkingPoints: String?
 }
 
 struct PreparedArticle {
@@ -429,6 +433,10 @@ struct PreparedArticle {
     
     // Related articles stored as structured data
     let relatedArticles: [RelatedArticle]?
+    
+    // New fields for R2 URL JSON payload
+    let actionRecommendations: String?
+    let talkingPoints: String?
 }
 
 func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
@@ -459,7 +467,11 @@ func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
         engineRawStats: input.engineRawStats,
         engineSystemInfo: input.engineSystemInfo,
         
-        relatedArticles: input.relatedArticles
+        relatedArticles: input.relatedArticles,
+        
+        // Pass the new R2 URL JSON fields
+        actionRecommendations: input.actionRecommendations,
+        talkingPoints: input.talkingPoints
     )
 }
 
@@ -486,6 +498,10 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     let engineElapsedTime = json["elapsed_time"] as? Double
     let engineRawStats = json["stats"] as? String
     let engineSystemInfo = json["system_info"] as? [String: Any]
+    
+    // Extract new R2 URL JSON fields (snake_case in API response)
+    let actionRecommendations = json["action_recommendations"] as? String
+    let talkingPoints = json["talking_points"] as? String
     
     // Parse similar articles if available
     var parsedRelatedArticles: [RelatedArticle]? = nil
@@ -561,7 +577,11 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         engineSystemInfo: engineSystemInfo,
         
         // Add structured related articles - use our parsed result
-        relatedArticles: parsedRelatedArticles
+        relatedArticles: parsedRelatedArticles,
+        
+        // Add new R2 URL JSON fields
+        actionRecommendations: actionRecommendations,
+        talkingPoints: talkingPoints
     )
 }
 
