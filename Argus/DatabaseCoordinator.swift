@@ -716,6 +716,8 @@ actor DatabaseCoordinator {
                 logicalFallacies: articleJSON.logicalFallacies,
                 relationToTopic: articleJSON.relationToTopic,
                 additionalInsights: articleJSON.additionalInsights,
+                actionRecommendations: articleJSON.actionRecommendations,
+                talkingPoints: articleJSON.talkingPoints,
                 engineModel: articleJSON.engineModel,
                 engineElapsedTime: articleJSON.engineElapsedTime,
                 engineRawStats: articleJSON.engineRawStats,
@@ -892,6 +894,8 @@ actor DatabaseCoordinator {
         article.logicalFallacies = data.logicalFallacies
         article.relationToTopic = data.relationToTopic
         article.additionalInsights = data.additionalInsights
+        article.actionRecommendations = data.actionRecommendations
+        article.talkingPoints = data.talkingPoints
 
         // Update metadata - use the individual engine fields
         article.engineModel = data.engineModel
@@ -1266,6 +1270,10 @@ extension DatabaseCoordinator {
         let engineElapsedTime = json["elapsed_time"] as? Double
         let engineRawStats = json["stats"] as? String
         let engineSystemInfo = json["system_info"] as? [String: Any]
+        
+        // Extract the new R2 URL JSON fields
+        let actionRecommendations = json["action_recommendations"] as? String
+        let talkingPoints = json["talking_points"] as? String
 
         // Create the article JSON object
         return ArticleJSON(
@@ -1292,7 +1300,9 @@ extension DatabaseCoordinator {
             engineElapsedTime: engineElapsedTime,
             engineRawStats: engineRawStats,
             engineSystemInfo: engineSystemInfo,
-            relatedArticles: extractSimilarArticles(from: json)
+            relatedArticles: extractSimilarArticles(from: json),
+            actionRecommendations: actionRecommendations,
+            talkingPoints: talkingPoints
         )
     }
 

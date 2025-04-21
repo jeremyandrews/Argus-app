@@ -153,6 +153,8 @@ extension RichTextField {
         case .sourceAnalysis: return notification.source_analysis
         case .relationToTopic: return notification.relation_to_topic
         case .additionalInsights: return notification.additional_insights
+        case .actionRecommendations: return nil // Not supported in legacy NotificationData
+        case .talkingPoints: return nil // Not supported in legacy NotificationData
         }
     }
 
@@ -167,6 +169,8 @@ extension RichTextField {
         case .sourceAnalysis: return notification.source_analysis_blob
         case .relationToTopic: return notification.relation_to_topic_blob
         case .additionalInsights: return notification.additional_insights_blob
+        case .actionRecommendations: return nil // Not supported in legacy NotificationData
+        case .talkingPoints: return nil // Not supported in legacy NotificationData
         }
     }
 
@@ -189,6 +193,12 @@ extension RichTextField {
             notification.relation_to_topic_blob = data
         case .additionalInsights:
             notification.additional_insights_blob = data
+        case .actionRecommendations:
+            // Not supported in legacy NotificationData
+            AppLogger.database.warning("⚠️ Setting actionRecommendations blob on legacy NotificationData (not supported)")
+        case .talkingPoints:
+            // Not supported in legacy NotificationData
+            AppLogger.database.warning("⚠️ Setting talkingPoints blob on legacy NotificationData (not supported)")
         }
     }
 }
@@ -708,6 +718,12 @@ class NotificationData {
             relation_to_topic_blob = data
         case .additionalInsights:
             additional_insights_blob = data
+        case .actionRecommendations:
+            // Not supported in legacy NotificationData
+            AppLogger.database.warning("⚠️ Setting actionRecommendations rich text on legacy NotificationData (not supported)")
+        case .talkingPoints:
+            // Not supported in legacy NotificationData
+            AppLogger.database.warning("⚠️ Setting talkingPoints rich text on legacy NotificationData (not supported)")
         }
 
         // No context saving anymore since this is not a SwiftData model

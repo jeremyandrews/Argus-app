@@ -73,6 +73,10 @@ struct NewsDetailView: View {
             return article.relationToTopic
         case .additionalInsights:
             return article.additionalInsights
+        case .actionRecommendations:
+            return article.actionRecommendations
+        case .talkingPoints:
+            return article.talkingPoints
         }
     }
 
@@ -131,6 +135,8 @@ struct NewsDetailView: View {
             "Source Analysis": false,
             "Relevance": false,
             "Context & Perspective": false,
+            "Action Recommendations": false,
+            "Talking Points": false,
             "Argus Engine Stats": false,
             "Preview": false,
             "Related Articles": false,
@@ -401,8 +407,20 @@ struct NewsDetailView: View {
         if !insights.isEmpty {
             sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
+        
+        // 7) "Action Recommendations"
+        let recommendations = n.actionRecommendations ?? (json["actionRecommendations"] as? String ?? "")
+        if !recommendations.isEmpty {
+            sections.append(ContentSection(header: "Action Recommendations", content: recommendations))
+        }
+        
+        // 8) "Talking Points"
+        let talkingPoints = n.talkingPoints ?? (json["talkingPoints"] as? String ?? "")
+        if !talkingPoints.isEmpty {
+            sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
+        }
 
-        // 7) "Argus Engine Stats" (argus_details)
+        // 9) "Argus Engine Stats" (argus_details)
         if let engineString = n.engine_stats {
             // parseEngineStatsJSON returns an ArgusDetailsData if valid
             if let parsed = parseEngineStatsJSON(engineString, fallbackDate: n.date) {
@@ -424,12 +442,12 @@ struct NewsDetailView: View {
             sections.append(ContentSection(header: "Argus Engine Stats", content: dataObject))
         }
 
-        // 8) "Preview" section
+        // 10) "Preview" section
         if let fullURL = n.getArticleUrl(additionalContent: additionalContent), !fullURL.isEmpty {
             sections.append(ContentSection(header: "Preview", content: fullURL))
         }
 
-        // 9) "Related Articles" - Direct approach using only the model data
+        // 11) "Related Articles" - Direct approach using only the model data
         if let relatedArticles = n.relatedArticles, !relatedArticles.isEmpty {
             AppLogger.database.debug("Found \(relatedArticles.count) related articles in article: \(n.id)")
             sections.append(ContentSection(header: "Related Articles", content: relatedArticles))
@@ -841,7 +859,8 @@ struct NewsDetailView: View {
     private func needsConversion(_ sectionHeader: String) -> Bool {
         switch sectionHeader {
         case "Summary", "Critical Analysis", "Logical Fallacies",
-             "Source Analysis", "Relevance", "Context & Perspective":
+             "Source Analysis", "Relevance", "Context & Perspective",
+             "Action Recommendations", "Talking Points":
             return true
         case "Argus Engine Stats", "Preview", "Related Articles":
             return false
@@ -1978,6 +1997,18 @@ struct ShareSelectionView: View {
 
         let insights = json["additionalInsights"] as? String ?? notification.additionalInsights ?? ""
         sections.append(ContentSection(header: "Context & Perspective", content: insights))
+        
+        // Add Action Recommendations if available
+        let recommendations = json["actionRecommendations"] as? String ?? notification.actionRecommendations ?? ""
+        if !recommendations.isEmpty {
+            sections.append(ContentSection(header: "Action Recommendations", content: recommendations))
+        }
+        
+        // Add Talking Points if available
+        let talkingPoints = json["talkingPoints"] as? String ?? notification.talkingPoints ?? ""
+        if !talkingPoints.isEmpty {
+            sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
+        }
 
         if let model = json["model"] as? String,
            let elapsedTime = json["elapsedTime"] as? Double,

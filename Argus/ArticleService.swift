@@ -723,6 +723,10 @@ final class ArticleService: ArticleServiceProtocol {
             text = article.relationToTopic
         case .additionalInsights:
             text = article.additionalInsights
+        case .actionRecommendations:
+            text = article.actionRecommendations
+        case .talkingPoints:
+            text = article.talkingPoints
         }
         
         // Skip if no text
@@ -808,6 +812,10 @@ final class ArticleService: ArticleServiceProtocol {
                 markdownText = articleModel.relationToTopic
             case .additionalInsights:
                 markdownText = articleModel.additionalInsights
+            case .actionRecommendations:
+                markdownText = articleModel.actionRecommendations
+            case .talkingPoints:
+                markdownText = articleModel.talkingPoints
             }
             
             guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
