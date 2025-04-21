@@ -499,9 +499,17 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     let engineRawStats = json["stats"] as? String
     let engineSystemInfo = json["system_info"] as? [String: Any]
     
-    // Extract new R2 URL JSON fields (snake_case in API response)
-    let actionRecommendations = json["action_recommendations"] as? String
-    let talkingPoints = json["talking_points"] as? String
+        // Extract new R2 URL JSON fields (snake_case in API response)
+        let actionRecommendations = json["action_recommendations"] as? String
+        let talkingPoints = json["talking_points"] as? String
+        
+        // Debug logging for these fields
+        if let actionRecs = actionRecommendations, !actionRecs.isEmpty {
+            AppLogger.database.debug("Found action_recommendations in JSON: \(actionRecs.prefix(50))...")
+        }
+        if let talkingPts = talkingPoints, !talkingPts.isEmpty {
+            AppLogger.database.debug("Found talking_points in JSON: \(talkingPts.prefix(50))...")
+        }
     
     // Parse similar articles if available
     var parsedRelatedArticles: [RelatedArticle]? = nil

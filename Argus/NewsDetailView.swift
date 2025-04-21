@@ -838,6 +838,7 @@ struct NewsDetailView: View {
                                 Text(section.header)
                                     .font(.headline)
                                 Spacer()
+                            
                                 Image(systemName: "chevron.right")
                                     .rotationEffect(.degrees(expandedSections[section.header] ?? false ? 90 : 0))
                             }
@@ -1349,16 +1350,40 @@ case "Related Articles":
         content["logicalFallacies"] = article.logicalFallacies
         content["relationToTopic"] = article.relationToTopic
         content["additionalInsights"] = article.additionalInsights
+        
+        // Add both camelCase and snake_case keys for the new fields
+        // This ensures compatibility with both formats
         content["actionRecommendations"] = article.actionRecommendations
+        content["action_recommendations"] = article.actionRecommendations
         content["talkingPoints"] = article.talkingPoints
+        content["talking_points"] = article.talkingPoints
 
-        // For source analysis, create a dictionary with the text and source type
-        if let sourceAnalysis = article.sourceAnalysis {
-            content["sourceAnalysis"] = [
-                "text": sourceAnalysis,
-                "sourceType": article.sourceType ?? "",
-            ]
-        }
+            // For source analysis, create a dictionary with the text and source type
+            if let sourceAnalysis = article.sourceAnalysis {
+                content["sourceAnalysis"] = [
+                    "text": sourceAnalysis,
+                    "sourceType": article.sourceType ?? "",
+                ]
+            }
+            
+            // Always include action recommendations and talking points in both formats
+            // Important: Even if they're nil, we'll store empty strings to ensure the fields exist
+            let actionRecs = article.actionRecommendations ?? ""
+            let talkingPts = article.talkingPoints ?? ""
+            
+            // Store in both snake_case and camelCase to handle any format in the JSON
+            content["action_recommendations"] = actionRecs
+            content["actionRecommendations"] = actionRecs
+            content["talking_points"] = talkingPts
+            content["talkingPoints"] = talkingPts
+            
+            // Log the presence of these fields for debugging
+            if !actionRecs.isEmpty {
+                AppLogger.database.debug("Action Recommendations present: \(actionRecs.prefix(50))...")
+            }
+            if !talkingPts.isEmpty {
+                AppLogger.database.debug("Talking Points present: \(talkingPts.prefix(50))...")
+            }
 
         // Transfer engine stats and similar articles as is
         if let engineStats = article.engine_stats,
