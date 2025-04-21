@@ -409,13 +409,15 @@ struct NewsDetailView: View {
         }
         
         // 7) "Action Recommendations"
-        let recommendations = n.actionRecommendations ?? (json["action_recommendations"] as? String ?? "")
+        let recommendations = n.actionRecommendations ?? (json["actionRecommendations"] as? String ?? "")
+        // Only add the section if there's content
         if !recommendations.isEmpty {
             sections.append(ContentSection(header: "Action Recommendations", content: recommendations))
         }
         
         // 8) "Talking Points"
-        let talkingPoints = n.talkingPoints ?? (json["talking_points"] as? String ?? "")
+        let talkingPoints = n.talkingPoints ?? (json["talkingPoints"] as? String ?? "")
+        // Only add the section if there's content
         if !talkingPoints.isEmpty {
             sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
         }
@@ -678,7 +680,19 @@ struct NewsDetailView: View {
                 Spacer()
             }
 
-            if let n = currentNotification {
+            // If still loading, show loading indicator
+            if isLoadingNextArticle {
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle())
+                    Text("Loading content...")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 32)
+            }
+            else if let n = currentNotification {
                 // Title - use rich text if available, otherwise fall back to plain text
                 Group {
                     if let titleAttrString = viewModel.titleAttributedString {
@@ -953,21 +967,55 @@ struct NewsDetailView: View {
         // Log the loading attempt
         AppLogger.database.debug("Loading initial content for article ID: \(article.id)")
 
+        // Set loading state to true
+        isLoadingNextArticle = true
+        
         // Ensure the Summary section is expanded
         expandedSections["Summary"] = true
 
-        // Use synchronous loading for critical above-the-fold content
+        // Immediately check if formatted content (blobs) already exists and show only formatted content
+        if let titleBlob = article.titleBlob, 
+           let bodyBlob = article.bodyBlob {
+            do {
+                // Try to extract the formatted content directly 
+                if let titleAttrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: titleBlob),
+                   let bodyAttrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob) {
+                    
+                    // Set the formatted content directly (avoid showing unformatted content first)
+                    viewModel.titleAttributedString = titleAttrString
+                    viewModel.bodyAttributedString = bodyAttrString
+                    
+                    // We have formatted content, clear loading state
+                    isLoadingNextArticle = false
+                    
+                    // Then continue loading the rest in the background
+                    Task {
+                        // After the initial content is displayed, load the Summary section
+                        loadContentForSection("Summary")
+                        AppLogger.database.debug("✅ Summary section load triggered for initial view")
+                    }
+                    
+                    return
+                }
+            } catch {
+                AppLogger.database.error("❌ Error extracting existing blobs: \(error)")
+            }
+        }
+        
+        // If we don't have blobs or extraction failed, use async loading with loading indicator 
         Task {
-            // First, load the title and body synchronously to prevent flashing of unformatted content
+            // Load the title and body
             await viewModel.loadMinimalContent()
-
-            // Log minimal content load completion
+            
+            // Only clear loading state after content is ready
+            await MainActor.run {
+                isLoadingNextArticle = false
+            }
+            
             AppLogger.database.debug("✅ Minimal content loaded for article ID: \(article.id)")
-
+            
             // After minimal content is loaded, force load the Summary section
             loadContentForSection("Summary")
-
-            // Log that we've explicitly loaded the Summary section
             AppLogger.database.debug("✅ Summary section load triggered for initial view")
         }
     }
@@ -1041,13 +1089,20 @@ struct NewsDetailView: View {
             .padding(.top, 6)
             .textSelection(.enabled)
             
-        // MARK: - Critical Analysis, Logical Fallacies, Relevance, Context & Perspective
-        case "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective":
+        // MARK: - Critical Analysis, Logical Fallacies, Relevance, Context & Perspective, Action Recommendations, Talking Points
+        case "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective", 
+             "Action Recommendations", "Talking Points":
             SectionContentView(
                 section: section,
                 attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
+            .onAppear {
+                // Safe place for debug logging that won't affect the view hierarchy
+                let content = section.content as? String ?? "No content"
+                let contentPreview = content.prefix(30)
+                AppLogger.database.debug("Rendering section: \(section.header) with content preview: \(contentPreview)...")
+            }
             
 // MARK: - Related Articles
 case "Related Articles":
@@ -1286,6 +1341,8 @@ case "Related Articles":
         content["logicalFallacies"] = article.logicalFallacies
         content["relationToTopic"] = article.relationToTopic
         content["additionalInsights"] = article.additionalInsights
+        content["actionRecommendations"] = article.actionRecommendations
+        content["talkingPoints"] = article.talkingPoints
         content["actionRecommendations"] = article.actionRecommendations
         content["talkingPoints"] = article.talkingPoints
 
@@ -2006,17 +2063,13 @@ struct ShareSelectionView: View {
         let insights = json["additionalInsights"] as? String ?? notification.additionalInsights ?? ""
         sections.append(ContentSection(header: "Context & Perspective", content: insights))
         
-        // Add Action Recommendations if available
+        // Always add Action Recommendations
         let recommendations = json["actionRecommendations"] as? String ?? notification.actionRecommendations ?? ""
-        if !recommendations.isEmpty {
-            sections.append(ContentSection(header: "Action Recommendations", content: recommendations))
-        }
+        sections.append(ContentSection(header: "Action Recommendations", content: recommendations))
         
-        // Add Talking Points if available
+        // Always add Talking Points
         let talkingPoints = json["talkingPoints"] as? String ?? notification.talkingPoints ?? ""
-        if !talkingPoints.isEmpty {
-            sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
-        }
+        sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
 
         if let model = json["model"] as? String,
            let elapsedTime = json["elapsedTime"] as? Double,

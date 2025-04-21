@@ -908,7 +908,8 @@ final class NewsDetailViewModel: ObservableObject {
     func needsConversion(_ section: String) -> Bool {
         switch section {
         case "Summary", "Critical Analysis", "Logical Fallacies",
-             "Source Analysis", "Relevance", "Context & Perspective":
+             "Source Analysis", "Relevance", "Context & Perspective",
+             "Action Recommendations", "Talking Points":
             return true
         case "Argus Engine Stats", "Preview", "Related Articles":
             return false
@@ -968,6 +969,8 @@ final class NewsDetailViewModel: ObservableObject {
             "Logical Fallacies": false,
             "Source Analysis": false,
             "Context & Perspective": false,
+            "Action Recommendations": false,
+            "Talking Points": false,
             "Argus Engine Stats": false,
             "Related Articles": false,
         ]
