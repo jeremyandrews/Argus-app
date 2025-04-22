@@ -254,6 +254,72 @@ struct NewsDetailView: View {
         if let section = initiallyExpandedSection {
             expandedSections[section] = true
         }
+        
+        // Log the article fields status for debugging
+        logArticleFieldsStatus()
+    }
+    
+    /// Logs a comprehensive summary of all content fields and their blob status
+    private func logArticleFieldsStatus() {
+        guard let article = currentNotification else {
+            AppLogger.database.debug("📊 ARTICLE FIELDS STATUS: No article available")
+            return
+        }
+        
+        AppLogger.database.debug("""
+        📊 ARTICLE FIELDS STATUS: ID=\(article.id)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        Basic Info:
+        - ID: \(article.id)
+        - jsonURL: \(article.jsonURL)
+        - topic: \(article.topic ?? "nil")
+        - isViewed: \(article.isViewed)
+        
+        📝 CONTENT FIELDS:
+        - title: \(fieldStatus(article.title))
+        - body: \(fieldStatus(article.body))
+        - summary: \(fieldStatus(article.summary))
+        - criticalAnalysis: \(fieldStatus(article.criticalAnalysis))
+        - logicalFallacies: \(fieldStatus(article.logicalFallacies))
+        - sourceAnalysis: \(fieldStatus(article.sourceAnalysis))
+        - relationToTopic: \(fieldStatus(article.relationToTopic))
+        - additionalInsights: \(fieldStatus(article.additionalInsights))
+        - actionRecommendations: \(fieldStatus(article.actionRecommendations))
+        - talkingPoints: \(fieldStatus(article.talkingPoints))
+        
+        📦 BLOB FIELDS:
+        - titleBlob: \(blobStatus(article.titleBlob))
+        - bodyBlob: \(blobStatus(article.bodyBlob))
+        - summaryBlob: \(blobStatus(article.summaryBlob))
+        - criticalAnalysisBlob: \(blobStatus(article.criticalAnalysisBlob))
+        - logicalFallaciesBlob: \(blobStatus(article.logicalFallaciesBlob))
+        - sourceAnalysisBlob: \(blobStatus(article.sourceAnalysisBlob))
+        - relationToTopicBlob: \(blobStatus(article.relationToTopicBlob))
+        - additionalInsightsBlob: \(blobStatus(article.additionalInsightsBlob))
+        - actionRecommendationsBlob: \(blobStatus(article.actionRecommendationsBlob))
+        - talkingPointsBlob: \(blobStatus(article.talkingPointsBlob))
+        """)
+    }
+    
+    /// Helper to format a string field status with preview
+    private func fieldStatus(_ field: String?) -> String {
+        guard let field = field, !field.isEmpty else {
+            return "❌ MISSING"
+        }
+        
+        let charCount = field.count
+        let preview = field.prefix(min(40, charCount)).replacingOccurrences(of: "\n", with: " ")
+        return "✅ (\(charCount) chars) \"\(preview)...\""
+    }
+    
+    /// Helper to format a blob field status
+    private func blobStatus(_ blob: Data?) -> String {
+        guard let blob = blob, !blob.isEmpty else {
+            return "❌ (Not generated yet - normal)"
+        }
+        
+        let sizeInKB = Double(blob.count) / 1024.0
+        return "✅ (\(String(format: "%.1f", sizeInKB)) KB)"
     }
 
     // MARK: - Top Bar
@@ -537,6 +603,15 @@ struct NewsDetailView: View {
         // Force refresh UI
         contentTransitionID = viewModel.contentTransitionID
         scrollToTopTrigger = UUID()
+        
+        // Log the article fields for the new article once it's loaded
+        Task {
+            // Add a small delay to ensure the article has been fully loaded
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            await MainActor.run {
+                logArticleFieldsStatus()
+            }
+        }
 
         // Now update with the new article if available
         if let newArticle = viewModel.currentArticle {

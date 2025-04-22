@@ -503,7 +503,32 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         let actionRecommendations = json["action_recommendations"] as? String
         let talkingPoints = json["talking_points"] as? String
         
-        // Debug logging for these fields
+        // Comprehensive debug logging for all content fields
+        AppLogger.database.debug("📊 JSON FIELD EXTRACTION REPORT:")
+        let fieldsList = [
+            "title": json["tiny_title"] as? String,
+            "body": json["tiny_summary"] as? String,
+            "summary": json["summary"] as? String,
+            "critical_analysis": json["critical_analysis"] as? String,
+            "logical_fallacies": json["logical_fallacies"] as? String,
+            "source_analysis": json["source_analysis"] as? String,
+            "relation_to_topic": json["relation_to_topic"] as? String,
+            "additional_insights": json["additional_insights"] as? String,
+            "action_recommendations": actionRecommendations,
+            "talking_points": talkingPoints
+        ]
+        
+        for (name, content) in fieldsList {
+            if let content = content, !content.isEmpty {
+                let charCount = content.count
+                let preview = content.prefix(min(30, charCount)).replacingOccurrences(of: "\n", with: " ")
+                AppLogger.database.debug("✅ Field '\(name)' found: \(charCount) chars, preview: \"\(preview)...\"")
+            } else {
+                AppLogger.database.debug("❌ Field '\(name)' is missing or empty")
+            }
+        }
+        
+        // Keep previous specific logging
         if let actionRecs = actionRecommendations, !actionRecs.isEmpty {
             AppLogger.database.debug("Found action_recommendations in JSON: \(actionRecs.prefix(50))...")
         }

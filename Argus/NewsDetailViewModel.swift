@@ -600,6 +600,10 @@ final class NewsDetailViewModel: ObservableObject {
             cachedContentBySection["Relevance"] = content
         case .additionalInsights:
             cachedContentBySection["Context & Perspective"] = content
+        case .actionRecommendations:
+            cachedContentBySection["Action Recommendations"] = content
+        case .talkingPoints:
+            cachedContentBySection["Talking Points"] = content
         default:
             cachedContentBySection[section] = content
         }
@@ -636,6 +640,10 @@ final class NewsDetailViewModel: ObservableObject {
             cachedContentBySection["Relevance"] = fallbackString
         case .additionalInsights:
             cachedContentBySection["Context & Perspective"] = fallbackString
+        case .actionRecommendations:
+            cachedContentBySection["Action Recommendations"] = fallbackString
+        case .talkingPoints:
+            cachedContentBySection["Talking Points"] = fallbackString
         default:
             cachedContentBySection[section] = fallbackString
         }
@@ -726,6 +734,10 @@ final class NewsDetailViewModel: ObservableObject {
             cachedContentBySection["Relevance"] = tempString
         case .additionalInsights:
             cachedContentBySection["Context & Perspective"] = tempString
+        case .actionRecommendations:
+            cachedContentBySection["Action Recommendations"] = tempString
+        case .talkingPoints:
+            cachedContentBySection["Talking Points"] = tempString
         default:
             cachedContentBySection[section] = tempString
         }
@@ -773,6 +785,14 @@ final class NewsDetailViewModel: ObservableObject {
 
         if let content = richTextContent[.additionalInsights] {
             cachedContentBySection["Context & Perspective"] = content
+        }
+        
+        if let content = richTextContent[.actionRecommendations] {
+            cachedContentBySection["Action Recommendations"] = content
+        }
+        
+        if let content = richTextContent[.talkingPoints] {
+            cachedContentBySection["Talking Points"] = content
         }
 
         isLoading = false
@@ -890,6 +910,10 @@ final class NewsDetailViewModel: ObservableObject {
             return cachedContentBySection["Relevance"]
         case "Context & Perspective":
             return cachedContentBySection["Context & Perspective"]
+        case "Action Recommendations":
+            return cachedContentBySection["Action Recommendations"]
+        case "Talking Points":
+            return cachedContentBySection["Talking Points"]
         default:
             return cachedContentBySection[section]
         }

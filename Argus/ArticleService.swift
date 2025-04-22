@@ -921,6 +921,23 @@ final class ArticleService: ArticleServiceProtocol {
                 if existingArticles.isEmpty {
                     // Create a new ArticleModel
                     let date = Date()
+                    
+                    // Log field values before model creation
+                    AppLogger.database.debug("""
+                    📊 ARTICLE MODEL CREATION - Field Values:
+                    - jsonURL: \(article.jsonURL)
+                    - title: \(article.title.prefix(30))...
+                    - body: \(article.body.prefix(30))...
+                    - summary: \(article.summary?.prefix(30) ?? "nil")...
+                    - criticalAnalysis: \(article.criticalAnalysis?.prefix(30) ?? "nil")...
+                    - logicalFallacies: \(article.logicalFallacies?.prefix(30) ?? "nil")...
+                    - sourceAnalysis: \(article.sourceAnalysis?.prefix(30) ?? "nil")...
+                    - relationToTopic: \(article.relationToTopic?.prefix(30) ?? "nil")...
+                    - additionalInsights: \(article.additionalInsights?.prefix(30) ?? "nil")...
+                    - actionRecommendations: \(article.actionRecommendations?.prefix(30) ?? "nil")...
+                    - talkingPoints: \(article.talkingPoints?.prefix(30) ?? "nil")...
+                    """)
+                    
                     let newArticle = ArticleModel(
                         id: UUID(),
                         jsonURL: article.jsonURL,
@@ -945,6 +962,8 @@ final class ArticleService: ArticleServiceProtocol {
                         logicalFallacies: article.logicalFallacies,
                         relationToTopic: article.relationToTopic,
                         additionalInsights: article.additionalInsights,
+                        actionRecommendations: article.actionRecommendations,
+                        talkingPoints: article.talkingPoints,
                         
                         // Add structured engine stats
                         engineModel: article.engineModel,
@@ -954,6 +973,14 @@ final class ArticleService: ArticleServiceProtocol {
                         
                         relatedArticles: article.relatedArticles
                     )
+                    
+                    // Log field values after model creation
+                    AppLogger.database.debug("""
+                    📊 ARTICLE MODEL CREATED - Field Verification:
+                    - additionalInsights exists: \(newArticle.additionalInsights != nil)
+                    - actionRecommendations exists: \(newArticle.actionRecommendations != nil)
+                    - talkingPoints exists: \(newArticle.talkingPoints != nil)
+                    """)
                     
                     // Add logging for related articles
                     if let relatedArticles = article.relatedArticles, !relatedArticles.isEmpty {
@@ -982,10 +1009,54 @@ final class ArticleService: ArticleServiceProtocol {
                 }
             }
             
+            // Log the state of some critical fields before saving to the database
+            do {
+                // Calculate the time threshold outside the predicate
+                let timeThreshold = Date().addingTimeInterval(-10)
+                
+                let recentDescriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { $0.addedDate > timeThreshold }
+                )
+                let recentArticles = try context.fetch(recentDescriptor)
+                for article in recentArticles {
+                    // Only check recently added articles
+                    AppLogger.database.debug("""
+                    📊 PRE-SAVE VERIFICATION for article \(article.id):
+                    - additionalInsights: \(article.additionalInsights?.prefix(20) ?? "nil")...
+                    - actionRecommendations: \(article.actionRecommendations?.prefix(20) ?? "nil")...
+                    - talkingPoints: \(article.talkingPoints?.prefix(20) ?? "nil")...
+                    """)
+                }
+            } catch {
+                AppLogger.database.error("Error fetching recent articles for pre-save verification: \(error)")
+            }
+            
             // Save after each batch to ensure changes are committed
             // This creates transaction boundaries after each batch
             try context.save()
             AppLogger.database.debug("✅ Completed and saved batch \(batchStart/batchSize + 1)")
+            
+            // Verify fields after saving to check if they're still there
+            do {
+                // Calculate the time threshold outside the predicate
+                let timeThreshold = Date().addingTimeInterval(-10)
+                
+                let recentDescriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { $0.addedDate > timeThreshold }
+                )
+                let recentArticles = try context.fetch(recentDescriptor)
+                for article in recentArticles {
+                    // Only check recently added articles
+                    AppLogger.database.debug("""
+                    📊 POST-SAVE VERIFICATION for article \(article.id):
+                    - additionalInsights: \(article.additionalInsights?.prefix(20) ?? "nil")...
+                    - actionRecommendations: \(article.actionRecommendations?.prefix(20) ?? "nil")...
+                    - talkingPoints: \(article.talkingPoints?.prefix(20) ?? "nil")...
+                    """)
+                }
+            } catch {
+                AppLogger.database.error("Error fetching recent articles for post-save verification: \(error)")
+            }
         }
         
         AppLogger.database.debug("✅ All batches processed - added \(addedCount) new articles")
