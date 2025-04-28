@@ -1665,12 +1665,11 @@ struct ArgusDetailsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Enhanced ID detection that tries multiple sources
+            // Extract IDs for later display
             let dbIdFromData = data.databaseId
             let dbIdFromArticle = article?.databaseId
             
-            // ARTICLE ID (string id like "bbc-12345") extraction
-            // Try to extract from JSON URL if not directly available
+            // Prepare article ID extraction
             let articleIdFromURL: String? = {
                 if let jsonURL = article?.jsonURL, 
                    let urlParts = jsonURL.split(separator: "/").last?.split(separator: "."),
@@ -1679,72 +1678,6 @@ struct ArgusDetailsView: View {
                 }
                 return nil
             }()
-            
-            // Display stack of IDs - show both types (database numeric ID and article string ID)
-            VStack(alignment: .leading, spacing: 8) {
-                // 1. ARTICLE ID (string format like "bbc-12345") display
-                if let articleId = articleIdFromURL {
-                    Text("🔖 ARTICLE ID: \(articleId)")
-                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        .foregroundColor(.purple)
-                        .padding(8)
-                        .background(Color.purple.opacity(0.15))
-                        .cornerRadius(8)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                
-                // 2. DATABASE ID (numeric) display with enhanced diagnostics
-                VStack(alignment: .leading, spacing: 4) {
-                    if let dbId = dbIdFromData {
-                        // Found ID directly in the engine stats
-                        Text("📌 DATABASE ID: \(dbId)")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.yellow.opacity(0.3))
-                            .cornerRadius(8)
-                            .textSelection(.enabled)
-                            
-                        Text("(Source: Engine Stats JSON)")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .padding(.leading, 8)
-                    } else if let articleDbId = dbIdFromArticle {
-                        // Found ID in the article model
-                        Text("📌 DATABASE ID: \(articleDbId)")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.yellow.opacity(0.3))
-                            .cornerRadius(8)
-                            .textSelection(.enabled)
-                            
-                        Text("(Source: Article Model)")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .padding(.leading, 8)
-                    } else {
-                        // No ID available
-                        Text("⚠️ No Database ID Available")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(8)
-                            .textSelection(.enabled)
-                            
-                        Text("Check logs for diagnostic information")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .padding(.leading, 8)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
             
             Text("Generated with \(data.model) in \(String(format: "%.2f", data.elapsedTime)) seconds.")
                 .font(.system(size: 14, weight: .regular, design: .monospaced))
@@ -1792,6 +1725,22 @@ struct ArgusDetailsView: View {
                     .padding(.leading, 16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            }
+            
+            // Display Database ID after uptime information
+            if let dbId = dbIdFromData ?? dbIdFromArticle {
+                Text("DATABASE ID: \(dbId)")
+                    .font(.system(size: 14, weight: .regular, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+                
+            // Display Article ID after Database ID
+            if let articleId = articleIdFromURL {
+                Text("ARTICLE ID: \(articleId)")
+                    .font(.system(size: 14, weight: .regular, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Text("Received from Argus on \(data.date, format: .dateTime.month(.wide).day().year().hour().minute().second()).")
