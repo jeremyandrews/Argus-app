@@ -3,7 +3,7 @@
 ## Current Status
 **Overall Status**: Beta - Core functionality implemented and all known issues resolved
 **Development Phase**: Stabilization and Refinement Phase
-**Last Updated**: April 14, 2025
+**Last Updated**: April 27, 2025
 
 ## Modernization Milestones
 
@@ -95,6 +95,46 @@ To complete the remaining work in the **Stabilization and Refinement** phase:
   - Quality indicators are functional
 
 ## Recently Completed
+
+- ✅ **Fixed Database ID Display Flow** (Completed):
+  - Resolved a critical bug that prevented the article database ID from displaying in the UI:
+    - Created comprehensive documentation in `memory-bank/article-id-display-flow.md` tracing the article database ID flow
+    - Found and fixed the root cause after several days of debugging
+  
+  - Root cause analysis:
+    - Database ID was correctly extracted from the JSON in `processArticleJSON`
+    - However, it wasn't being passed to the `ArticleModel` constructor in `ArticleService.swift`'s `processRemoteArticles` method
+    - This caused:
+      1. Database ID field being nil in the SwiftData database
+      2. ID not being included in the engine_stats JSON string 
+      3. No ID being displayed in the UI's Argus Engine Stats section
+  
+  - Implementation details:
+    - Added the missing parameter to the ArticleModel constructor in processRemoteArticles:
+      ```swift
+      let newArticle = ArticleModel(
+          // Other fields...
+          databaseId: article.databaseId,  // Added this line to fix the bug
+          // Other fields...
+      )
+      ```
+    - Verified the complete data flow worked as expected after the fix:
+      1. Database ID extracted from JSON
+      2. Stored in ArticleModel
+      3. Included in engine_stats JSON string
+      4. Extracted and displayed in UI with "Source: Engine Stats JSON" label
+  
+  - Benefits:
+    - Users can now see the server database ID for each article
+    - Complete, consistent flow of database ID from API to UI
+    - Simplified debugging for cross-references with server-side data
+    - Proper association between client and server article representations
+  
+  - Key learnings:
+    - Even simple parameter omissions can cause complex debugging challenges
+    - The importance of tracing data flow from source to display
+    - Value of comprehensive logging throughout the processing pipeline
+    - Benefits of structured error reporting for complex dataflows
 
 - ✅ **Fixed UI Update Issue for Empty Topics and Filters** (Completed):
   - Resolved multiple related issues with UI updates:

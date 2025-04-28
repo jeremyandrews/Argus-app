@@ -971,6 +971,9 @@ final class ArticleService: ArticleServiceProtocol {
                         engineRawStats: article.engineRawStats,
                         engineSystemInfo: article.engineSystemInfo,
                         
+                        // BUGFIX: Add database ID - this was missing!
+                        databaseId: article.databaseId,
+                        
                         relatedArticles: article.relatedArticles
                     )
                     

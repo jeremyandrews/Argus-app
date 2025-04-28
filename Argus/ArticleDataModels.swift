@@ -17,6 +17,9 @@ struct ArgusDetailsData {
     /// Raw statistics string (e.g., "324871:41249:327:3:11:30")
     let stats: String
     
+    /// Article database ID from backend
+    let databaseId: Int?
+    
     /// Additional system information
     let systemInfo: [String: Any]?
 }
@@ -53,6 +56,9 @@ final class ArticleModel: Equatable {
 
     /// Who or what is affected by this article
     var affected: String = ""
+    
+    /// Database ID from the backend system
+    var databaseId: Int?
 
     // MARK: - Metadata
 
@@ -264,6 +270,7 @@ final class ArticleModel: Equatable {
         engineElapsedTime: Double? = nil,
         engineRawStats: String? = nil,
         engineSystemInfo: [String: Any]? = nil,
+        databaseId: Int? = nil,
         relatedArticles: [RelatedArticle]? = nil,
         titleBlob: Data? = nil,
         bodyBlob: Data? = nil,
@@ -284,6 +291,7 @@ final class ArticleModel: Equatable {
         self.domain = domain
         self.articleTitle = articleTitle
         self.affected = affected
+        self.databaseId = databaseId
         self.publishDate = publishDate
         self.addedDate = addedDate
         self.topic = topic
@@ -321,6 +329,27 @@ final class ArticleModel: Equatable {
                 self.engineModel = self.engineModel ?? engineDict["model"] as? String
                 self.engineElapsedTime = self.engineElapsedTime ?? engineDict["elapsed_time"] as? Double
                 self.engineRawStats = self.engineRawStats ?? engineDict["stats"] as? String
+                
+                // ENHANCED: Extract the database ID with robust type handling if it's not already set
+                if self.databaseId == nil {
+                    if let intId = engineDict["id"] as? Int {
+                        self.databaseId = intId
+                        AppLogger.database.debug("✅ Initializer: Extracted database ID as Int: \(intId)")
+                    } else if let numberVal = engineDict["id"] as? NSNumber {
+                        // NSNumber case - common when deserialized from JSON
+                        self.databaseId = numberVal.intValue
+                        AppLogger.database.debug("✅ Initializer: Extracted database ID from NSNumber: \(numberVal.intValue)")
+                    } else if let stringId = engineDict["id"] as? String, let intFromString = Int(stringId) {
+                        self.databaseId = intFromString
+                        AppLogger.database.debug("✅ Initializer: Extracted database ID from String: \(intFromString)")
+                    } else if let doubleId = engineDict["id"] as? Double, doubleId.truncatingRemainder(dividingBy: 1) == 0 {
+                        self.databaseId = Int(doubleId)
+                        AppLogger.database.debug("✅ Initializer: Extracted database ID from Double: \(Int(doubleId))")
+                    } else if let rawId = engineDict["id"] {
+                        let typeString = String(describing: type(of: rawId))
+                        AppLogger.database.debug("⚠️ Initializer: ID found but couldn't convert to Int: \(String(describing: rawId)) (Type: \(typeString))")
+                    }
+                }
                 
                 // If we have system info and no existing engine system info data
                 if self.engineSystemInfoData == nil, let sysInfo = engineDict["system_info"] as? [String: Any] {
@@ -388,6 +417,7 @@ final class ArticleModel: Equatable {
             elapsedTime: elapsed,
             date: addedDate,
             stats: stats,
+            databaseId: databaseId,
             systemInfo: engineSystemInfo
         )
     }
@@ -618,22 +648,47 @@ extension ArticleModel {
         get {
             // If we have the structured fields, reconstruct a JSON string
             if let model = engineModel, let elapsedTime = engineElapsedTime, let stats = engineRawStats {
-                let dict: [String: Any] = [
+                // Create the base dictionary with the required fields
+                var dict: [String: Any] = [
                     "model": model,
                     "elapsed_time": elapsedTime,
                     "stats": stats
                 ]
                 
-                // Add system info if available
+                // IMPORTANT: Add database ID with explicit type handling to ensure proper serialization
+                // We MUST add this before creating any copies of the dictionary
+                if let dbId = databaseId {
+                    // Force dbId to be treated as NSNumber to ensure proper JSON serialization
+                    dict["id"] = NSNumber(value: dbId)
+                    
+                    // Enhanced logging to diagnose the issue
+                    AppLogger.database.debug("✅ engine_stats: Adding database ID to JSON: \(dbId) (Type: \(type(of: NSNumber(value: dbId))))")
+                } else {
+                    // Log when databaseId is nil to help diagnose issues
+                    AppLogger.database.debug("⚠️ engine_stats: No database ID available to add to JSON (databaseId is nil)")
+                }
+                
+                // Now handle system info - making sure we're working with the dictionary that already has the ID
                 if let sysInfo = engineSystemInfo {
-                    var fullDict = dict
-                    fullDict["system_info"] = sysInfo
-                    if let data = try? JSONSerialization.data(withJSONObject: fullDict),
+                    // Add system info to the same dictionary that already has the ID
+                    dict["system_info"] = sysInfo
+                    
+                    // Debug logging to verify the final dictionary contents before serialization
+                    if let dbId = dict["id"] {
+                        let dbIdString = String(describing: dbId)
+                        let typeString = String(describing: type(of: dbId))
+                        AppLogger.database.debug("✅ engine_stats with system_info: Dictionary includes ID: \(dbIdString) (Type: \(typeString))")
+                    } else {
+                        AppLogger.database.debug("❌ engine_stats with system_info: Dictionary is MISSING ID field")
+                    }
+                    
+                    // Serialize the dictionary with system info and ID
+                    if let data = try? JSONSerialization.data(withJSONObject: dict),
                        let jsonString = String(data: data, encoding: .utf8) {
                         return jsonString
                     }
                 } else {
-                    // Without system info
+                    // Without system info - serialize the dictionary that has the ID
                     if let data = try? JSONSerialization.data(withJSONObject: dict),
                        let jsonString = String(data: data, encoding: .utf8) {
                         return jsonString
@@ -653,6 +708,29 @@ extension ArticleModel {
                 self.engineModel = dict["model"] as? String
                 self.engineElapsedTime = dict["elapsed_time"] as? Double
                 self.engineRawStats = dict["stats"] as? String
+                
+                // ENHANCED: Extract database ID with more detailed type handling and logging
+                if let intId = dict["id"] as? Int {
+                    // Direct Int case - preferred
+                    self.databaseId = intId
+                    AppLogger.database.debug("✅ engine_stats setter: Extracted database ID as Int: \(intId)")
+                } else if let numberVal = dict["id"] as? NSNumber {
+                    // NSNumber case - common when deserialized from JSON
+                    self.databaseId = numberVal.intValue
+                    AppLogger.database.debug("✅ engine_stats setter: Extracted database ID from NSNumber: \(numberVal.intValue)")
+                } else if let stringId = dict["id"] as? String, let intFromString = Int(stringId) {
+                    // String that can be converted to Int
+                    self.databaseId = intFromString
+                    AppLogger.database.debug("✅ engine_stats setter: Extracted database ID from String: \(intFromString)")
+                } else if let doubleId = dict["id"] as? Double, doubleId.truncatingRemainder(dividingBy: 1) == 0 {
+                    // Double with no fractional part
+                    self.databaseId = Int(doubleId)
+                    AppLogger.database.debug("✅ engine_stats setter: Extracted database ID from Double: \(Int(doubleId))")
+                } else if let rawId = dict["id"] {
+                    // ID exists but couldn't be converted to Int
+                    let typeString = String(describing: type(of: rawId))
+                    AppLogger.database.debug("⚠️ engine_stats setter: ID found but couldn't convert to Int: \(String(describing: rawId)) (Type: \(typeString))")
+                }
                 
                 // Handle system info
                 if let sysInfo = dict["system_info"] as? [String: Any] {

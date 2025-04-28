@@ -499,7 +499,7 @@ struct NewsDetailView: View {
         // 9) "Argus Engine Stats" (argus_details)
         if let engineString = n.engine_stats {
             // parseEngineStatsJSON returns an ArgusDetailsData if valid
-            if let parsed = parseEngineStatsJSON(engineString, fallbackDate: n.date) {
+            if let parsed = parseEngineStatsJSON(engineString, fallbackDate: n.date, fallbackArticle: n) {
                 sections.append(ContentSection(header: "Argus Engine Stats", content: parsed))
             } else {}
         } else if
@@ -513,6 +513,7 @@ struct NewsDetailView: View {
                 elapsedTime: elapsed,
                 date: n.date,
                 stats: stats,
+                databaseId: json["id"] as? Int ?? n.databaseId, // Use article ID as fallback
                 systemInfo: json["systemInfo"] as? [String: Any]
             )
             sections.append(ContentSection(header: "Argus Engine Stats", content: dataObject))
@@ -894,6 +895,13 @@ struct NewsDetailView: View {
             if let n = currentNotification {
                 let contentDict = buildContentDictionary(from: n)
                 let sections = getSections(from: contentDict)
+                
+                // Use onAppear to update the content dictionary without affecting the view hierarchy
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .onAppear {
+                        self.additionalContent = contentDict
+                    }
 
                 ForEach(sections, id: \.header) { section in
                     Divider()
@@ -1239,7 +1247,7 @@ case "Related Articles":
                     .padding()
                 } else {
                     // Normal detailed view
-                    ArgusDetailsView(data: details)
+                    ArgusDetailsView(data: details, article: currentNotification)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
@@ -1316,8 +1324,16 @@ case "Related Articles":
         }
     }
     
-    /// Parse engine stats JSON into a structured type
-    private func parseEngineStatsJSON(_ jsonString: String, fallbackDate: Date) -> ArgusDetailsData? {
+    /// Parse engine stats JSON into a structured type with enhanced diagnostics
+    /// - Parameters:
+    ///   - jsonString: The JSON string containing engine stats
+    ///   - fallbackDate: Date to use if not provided in the JSON
+    ///   - fallbackArticle: The article containing the database ID as a fallback
+    /// - Returns: A structured ArgusDetailsData object with all the information
+    private func parseEngineStatsJSON(_ jsonString: String, fallbackDate: Date, fallbackArticle: ArticleModel? = nil) -> ArgusDetailsData? {
+        // Log the raw json string for complete debugging context
+        AppLogger.database.debug("📊 ENGINE STATS RAW JSON: \(jsonString.prefix(500))")
+        
         // Try to parse as JSON first
         if let data = jsonString.data(using: .utf8),
            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -1326,26 +1342,87 @@ case "Related Articles":
             let model = dict["model"] as? String ?? ""
             let elapsedTime = dict["elapsed_time"] as? Double ?? 0.0
             let stats = dict["stats"] as? String ?? "0:0:0:0:0:0"
+            
+            // ENHANCED: Extract database ID with comprehensive diagnostics
+            var databaseId: Int? = nil
+            
+            // Log all dict keys and values with clear structure for easier scanning
+            AppLogger.database.debug("📊 ENGINE STATS PARSED DICTIONARY - Top Level Keys:")
+            for key in dict.keys.sorted() {
+                AppLogger.database.debug("  • \(key)")
+            }
+            
+            AppLogger.database.debug("📊 ENGINE STATS DICTIONARY - Detailed Contents:")
+            for (key, value) in dict {
+                let typeString = String(describing: type(of: value))
+                let valueString = String(describing: value)
+                AppLogger.database.debug("  Key: \(key), Value: \(valueString) (Type: \(typeString))")
+            }
+            
+            AppLogger.database.debug("🔍 ENGINE STATS - Attempting ID Extraction:")
+            if let intId = dict["id"] as? Int {
+                // Direct Int case - preferred
+                databaseId = intId
+                AppLogger.database.debug("✅ ENGINE STATS: Found ID as Int: \(intId)")
+            } else if let numberVal = dict["id"] as? NSNumber {
+                // NSNumber case - common when deserialized from JSON
+                databaseId = numberVal.intValue
+                AppLogger.database.debug("✅ ENGINE STATS: Found ID as NSNumber: \(numberVal.intValue)")
+            } else if let stringId = dict["id"] as? String, let intFromString = Int(stringId) {
+                // String case
+                databaseId = intFromString
+                AppLogger.database.debug("✅ ENGINE STATS: Found ID as String, converted to Int: \(intFromString)")
+            } else if let doubleId = dict["id"] as? Double, doubleId.truncatingRemainder(dividingBy: 1) == 0 {
+                // Double case
+                databaseId = Int(doubleId)
+                AppLogger.database.debug("✅ ENGINE STATS: Found ID as Double, converted to Int: \(Int(doubleId))")
+            } else if let rawId = dict["id"] {
+                // Unknown type
+                let typeString = String(describing: type(of: rawId))
+                AppLogger.database.debug("⚠️ ENGINE STATS: ID found but couldn't convert to Int: \(String(describing: rawId)) (Type: \(typeString))")
+            } else {
+                // No ID found
+                AppLogger.database.debug("❌ ENGINE STATS: No 'id' key found in dictionary")
+            }
+            
+            // If no ID was found in the JSON, check the fallback article
+            if databaseId == nil && fallbackArticle?.databaseId != nil {
+                databaseId = fallbackArticle!.databaseId
+                AppLogger.database.debug("🔄 ENGINE STATS: Using fallback ID from article model: \(databaseId!)")
+            }
+            
             let systemInfo = dict["system_info"] as? [String: Any]
             
-            AppLogger.database.debug("Engine stats parsed: model=\(model), time=\(elapsedTime), stats=\(stats)")
+            // Summary log with final decision
+            AppLogger.database.debug("📋 ENGINE STATS SUMMARY: model=\(model), time=\(elapsedTime), stats=\(stats), databaseId=\(databaseId?.description ?? "nil")")
             
             return ArgusDetailsData(
                 model: model,
                 elapsedTime: elapsedTime,
                 date: fallbackDate,
                 stats: stats,
+                databaseId: databaseId, // Use ID from the JSON or fallback
                 systemInfo: systemInfo
             )
         }
 
-        // If that fails, just create a hardcoded object with the raw text
-        AppLogger.database.debug("Failed to parse engine stats JSON, using fallback")
+        // If JSON parsing fails, create a hardcoded object with the raw text
+        AppLogger.database.debug("⚠️ ENGINE STATS PARSE FAILURE: Could not parse JSON, using fallback values")
+        
+        // Still use the fallback article's database ID if available
+        let fallbackId = fallbackArticle?.databaseId
+        if fallbackId != nil {
+            AppLogger.database.debug("🔄 ENGINE STATS FALLBACK: Using article's database ID: \(fallbackId!)")
+        } else {
+            AppLogger.database.debug("❌ ENGINE STATS FALLBACK: No database ID available (fallback article has nil ID)")
+        }
+        
         return ArgusDetailsData(
             model: "Unknown",
             elapsedTime: 0.0,
             date: fallbackDate,
             stats: "0:0:0:0:0:0",
+            databaseId: fallbackId, // Use fallback ID if available
             systemInfo: ["raw_content": jsonString as Any]
         )
     }
@@ -1412,6 +1489,11 @@ case "Related Articles":
         // Add URL if available
         if let domain = article.domain {
             content["url"] = "https://\(domain)"
+        }
+        
+        // Add database ID if available
+        if let dbId = article.databaseId {
+            content["id"] = dbId
         }
 
         // Transfer metadata fields directly without processing
@@ -1573,9 +1655,97 @@ struct ContentSection {
 /// ArgusDetailsView for displaying engine stats
 struct ArgusDetailsView: View {
     let data: ArgusDetailsData
+    let article: ArticleModel?
+    
+    // Initialize with both the data and the article to check for IDs from multiple sources
+    init(data: ArgusDetailsData, article: ArticleModel? = nil) {
+        self.data = data
+        self.article = article
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Enhanced ID detection that tries multiple sources
+            let dbIdFromData = data.databaseId
+            let dbIdFromArticle = article?.databaseId
+            
+            // ARTICLE ID (string id like "bbc-12345") extraction
+            // Try to extract from JSON URL if not directly available
+            let articleIdFromURL: String? = {
+                if let jsonURL = article?.jsonURL, 
+                   let urlParts = jsonURL.split(separator: "/").last?.split(separator: "."),
+                   let idPart = urlParts.first {
+                    return String(idPart)
+                }
+                return nil
+            }()
+            
+            // Display stack of IDs - show both types (database numeric ID and article string ID)
+            VStack(alignment: .leading, spacing: 8) {
+                // 1. ARTICLE ID (string format like "bbc-12345") display
+                if let articleId = articleIdFromURL {
+                    Text("🔖 ARTICLE ID: \(articleId)")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(.purple)
+                        .padding(8)
+                        .background(Color.purple.opacity(0.15))
+                        .cornerRadius(8)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                
+                // 2. DATABASE ID (numeric) display with enhanced diagnostics
+                VStack(alignment: .leading, spacing: 4) {
+                    if let dbId = dbIdFromData {
+                        // Found ID directly in the engine stats
+                        Text("📌 DATABASE ID: \(dbId)")
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.yellow.opacity(0.3))
+                            .cornerRadius(8)
+                            .textSelection(.enabled)
+                            
+                        Text("(Source: Engine Stats JSON)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 8)
+                    } else if let articleDbId = dbIdFromArticle {
+                        // Found ID in the article model
+                        Text("📌 DATABASE ID: \(articleDbId)")
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.yellow.opacity(0.3))
+                            .cornerRadius(8)
+                            .textSelection(.enabled)
+                            
+                        Text("(Source: Article Model)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 8)
+                    } else {
+                        // No ID available
+                        Text("⚠️ No Database ID Available")
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.gray.opacity(0.2))
+                            .cornerRadius(8)
+                            .textSelection(.enabled)
+                            
+                        Text("Check logs for diagnostic information")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 8)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            
             Text("Generated with \(data.model) in \(String(format: "%.2f", data.elapsedTime)) seconds.")
                 .font(.system(size: 14, weight: .regular, design: .monospaced))
                 .textSelection(.enabled)
@@ -2056,13 +2226,22 @@ struct ShareSelectionView: View {
 
                 case "Argus Engine Stats":
                     if let details = section.argusDetails {
-                        sectionContent = """
+                        // Build content starting with database ID if available
+                        var statsText = ""
+                        if let dbId = details.databaseId {
+                            statsText += "**Database ID:** \(dbId)\n"
+                        }
+                        
+                        // Append the rest of the stats content
+                        statsText += """
                         **Model:** \(details.model)
                         **Elapsed Time:** \(String(format: "%.2f", details.elapsedTime)) seconds
                         **Metrics:**
                         \(formattedStats(details.stats))
                         **Received:** \(details.date.formatted(.dateTime.month().day().year().hour().minute().second()))
                         """
+                        sectionContent = statsText
+                        
                         if let systemInfo = details.systemInfo {
                             sectionContent! += formatSystemInfo(systemInfo)
                         }
@@ -2188,6 +2367,7 @@ struct ShareSelectionView: View {
                     elapsedTime: elapsedTime,
                     date: notification.date,
                     stats: stats,
+                    databaseId: json["id"] as? Int,
                     systemInfo: json["systemInfo"] as? [String: Any]
                 )
             ))

@@ -871,6 +871,9 @@ actor DatabaseCoordinator {
         article.articleTitle = data.articleTitle
         article.affected = data.affected
         article.domain = data.domain
+        
+        // Update database ID
+        article.databaseId = data.databaseId
 
         // Only update the pubDate if the new one has a value
         if let pubDate = data.pubDate {
@@ -922,6 +925,16 @@ actor DatabaseCoordinator {
         article.article_title = data.articleTitle
         article.affected = data.affected
         article.domain = data.domain
+        
+        // Update database ID if available in NotificationData model
+        // Note: This is done with reflection since NotificationData may not have this field
+        // in older versions of the app
+        if let setter = Mirror(reflecting: article).children.first(where: { $0.label == "setDatabaseId" }) {
+            // If setter exists, use it
+            if let setterFunc = setter.value as? (Int?) -> Void {
+                setterFunc(data.databaseId)
+            }
+        }
 
         // Only update the pubDate if the new one has a value
         if let pubDate = data.pubDate {
@@ -956,6 +969,11 @@ actor DatabaseCoordinator {
                 "elapsed_time": elapsedTime,
                 "stats": stats
             ]
+            
+            // Add database ID if available
+            if let dbId = data.databaseId {
+                engineStatsDict["id"] = dbId
+            }
             
             // Add system info if available
             if let systemInfo = data.engineSystemInfo {
@@ -1274,9 +1292,59 @@ extension DatabaseCoordinator {
         // Extract the new R2 URL JSON fields
         let actionRecommendations = json["action_recommendations"] as? String
         let talkingPoints = json["talking_points"] as? String
+        
+        // Extract the database ID with robust type handling
+        var databaseId: Int? = nil
+        
+        // First try as direct Int
+        if let intId = json["id"] as? Int {
+            databaseId = intId
+            logger.debug("✅ DatabaseCoordinator: Extracted database ID as Int: \(intId)")
+        } 
+        // Then try as String that can be converted to Int
+        else if let stringId = json["id"] as? String, let intFromString = Int(stringId) {
+            databaseId = intFromString
+            logger.debug("✅ DatabaseCoordinator: Extracted database ID from String: \(intFromString)")
+        } 
+        // Finally try as Double with no fractional part
+        else if let doubleId = json["id"] as? Double, doubleId.truncatingRemainder(dividingBy: 1) == 0 {
+            databaseId = Int(doubleId)
+            logger.debug("✅ DatabaseCoordinator: Extracted database ID from Double: \(Int(doubleId))")
+        } 
+        // Log if ID exists but couldn't be converted
+        else if let rawId = json["id"] {
+            let typeString = String(describing: type(of: rawId))
+            logger.debug("⚠️ DatabaseCoordinator: ID found but couldn't convert to Int: \(String(describing: rawId)) (Type: \(typeString))")
+        }
+        
+        // Final log to show if we got a database ID
+        if let databaseId = databaseId {
+            logger.debug("🔑 DatabaseCoordinator: Will use database ID: \(databaseId)")
+        } else {
+            logger.debug("🚫 DatabaseCoordinator: No database ID found in article JSON")
+        }
 
         // Create the article JSON object
+        
+        // Extract string ID from available sources for new id parameter
+        let stringId: String
+        if let idValue = json["id"] {
+            // Use string value or convert to string
+            if let strValue = idValue as? String {
+                stringId = strValue
+            } else {
+                stringId = String(describing: idValue)
+            }
+        } else if let fileName = jsonURL.split(separator: "/").last?.split(separator: ".").first {
+            // Extract from URL (e.g., "articles/bbc-12345.json" → "bbc-12345")
+            stringId = String(fileName)
+        } else {
+            // Fallback to URL as ID
+            stringId = jsonURL
+        }
+        
         return ArticleJSON(
+            id: stringId,  // Add the required id parameter
             title: title,
             body: body,
             jsonURL: jsonURL,
@@ -1302,7 +1370,8 @@ extension DatabaseCoordinator {
             engineSystemInfo: engineSystemInfo,
             relatedArticles: extractSimilarArticles(from: json),
             actionRecommendations: actionRecommendations,
-            talkingPoints: talkingPoints
+            talkingPoints: talkingPoints,
+            databaseId: databaseId
         )
     }
 

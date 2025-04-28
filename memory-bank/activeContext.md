@@ -98,6 +98,43 @@ To complete the Legacy Code Removal phase, we should focus on:
 
 ## Current Work Focus
 
+- **Fixed Database ID Display Flow** (Completed):
+  - Resolved a critical bug where article database IDs were not being displayed in the UI:
+    - Root cause: Database ID was correctly extracted from JSON in `processArticleJSON` but wasn't being passed to the `ArticleModel` constructor in `ArticleService.swift`
+    - This caused:
+      1. Database ID field being nil in the SwiftData database
+      2. ID not being included in the engine_stats JSON string
+      3. No ID displayed in the UI's Argus Engine Stats section
+  
+  - Fix implementation:
+    - Added the missing parameter to the `ArticleModel` constructor in `processRemoteArticles`:
+    ```swift
+    let newArticle = ArticleModel(
+        // Other fields...
+        databaseId: article.databaseId,  // Added this line to fix the bug
+        // Other fields...
+    )
+    ```
+    - Comprehensive documentation added in memory-bank/article-id-display-flow.md tracing article database ID flow from initial API to display in UI
+  
+  - Complete flow implemented and verified:
+    1. Backend API includes `id` field in the article JSON
+    2. `processArticleJSON` extracts the ID and places it in `ArticleJSON` object
+    3. `processRemoteArticles` passes the ID to the `ArticleModel` constructor (fixed)
+    4. The ID is stored in the SwiftData database as part of the ArticleModel
+    5. `engine_stats` property includes the ID in the JSON string
+    6. `parseEngineStatsJSON` extracts the ID from JSON string into `ArgusDetailsData` object
+    7. `ArgusDetailsView` renders the ID in the UI with "Source: Engine Stats JSON" label
+  
+  - Added specific debugging recommendations in the documentation for troubleshooting similar issues:
+    - API Response Check: Confirm the backend API is including the ID field
+    - Database Storage Check: Verify the ID is stored in the ArticleModel
+    - Engine Stats JSON Check: Examine the generated engine_stats JSON string
+    - Parsing Check: Confirm the ID is correctly extracted from the JSON
+    - UI Rendering Check: Verify the conditional display logic
+  
+  - The fixed implementation ensures a complete, consistent flow for handling the database ID from API to UI
+
 - **Implemented R2 URL JSON New Fields** (Completed):
   - Added support for two new fields in the JSON payload from the R2 URL:
     - `action_recommendations`: Concrete, actionable steps based on article content
@@ -612,56 +649,4 @@ To complete the Legacy Code Removal phase, we should focus on:
     - No functional changes, just improved build reliability
     - Consistent domain extraction behavior between local and cloud builds
   - Key learnings:
-    - Cloud build environments may process files differently than local Xcode builds
-    - Prefer using local functions over extensions when working across file boundaries in cloud builds
-    - Using standalone functions creates more predictable behavior across different build environments
-    - This pattern aligns with previous fixes for similar issues in other parts of the app
-
-- **Fixed Cloud Build Domain Extraction Scope Error** (Completed):
-  - Resolved build error that occurred in Apple's cloud build but not in local Xcode build:
-    - Error symptoms: `Cannot find 'extractDomain' in scope` in DatabaseCoordinator.swift and ArticleModels.swift
-    - Root cause: Global functions may not be properly visible across file boundaries in cloud build environments
-  - Implementation details:
-    - Duplicated the `extractDomain(from:)` function directly in both files that need it:
-      ```swift
-      // Function duplicated in both files that need it
-      private func extractDomain(from urlString: String) -> String? {
-          // Implementation
-      }
-      ```
-    - Made the function private to each file to avoid potential naming conflicts
-    - Maintained identical implementation in both files to ensure consistent behavior
-  - Results:
-    - App now builds successfully in both local Xcode and Apple's cloud build environment
-    - No functional changes, just improved build reliability
-    - Self-contained files with no external function dependencies
-  - Key learnings:
-    - Cloud build environments may process files in a different order than local builds
-    - Functions defined in one file may not be visible to other files during cloud builds
-    - Sometimes direct duplication is more reliable than elegant centralization for build systems
-    - Each file containing all its dependencies makes it more resilient to build order issues
-
-- **Fixed Progress Indicator Duplication Issue** (Completed):
-  - Resolved issue where the sync status display duplicated the progress numbers:
-    - Problem: SyncStatusIndicator was showing `"Downloading X of Y articles... X/Y"` with redundant numbers
-    - The UI was inconsistent with standard iOS patterns for progress indicators
-  - Research into iOS 18+ standard patterns:
-    - Apple's native apps (Files, Mail, App Store) follow consistent patterns:
-      1. Icon or activity indicator appears first (left side)
-      2. Descriptive text follows with embedded count information
-      3. Circular progress indicators for indeterminate operations
-      4. Parenthetical count format: "Operation... (X of Y)"
-      5. No separate numerical display outside the descriptive text
-  - Implementation details:
-    - Updated `SyncStatusIndicator.swift` to follow standard iOS patterns:
-      ```swift
-      HStack(spacing: 8) {
-          // Activity indicator first (standard iOS pattern)
-          if status.isActive {
-              ProgressView()
-                  .progressViewStyle(CircularProgressViewStyle())
-                  .scaleEffect(0.8)
-          } else if status.shouldDisplay {
-              Image(systemName: status.systemImage)
-                  .foregroundColor(colorForStatus)
-          }
+    - Cloud build environments may process files differently than local X
