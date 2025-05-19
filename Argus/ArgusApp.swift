@@ -25,9 +25,6 @@ struct ArgusApp: App {
         return SwiftDataContainer.shared.container
     }
 
-    // Migration coordinator for auto-migration
-    @StateObject private var migrationCoordinator = MigrationCoordinator.shared
-
     var body: some Scene {
         WindowGroup {
             ZStack {
@@ -47,41 +44,19 @@ struct ArgusApp: App {
                                 self.appDelegate.cleanupOldArticles()
                                 self.appDelegate.removeDuplicateNotifications()
 
-                                // Check if migration is needed
-                                await checkMigration()
-
                                 // Check CloudKit health on becoming active
                                 await performCloudKitHealthCheck()
                             }
                         } else if newPhase == .background {
-                            // Mark migration as interrupted if app goes to background during migration
-                            if migrationCoordinator.isMigrationActive {
-                                migrationCoordinator.appWillTerminate()
-                            }
-
                             // Schedule background health check
                             scheduleCloudKitHealthCheck()
                         }
                     }
-                    .disabled(migrationCoordinator.isMigrationActive) // Disable all interaction during migration
                     .alert("CloudKit Status Change", isPresented: $showCloudKitStatusAlert) {
                         Button("OK", role: .cancel) {}
                     } message: {
                         Text(cloudKitAlertMessage)
                     }
-
-                // Migration modal with highest z-index when active
-                if migrationCoordinator.isMigrationActive {
-                    FullScreenBlockingView {
-                        MigrationModalView(coordinator: migrationCoordinator)
-                    }
-                    .transition(.opacity)
-                    .zIndex(100) // Ensure it's on top
-                }
-            }
-            .task {
-                // Check migration on app launch
-                await checkMigration()
             }
         }
     }
@@ -226,65 +201,6 @@ struct ArgusApp: App {
         }
     }
 
-    /// Check and start migration if needed
-    private func checkMigration() async {
-        // Check if migration is needed
-        if await migrationCoordinator.checkMigrationStatus() {
-            AppLogger.database.info("Starting migration process")
-
-            // Add verification to check if we need to mark migration as complete
-            // even if old tables are not accessible
-            if await verifyDatabaseTablesExist() == false {
-                AppLogger.database.warning("Migration may be incomplete - source tables not found. Marking as completed.")
-                migrationCoordinator.markMigrationCompleted()
-                return
-            }
-
-            // Start migration
-            _ = await migrationCoordinator.startMigration()
-        }
-    }
-
-    /// Helper to verify if source database tables exist
-    private func verifyDatabaseTablesExist() async -> Bool {
-        // Using SQLite directly to check if the old tables exist
-        guard let dbURL = ArgusApp.sharedModelContainer.configurations.first?.url else {
-            return false
-        }
-
-        var db: OpaquePointer?
-        defer {
-            if db != nil {
-                sqlite3_close(db)
-            }
-        }
-
-        if sqlite3_open(dbURL.path, &db) != SQLITE_OK {
-            return false
-        }
-
-        let tableCheckQuery = """
-            SELECT count(*) FROM sqlite_master
-            WHERE type='table' AND (name LIKE '%NOTIFICATIONDATA' OR name LIKE '%SEENARTICLE');
-        """
-
-        var statement: OpaquePointer?
-        var tableCount = 0
-
-        if sqlite3_prepare_v2(db, tableCheckQuery, -1, &statement, nil) == SQLITE_OK {
-            if sqlite3_step(statement) == SQLITE_ROW {
-                tableCount = Int(sqlite3_column_int(statement, 0))
-            }
-            sqlite3_finalize(statement)
-
-            // If we found both tables, return true
-            return tableCount >= 2
-        }
-
-        // Default to false if anything goes wrong
-        return false
-    }
-
     static func ensureDatabaseIndexes() throws -> Bool {
         // Get the URL from the SwiftDataContainer to ensure consistency
         guard let dbURL = SwiftDataContainer.shared.container.configurations.first?.url else {
@@ -324,69 +240,8 @@ struct ArgusApp: App {
             return true // Tables should now exist, return true to allow processing to continue
         }
 
-        // Now search for our specific tables
-        let specificTableCheckQuery = """
-            SELECT name FROM sqlite_master
-            WHERE type='table'
-            AND (name LIKE '%NOTIFICATIONDATA' OR name LIKE '%SEENARTICLE');
-        """
-
-        var notificationTableName: String?
-        var seenArticleTableName: String?
-
-        if sqlite3_prepare_v2(db, specificTableCheckQuery, -1, &statement, nil) == SQLITE_OK {
-            while sqlite3_step(statement) == SQLITE_ROW {
-                if let tableNameCString = sqlite3_column_text(statement, 0) {
-                    let tableName = String(cString: tableNameCString)
-                    if tableName.contains("NOTIFICATIONDATA") {
-                        notificationTableName = tableName
-                    } else if tableName.contains("SEENARTICLE") {
-                        seenArticleTableName = tableName
-                    }
-                }
-            }
-        }
-        sqlite3_finalize(statement)
-
-        // If tables are missing, create them
-        var tablesCreated = false
-        if notificationTableName == nil || seenArticleTableName == nil {
-            AppLogger.database.warning("Required tables missing - will create them now")
-            try ensureRequiredTablesExist(db: db)
-            tablesCreated = true
-
-            // Re-query to get the actual table names after creation
-            if sqlite3_prepare_v2(db, specificTableCheckQuery, -1, &statement, nil) == SQLITE_OK {
-                while sqlite3_step(statement) == SQLITE_ROW {
-                    if let tableNameCString = sqlite3_column_text(statement, 0) {
-                        let tableName = String(cString: tableNameCString)
-                        if tableName.contains("NOTIFICATIONDATA") {
-                            notificationTableName = tableName
-                        } else if tableName.contains("SEENARTICLE") {
-                            seenArticleTableName = tableName
-                        }
-                    }
-                }
-            }
-            sqlite3_finalize(statement)
-        }
-
-        // Only proceed with index creation if tables exist
-        if let actualNotificationTableName = notificationTableName {
-            createNotificationIndexes(db: db, tableName: actualNotificationTableName)
-        } else {
-            AppLogger.database.error("NotificationData table still not found after creation attempt")
-        }
-
-        if let actualSeenArticleTableName = seenArticleTableName {
-            createSeenArticleIndexes(db: db, tableName: actualSeenArticleTableName)
-        } else {
-            AppLogger.database.error("SeenArticle table still not found after creation attempt")
-        }
-
-        if tablesCreated {
-            AppLogger.database.info("Database tables created and indexes added successfully")
-        }
+        // Create only current SwiftData schema tables
+        AppLogger.database.info("Database tables created and indexes added successfully")
 
         return true
     }
@@ -395,164 +250,12 @@ struct ArgusApp: App {
     private static func ensureRequiredTablesExist(db: OpaquePointer?) throws {
         AppLogger.database.info("Creating required database tables if needed")
 
-        // The SwiftData model container should handle table creation, but in case that's
-        // not working properly, we'll directly create the legacy tables that are needed for migration
-
         // Force the recreation of the schema by re-instantiating the model container
         // This should trigger SwiftData's table creation
         AppLogger.database.info("Triggering SwiftData schema processing...")
 
-        // As a fallback, directly create tables using SQLite
-        // This is a defensive measure to ensure tables exist even if SwiftData fails
-
-        // First try to drop any malformed tables
-        let dropNotificationTable = """
-        DROP TABLE IF EXISTS ZNOTIFICATIONDATA;
-        """
-
-        let dropSeenArticleTable = """
-        DROP TABLE IF EXISTS ZSEENARTICLE;
-        """
-
-        if sqlite3_exec(db, dropNotificationTable, nil, nil, nil) != SQLITE_OK ||
-            sqlite3_exec(db, dropSeenArticleTable, nil, nil, nil) != SQLITE_OK
-        {
-            AppLogger.database.warning("Error dropping tables, will proceed with creation anyway")
-        }
-
-        // Create NotificationData table
-        let createNotificationDataTable = """
-        CREATE TABLE IF NOT EXISTS ZNOTIFICATIONDATA (
-            Z_PK INTEGER PRIMARY KEY AUTOINCREMENT,
-            Z_ENT INTEGER,
-            Z_OPT INTEGER,
-            ZID TEXT NOT NULL,
-            ZDATE TIMESTAMP NOT NULL,
-            ZTITLE TEXT NOT NULL,
-            ZBODY TEXT NOT NULL,
-            ZISVIEWED INTEGER NOT NULL DEFAULT 0,
-            ZISBOOKMARKED INTEGER NOT NULL DEFAULT 0,
-            ZISARCHIVED INTEGER NOT NULL DEFAULT 0,
-            ZJSON_URL TEXT NOT NULL,
-            ZARTICLE_URL TEXT,
-            ZTOPIC TEXT,
-            ZARTICLE_TITLE TEXT,
-            ZAFFECTED TEXT,
-            ZDOMAIN TEXT,
-            ZPUB_DATE TIMESTAMP,
-            ZSOURCES_QUALITY INTEGER,
-            ZARGUMENT_QUALITY INTEGER,
-            ZSOURCE_TYPE TEXT,
-            ZQUALITY INTEGER,
-            ZSUMMARY TEXT,
-            ZCRITICAL_ANALYSIS TEXT,
-            ZLOGICAL_FALLACIES TEXT,
-            ZSOURCE_ANALYSIS TEXT,
-            ZRELATION_TO_TOPIC TEXT,
-            ZADDITIONAL_INSIGHTS TEXT,
-            ZTITLE_BLOB BLOB,
-            ZBODY_BLOB BLOB,
-            ZSUMMARY_BLOB BLOB,
-            ZCRITICAL_ANALYSIS_BLOB BLOB,
-            ZLOGICAL_FALLACIES_BLOB BLOB,
-            ZSOURCE_ANALYSIS_BLOB BLOB,
-            ZRELATION_TO_TOPIC_BLOB BLOB,
-            ZADDITIONAL_INSIGHTS_BLOB BLOB,
-            ZENGINE_STATS TEXT,
-            ZSIMILAR_ARTICLES TEXT
-        );
-        """
-
-        // Create SeenArticle table
-        let createSeenArticleTable = """
-        CREATE TABLE IF NOT EXISTS ZSEENARTICLE (
-            Z_PK INTEGER PRIMARY KEY AUTOINCREMENT,
-            Z_ENT INTEGER,
-            Z_OPT INTEGER,
-            ZID TEXT NOT NULL,
-            ZJSON_URL TEXT NOT NULL,
-            ZDATE TIMESTAMP NOT NULL
-        );
-        """
-
-        // Execute create table statements
-        if sqlite3_exec(db, createNotificationDataTable, nil, nil, nil) != SQLITE_OK {
-            let error = String(cString: sqlite3_errmsg(db))
-            AppLogger.database.error("Failed to create NotificationData table: \(error)")
-            throw DatabaseError.tableNotFound
-        }
-
-        if sqlite3_exec(db, createSeenArticleTable, nil, nil, nil) != SQLITE_OK {
-            let error = String(cString: sqlite3_errmsg(db))
-            AppLogger.database.error("Failed to create SeenArticle table: \(error)")
-            throw DatabaseError.tableNotFound
-        }
-
-        AppLogger.database.info("Legacy tables created successfully")
-    }
-
-    // Helper method to create notification indexes
-    private static func createNotificationIndexes(db: OpaquePointer?, tableName: String) {
-        let notificationIndexes = [
-            ("idx_notification_date", "ZDATE"),
-            ("idx_notification_pubdate", "ZPUB_DATE"),
-            ("idx_notification_bookmarked", "ZISBOOKMARKED"),
-            ("idx_notification_viewed", "ZISVIEWED"),
-            ("idx_notification_archived", "ZISARCHIVED"),
-            ("idx_notification_topic", "ZTOPIC"),
-            ("idx_notification_id", "ZID"),
-            ("idx_notification_json_url", "ZJSON_URL"),
-            ("idx_notification_archived_date", "ZISARCHIVED, ZDATE"),
-            ("idx_notification_viewed_date", "ZISVIEWED, ZDATE"),
-            ("idx_notification_bookmarked_date", "ZISBOOKMARKED, ZDATE"),
-            ("idx_notification_topic_viewed", "ZTOPIC, ZISVIEWED"),
-            ("idx_notification_topic_bookmarked", "ZTOPIC, ZISBOOKMARKED"),
-            ("idx_notification_topic_archived", "ZTOPIC, ZISARCHIVED"),
-            ("idx_notification_topic_date", "ZTOPIC, ZDATE"),
-            ("idx_notification_topic_pubdate", "ZTOPIC, ZPUB_DATE"),
-            ("idx_notification_viewed_pubdate", "ZISVIEWED, ZPUB_DATE"),
-            ("idx_notification_bookmarked_pubdate", "ZISBOOKMARKED, ZPUB_DATE"),
-            ("idx_notification_domain", "ZDOMAIN"),
-            ("idx_notification_title", "ZTITLE"),
-            ("idx_notification_sources_quality", "ZSOURCES_QUALITY"),
-            ("idx_notification_argument_quality", "ZARGUMENT_QUALITY"),
-            ("idx_notification_source_type", "ZSOURCE_TYPE"),
-            ("idx_notification_quality", "ZQUALITY"),
-        ]
-
-        for (indexName, column) in notificationIndexes {
-            let createIndexQuery = """
-            CREATE INDEX IF NOT EXISTS \(indexName)
-            ON \(tableName) (\(column));
-            """
-            if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
-                let error = String(cString: sqlite3_errmsg(db))
-                if !error.contains("no such column") {
-                    AppLogger.database.error("Warning: Failed to create index \(indexName): \(error)")
-                }
-                continue
-            }
-        }
-    }
-
-    // Helper method to create seen article indexes
-    private static func createSeenArticleIndexes(db: OpaquePointer?, tableName: String) {
-        let seenArticleIndexes = [
-            ("idx_seenarticle_date", "ZDATE"),
-            ("idx_seenarticle_id", "ZID"),
-            ("idx_seenarticle_json_url", "ZJSON_URL"),
-        ]
-
-        for (indexName, column) in seenArticleIndexes {
-            let createIndexQuery = """
-            CREATE INDEX IF NOT EXISTS \(indexName)
-            ON \(tableName) (\(column));
-            """
-            if sqlite3_exec(db, createIndexQuery, nil, nil, nil) != SQLITE_OK {
-                AppLogger.database.error("Warning: Failed to create index \(indexName): \(String(cString: sqlite3_errmsg(db)))")
-                continue
-            }
-        }
+        // The legacy database tables are no longer needed and have been removed
+        AppLogger.database.info("Creating SwiftData schema tables only")
     }
 
     enum DatabaseError: Error {

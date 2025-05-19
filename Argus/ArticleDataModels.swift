@@ -372,22 +372,6 @@ final class ArticleModel: Equatable {
         self.talkingPointsBlob = talkingPointsBlob
     }
 
-    // Convenience initializer will be implemented after ArticleJSON is available
-
-    /// Updates blob data from a NotificationData object
-    /// Used during migration and compatibility with legacy code
-    func updateBlobs(from notification: NotificationData) {
-        // Transfer all blob data from the NotificationData to this ArticleModel
-        titleBlob = notification.title_blob
-        bodyBlob = notification.body_blob
-        summaryBlob = notification.summary_blob
-        criticalAnalysisBlob = notification.critical_analysis_blob
-        logicalFallaciesBlob = notification.logical_fallacies_blob
-        sourceAnalysisBlob = notification.source_analysis_blob
-        relationToTopicBlob = notification.relation_to_topic_blob
-        additionalInsightsBlob = notification.additional_insights_blob
-    }
-
     /// Regenerates missing blob data for this ArticleModel
     /// Returns the number of blobs regenerated
     @MainActor
@@ -426,8 +410,6 @@ final class ArticleModel: Equatable {
         return lhs.id == rhs.id
     }
 }
-
-// Extensions removed, implementation moved inside classes
 
 /// SwiftData model for tracking which articles have been seen
 @Model
@@ -509,16 +491,10 @@ enum TopicPriority: String, Codable, CaseIterable {
     }
 }
 
-// MARK: - Helpers for Migration and Data Access
-
-// Migration utilities will be implemented in a later phase
-// when NotificationData is properly defined and accessible
-
 // MARK: - API Compatibility Extensions
 
 /// Typealias for backward compatibility
 typealias SeenArticle = SeenArticleModel
-// Note: NotificationData is defined in MarkdownUtilities.swift as a legacy class for migration
 
 /// SeenArticle compatibility extension to make SeenArticleModel work with existing APIs
 extension SeenArticleModel {

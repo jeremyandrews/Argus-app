@@ -51,9 +51,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Set up CloudKit notification observer for account changes
         setupCloudKitNotificationObservers()
 
-        // Check for and resume any in-progress migrations
-        checkAndResumeMigration()
-
         // Check if we're running UI tests and should set up test data
         if isRunningUITests {
             setupTestDataIfNeeded()
@@ -467,33 +464,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 AppLogger.app.error("Failed to authenticate device: \(error)")
             }
         }
-    }
-
-    private func checkAndResumeMigration() {
-        // Check if migration was in progress
-        guard let data = UserDefaults.standard.data(forKey: "migrationProgress"),
-              let progress = try? JSONDecoder().decode(MigrationProgress.self, from: data),
-              progress.state == .inProgress
-        else {
-            return
-        }
-
-        // If migration was in progress, notify the user it will resume
-        let notification = UNMutableNotificationContent()
-        notification.title = "Data Migration"
-        notification.body = "Your data migration was interrupted and will resume when you open the app."
-        notification.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: "migration-resume",
-            content: notification,
-            trigger: nil
-        )
-
-        UNUserNotificationCenter.current().add(request)
-
-        // The actual resumption will happen in the MigrationView when it appears
-        AppLogger.app.info("Data migration needs to be resumed - will continue in MigrationView")
     }
 
     private func setupTestDataIfNeeded() {

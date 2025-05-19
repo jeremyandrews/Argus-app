@@ -71,20 +71,16 @@ class SwiftDataContainer {
         // Initialize request coordinator
         requestCoordinator = CloudKitRequestCoordinator(containerIdentifier: cloudKitContainerIdentifier)
 
-        // Create a schema with only the new models plus legacy SeenArticle for migration
+        // Create a schema with only the current models
         let schema = Schema([
-            // Legacy model needed for migration only
-            SeenArticle.self,
-
             // New SwiftData models - our primary schema
             ArticleModel.self,
             SeenArticleModel.self,
             TopicModel.self,
         ])
         
-        // Skip migration plan since it's causing issues in Swift 6
-        // We'll implement schema evolution differently if needed later
-        // No migration plan needed for now
+        // Migration functionality has been completely removed
+        // For schema evolution, we'll use standard SwiftData versioning when needed
 
         // Storage path
         let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -408,9 +404,6 @@ class SwiftDataContainer {
                 print("Failed to list directory contents at \(location.path): \(error)")
             }
         }
-
-        // Also clear UserDefaults related to migration
-        UserDefaults.standard.removeObject(forKey: "migrationProgress")
 
         // Build result summary
         var result = "Store reset attempted - please restart the app for changes to take effect\n\n"

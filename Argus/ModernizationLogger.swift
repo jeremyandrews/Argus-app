@@ -7,7 +7,6 @@ class ModernizationLogger {
     /// Logging components for categorization
     enum Component: String, CaseIterable {
         case sync = "Sync" // Renamed from syncManager
-        case migration = "Migration"
         case cloudKit = "CloudKit"
         case apiClient = "APIClient"
         case databaseCoordinator = "DatabaseCoordinator"
@@ -294,24 +293,6 @@ class ModernizationLogger {
             file: file, line: line)
     }
 
-    /// Log migration related event
-    /// - Parameters:
-    ///   - event: Description of the migration event
-    ///   - progress: Current progress (0-100)
-    ///   - file: Source file
-    ///   - line: Line number
-    static func logMigrationEvent(_ event: String,
-                                  progress: Double? = nil,
-                                  file: String = #file,
-                                  line: Int = #line)
-    {
-        var message = "MIGRATION: \(event)"
-        if let progress = progress {
-            message += " (Progress: \(String(format: "%.1f", progress))%)"
-        }
-        log(.info, component: .migration, message: message, file: file, line: line)
-    }
-
     // MARK: - Performance Measurement Methods
 
     /// Measure the execution time of a synchronous operation
@@ -404,7 +385,7 @@ class ModernizationLogger {
             .replacingOccurrences(of: ".", with: "-")
 
         let exportDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let exportURL = exportDirectory.appendingPathComponent("argus_migration_log_\(timestamp).txt")
+        let exportURL = exportDirectory.appendingPathComponent("argus_log_\(timestamp).txt")
 
         do {
             if let contents = getLogFileContents() {
