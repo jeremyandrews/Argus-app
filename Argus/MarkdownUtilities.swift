@@ -15,6 +15,7 @@ enum RichTextField: String, CaseIterable {
     case additionalInsights
     case actionRecommendations
     case talkingPoints
+    case eli5
 }
 
 // Centralized section naming system to ensure consistency
@@ -30,6 +31,7 @@ public enum SectionNaming {
         case "Context & Perspective": return .additionalInsights
         case "Action Recommendations": return .actionRecommendations
         case "Talking Points": return .talkingPoints
+        case "Explain Like I'm 5": return .eli5
         default: return .body
         }
     }
@@ -47,6 +49,7 @@ public enum SectionNaming {
         case .additionalInsights: return "Context & Perspective"
         case .actionRecommendations: return "Action Recommendations"
         case .talkingPoints: return "Talking Points"
+        case .eli5: return "Explain Like I'm 5"
         }
     }
 
@@ -61,6 +64,7 @@ public enum SectionNaming {
         case "Context & Perspective": return "additionalInsights"
         case "Action Recommendations": return "actionRecommendations"
         case "Talking Points": return "talkingPoints"
+        case "Explain Like I'm 5": return "eli5"
         default: return section.lowercased()
         }
     }
@@ -75,7 +79,7 @@ extension RichTextField {
         case .body, .summary, .criticalAnalysis,
              .logicalFallacies, .sourceAnalysis,
              .relationToTopic, .additionalInsights,
-             .actionRecommendations, .talkingPoints:
+             .actionRecommendations, .talkingPoints, .eli5:
             return "UIFontTextStyleBody"
         }
     }
@@ -95,6 +99,7 @@ extension RichTextField {
         case .additionalInsights: return article.additionalInsights
         case .actionRecommendations: return article.actionRecommendations
         case .talkingPoints: return article.talkingPoints
+        case .eli5: return article.eli5
         }
     }
 
@@ -111,6 +116,7 @@ extension RichTextField {
         case .additionalInsights: return article.additionalInsightsBlob
         case .actionRecommendations: return article.actionRecommendationsBlob
         case .talkingPoints: return article.talkingPointsBlob
+        case .eli5: return article.eli5Blob
         }
     }
 
@@ -137,6 +143,8 @@ extension RichTextField {
             article.actionRecommendationsBlob = data
         case .talkingPoints:
             article.talkingPointsBlob = data
+        case .eli5:
+            article.eli5Blob = data
         }
     }
 }
@@ -407,7 +415,8 @@ func verifyAllBlobs(in article: ArticleModel) -> Bool {
     let fields: [RichTextField] = [
         .title, .body, .summary, .criticalAnalysis,
         .logicalFallacies, .sourceAnalysis, .relationToTopic,
-        .additionalInsights, .actionRecommendations, .talkingPoints
+        .additionalInsights, .actionRecommendations, .talkingPoints,
+        .eli5
     ]
 
     AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(article.id):")
@@ -452,7 +461,8 @@ func regenerateAllBlobs(for article: ArticleModel, force: Bool = false) -> Int {
     let fields: [RichTextField] = [
         .title, .body, .summary, .criticalAnalysis,
         .logicalFallacies, .sourceAnalysis, .relationToTopic,
-        .additionalInsights, .actionRecommendations, .talkingPoints
+        .additionalInsights, .actionRecommendations, .talkingPoints,
+        .eli5
     ]
 
     var regeneratedCount = 0

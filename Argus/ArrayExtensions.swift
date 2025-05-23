@@ -1,22 +1,22 @@
 import Foundation
 import SwiftData
 
-// MARK: - Array Extensions for NotificationData
+// MARK: - Array Extensions for ArticleModel
 
-extension Array where Element == NotificationData {
-    /// Returns a new array containing only unique NotificationData objects by their ID
+extension Array where Element == ArticleModel {
+    /// Returns a new array containing only unique ArticleModel objects by their ID
     /// This prevents duplicate articles from appearing in the UI
-    func uniqued() -> [NotificationData] {
+    func uniqued() -> [ArticleModel] {
         var seen = Set<UUID>()
-        var result = [NotificationData]()
+        var result = [ArticleModel]()
         result.reserveCapacity(underestimatedCount)
 
-        for notification in self {
-            if seen.insert(notification.id).inserted {
-                result.append(notification)
+        for article in self {
+            if seen.insert(article.id).inserted {
+                result.append(article)
             } else {
                 #if DEBUG
-                    print("🚨 Found duplicate NotificationData with ID: \(notification.id)")
+                    print("🚨 Found duplicate ArticleModel with ID: \(article.id)")
                 #endif
             }
         }

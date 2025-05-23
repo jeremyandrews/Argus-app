@@ -727,6 +727,8 @@ final class ArticleService: ArticleServiceProtocol {
             text = article.actionRecommendations
         case .talkingPoints:
             text = article.talkingPoints
+        case .eli5:
+            text = article.eli5
         }
         
         // Skip if no text
@@ -816,6 +818,8 @@ final class ArticleService: ArticleServiceProtocol {
                 markdownText = articleModel.actionRecommendations
             case .talkingPoints:
                 markdownText = articleModel.talkingPoints
+            case .eli5:
+                markdownText = articleModel.eli5
             }
             
             guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
@@ -964,6 +968,7 @@ final class ArticleService: ArticleServiceProtocol {
                         additionalInsights: article.additionalInsights,
                         actionRecommendations: article.actionRecommendations,
                         talkingPoints: article.talkingPoints,
+                        eli5: article.eli5,
                         
                         // Add structured engine stats
                         engineModel: article.engineModel,

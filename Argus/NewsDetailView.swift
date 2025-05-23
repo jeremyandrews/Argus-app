@@ -77,6 +77,8 @@ struct NewsDetailView: View {
             return article.actionRecommendations
         case .talkingPoints:
             return article.talkingPoints
+        case .eli5:
+            return article.eli5
         }
     }
 
@@ -137,6 +139,7 @@ struct NewsDetailView: View {
             "Context & Perspective": false,
             "Action Recommendations": false,
             "Talking Points": false,
+            "Explain Like I'm 5": false,
             "Argus Engine Stats": false,
             "Preview": false,
             "Related Articles": false,
@@ -286,6 +289,7 @@ struct NewsDetailView: View {
         - additionalInsights: \(fieldStatus(article.additionalInsights))
         - actionRecommendations: \(fieldStatus(article.actionRecommendations))
         - talkingPoints: \(fieldStatus(article.talkingPoints))
+        - eli5: \(fieldStatus(article.eli5))
         
         📦 BLOB FIELDS:
         - titleBlob: \(blobStatus(article.titleBlob))
@@ -298,6 +302,7 @@ struct NewsDetailView: View {
         - additionalInsightsBlob: \(blobStatus(article.additionalInsightsBlob))
         - actionRecommendationsBlob: \(blobStatus(article.actionRecommendationsBlob))
         - talkingPointsBlob: \(blobStatus(article.talkingPointsBlob))
+        - eli5Blob: \(blobStatus(article.eli5Blob))
         """)
     }
     
@@ -495,8 +500,19 @@ struct NewsDetailView: View {
         if !talkingPoints.isEmpty {
             sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
         }
+        
+        // 9) "Explain Like I'm 5"
+        // Look for snake_case key in JSON first (as received from backend)
+        // Then fall back to camelCase key (as stored in content dictionary)
+        let eli5Content = n.eli5 ?? 
+                         (json["eli5"] as? String ?? 
+                          json["eli5_text"] as? String ?? "")
+        // Only add the section if there's content
+        if !eli5Content.isEmpty {
+            sections.append(ContentSection(header: "Explain Like I'm 5", content: eli5Content))
+        }
 
-        // 9) "Argus Engine Stats" (argus_details)
+        // 10) "Argus Engine Stats" (argus_details)
         if let engineString = n.engine_stats {
             // parseEngineStatsJSON returns an ArgusDetailsData if valid
             if let parsed = parseEngineStatsJSON(engineString, fallbackDate: n.date, fallbackArticle: n) {
@@ -519,12 +535,12 @@ struct NewsDetailView: View {
             sections.append(ContentSection(header: "Argus Engine Stats", content: dataObject))
         }
 
-        // 10) "Preview" section
+        // 11) "Preview" section
         if let fullURL = n.getArticleUrl(additionalContent: additionalContent), !fullURL.isEmpty {
             sections.append(ContentSection(header: "Preview", content: fullURL))
         }
 
-        // 11) "Related Articles" - Direct approach using only the model data
+        // 12) "Related Articles" - Direct approach using only the model data
         if let relatedArticles = n.relatedArticles, !relatedArticles.isEmpty {
             AppLogger.database.debug("Found \(relatedArticles.count) related articles in article: \(n.id)")
             sections.append(ContentSection(header: "Related Articles", content: relatedArticles))
@@ -2172,6 +2188,9 @@ struct ShareSelectionView: View {
                     
                 case "Talking Points":
                     sectionContent = notification.talkingPoints
+                    
+                case "Explain Like I'm 5":
+                    sectionContent = notification.eli5
 
                 case "Argus Engine Stats":
                     if let details = section.argusDetails {
@@ -2304,6 +2323,10 @@ struct ShareSelectionView: View {
         // Always add Talking Points
         let talkingPoints = json["talkingPoints"] as? String ?? notification.talkingPoints ?? ""
         sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
+        
+        // Always add Explain Like I'm 5
+        let eli5Content = json["eli5"] as? String ?? notification.eli5 ?? ""
+        sections.append(ContentSection(header: "Explain Like I'm 5", content: eli5Content))
 
         if let model = json["model"] as? String,
            let elapsedTime = json["elapsedTime"] as? Double,

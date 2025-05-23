@@ -403,6 +403,7 @@ struct ArticleJSON {
     // New fields for R2 URL JSON payload
     let actionRecommendations: String?
     let talkingPoints: String?
+    let eli5: String?
     
     // Article database ID from backend
     let databaseId: Int?
@@ -442,6 +443,7 @@ struct PreparedArticle {
     // New fields for R2 URL JSON payload
     let actionRecommendations: String?
     let talkingPoints: String?
+    let eli5: String?
     
     // Article database ID from backend
     let databaseId: Int?
@@ -481,6 +483,7 @@ func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
         // Pass the new R2 URL JSON fields
         actionRecommendations: input.actionRecommendations,
         talkingPoints: input.talkingPoints,
+        eli5: input.eli5,
         
         // Pass the database ID
         databaseId: input.databaseId
@@ -668,6 +671,7 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         // Extract new R2 URL JSON fields (snake_case in API response)
         let actionRecommendations = json["action_recommendations"] as? String
         let talkingPoints = json["talking_points"] as? String
+        let eli5Content = json["eli5"] as? String
         
         // Comprehensive debug logging for all content fields
         AppLogger.database.debug("📊 JSON FIELD EXTRACTION REPORT:")
@@ -681,7 +685,8 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
             "relation_to_topic": json["relation_to_topic"] as? String,
             "additional_insights": json["additional_insights"] as? String,
             "action_recommendations": actionRecommendations,
-            "talking_points": talkingPoints
+            "talking_points": talkingPoints,
+            "eli5": eli5Content
         ]
         
         for (name, content) in fieldsList {
@@ -782,6 +787,7 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         // Add new R2 URL JSON fields
         actionRecommendations: actionRecommendations,
         talkingPoints: talkingPoints,
+        eli5: eli5Content,
         
         // Add database ID
         databaseId: databaseId

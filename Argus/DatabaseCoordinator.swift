@@ -899,6 +899,7 @@ actor DatabaseCoordinator {
         article.additionalInsights = data.additionalInsights
         article.actionRecommendations = data.actionRecommendations
         article.talkingPoints = data.talkingPoints
+        article.eli5 = data.eli5
 
         // Update metadata - use the individual engine fields
         article.engineModel = data.engineModel
@@ -911,96 +912,8 @@ actor DatabaseCoordinator {
         article.relatedArticles = data.relatedArticles
     }
 
-    /// Helper method to update the fields of a NotificationData article
-    /// - Parameters:
-    ///   - article: The article to update
-    ///   - data: The new data to apply
-    private func updateFields(of article: NotificationData, with data: ArticleJSON) async {
-        // Update notification fields
-        article.title = data.title
-        article.body = data.body
-        article.json_url = data.jsonURL
-        article.article_url = data.url
-        article.topic = data.topic
-        article.article_title = data.articleTitle
-        article.affected = data.affected
-        article.domain = data.domain
-        
-        // Update database ID if available in NotificationData model
-        // Note: This is done with reflection since NotificationData may not have this field
-        // in older versions of the app
-        if let setter = Mirror(reflecting: article).children.first(where: { $0.label == "setDatabaseId" }) {
-            // If setter exists, use it
-            if let setterFunc = setter.value as? (Int?) -> Void {
-                setterFunc(data.databaseId)
-            }
-        }
-
-        // Only update the pubDate if the new one has a value
-        if let pubDate = data.pubDate {
-            article.pub_date = pubDate
-        }
-
-        // Don't override user-specific flags
-        // article.isViewed remains unchanged
-        // article.isBookmarked remains unchanged
-
-        // Update quality indicators
-        article.sources_quality = data.sourcesQuality
-        article.argument_quality = data.argumentQuality
-        article.source_type = data.sourceType
-        article.source_analysis = data.sourceAnalysis
-        article.quality = data.quality
-
-        // Update content analysis
-        article.summary = data.summary
-        article.critical_analysis = data.criticalAnalysis
-        article.logical_fallacies = data.logicalFallacies
-        article.relation_to_topic = data.relationToTopic
-        article.additional_insights = data.additionalInsights
-
-        // Update metadata - Build engine_stats from individual fields
-        if let model = data.engineModel, 
-           let elapsedTime = data.engineElapsedTime,
-           let stats = data.engineRawStats {
-            // Create engine stats dictionary as a var since we modify it
-            var engineStatsDict: [String: Any] = [
-                "model": model,
-                "elapsed_time": elapsedTime,
-                "stats": stats
-            ]
-            
-            // Add database ID if available
-            if let dbId = data.databaseId {
-                engineStatsDict["id"] = dbId
-            }
-            
-            // Add system info if available
-            if let systemInfo = data.engineSystemInfo {
-                engineStatsDict["system_info"] = systemInfo
-            }
-            
-            // Serialize to JSON string
-            if let engineStatsData = try? JSONSerialization.data(withJSONObject: engineStatsDict),
-               let engineStatsString = String(data: engineStatsData, encoding: .utf8) {
-                article.engine_stats = engineStatsString
-            }
-        }
-        
-        // Convert RelatedArticles to JSON string if needed
-        if let relatedArticles = data.relatedArticles {
-            do {
-                let jsonData = try JSONEncoder().encode(relatedArticles)
-                if let jsonString = String(data: jsonData, encoding: .utf8) {
-                    article.similar_articles = jsonString
-                }
-            } catch {
-                self.logger.error("Failed to encode relatedArticles to JSON: \(error)")
-            }
-        } else {
-            article.similar_articles = nil
-        }
-    }
+    // Helper method to update the fields of an ArticleModel
+    // This is the only updateFields method we need
 
     // MARK: - Query Operations
 
@@ -1292,6 +1205,7 @@ extension DatabaseCoordinator {
         // Extract the new R2 URL JSON fields
         let actionRecommendations = json["action_recommendations"] as? String
         let talkingPoints = json["talking_points"] as? String
+        let eli5Content = json["eli5"] as? String
         
         // Extract the database ID with robust type handling
         var databaseId: Int? = nil
@@ -1371,6 +1285,7 @@ extension DatabaseCoordinator {
             relatedArticles: extractSimilarArticles(from: json),
             actionRecommendations: actionRecommendations,
             talkingPoints: talkingPoints,
+            eli5: eli5Content,
             databaseId: databaseId
         )
     }

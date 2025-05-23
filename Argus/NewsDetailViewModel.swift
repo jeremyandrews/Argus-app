@@ -604,6 +604,8 @@ final class NewsDetailViewModel: ObservableObject {
             cachedContentBySection["Action Recommendations"] = content
         case .talkingPoints:
             cachedContentBySection["Talking Points"] = content
+        case .eli5:
+            cachedContentBySection["Explain Like I'm 5"] = content
         default:
             cachedContentBySection[section] = content
         }
@@ -914,6 +916,8 @@ final class NewsDetailViewModel: ObservableObject {
             return cachedContentBySection["Action Recommendations"]
         case "Talking Points":
             return cachedContentBySection["Talking Points"]
+        case "Explain Like I'm 5":
+            return cachedContentBySection["Explain Like I'm 5"]
         default:
             return cachedContentBySection[section]
         }

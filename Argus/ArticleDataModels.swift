@@ -120,6 +120,9 @@ final class ArticleModel: Equatable {
     
     /// Talking points for facilitating discussions about the article
     var talkingPoints: String?
+    
+    /// Simplified explanation of the article (Explain Like I'm 5)
+    var eli5: String?
 
     // MARK: - Rich Text Blobs
 
@@ -152,6 +155,9 @@ final class ArticleModel: Equatable {
     
     /// Rich text blob for talking points
     var talkingPointsBlob: Data?
+    
+    /// Rich text blob for eli5 content
+    var eli5Blob: Data?
 
     // MARK: - Additional Metadata
     
@@ -263,6 +269,7 @@ final class ArticleModel: Equatable {
         additionalInsights: String? = nil,
         actionRecommendations: String? = nil,
         talkingPoints: String? = nil,
+        eli5: String? = nil,
         // Legacy field - we'll parse it if provided
         engineStats: String? = nil,
         // New engine stats fields
@@ -281,7 +288,8 @@ final class ArticleModel: Equatable {
         relationToTopicBlob: Data? = nil,
         additionalInsightsBlob: Data? = nil,
         actionRecommendationsBlob: Data? = nil,
-        talkingPointsBlob: Data? = nil
+        talkingPointsBlob: Data? = nil,
+        eli5Blob: Data? = nil
     ) {
         self.id = id
         self.jsonURL = jsonURL
@@ -310,6 +318,7 @@ final class ArticleModel: Equatable {
         self.additionalInsights = additionalInsights
         self.actionRecommendations = actionRecommendations
         self.talkingPoints = talkingPoints
+        self.eli5 = eli5
         // Handle new engine stats fields:
         self.engineModel = engineModel
         self.engineElapsedTime = engineElapsedTime
@@ -370,6 +379,7 @@ final class ArticleModel: Equatable {
         self.additionalInsightsBlob = additionalInsightsBlob
         self.actionRecommendationsBlob = actionRecommendationsBlob
         self.talkingPointsBlob = talkingPointsBlob
+        self.eli5Blob = eli5Blob
     }
 
     /// Regenerates missing blob data for this ArticleModel
@@ -617,6 +627,12 @@ extension ArticleModel {
     var talking_points: String? {
         get { return talkingPoints }
         set { talkingPoints = newValue }
+    }
+    
+    /// The eli5 property of the notification data (snake_case format)
+    var eli5_text: String? {
+        get { return eli5 }
+        set { eli5 = newValue }
     }
 
     /// The engine_stats property of the notification data (renamed to match NotificationData)
