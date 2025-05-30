@@ -734,7 +734,7 @@ struct NewsView: View {
                     // Use NonSelectableRichTextView to match NewsDetailView's rendering
                     NonSelectableRichTextView(attributedString: attributedString)
                         .foregroundColor(.secondary)
-                        .padding(.top, 5)
+                        .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.disabled)
                 } else {
                     // Fallback to plain text with original styling
@@ -743,7 +743,6 @@ struct NewsView: View {
                         .foregroundColor(.secondary) // Keep the original color
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 5)
                         .textSelection(.disabled)
                 }
             }

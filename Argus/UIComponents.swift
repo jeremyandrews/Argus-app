@@ -146,6 +146,19 @@ struct NonSelectableRichTextView: UIViewRepresentable {
 
         uiView.attributedText = mutableString
         uiView.textAlignment = .left
+        
+        // Set the container width to match the proposal
+        let width = UIScreen.main.bounds.width - 40
+        uiView.textContainer.size.width = width
+        
+        // Force the text view to be exactly the size of its content
+        let layoutManager = uiView.layoutManager
+        let textContainer = uiView.textContainer
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        
+        // Set frame to exact content size to prevent extra spacing
+        uiView.frame = CGRect(x: 0, y: 0, width: width, height: max(usedRect.height, 0))
+        
         uiView.invalidateIntrinsicContentSize()
         uiView.layoutIfNeeded()
     }
@@ -156,13 +169,13 @@ struct NonSelectableRichTextView: UIViewRepresentable {
         uiView.textContainer.size.width = width
         uiView.layoutIfNeeded()
 
-        // Calculate height that fits all content
-        let fittingSize = uiView.sizeThatFits(CGSize(
-            width: width,
-            height: UIView.layoutFittingExpandedSize.height
-        ))
-
-        return fittingSize
+        // Use precise text measurement to avoid extra spacing
+        let layoutManager = uiView.layoutManager
+        let textContainer = uiView.textContainer
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        
+        // Return the exact height needed for the text content
+        return CGSize(width: width, height: max(usedRect.height, 0))
     }
 }
 

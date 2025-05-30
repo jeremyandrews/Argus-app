@@ -98,6 +98,43 @@ To complete the Legacy Code Removal phase, we should focus on:
 
 ## Current Work Focus
 
+- **Fixed Sync Logic for Target-Based Article Processing** (Completed):
+  - Resolved critical issue where sync was limited to processing only 50 articles total, regardless of how many were new vs duplicates
+  - Root cause: APIClient artificially limited processing to 50 articles before checking if they were actually new in the database
+  - This meant users could get fewer than 50 new articles if many were duplicates, and potentially miss new content after the cutoff
+  
+  - **Implementation Details**:
+    - **Updated APIClient.swift**:
+      - Changed progress handler from `((Int, Int) -> Void)?` to `((String) -> Void)?` for phase-based reporting
+      - Removed artificial limit that stopped at 50 articles
+      - Now processes ALL articles the server sends (server already does smart filtering)
+      - Changed from numeric progress to phase-based: "Checking for new articles..." → "Downloading new articles..."
+    
+    - **Enhanced ArticleService.swift**:
+      - Added new target-based `processRemoteArticles` method with `targetNewArticles: Int = 50` parameter
+      - Implements early termination when target number of NEW articles is reached
+      - Updated `syncArticlesFromServer` to use target-based approach  
+      - Updated `performBackgroundSync` to use phase-based progress reporting
+      - Maintains backward compatibility with legacy method signature
+    
+    - **Updated ArticleServiceProtocol.swift**:
+      - Updated method signatures to use phase-based progress handlers
+      - Maintains API compatibility while enabling better UX
+
+  - **Key Behavior Changes**:
+    - **Before**: Stop after processing 50 articles total (includes duplicates)
+    - **After**: Process until 50 NEW articles found OR all server articles processed
+    - **Progress**: Standard iOS pattern: "Checking..." → "Downloading..." → "Found X new articles"
+    - **Performance**: Early termination saves processing time when target is reached
+    - **Reliability**: Users always get up to 50 new articles when available
+
+  - **Benefits**:
+    - More reliable sync ensuring users get the expected number of new articles
+    - No missed content due to artificial processing limits
+    - Better user experience with familiar iOS progress patterns
+    - Improved performance through early termination
+    - Maintains all existing functionality while fixing the core issue
+
 - **Fixed Database ID Display Flow** (Completed):
   - Resolved a critical bug where article database IDs were not being displayed in the UI:
     - Root cause: Database ID was correctly extracted from JSON in `processArticleJSON` but wasn't being passed to the `ArticleModel` constructor in `ArticleService.swift`
@@ -522,6 +559,7 @@ To complete the Legacy Code Removal phase, we should focus on:
 - **Simplified Implementation**: Removed dual-implementation pattern by simplifying MigrationAwareArticleService
 - **Settings Functionality**: Fixed issues with settings updates using Combine-based observation in ViewModels
 - **Enhanced Related Articles**: Added additional vector and entity similarity metrics to provide deeper insight into article relationships
+- **Sync Reliability**: Fixed target-based sync logic to ensure users always get the expected number of new articles
 
 ## Current Work Focus
 
@@ -573,141 +611,4 @@ To complete the Legacy Code Removal phase, we should focus on:
 
 ## Recent Changes
 
-- **Implemented Auto-Redirect for Empty Topics** (Completed):
-  - Resolved issue where users saw "No news is good news" when selecting a topic with no content:
-    - Problem: When a user selected a topic with no content, they would see an empty state view suggesting there was no news at all
-    - This created a suboptimal user experience, as content might be available in other topics
-  - Implementation details:
-    - Modified `applyTopicFilter` method in `NewsViewModel` to auto-redirect to "All" when a selected topic has no content:
-      ```swift
-      // Auto-redirect to "All" if no content is available for the selected topic
-      if filteredArticles.isEmpty && topic != "All" {
-          AppLogger.database.debug("No content for topic '\(topic)', auto-redirecting to 'All'")
-          
-          // Revert to "All" topic
-          selectedTopic = "All"
-          
-          // Save the preference
-          saveUserPreferences()
-          
-          // Refresh with "All" topics
-          await refreshArticles()
-      }
-      ```
-    - Updated the empty state message in `NewsView+Extensions.swift` to provide better context during transition:
-      ```swift
-      // This case should rarely happen now due to auto-redirect,
-      // but include it for completeness
-      return "No articles found for topic '\(viewModel.selectedTopic)'. Redirecting to All topics..."
-      ```
-  - Results:
-    - Users now automatically see content from "All" topics if their selected topic is empty
-    - Eliminates the confusing user experience of suggesting there's no news when content exists
-    - Maintains user preferences by saving the redirected selection to UserDefaults
-    - Provides clear logging for debugging purposes
-  - Key learnings:
-    - Smart defaults and automatic fallbacks can significantly improve user experience
-    - Always provide a path to content when possible instead of showing empty states
-    - Consider the full context of user selections when designing UI flows
-    - Small UX improvements can have a significant impact on overall app usability
-
-- **Simplified Related Content Implementation** (Completed):
-  - Streamlined and simplified the Related Content implementation using the same pattern as Engine Stats:
-    - Problem: The previous implementation used raw dictionaries with complex state management
-    - Approach: Refactored to use a structured data model with clean separation of concerns
-  - Implementation details:
-    - Created a dedicated `RelatedArticleData` struct to hold strongly-typed data:
-      ```swift
-      struct RelatedArticleData {
-          let title: String
-          let summary: String
-          let publishedDate: Date?
-          let category: String
-          let qualityScore: Int
-          let similarityScore: Double
-          let jsonURL: String
-          
-          // Computed properties for formatting
-          var formattedDate: String {...}
-          var qualityDescription: String {...}
-          var similarityPercent: String {...}
-      }
-      ```
-    - Implemented a structured JSON parser (`parseRelatedArticlesJSON`) with proper error handling
-    - Created a dedicated view component (`RelatedArticlesView`) for displaying related articles
-    - Added a clean navigation flow with `loadRelatedArticle` function for handling article selection
-    - Used proper type-safe programming patterns throughout
-  - Results:
-    - Consistent implementation pattern between Engine Stats and Related Content sections
-    - Better type safety with structured data instead of raw dictionaries
-    - Clean separation between data, parsing, and UI components
-    - Improved maintainability with localized changes in modular components
-    - More predictable behavior and error handling
-  - Key learnings:
-    - Structured data types with computed properties simplify both processing and display logic
-    - Dedicated view components with clear responsibilities make code more maintainable
-    - Moving implementation components to the proper scope prevents compiler errors
-    - Following consistent patterns across the codebase improves developer experience
-
-- **Fixed Article Navigation Flicker Issue** (Completed):
-  - Resolved visual issue when navigating between articles using chevron buttons:
-    - Problem symptoms: When navigating to a new article, three different states would display in rapid succession:
-      1. First showing the article as bold/unread
-      2. Then showing it with unformatted content
-      3. Finally showing it with properly formatted content
-    - Root cause: The UI was being updated with unformatted content before formatted blobs were extracted
-  - Implementation details:
-    - Modified `navigateToArticle(direction:)` in `NewsDetailViewModel.swift` to use a content-first approach:
-      ```swift
-      // Extract formatted content from blobs BEFORE updating the UI
-      var extractedTitle: NSAttributedString? = nil
-      var extractedBody: NSAttributedString? = nil
-      var extractedSummary: NSAttributedString? = nil
-      
-      // After extraction is complete, update the UI in a single operation
-      await MainActor.run {
-          // CRITICAL: Set formatted content BEFORE triggering UI refresh
-          titleAttributedString = extractedTitle
-          bodyAttributedString = extractedBody
-          summaryAttributedString = extractedSummary
-          
-          // Force UI refresh AFTER all content is ready
-          contentTransitionID = UUID()
-          scrollToTopTrigger = UUID()
-      }
-      ```
-    - Took advantage of the fact that title and body blobs are always available in the database
-    - Restructured code to extract all blob content first, then update UI only once with fully formatted content
-    - Removed unused variables causing compiler warnings
-  - Results:
-    - Navigation between articles now shows only the final formatted state with no flickering
-    - No intermediate unformatted content is displayed during transitions
-    - Improved user experience with smoother, more professional transitions
-    - Eliminated jarring content changes that were distracting when reviewing multiple articles
-  - Key learnings:
-    - When working with formatted content, it's better to wait until all content is ready before updating UI
-    - The content-first approach (versus UI-first) provides a better user experience for rich content
-    - Taking advantage of pre-generated blobs can significantly improve performance
-    - Single UI updates are less jarring than staged UI updates
-
-- **Fixed Cloud Build String Extension Issue** (Completed):
-  - Resolved build error that occurred in Apple's cloud build but not in local Xcode build:
-    - Error symptoms: `Value of type 'String' has no member 'extractDomain'` in DatabaseCoordinator.swift
-    - Root cause: In cloud builds, String extensions defined in other files may not be visible across file boundaries
-  - Implementation details:
-    - Modified `DatabaseCoordinator.swift` to use the private standalone function instead of calling it as an extension method:
-      ```swift
-      // Before:
-      let domain = url.extractDomain()
-      
-      // After:
-      let domain = extractDomain(from: url)
-      ```
-    - Used the already existing private function implementation in DatabaseCoordinator.swift
-    - Maintained identical functionality while ensuring compatibility with cloud build environments
-  - Results:
-    - App now builds successfully in Apple's cloud build environment
-    - No functional changes, just improved build reliability
-    - Consistent domain extraction behavior between local and cloud builds
-  - Key learnings:
-    - Cloud build environments may process files differently than local X
+- **Implemented Auto-Redirect for

@@ -363,24 +363,24 @@ final class ArticleService: ArticleServiceProtocol {
     ///   - articles: Array of ArticleJSON objects to process
     ///   - progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Number of new articles added to the database
-    func processArticleData(_ articles: [ArticleJSON], progressHandler: ((Int, Int) -> Void)? = nil) async throws -> Int {
-        return try await processRemoteArticles(articles, progressHandler: progressHandler)
+    func processArticleData(_ articles: [ArticleJSON], progressHandler: ((String) -> Void)? = nil) async throws -> Int {
+        return try await processRemoteArticles(articles, targetNewArticles: 50, progressHandler: progressHandler)
     }
 
-    func syncArticlesFromServer(topic: String?, limit _: Int?, progressHandler: ((Int, Int) -> Void)? = nil) async throws -> Int {
+    func syncArticlesFromServer(topic: String?, limit: Int?, progressHandler: ((String) -> Void)? = nil) async throws -> Int {
         do {
-            // Signal that we're searching for articles
-            progressHandler?(0, 0)
+            // Signal that we're checking for articles
+            progressHandler?("Checking for new articles...")
             
-            // Fetch articles from server with default limits
-            // Note: The API sends all unseen articles, so we'll handle limiting after fetch
+            // Fetch articles from server - API will send ALL unseen articles
             let remoteArticles = try await apiClient.fetchArticles(
                 topic: topic,
                 progressHandler: progressHandler
             )
 
-            // Process the articles with progress updates
-            return try await processRemoteArticles(remoteArticles, progressHandler: progressHandler)
+            // Process articles until we find the target number of new ones (default 50)
+            let targetNewArticles = limit ?? 50
+            return try await processRemoteArticles(remoteArticles, targetNewArticles: targetNewArticles, progressHandler: progressHandler)
 
         } catch {
             AppLogger.sync.error("Error syncing articles from server: \(error)")
@@ -388,7 +388,7 @@ final class ArticleService: ArticleServiceProtocol {
         }
     }
 
-    func performBackgroundSync(progressHandler: ((Int, Int) -> Void)? = nil) async throws -> SyncResultSummary {
+    func performBackgroundSync(progressHandler: ((String) -> Void)? = nil) async throws -> SyncResultSummary {
         // Cancel any existing task
         activeSyncTask?.cancel()
 
@@ -399,7 +399,7 @@ final class ArticleService: ArticleServiceProtocol {
         let deletedCount = 0
         
         // Initial progress - searching
-        progressHandler?(0, 0)
+        progressHandler?("Starting background sync...")
 
         // Create a new task for syncing
         do {
@@ -407,38 +407,18 @@ final class ArticleService: ArticleServiceProtocol {
             let subscriptions = await SubscriptionsView().loadSubscriptions()
             let subscribedTopics = subscriptions.filter { $0.value.isSubscribed }.keys
             
-            // Create a progress tracker across all topics
-            var currentProgress = 0
-            let totalTopics = 1 + subscribedTopics.count // "All" + subscribed topics
-            var topicProgress: ((Int, Int) -> Void)? = nil
-            
-            if let progressHandler = progressHandler {
-                topicProgress = { current, total in
-                    if total > 0 {
-                        // Map the progress of this topic to the overall progress
-                        let topicWeight = 1.0 / Double(totalTopics)
-                        let topicCompletion = Double(current) / Double(total)
-                        let overallProgress = Int(Double(currentProgress) + topicCompletion * 100.0 * topicWeight)
-                        progressHandler(overallProgress, 100)
-                    } else {
-                        // Just pass the searching state
-                        progressHandler(0, 0)
-                    }
-                }
-            }
-
             // Start with "All" topics sync (limited count)
-            addedCount += try await syncArticlesFromServer(topic: nil, limit: 30, progressHandler: topicProgress)
-            currentProgress += 100 / totalTopics
+            progressHandler?("Syncing general articles...")
+            addedCount += try await syncArticlesFromServer(topic: nil, limit: 30, progressHandler: progressHandler)
 
             // Sync each subscribed topic
-            for (index, topic) in subscribedTopics.enumerated() {
+            for topic in subscribedTopics {
                 // Check for cancellation before each topic
                 try Task.checkCancellation()
 
                 // Sync this topic (limited count)
-                addedCount += try await syncArticlesFromServer(topic: topic, limit: 20, progressHandler: topicProgress)
-                currentProgress = ((index + 1) * 100) / totalTopics
+                progressHandler?("Syncing \(topic) articles...")
+                addedCount += try await syncArticlesFromServer(topic: topic, limit: 20, progressHandler: progressHandler)
             }
 
             // Update last sync time
@@ -452,6 +432,9 @@ final class ArticleService: ArticleServiceProtocol {
                 clearCache() // This now runs on cacheQueue
                 continuation.resume()
             }
+            
+            // Final progress message
+            progressHandler?("Background sync completed - found \(addedCount) new articles")
 
             // Return the summary
             return SyncResultSummary(
@@ -869,244 +852,126 @@ final class ArticleService: ArticleServiceProtocol {
 
     // MARK: - Private Helper Methods
 
-    private func processRemoteArticles(_ articles: [ArticleJSON], progressHandler: ((Int, Int) -> Void)? = nil) async throws -> Int {
+    // New target-based method with phase progress reporting
+    private func processRemoteArticles(_ articles: [ArticleJSON], targetNewArticles: Int = 50, progressHandler: ((String) -> Void)? = nil) async throws -> Int {
         guard !articles.isEmpty else { return 0 }
 
-        // Define missing topics to watch for
-        let missingTopics = Set(["Rust", "Space", "Tuscany", "Vulnerability"])
+        AppLogger.database.debug("🎯 Processing \(articles.count) articles with target of \(targetNewArticles) new articles")
+        progressHandler?("Processing articles...")
         
         var addedCount = 0
-        let totalCount = articles.count
-        
-        // Report initial progress
-        progressHandler?(0, totalCount)
-        
-        // Create a fresh context for this transaction
         let context = ModelContext(modelContainer)
         
-        AppLogger.database.debug("🔄 Starting article processing with batched transaction management")
+        AppLogger.database.debug("🔄 Starting target-based article processing")
         
-        // Process articles in batches for better memory management and transactional safety
-        let batchSize = 10
-        for batchStart in stride(from: 0, to: totalCount, by: batchSize) {
-            // Calculate the end index for this batch
-            let batchEnd = min(batchStart + batchSize, totalCount)
-            AppLogger.database.debug("📝 Starting batch \(batchStart/batchSize + 1): articles \(batchStart+1)-\(batchEnd) of \(totalCount)")
-            
-            // Process each article in the batch
-            for index in batchStart..<batchEnd {
-                let article = articles[index]
-                
-                // Report progress every few articles
-                if index % 2 == 0 || index == totalCount - 1 {
-                    progressHandler?(index + 1, totalCount)
-                }
-                
-                // Special logging for missing topics only
-                if let topic = article.topic, missingTopics.contains(topic) {
-                    AppLogger.database.debug("📊 MISSING TOPIC: Processing article with topic '\(topic)' - jsonURL: \(article.jsonURL)")
-                }
-                
-                // Extract the jsonURL for checking duplicates
-                let jsonURLString = article.jsonURL
-
-                // Skip articles with empty jsonURL
-                guard !jsonURLString.isEmpty else {
-                    AppLogger.database.warning("⚠️ Skipping article with empty jsonURL")
-                    continue
-                }
-
-                // Efficiently check for duplicates using a direct predicate query
-                // All checks and insertions within this batch are part of the same transaction
-                let existingArticlePredicate = #Predicate<ArticleModel> { $0.jsonURL == jsonURLString }
-                let existingArticleDescriptor = FetchDescriptor<ArticleModel>(predicate: existingArticlePredicate)
-                let existingArticles = try context.fetch(existingArticleDescriptor)
-
-                if existingArticles.isEmpty {
-                    // Create a new ArticleModel
-                    let date = Date()
-                    
-                    // Log field values before model creation
-                    AppLogger.database.debug("""
-                    📊 ARTICLE MODEL CREATION - Field Values:
-                    - jsonURL: \(article.jsonURL)
-                    - title: \(article.title.prefix(30))...
-                    - body: \(article.body.prefix(30))...
-                    - summary: \(article.summary?.prefix(30) ?? "nil")...
-                    - criticalAnalysis: \(article.criticalAnalysis?.prefix(30) ?? "nil")...
-                    - logicalFallacies: \(article.logicalFallacies?.prefix(30) ?? "nil")...
-                    - sourceAnalysis: \(article.sourceAnalysis?.prefix(30) ?? "nil")...
-                    - relationToTopic: \(article.relationToTopic?.prefix(30) ?? "nil")...
-                    - additionalInsights: \(article.additionalInsights?.prefix(30) ?? "nil")...
-                    - actionRecommendations: \(article.actionRecommendations?.prefix(30) ?? "nil")...
-                    - talkingPoints: \(article.talkingPoints?.prefix(30) ?? "nil")...
-                    """)
-                    
-                    let newArticle = ArticleModel(
-                        id: UUID(),
-                        jsonURL: article.jsonURL,
-                        url: article.url,
-                        title: article.title,
-                        body: article.body,
-                        domain: article.domain,
-                        articleTitle: article.articleTitle,
-                        affected: article.affected,
-                        publishDate: article.pubDate ?? date,
-                        addedDate: date,
-                        topic: article.topic,
-                        isViewed: false,
-                        isBookmarked: false,
-                        sourcesQuality: article.sourcesQuality,
-                        argumentQuality: article.argumentQuality,
-                        sourceType: article.sourceType,
-                        sourceAnalysis: article.sourceAnalysis,
-                        quality: article.quality,
-                        summary: article.summary,
-                        criticalAnalysis: article.criticalAnalysis,
-                        logicalFallacies: article.logicalFallacies,
-                        relationToTopic: article.relationToTopic,
-                        additionalInsights: article.additionalInsights,
-                        actionRecommendations: article.actionRecommendations,
-                        talkingPoints: article.talkingPoints,
-                        eli5: article.eli5,
-                        
-                        // Add structured engine stats
-                        engineModel: article.engineModel,
-                        engineElapsedTime: article.engineElapsedTime,
-                        engineRawStats: article.engineRawStats,
-                        engineSystemInfo: article.engineSystemInfo,
-                        
-                        // BUGFIX: Add database ID - this was missing!
-                        databaseId: article.databaseId,
-                        
-                        relatedArticles: article.relatedArticles
-                    )
-                    
-                    // Log field values after model creation
-                    AppLogger.database.debug("""
-                    📊 ARTICLE MODEL CREATED - Field Verification:
-                    - additionalInsights exists: \(newArticle.additionalInsights != nil)
-                    - actionRecommendations exists: \(newArticle.actionRecommendations != nil)
-                    - talkingPoints exists: \(newArticle.talkingPoints != nil)
-                    """)
-                    
-                    // Add logging for related articles
-                    if let relatedArticles = article.relatedArticles, !relatedArticles.isEmpty {
-                        AppLogger.database.debug("Transferring \(relatedArticles.count) related articles to ArticleModel for \(article.jsonURL)")
-                    }
-
-                    context.insert(newArticle)
-                    
-                    // Special logging for missing topics only
-                    if let topic = article.topic, missingTopics.contains(topic) {
-                        AppLogger.database.debug("✅ MISSING TOPIC: Added new article with topic '\(topic)' - title: \(article.title)")
-                    }
-
-                    addedCount += 1
-                } else {
-                    // Special logging for missing topics only
-                    if let topic = article.topic, missingTopics.contains(topic) {
-                        AppLogger.database.debug("⚠️ MISSING TOPIC: Skipping duplicate article with topic '\(topic)'")
-                    } else {
-                        // Log that we're skipping a duplicate (normal logging)
-                        AppLogger.database.debug("Skipping duplicate article with jsonURL: \(jsonURLString)")
-                    }
-
-                    // We already have this article - update any missing fields if needed
-                    // This could be expanded to update specific fields that might change
-                }
+        // Process articles until we reach target or process all
+        for (index, article) in articles.enumerated() {
+            // Check if we've reached our target
+            if addedCount >= targetNewArticles {
+                AppLogger.database.debug("🎯 Reached target of \(targetNewArticles) new articles, stopping early (processed \(index + 1) of \(articles.count))")
+                break
             }
             
-            // Log the state of some critical fields before saving to the database
-            do {
-                // Calculate the time threshold outside the predicate
-                let timeThreshold = Date().addingTimeInterval(-10)
-                
-                let recentDescriptor = FetchDescriptor<ArticleModel>(
-                    predicate: #Predicate<ArticleModel> { $0.addedDate > timeThreshold }
-                )
-                let recentArticles = try context.fetch(recentDescriptor)
-                for article in recentArticles {
-                    // Only check recently added articles
-                    AppLogger.database.debug("""
-                    📊 PRE-SAVE VERIFICATION for article \(article.id):
-                    - additionalInsights: \(article.additionalInsights?.prefix(20) ?? "nil")...
-                    - actionRecommendations: \(article.actionRecommendations?.prefix(20) ?? "nil")...
-                    - talkingPoints: \(article.talkingPoints?.prefix(20) ?? "nil")...
-                    """)
-                }
-            } catch {
-                AppLogger.database.error("Error fetching recent articles for pre-save verification: \(error)")
+            // Extract the jsonURL for checking duplicates
+            let jsonURLString = article.jsonURL
+
+            // Skip articles with empty jsonURL
+            guard !jsonURLString.isEmpty else {
+                AppLogger.database.warning("⚠️ Skipping article with empty jsonURL")
+                continue
             }
-            
-            // Save after each batch to ensure changes are committed
-            // This creates transaction boundaries after each batch
-            try context.save()
-            AppLogger.database.debug("✅ Completed and saved batch \(batchStart/batchSize + 1)")
-            
-            // Verify fields after saving to check if they're still there
-            do {
-                // Calculate the time threshold outside the predicate
-                let timeThreshold = Date().addingTimeInterval(-10)
+
+            // Check for duplicates
+            let existingArticlePredicate = #Predicate<ArticleModel> { $0.jsonURL == jsonURLString }
+            let existingArticleDescriptor = FetchDescriptor<ArticleModel>(predicate: existingArticlePredicate)
+            let existingArticles = try context.fetch(existingArticleDescriptor)
+
+            if existingArticles.isEmpty {
+                // Create a new ArticleModel
+                let date = Date()
                 
-                let recentDescriptor = FetchDescriptor<ArticleModel>(
-                    predicate: #Predicate<ArticleModel> { $0.addedDate > timeThreshold }
+                let newArticle = ArticleModel(
+                    id: UUID(),
+                    jsonURL: article.jsonURL,
+                    url: article.url,
+                    title: article.title,
+                    body: article.body,
+                    domain: article.domain,
+                    articleTitle: article.articleTitle,
+                    affected: article.affected,
+                    publishDate: article.pubDate ?? date,
+                    addedDate: date,
+                    topic: article.topic,
+                    isViewed: false,
+                    isBookmarked: false,
+                    sourcesQuality: article.sourcesQuality,
+                    argumentQuality: article.argumentQuality,
+                    sourceType: article.sourceType,
+                    sourceAnalysis: article.sourceAnalysis,
+                    quality: article.quality,
+                    summary: article.summary,
+                    criticalAnalysis: article.criticalAnalysis,
+                    logicalFallacies: article.logicalFallacies,
+                    relationToTopic: article.relationToTopic,
+                    additionalInsights: article.additionalInsights,
+                    actionRecommendations: article.actionRecommendations,
+                    talkingPoints: article.talkingPoints,
+                    eli5: article.eli5,
+                    engineModel: article.engineModel,
+                    engineElapsedTime: article.engineElapsedTime,
+                    engineRawStats: article.engineRawStats,
+                    engineSystemInfo: article.engineSystemInfo,
+                    databaseId: article.databaseId,
+                    relatedArticles: article.relatedArticles
                 )
-                let recentArticles = try context.fetch(recentDescriptor)
-                for article in recentArticles {
-                    // Only check recently added articles
-                    AppLogger.database.debug("""
-                    📊 POST-SAVE VERIFICATION for article \(article.id):
-                    - additionalInsights: \(article.additionalInsights?.prefix(20) ?? "nil")...
-                    - actionRecommendations: \(article.actionRecommendations?.prefix(20) ?? "nil")...
-                    - talkingPoints: \(article.talkingPoints?.prefix(20) ?? "nil")...
-                    """)
+                
+                context.insert(newArticle)
+                addedCount += 1
+                
+                // Save every 10 articles to avoid large transactions
+                if addedCount % 10 == 0 {
+                    try context.save()
+                    AppLogger.database.debug("💾 Saved batch after \(addedCount) new articles")
                 }
-            } catch {
-                AppLogger.database.error("Error fetching recent articles for post-save verification: \(error)")
             }
         }
         
-        AppLogger.database.debug("✅ All batches processed - added \(addedCount) new articles")
+        // Final save for any remaining articles
+        try context.save()
+        AppLogger.database.debug("✅ Final save completed - added \(addedCount) new articles")
         
-        // Now that all articles are saved, generate rich text content
-        // This is done as a separate step to avoid overloading the initial insertion transaction
+        // Generate rich text for new articles
         if addedCount > 0 {
             AppLogger.database.debug("⚙️ Generating rich text for \(addedCount) new articles")
             
-            // Fetch all the new articles we just added
-            var newArticlesFetchDescriptor = FetchDescriptor<ArticleModel>()
-            newArticlesFetchDescriptor.sortBy = [SortDescriptor(\.addedDate, order: .reverse)]
-            newArticlesFetchDescriptor.fetchLimit = addedCount
+            // Fetch the new articles we just added
+            let timeThreshold = Date().addingTimeInterval(-30) // Last 30 seconds
+            var newArticleDescriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { $0.addedDate > timeThreshold }
+            )
+            newArticleDescriptor.sortBy = [SortDescriptor(\.addedDate, order: .reverse)]
+            newArticleDescriptor.fetchLimit = addedCount
             
-            let newArticles = try context.fetch(newArticlesFetchDescriptor)
+            let newArticles = try context.fetch(newArticleDescriptor)
             
-            // Process rich text generation in smaller batches too
-            let richTextBatchSize = 5
-            for batchStart in stride(from: 0, to: newArticles.count, by: richTextBatchSize) {
-                let batchEnd = min(batchStart + richTextBatchSize, newArticles.count)
-                AppLogger.database.debug("⚙️ Generating rich text for batch \(batchStart/richTextBatchSize + 1): articles \(batchStart+1)-\(batchEnd) of \(newArticles.count)")
-                
-                for i in batchStart..<batchEnd {
-                    // Generate rich text directly on the ArticleModel
-                    await generateInitialRichText(for: newArticles[i])
-                }
-                
-                // Save after each batch of rich text generation
-                try context.save()
-                AppLogger.database.debug("✅ Completed and saved rich text batch \(batchStart/richTextBatchSize + 1)")
+            // Generate rich text for each new article
+            for article in newArticles {
+                await generateInitialRichText(for: article)
             }
             
-            AppLogger.database.debug("✅ Rich text generation completed for all \(addedCount) new articles")
+            try context.save()
+            AppLogger.database.debug("✅ Rich text generation completed for \(addedCount) new articles")
         }
 
         // Clear cache safely as we have new data
         await withCheckedContinuation { continuation in
-            clearCache() // This now runs on cacheQueue
+            clearCache()
             continuation.resume()
         }
+        
+        // Update final progress message
+        progressHandler?("Found \(addedCount) new articles")
 
-        // Return count of new articles
         return addedCount
     }
 

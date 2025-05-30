@@ -308,12 +308,10 @@ final class NewsViewModel: ObservableObject {
             // Sync with server
             let addedCount = try await articleOperations.syncContent(
                 topic: selectedTopic != "All" ? selectedTopic : nil,
-                progressHandler: { current, total in
-                    // Update progress state
-                    if current > 0 && total > 0 {
-                        Task { @MainActor in
-                            self.syncStatus = .downloading(current: current, total: total)
-                        }
+                progressHandler: { message in
+                    // Update progress state with phase message
+                    Task { @MainActor in
+                        self.syncStatus = .syncing(message: message)
                     }
                 }
             )

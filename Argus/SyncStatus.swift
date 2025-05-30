@@ -8,8 +8,8 @@ enum SyncStatus: Equatable {
     /// Actively searching for new articles from the server
     case searching
     
-    /// Downloading articles with progress information
-    case downloading(current: Int, total: Int)
+    /// Syncing articles with phase information
+    case syncing(message: String)
     
     /// Sync operation completed successfully
     case complete
@@ -24,10 +24,9 @@ enum SyncStatus: Equatable {
             return ""
         case .searching:
             return "Checking for new articles..."
-        case .downloading(let current, let total):
-            // Format matches standard iOS progress indicators
-            // Example: "Downloading articles... (4 of 10)"
-            return "Downloading articles... (\(current) of \(total))"
+        case .syncing(let message):
+            // Display the phase message directly
+            return message
         case .complete:
             return "Articles updated"
         case .error(let message):
@@ -42,7 +41,7 @@ enum SyncStatus: Equatable {
             return ""
         case .searching:
             return "magnifyingglass"
-        case .downloading:
+        case .syncing:
             return "arrow.down.circle"
         case .complete:
             return "checkmark.circle"
@@ -64,7 +63,7 @@ enum SyncStatus: Equatable {
     /// Returns true if the status represents an active operation
     var isActive: Bool {
         switch self {
-        case .searching, .downloading:
+        case .searching, .syncing:
             return true
         default:
             return false

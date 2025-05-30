@@ -59,8 +59,8 @@ struct SyncStatusIndicator: View {
         .background(Color(.systemGroupedBackground))
 }
 
-#Preview("Downloading State") {
-    SyncStatusIndicator(status: .constant(.downloading(current: 4, total: 10)))
+#Preview("Syncing State") {
+    SyncStatusIndicator(status: .constant(.syncing(message: "Downloading new articles...")))
         .padding()
         .background(Color(.systemGroupedBackground))
 }
@@ -82,7 +82,7 @@ struct SyncStatusIndicator: View {
     VStack(spacing: 20) {
         SyncStatusIndicator(status: .constant(.idle))
         SyncStatusIndicator(status: .constant(.searching))
-        SyncStatusIndicator(status: .constant(.downloading(current: 4, total: 10)))
+        SyncStatusIndicator(status: .constant(.syncing(message: "Downloading new articles...")))
         SyncStatusIndicator(status: .constant(.complete))
         SyncStatusIndicator(status: .constant(.error("Network connection failed")))
     }

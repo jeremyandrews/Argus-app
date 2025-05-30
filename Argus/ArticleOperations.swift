@@ -487,7 +487,7 @@ final class ArticleOperations {
     func syncContent(
         topic: String? = nil,
         limit: Int? = 30,
-        progressHandler: ((Int, Int) -> Void)? = nil
+        progressHandler: ((String) -> Void)? = nil
     ) async throws -> Int {
         do {
             let articleService = ArticleService.shared
@@ -508,7 +508,7 @@ final class ArticleOperations {
     /// Performs a background sync for all subscribed topics
     /// - Parameter progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Summary of the sync operation
-    func performBackgroundSync(progressHandler: ((Int, Int) -> Void)? = nil) async throws -> SyncResultSummary {
+    func performBackgroundSync(progressHandler: ((String) -> Void)? = nil) async throws -> SyncResultSummary {
         return try await articleService.performBackgroundSync(progressHandler: progressHandler)
     }
 
