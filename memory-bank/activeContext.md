@@ -611,4 +611,50 @@ To complete the Legacy Code Removal phase, we should focus on:
 
 ## Recent Changes
 
+- **Fixed NewsView Empty Line Spacing Issue** (Completed):
+  - Resolved intermittent large blank spaces appearing between article tiny_summary and domain/source line in NewsView
+  - Issue was caused by combination of factors:
+    1. Imprecise height calculation in `NonSelectableRichTextView.sizeThatFits` method
+    2. Extra `.padding(.top, 5)` applied to summary content creating unwanted space
+    3. SwiftUI allowing view expansion beyond intrinsic content size
+  
+  - **Implementation Details**:
+    - **Enhanced UIComponents.swift**:
+      - Modified `NonSelectableRichTextView.sizeThatFits` to use `NSLayoutManager.usedRect(for:)` for precise text measurement
+      - Updated `updateUIView` to set UITextView frame to exact content bounds
+      - Replaced imprecise `UITextView.sizeThatFits` with exact layout manager calculations
+    
+    - **Updated NewsView.swift**:
+      - Removed `.padding(.top, 5)` from `summaryContent` function that was adding unwanted space
+      - Added `.fixedSize(horizontal: false, vertical: true)` modifier to force SwiftUI to respect exact content size
+      - Ensured consistent spacing between summary and domain/source elements
+  
+  - **Key Technical Changes**:
+    ```swift
+    // Before: Imprecise height calculation
+    let fittingSize = uiView.sizeThatFits(CGSize(
+        width: width,
+        height: UIView.layoutFittingExpandedSize.height
+    ))
+    
+    // After: Precise text measurement
+    let layoutManager = uiView.layoutManager
+    let textContainer = uiView.textContainer
+    let usedRect = layoutManager.usedRect(for: textContainer)
+    return CGSize(width: width, height: max(usedRect.height, 0))
+    ```
+  
+  - **Benefits**:
+    - Eliminated intermittent large blank spaces in article list view
+    - Consistent spacing between summary content and domain/source line
+    - Improved visual consistency between NewsView and NewsDetailView
+    - Fix applies immediately to all existing articles (calculation happens at render time)
+    - Better overall visual polish and user experience
+  
+  - **Technical Notes**:
+    - Height calculation occurs at UI render time, not article storage time
+    - Fix applies to all existing content immediately without need for new syncs
+    - Used precise text measurement rather than estimated sizing
+    - Maintained all rich text formatting while ensuring proper layout
+
 - **Implemented Auto-Redirect for
