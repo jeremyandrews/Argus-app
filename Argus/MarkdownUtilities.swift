@@ -29,9 +29,9 @@ public enum SectionNaming {
         case "Source Analysis": return .sourceAnalysis
         case "Relevance": return .relationToTopic
         case "Context & Perspective": return .additionalInsights
-        case "Consider This": return .actionRecommendations
+        case "What You Can Do": return .actionRecommendations
         case "Talking Points": return .talkingPoints
-        case "In Simple Terms": return .eli5
+        case "Simple Breakdown": return .eli5
         default: return .body
         }
     }
@@ -47,9 +47,9 @@ public enum SectionNaming {
         case .sourceAnalysis: return "Source Analysis"
         case .relationToTopic: return "Relevance"
         case .additionalInsights: return "Context & Perspective"
-        case .actionRecommendations: return "Consider This"
+        case .actionRecommendations: return "What You Can Do"
         case .talkingPoints: return "Talking Points"
-        case .eli5: return "In Simple Terms"
+        case .eli5: return "Simple Breakdown"
         }
     }
 
@@ -62,9 +62,9 @@ public enum SectionNaming {
         case "Source Analysis": return "sourceAnalysis"
         case "Relevance": return "relationToTopic"
         case "Context & Perspective": return "additionalInsights"
-        case "Consider This": return "actionRecommendations"
+        case "What You Can Do": return "actionRecommendations"
         case "Talking Points": return "talkingPoints"
-        case "In Simple Terms": return "eli5"
+        case "Simple Breakdown": return "eli5"
         default: return section.lowercased()
         }
     }

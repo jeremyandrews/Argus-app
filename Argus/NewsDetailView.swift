@@ -132,14 +132,14 @@ struct NewsDetailView: View {
     private static func getDefaultExpandedSections() -> [String: Bool] {
         return [
             "Summary": true,
+            "Relevance": false,
+            "Simple Breakdown": false,
+            "Context & Perspective": false,
+            "Talking Points": false,
+            "What You Can Do": false,
+            "Source Analysis": false,
             "Critical Analysis": false,
             "Logical Fallacies": false,
-            "Source Analysis": false,
-            "Relevance": false,
-            "Context & Perspective": false,
-            "Action Recommendations": false,
-            "Talking Points": false,
-            "Explain Like I'm 5": false,
             "Argus Engine Stats": false,
             "Preview": false,
             "Related Articles": false,
@@ -456,15 +456,46 @@ struct NewsDetailView: View {
         let relevanceContent = n.relationToTopic ?? (json["relationToTopic"] as? String ?? "")
         sections.append(ContentSection(header: "Relevance", content: relevanceContent))
 
-        // 3) "Critical Analysis" section
-        let criticalContent = n.criticalAnalysis ?? (json["criticalAnalysis"] as? String ?? "")
-        sections.append(ContentSection(header: "Critical Analysis", content: criticalContent))
+        // 3) "Simple Breakdown"
+        // Look for snake_case key in JSON first (as received from backend)
+        // Then fall back to camelCase key (as stored in content dictionary)
+        let eli5Content = n.eli5 ?? 
+                        (json["eli5"] as? String ?? 
+                        json["eli5_text"] as? String ?? "")
+        // Only add the section if there's content
+        if !eli5Content.isEmpty {
+            sections.append(ContentSection(header: "Simple Breakdown", content: eli5Content))
+        }
 
-        // 4) "Logical Fallacies" section
-        let fallaciesContent = n.logicalFallacies ?? (json["logicalFallacies"] as? String ?? "")
-        sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
+        // 4) "Context & Perspective" (aka "additional_insights")
+        let insights = n.additionalInsights ?? (json["additionalInsights"] as? String ?? "")
+        if !insights.isEmpty {
+            sections.append(ContentSection(header: "Context & Perspective", content: insights))
+        }
+        
+        // 5) "Talking Points"
+        // Look for snake_case key in JSON first (as received from backend)
+        // Then fall back to camelCase key (as stored in content dictionary)
+        let talkingPoints = n.talkingPoints ?? 
+                        (json["talking_points"] as? String ?? 
+                            json["talkingPoints"] as? String ?? "")
+        // Only add the section if there's content
+        if !talkingPoints.isEmpty {
+            sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
+        }
+        
+        // 6) "What You Can Do" 
+        // Look for snake_case key in JSON first (as received from backend)
+        // Then fall back to camelCase key (as stored in content dictionary)
+        let recommendations = n.actionRecommendations ?? 
+                            (json["action_recommendations"] as? String ?? 
+                            json["actionRecommendations"] as? String ?? "")
+        // Only add the section if there's content
+        if !recommendations.isEmpty {
+            sections.append(ContentSection(header: "What You Can Do", content: recommendations))
+        }
 
-        // 5) "Source Analysis" section
+        // 7) "Source Analysis" section
         let sourceAnalysisText = n.sourceAnalysis ?? (json["sourceAnalysis"] as? String ?? "")
         let sourceType = n.sourceType ?? (json["sourceType"] as? String ?? "")
         let sourceAnalysisData: [String: Any] = [
@@ -473,44 +504,13 @@ struct NewsDetailView: View {
         ]
         sections.append(ContentSection(header: "Source Analysis", content: sourceAnalysisData))
 
-        // 6) "Context & Perspective" (aka "additional_insights")
-        let insights = n.additionalInsights ?? (json["additionalInsights"] as? String ?? "")
-        if !insights.isEmpty {
-            sections.append(ContentSection(header: "Context & Perspective", content: insights))
-        }
-        
-        // 7) "Action Recommendations" 
-        // Look for snake_case key in JSON first (as received from backend)
-        // Then fall back to camelCase key (as stored in content dictionary)
-        let recommendations = n.actionRecommendations ?? 
-                             (json["action_recommendations"] as? String ?? 
-                              json["actionRecommendations"] as? String ?? "")
-        // Only add the section if there's content
-        if !recommendations.isEmpty {
-            sections.append(ContentSection(header: "Action Recommendations", content: recommendations))
-        }
-        
-        // 8) "Talking Points"
-        // Look for snake_case key in JSON first (as received from backend)
-        // Then fall back to camelCase key (as stored in content dictionary)
-        let talkingPoints = n.talkingPoints ?? 
-                           (json["talking_points"] as? String ?? 
-                            json["talkingPoints"] as? String ?? "")
-        // Only add the section if there's content
-        if !talkingPoints.isEmpty {
-            sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
-        }
-        
-        // 9) "Explain Like I'm 5"
-        // Look for snake_case key in JSON first (as received from backend)
-        // Then fall back to camelCase key (as stored in content dictionary)
-        let eli5Content = n.eli5 ?? 
-                         (json["eli5"] as? String ?? 
-                          json["eli5_text"] as? String ?? "")
-        // Only add the section if there's content
-        if !eli5Content.isEmpty {
-            sections.append(ContentSection(header: "Explain Like I'm 5", content: eli5Content))
-        }
+        // 8) "Critical Analysis" section
+        let criticalContent = n.criticalAnalysis ?? (json["criticalAnalysis"] as? String ?? "")
+        sections.append(ContentSection(header: "Critical Analysis", content: criticalContent))
+
+        // 9) "Logical Fallacies" section
+        let fallaciesContent = n.logicalFallacies ?? (json["logicalFallacies"] as? String ?? "")
+        sections.append(ContentSection(header: "Logical Fallacies", content: fallaciesContent))
 
         // 10) "Argus Engine Stats" (argus_details)
         if let engineString = n.engine_stats {
@@ -981,8 +981,8 @@ struct NewsDetailView: View {
     private func needsConversion(_ sectionHeader: String) -> Bool {
         switch sectionHeader {
         case "Summary", "Critical Analysis", "Logical Fallacies",
-             "Source Analysis", "Relevance", "Context & Perspective",
-             "Action Recommendations", "Talking Points":
+            "Source Analysis", "Relevance", "Context & Perspective",
+            "What You Can Do", "Talking Points", "Simple Breakdown":
             return true
         case "Argus Engine Stats", "Preview", "Related Articles":
             return false
@@ -1197,9 +1197,9 @@ struct NewsDetailView: View {
             .padding(.top, 6)
             .textSelection(.enabled)
             
-        // MARK: - Critical Analysis, Logical Fallacies, Relevance, Context & Perspective, Action Recommendations, Talking Points
+        // MARK: - Critical Analysis, Logical Fallacies, Relevance, Context & Perspective, What You Can Do, Talking Points
         case "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective", 
-             "Action Recommendations", "Talking Points":
+            "What You Can Do", "Talking Points", "Simple Breakdown":
             SectionContentView(
                 section: section,
                 attributedString: getAttributedStringForSection(section.header),
@@ -1552,7 +1552,7 @@ case "Related Articles":
             
             // Log the presence of these fields for debugging
             if !actionRecs.isEmpty {
-                AppLogger.database.debug("Action Recommendations present: \(actionRecs.prefix(50))...")
+                AppLogger.database.debug("What You Can Do present: \(actionRecs.prefix(50))...")
             }
             if !talkingPts.isEmpty {
                 AppLogger.database.debug("Talking Points present: \(talkingPts.prefix(50))...")
@@ -2183,13 +2183,13 @@ struct ShareSelectionView: View {
                 case "Context & Perspective":
                     sectionContent = notification.additionalInsights
                     
-                case "Action Recommendations":
-                    sectionContent = notification.actionRecommendations
-                    
                 case "Talking Points":
                     sectionContent = notification.talkingPoints
                     
-                case "Explain Like I'm 5":
+                case "What You Can Do":
+                    sectionContent = notification.actionRecommendations
+    
+                case "Simple Breakdown":
                     sectionContent = notification.eli5
 
                 case "Argus Engine Stats":
@@ -2302,32 +2302,51 @@ struct ShareSelectionView: View {
     }
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
-        var sections = [
-            ContentSection(header: "Title", content: json["tinyTitle"] as? String ?? ""),
-            ContentSection(header: "Brief Summary", content: json["tinySummary"] as? String ?? ""),
-            ContentSection(header: "Article URL", content: json["url"] as? String ?? ""),
-            ContentSection(header: "Summary", content: json["summary"] as? String ?? ""),
-            ContentSection(header: "Relevance", content: json["relationToTopic"] as? String ?? ""),
-            ContentSection(header: "Critical Analysis", content: json["criticalAnalysis"] as? String ?? ""),
-            ContentSection(header: "Logical Fallacies", content: json["logicalFallacies"] as? String ?? ""),
-            ContentSection(header: "Source Analysis", content: json["sourceAnalysis"] as? String ?? ""),
-        ]
+        var sections: [ContentSection] = []
+        
+        // Share view specific sections first
+        sections.append(ContentSection(header: "Title", content: notification.title))
+        sections.append(ContentSection(header: "Brief Summary", content: notification.body))
+        sections.append(ContentSection(header: "Article URL", content: json["url"] as? String ?? ""))
+        
+        // Follow the same order as the main view for content sections
+        sections.append(ContentSection(header: "Summary", content: notification.summary ?? ""))
+        sections.append(ContentSection(header: "Relevance", content: notification.relationToTopic ?? ""))
+        
+        // Simple Breakdown
+        let eli5Content = notification.eli5 ?? ""
+        if !eli5Content.isEmpty {
+            sections.append(ContentSection(header: "Simple Breakdown", content: eli5Content))
+        }
+        
+        // Context & Perspective
+        let insights = notification.additionalInsights ?? ""
+        if !insights.isEmpty {
+            sections.append(ContentSection(header: "Context & Perspective", content: insights))
+        }
+        
+        // Talking Points
+        let talkingPoints = notification.talkingPoints ?? ""
+        if !talkingPoints.isEmpty {
+            sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
+        }
+        
+        // What You Can Do
+        let recommendations = notification.actionRecommendations ?? ""
+        if !recommendations.isEmpty {
+            sections.append(ContentSection(header: "What You Can Do", content: recommendations))
+        }
+        
+        // Source Analysis
+        sections.append(ContentSection(header: "Source Analysis", content: notification.sourceAnalysis ?? ""))
+        
+        // Critical Analysis
+        sections.append(ContentSection(header: "Critical Analysis", content: notification.criticalAnalysis ?? ""))
+        
+        // Logical Fallacies
+        sections.append(ContentSection(header: "Logical Fallacies", content: notification.logicalFallacies ?? ""))
 
-        let insights = json["additionalInsights"] as? String ?? notification.additionalInsights ?? ""
-        sections.append(ContentSection(header: "Context & Perspective", content: insights))
-        
-        // Always add Action Recommendations
-        let recommendations = json["actionRecommendations"] as? String ?? notification.actionRecommendations ?? ""
-        sections.append(ContentSection(header: "Action Recommendations", content: recommendations))
-        
-        // Always add Talking Points
-        let talkingPoints = json["talkingPoints"] as? String ?? notification.talkingPoints ?? ""
-        sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
-        
-        // Always add Explain Like I'm 5
-        let eli5Content = json["eli5"] as? String ?? notification.eli5 ?? ""
-        sections.append(ContentSection(header: "Explain Like I'm 5", content: eli5Content))
-
+        // Argus Engine Stats
         if let model = json["model"] as? String,
            let elapsedTime = json["elapsedTime"] as? Double,
            let stats = json["stats"] as? String

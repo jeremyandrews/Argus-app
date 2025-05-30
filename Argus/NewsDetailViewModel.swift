@@ -586,7 +586,7 @@ final class NewsDetailViewModel: ObservableObject {
     ///   - content: The content to set
     @MainActor
     private func updateSectionContent(_ section: String, _ field: RichTextField, _ content: NSAttributedString) {
-        // Store in appropriate property
+        // Store in appropriate property - FIXED: Use correct section names
         switch field {
         case .summary:
             summaryAttributedString = content
@@ -601,11 +601,11 @@ final class NewsDetailViewModel: ObservableObject {
         case .additionalInsights:
             cachedContentBySection["Context & Perspective"] = content
         case .actionRecommendations:
-            cachedContentBySection["Action Recommendations"] = content
+            cachedContentBySection["What You Can Do"] = content
         case .talkingPoints:
             cachedContentBySection["Talking Points"] = content
         case .eli5:
-            cachedContentBySection["Explain Like I'm 5"] = content
+            cachedContentBySection["Simple Breakdown"] = content
         default:
             cachedContentBySection[section] = content
         }
@@ -628,7 +628,7 @@ final class NewsDetailViewModel: ObservableObject {
             attributes: [.foregroundColor: UIColor.systemRed]
         )
 
-        // Store the fallback in the appropriate property
+        // Store the fallback in the appropriate property - FIXED: Use correct section names
         switch field {
         case .summary:
             summaryAttributedString = fallbackString
@@ -643,9 +643,11 @@ final class NewsDetailViewModel: ObservableObject {
         case .additionalInsights:
             cachedContentBySection["Context & Perspective"] = fallbackString
         case .actionRecommendations:
-            cachedContentBySection["Action Recommendations"] = fallbackString
+            cachedContentBySection["What You Can Do"] = fallbackString
         case .talkingPoints:
             cachedContentBySection["Talking Points"] = fallbackString
+        case .eli5:
+            cachedContentBySection["Simple Breakdown"] = fallbackString
         default:
             cachedContentBySection[section] = fallbackString
         }
@@ -722,7 +724,7 @@ final class NewsDetailViewModel: ObservableObject {
             ]
         )
 
-        // Store in the appropriate property
+        // Store in the appropriate property - FIXED: Use correct section names
         switch field {
         case .summary:
             summaryAttributedString = tempString
@@ -737,9 +739,11 @@ final class NewsDetailViewModel: ObservableObject {
         case .additionalInsights:
             cachedContentBySection["Context & Perspective"] = tempString
         case .actionRecommendations:
-            cachedContentBySection["Action Recommendations"] = tempString
+            cachedContentBySection["What You Can Do"] = tempString
         case .talkingPoints:
             cachedContentBySection["Talking Points"] = tempString
+        case .eli5:
+            cachedContentBySection["Simple Breakdown"] = tempString
         default:
             cachedContentBySection[section] = tempString
         }
@@ -756,7 +760,7 @@ final class NewsDetailViewModel: ObservableObject {
 
         let richTextContent = articleOperations.generateAllRichTextContent(for: article)
 
-        // Update cached content
+        // Update cached content - FIXED: Use correct section names
         if let content = richTextContent[.title] {
             titleAttributedString = content
         }
@@ -781,7 +785,8 @@ final class NewsDetailViewModel: ObservableObject {
             sourceAnalysisAttributedString = content
         }
 
-        if let content = richTextContent[.relationToTopic] {
+        if let content = richTextContent[.relationToTopic]
+{
             cachedContentBySection["Relevance"] = content
         }
 
@@ -790,11 +795,15 @@ final class NewsDetailViewModel: ObservableObject {
         }
         
         if let content = richTextContent[.actionRecommendations] {
-            cachedContentBySection["Action Recommendations"] = content
+            cachedContentBySection["What You Can Do"] = content
         }
         
         if let content = richTextContent[.talkingPoints] {
             cachedContentBySection["Talking Points"] = content
+        }
+
+        if let content = richTextContent[.eli5] {
+            cachedContentBySection["Simple Breakdown"] = content
         }
 
         isLoading = false
@@ -912,12 +921,12 @@ final class NewsDetailViewModel: ObservableObject {
             return cachedContentBySection["Relevance"]
         case "Context & Perspective":
             return cachedContentBySection["Context & Perspective"]
-        case "Action Recommendations":
-            return cachedContentBySection["Action Recommendations"]
+        case "What You Can Do":
+            return cachedContentBySection["What You Can Do"]
         case "Talking Points":
             return cachedContentBySection["Talking Points"]
-        case "Explain Like I'm 5":
-            return cachedContentBySection["Explain Like I'm 5"]
+        case "Simple Breakdown":
+            return cachedContentBySection["Simple Breakdown"]
         default:
             return cachedContentBySection[section]
         }
@@ -937,7 +946,7 @@ final class NewsDetailViewModel: ObservableObject {
         switch section {
         case "Summary", "Critical Analysis", "Logical Fallacies",
              "Source Analysis", "Relevance", "Context & Perspective",
-             "Action Recommendations", "Talking Points":
+             "What You Can Do", "Talking Points", "Simple Breakdown":
             return true
         case "Argus Engine Stats", "Preview", "Related Articles":
             return false
@@ -993,13 +1002,15 @@ final class NewsDetailViewModel: ObservableObject {
         return [
             "Summary": true,
             "Relevance": false,
+            "Simple Breakdown": false,
+            "Context & Perspective": false,
+            "Talking Points": false,
+            "What You Can Do": false,
             "Critical Analysis": false,
             "Logical Fallacies": false,
             "Source Analysis": false,
-            "Context & Perspective": false,
-            "Action Recommendations": false,
-            "Talking Points": false,
             "Argus Engine Stats": false,
+            "Preview": false,
             "Related Articles": false,
         ]
     }
