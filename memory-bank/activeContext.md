@@ -135,6 +135,67 @@ To complete the Legacy Code Removal phase, we should focus on:
   
   - The fixed implementation ensures a complete, consistent flow for handling the database ID from API to UI
 
+- **Implemented "Explain Like I'm 5" Feature** (Completed):
+  - Added support for the new `eli5` field in the JSON payload:
+    - Simple, plain language explanation of complex article content
+    - Designed to make news accessible to all reading levels
+    - Positioned in the UI under Talking Points and before Argus Engine Stats
+  - Technical implementation:
+    - Added `eli5` field to `ArticleJSON` and `PreparedArticle` structs in ArticleModels.swift:
+      ```swift
+      struct ArticleJSON {
+          // Existing fields...
+          
+          // New fields for R2 URL JSON payload
+          let actionRecommendations: String?
+          let talkingPoints: String?
+          let eli5: String?
+      }
+      ```
+    - Added corresponding property and blob storage field in ArticleDataModels.swift:
+      ```swift
+      @Model
+      final class ArticleModel: Equatable {
+          // Existing fields...
+          
+          // New field
+          var eli5: String?
+          
+          // Blob storage field for rich text
+          var eli5Blob: Data?
+          
+          // API compatibility extension
+          var eli5: String? {
+              get { return eli5 }
+              set { eli5 = newValue }
+          }
+      }
+      ```
+    - Updated MarkdownUtilities.swift for rich text handling:
+      - Added new case to `RichTextField` enum
+      - Implemented section naming and mapping
+      - Added text style configuration
+      - Updated blob storage and retrieval
+      - Included field in verification and regeneration functions
+    - Updated ArticleService.swift with proper handling in:
+      - `regenerateRichTextForField` method to include the eli5 field
+      - `generateRichTextContent` to support the eli5 field
+    - Updated DatabaseCoordinator.swift to:
+      - Extract the eli5 field from JSON in `syncProcessArticleJSON`
+      - Include the eli5 field in the ArticleJSON constructor
+      - Update the `updateFields` method to handle the eli5 field
+    
+  - Format and structure:
+    - `eli5`: Simple paragraph(s) explaining complex topics in plain language
+    - Uses Markdown formatting for rich text display
+    - Typically 2-3 paragraphs of simplified content
+  
+  - User benefits:
+    - Makes complex news topics accessible to users of all reading levels
+    - Provides an entry point for understanding difficult concepts
+    - Increases overall accessibility of content
+    - Maintains consistent rich text rendering across all content types
+
 - **Implemented R2 URL JSON New Fields** (Completed):
   - Added support for two new fields in the JSON payload from the R2 URL:
     - `action_recommendations`: Concrete, actionable steps based on article content
