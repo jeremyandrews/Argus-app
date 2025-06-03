@@ -606,6 +606,8 @@ final class NewsDetailViewModel: ObservableObject {
             cachedContentBySection["Talking Points"] = content
         case .eli5:
             cachedContentBySection["Simple Breakdown"] = content
+        case .clusterSummary:
+            cachedContentBySection["Cluster Summary"] = content
         default:
             cachedContentBySection[section] = content
         }
@@ -648,6 +650,8 @@ final class NewsDetailViewModel: ObservableObject {
             cachedContentBySection["Talking Points"] = fallbackString
         case .eli5:
             cachedContentBySection["Simple Breakdown"] = fallbackString
+        case .clusterSummary:
+            cachedContentBySection["Cluster Summary"] = fallbackString
         default:
             cachedContentBySection[section] = fallbackString
         }
@@ -744,6 +748,8 @@ final class NewsDetailViewModel: ObservableObject {
             cachedContentBySection["Talking Points"] = tempString
         case .eli5:
             cachedContentBySection["Simple Breakdown"] = tempString
+        case .clusterSummary:
+            cachedContentBySection["Cluster Summary"] = tempString
         default:
             cachedContentBySection[section] = tempString
         }

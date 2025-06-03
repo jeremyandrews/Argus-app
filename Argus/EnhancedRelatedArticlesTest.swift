@@ -98,7 +98,7 @@ struct RelatedArticlesTestView: View {
             
             Divider()
             
-            EnhancedRelatedArticlesView(articles: articles) { jsonURL in
+            EnhancedRelatedArticlesView(articles: articles, clusterSummary: "**TL;DR:** This is a test cluster summary showing how multiple related articles about quantum computing and AI research are connected.\n\n**Full Summary:**\nThis cluster contains articles about breakthrough developments in quantum computing research, particularly focusing on AI applications and industry initiatives. The articles span from academic research announcements to corporate financial reports, showing the broad impact of quantum computing developments across different sectors.\n\n**References:**\nHigh Quality Sources:\n- Research Institute Press Release\n- AI Quarterly Journal\n- Tech Industry Analysis\n\nMedium Quality Sources:\n- Business Financial Reports\n- Technology News Coverage") { jsonURL in
                 print("Selected article with URL: \(jsonURL)")
             }
             .padding()

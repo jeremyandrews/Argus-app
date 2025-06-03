@@ -718,11 +718,15 @@ actor DatabaseCoordinator {
                 additionalInsights: articleJSON.additionalInsights,
                 actionRecommendations: articleJSON.actionRecommendations,
                 talkingPoints: articleJSON.talkingPoints,
+                eli5: articleJSON.eli5,
                 engineModel: articleJSON.engineModel,
                 engineElapsedTime: articleJSON.engineElapsedTime,
                 engineRawStats: articleJSON.engineRawStats,
                 engineSystemInfo: articleJSON.engineSystemInfo,
-                relatedArticles: articleJSON.relatedArticles
+                databaseId: articleJSON.databaseId,
+                relatedArticles: articleJSON.relatedArticles,
+                clusterSummary: articleJSON.clusterSummary,
+                entities: articleJSON.entities
             )
 
             // Create seen article record
@@ -910,6 +914,10 @@ actor DatabaseCoordinator {
             article.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
         }
         article.relatedArticles = data.relatedArticles
+        
+        // Update new fields
+        article.clusterSummary = data.clusterSummary
+        article.entities = data.entities
     }
 
     // Helper method to update the fields of an ArticleModel
@@ -1286,6 +1294,8 @@ extension DatabaseCoordinator {
             actionRecommendations: actionRecommendations,
             talkingPoints: talkingPoints,
             eli5: eli5Content,
+            clusterSummary: json["cluster_summary"] as? String,
+            entities: extractEntities(from: json),
             databaseId: databaseId
         )
     }
@@ -1365,6 +1375,22 @@ extension DatabaseCoordinator {
         }
 
         return try? String(data: JSONSerialization.data(withJSONObject: engineStatsDict), encoding: .utf8)
+    }
+
+    // Helper to extract entities from JSON
+    private func extractEntities(from json: [String: Any]) -> [Entity] {
+        guard let entitiesArray = json["entities"] as? [[String: Any]] else {
+            return []
+        }
+        
+        do {
+            let data = try JSONSerialization.data(withJSONObject: entitiesArray)
+            let decoder = JSONDecoder()
+            return try decoder.decode([Entity].self, from: data)
+        } catch {
+            self.logger.error("Failed to decode entities: \(error)")
+            return []
+        }
     }
 
     // Helper to extract similar articles from JSON and convert to RelatedArticle array

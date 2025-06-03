@@ -41,7 +41,11 @@ class TestArticleService: ObservableObject {
                 articleTitle: "Full Test Article Title",
                 affected: "Test Users",
                 publishDate: Date(),
-                topic: "Test Topic"
+                topic: "Test Topic",
+                
+                // NEW: Cluster summary and entities
+                clusterSummary: nil,
+                entities: []
             )
 
             // Associate the article with the topic
@@ -144,7 +148,11 @@ class TestArticleService: ObservableObject {
                             articleTitle: "Full Test Article Title \(i + 1)",
                             affected: "Test Users Group \(i % 3 + 1)",
                             publishDate: Date().addingTimeInterval(-Double(i * 3600)), // Varied publish dates
-                            topic: topics[i % topicsCount].name
+                            topic: topics[i % topicsCount].name,
+                            
+                            // NEW: Cluster summary and entities
+                            clusterSummary: nil,
+                            entities: []
                         )
 
                         // Randomly assign 1-3 topics to each article

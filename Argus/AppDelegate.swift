@@ -512,7 +512,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 relationToTopic: "This article is highly relevant to the topic.",
                 additionalInsights: "Here are some additional contextual insights.",
                 engineStats: nil,
-                relatedArticles: nil
+                relatedArticles: nil,
+                
+                // NEW: Cluster summary and entities
+                clusterSummary: nil,
+                entities: []
             )
 
             context.insert(testArticle)

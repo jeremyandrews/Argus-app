@@ -1,6 +1,67 @@
 import Foundation
 import SwiftUI
 
+/// Entity extracted from article content
+struct Entity: Codable, Identifiable, Hashable {
+    let id = UUID()
+    let name: String
+    let normalizedName: String
+    let type: String // PERSON, ORGANIZATION, LOCATION, EVENT, PRODUCT, DATE, OTHER
+    let importance: String // PRIMARY, SECONDARY
+    
+    enum CodingKeys: String, CodingKey {
+        case name
+        case normalizedName = "normalized_name"
+        case type
+        case importance
+    }
+    
+    /// Get color for entity type
+    var typeColor: Color {
+        switch type.uppercased() {
+        case "PERSON":
+            return .blue
+        case "ORGANIZATION":
+            return .orange
+        case "LOCATION":
+            return .green
+        case "EVENT":
+            return .purple
+        case "PRODUCT":
+            return .pink
+        case "DATE":
+            return .teal
+        default:
+            return .gray
+        }
+    }
+    
+    /// Get icon for entity type
+    var typeIcon: String {
+        switch type.uppercased() {
+        case "PERSON":
+            return "person.fill"
+        case "ORGANIZATION":
+            return "building.2.fill"
+        case "LOCATION":
+            return "mappin.circle.fill"
+        case "EVENT":
+            return "calendar"
+        case "PRODUCT":
+            return "cube.box.fill"
+        case "DATE":
+            return "clock.fill"
+        default:
+            return "tag.fill"
+        }
+    }
+    
+    /// Whether this is a primary importance entity
+    var isPrimary: Bool {
+        return importance.uppercased() == "PRIMARY"
+    }
+}
+
 /// Struct specifically for decoding related articles from API responses with ISO8601 date strings
 struct APIRelatedArticle: Codable {
     let id: Int
@@ -405,6 +466,10 @@ struct ArticleJSON {
     let talkingPoints: String?
     let eli5: String?
     
+    // NEW: Cluster summary and entities fields
+    let clusterSummary: String?
+    let entities: [Entity]?
+    
     // Article database ID from backend
     let databaseId: Int?
 }
@@ -445,6 +510,10 @@ struct PreparedArticle {
     let talkingPoints: String?
     let eli5: String?
     
+    // NEW: Cluster summary and entities fields
+    let clusterSummary: String?
+    let entities: [Entity]?
+    
     // Article database ID from backend
     let databaseId: Int?
 }
@@ -484,6 +553,10 @@ func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
         actionRecommendations: input.actionRecommendations,
         talkingPoints: input.talkingPoints,
         eli5: input.eli5,
+        
+        // Pass the new cluster summary and entities fields
+        clusterSummary: input.clusterSummary,
+        entities: input.entities,
         
         // Pass the database ID
         databaseId: input.databaseId
@@ -707,6 +780,32 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
             AppLogger.database.debug("Found talking_points in JSON: \(talkingPts.prefix(50))...")
         }
     
+    // Extract cluster summary
+    let clusterSummary = json["cluster_summary"] as? String
+    if let cluster = clusterSummary, !cluster.isEmpty {
+        AppLogger.database.debug("Found cluster_summary in JSON: \(cluster.prefix(50))...")
+    }
+    
+    // Extract entities
+    var parsedEntities: [Entity]? = nil
+    if let entitiesArray = json["entities"] as? [[String: Any]], !entitiesArray.isEmpty {
+        do {
+            AppLogger.database.debug("Found \(entitiesArray.count) entities in API response")
+            let data = try JSONSerialization.data(withJSONObject: entitiesArray)
+            let decoder = JSONDecoder()
+            parsedEntities = try decoder.decode([Entity].self, from: data)
+            AppLogger.database.debug("Successfully parsed \(parsedEntities?.count ?? 0) entities from API")
+            
+            // Log a sample of entities for debugging
+            if let entities = parsedEntities, !entities.isEmpty {
+                let firstEntity = entities[0]
+                AppLogger.database.debug("Sample entity - Name: '\(firstEntity.name)', Type: '\(firstEntity.type)', Importance: '\(firstEntity.importance)'")
+            }
+        } catch {
+            AppLogger.database.error("Failed to parse entities: \(error)")
+        }
+    }
+    
     // Parse similar articles if available
     var parsedRelatedArticles: [RelatedArticle]? = nil
     if let similarArticlesArray = json["similar_articles"] as? [[String: Any]], !similarArticlesArray.isEmpty {
@@ -788,6 +887,10 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         actionRecommendations: actionRecommendations,
         talkingPoints: talkingPoints,
         eli5: eli5Content,
+        
+        // Add new cluster summary and entities fields
+        clusterSummary: clusterSummary,
+        entities: parsedEntities,
         
         // Add database ID
         databaseId: databaseId

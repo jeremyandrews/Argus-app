@@ -712,6 +712,8 @@ final class ArticleService: ArticleServiceProtocol {
             text = article.talkingPoints
         case .eli5:
             text = article.eli5
+        case .clusterSummary:
+            text = article.clusterSummary
         }
         
         // Skip if no text
@@ -803,6 +805,8 @@ final class ArticleService: ArticleServiceProtocol {
                 markdownText = articleModel.talkingPoints
             case .eli5:
                 markdownText = articleModel.eli5
+            case .clusterSummary:
+                markdownText = articleModel.clusterSummary
             }
             
             guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
@@ -922,7 +926,11 @@ final class ArticleService: ArticleServiceProtocol {
                     engineRawStats: article.engineRawStats,
                     engineSystemInfo: article.engineSystemInfo,
                     databaseId: article.databaseId,
-                    relatedArticles: article.relatedArticles
+                    relatedArticles: article.relatedArticles,
+                    
+                    // NEW: Cluster summary and entities
+                    clusterSummary: article.clusterSummary,
+                    entities: article.entities
                 )
                 
                 context.insert(newArticle)

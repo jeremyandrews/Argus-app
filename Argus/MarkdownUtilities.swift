@@ -16,6 +16,7 @@ enum RichTextField: String, CaseIterable {
     case actionRecommendations
     case talkingPoints
     case eli5
+    case clusterSummary
 }
 
 // Centralized section naming system to ensure consistency
@@ -50,6 +51,7 @@ public enum SectionNaming {
         case .actionRecommendations: return "What You Can Do"
         case .talkingPoints: return "Talking Points"
         case .eli5: return "Simple Breakdown"
+        case .clusterSummary: return "Cluster Summary"
         }
     }
 
@@ -65,6 +67,7 @@ public enum SectionNaming {
         case "What You Can Do": return "actionRecommendations"
         case "Talking Points": return "talkingPoints"
         case "Simple Breakdown": return "eli5"
+        case "Cluster Summary": return "clusterSummary"
         default: return section.lowercased()
         }
     }
@@ -79,7 +82,7 @@ extension RichTextField {
         case .body, .summary, .criticalAnalysis,
              .logicalFallacies, .sourceAnalysis,
              .relationToTopic, .additionalInsights,
-             .actionRecommendations, .talkingPoints, .eli5:
+             .actionRecommendations, .talkingPoints, .eli5, .clusterSummary:
             return "UIFontTextStyleBody"
         }
     }
@@ -100,6 +103,7 @@ extension RichTextField {
         case .actionRecommendations: return article.actionRecommendations
         case .talkingPoints: return article.talkingPoints
         case .eli5: return article.eli5
+        case .clusterSummary: return article.clusterSummary
         }
     }
 
@@ -117,6 +121,7 @@ extension RichTextField {
         case .actionRecommendations: return article.actionRecommendationsBlob
         case .talkingPoints: return article.talkingPointsBlob
         case .eli5: return article.eli5Blob
+        case .clusterSummary: return article.clusterSummaryBlob
         }
     }
 
@@ -145,6 +150,8 @@ extension RichTextField {
             article.talkingPointsBlob = data
         case .eli5:
             article.eli5Blob = data
+        case .clusterSummary:
+            article.clusterSummaryBlob = data
         }
     }
 }
@@ -416,7 +423,7 @@ func verifyAllBlobs(in article: ArticleModel) -> Bool {
         .title, .body, .summary, .criticalAnalysis,
         .logicalFallacies, .sourceAnalysis, .relationToTopic,
         .additionalInsights, .actionRecommendations, .talkingPoints,
-        .eli5
+        .eli5, .clusterSummary
     ]
 
     AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(article.id):")
@@ -462,7 +469,7 @@ func regenerateAllBlobs(for article: ArticleModel, force: Bool = false) -> Int {
         .title, .body, .summary, .criticalAnalysis,
         .logicalFallacies, .sourceAnalysis, .relationToTopic,
         .additionalInsights, .actionRecommendations, .talkingPoints,
-        .eli5
+        .eli5, .clusterSummary
     ]
 
     var regeneratedCount = 0

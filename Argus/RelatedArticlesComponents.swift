@@ -452,6 +452,7 @@ struct FormulaExplanationView: View {
 /// Main view for displaying related articles
 struct EnhancedRelatedArticlesView: View {
     let articles: [RelatedArticle]
+    let clusterSummary: String
     let onArticleSelected: (String) -> Void
     
     @State private var showError = false
@@ -468,6 +469,27 @@ struct EnhancedRelatedArticlesView: View {
                 Spacer()
                 
                 InfoTooltip(message: "Articles that are related to this one based on content similarity, shared entities (people, organizations, locations), and temporal proximity.")
+            }
+            
+            // Cluster summary (if available)
+            if !clusterSummary.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Cluster Summary")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    Text(clusterSummary)
+                        .font(.body)
+                        .lineSpacing(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                .padding(12)
+                .background(Color(UIColor.systemGray6).opacity(0.7))
+                .cornerRadius(8)
+                .padding(.bottom, 8)
             }
             
             // Articles list
@@ -504,6 +526,103 @@ struct EnhancedRelatedArticlesView: View {
             for (index, article) in articles.enumerated() {
                 AppLogger.database.debug("Article \(index + 1): ID \(article.id), Title: \(article.title), URL: \(article.jsonURL.isEmpty ? "EMPTY" : article.jsonURL)")
             }
+        }
+    }
+}
+
+// MARK: - Tags View
+
+/// View for displaying extracted entities as tags
+struct TagsView: View {
+    let entities: [Entity]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Primary entities (shown first)
+            let primaryEntities = entities.filter { $0.isPrimary }
+            if !primaryEntities.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Primary Tags")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    EntityTagsGrid(entities: primaryEntities, isPrimarySection: true)
+                }
+            }
+            
+            // All entities in a grid
+            VStack(alignment: .leading, spacing: 8) {
+                Text("All Tags")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                
+                EntityTagsGrid(entities: entities, isPrimarySection: false)
+            }
+            
+            // Summary info
+            Text("\(entities.count) tags (\(entities.filter { $0.isPrimary }.count) primary)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
+        }
+    }
+}
+
+/// Grid layout for entity tags
+struct EntityTagsGrid: View {
+    let entities: [Entity]
+    let isPrimarySection: Bool
+    
+    // Create a 2-column flexible grid layout for better tag display
+    private let columns = [
+        GridItem(.flexible(minimum: 120), spacing: 12),
+        GridItem(.flexible(minimum: 120), spacing: 12)
+    ]
+    
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(entities, id: \.id) { entity in
+                EntityTag(entity: entity, isPrimary: isPrimarySection)
+            }
+        }
+    }
+}
+
+/// Individual entity tag component
+struct EntityTag: View {
+    let entity: Entity
+    let isPrimary: Bool
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: entity.typeIcon)
+                .font(.caption2)
+                .foregroundColor(entity.typeColor)
+            
+            Text(entity.name)
+                .font(.caption)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            entity.typeColor.opacity(isPrimary ? 0.2 : 0.1)
+        )
+        .foregroundColor(
+            isPrimary ? entity.typeColor : .primary
+        )
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(entity.typeColor.opacity(isPrimary ? 0.6 : 0.3), lineWidth: isPrimary ? 1.5 : 1)
+        )
+        .onTapGesture {
+            // Future: This could trigger filtering by this entity
+            AppLogger.database.debug("Tapped entity: \(entity.name) (\(entity.type))")
         }
     }
 }

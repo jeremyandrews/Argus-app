@@ -79,6 +79,8 @@ struct NewsDetailView: View {
             return article.talkingPoints
         case .eli5:
             return article.eli5
+        case .clusterSummary:
+            return article.clusterSummary
         }
     }
 
@@ -142,6 +144,7 @@ struct NewsDetailView: View {
             "Logical Fallacies": false,
             "Argus Engine Stats": false,
             "Preview": false,
+            "Tags": false,
             "Related Articles": false,
         ]
     }
@@ -540,10 +543,26 @@ struct NewsDetailView: View {
             sections.append(ContentSection(header: "Preview", content: fullURL))
         }
 
-        // 12) "Related Articles" - Direct approach using only the model data
+        // 12) "Tags" section - Display extracted entities
+        if let entities = n.entities, !entities.isEmpty {
+            AppLogger.database.debug("Found \(entities.count) entities in article: \(n.id)")
+            sections.append(ContentSection(header: "Tags", content: entities))
+        } else {
+            AppLogger.database.debug("No entities found for article: \(n.id)")
+        }
+
+        // 13) "Related Articles" - Direct approach using only the model data
         if let relatedArticles = n.relatedArticles, !relatedArticles.isEmpty {
+            let clusterSummary = n.clusterSummary ?? ""
             AppLogger.database.debug("Found \(relatedArticles.count) related articles in article: \(n.id)")
-            sections.append(ContentSection(header: "Related Articles", content: relatedArticles))
+            AppLogger.database.debug("Cluster summary for article \(n.id): '\(clusterSummary.isEmpty ? "EMPTY" : clusterSummary.prefix(50))...'")
+            
+            // Include cluster summary with related articles
+            let relatedArticlesData: [String: Any] = [
+                "articles": relatedArticles,
+                "clusterSummary": clusterSummary
+            ]
+            sections.append(ContentSection(header: "Related Articles", content: relatedArticlesData))
         } else {
             AppLogger.database.debug("No related articles found for article: \(n.id)")
             // Don't add a section for related articles if there are none
@@ -984,7 +1003,7 @@ struct NewsDetailView: View {
             "Source Analysis", "Relevance", "Context & Perspective",
             "What You Can Do", "Talking Points", "Simple Breakdown":
             return true
-        case "Argus Engine Stats", "Preview", "Related Articles":
+        case "Argus Engine Stats", "Preview", "Tags", "Related Articles":
             return false
         default:
             return false
@@ -1212,11 +1231,39 @@ struct NewsDetailView: View {
                 AppLogger.database.debug("Rendering section: \(section.header) with content preview: \(contentPreview)...")
             }
             
+// MARK: - Tags
+case "Tags":
+    VStack(alignment: .leading, spacing: 8) {
+        if let entities = section.content as? [Entity], !entities.isEmpty {
+            TagsView(entities: entities)
+        } else {
+            Text("No tags available")
+                .font(.callout)
+                .foregroundColor(.secondary)
+        }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 12)
+    .padding(.top, 6)
+            
 // MARK: - Related Articles
 case "Related Articles":
     VStack(alignment: .leading, spacing: 8) {
-        if let relatedArticles = section.content as? [RelatedArticle], !relatedArticles.isEmpty {
-            EnhancedRelatedArticlesView(articles: relatedArticles) { jsonURL in
+        if let relatedData = section.content as? [String: Any] {
+            // Handle the new format with articles and cluster summary
+            if let relatedArticles = relatedData["articles"] as? [RelatedArticle], !relatedArticles.isEmpty {
+                let clusterSummary = relatedData["clusterSummary"] as? String ?? ""
+                EnhancedRelatedArticlesView(articles: relatedArticles, clusterSummary: clusterSummary) { jsonURL in
+                    loadRelatedArticle(jsonURL: jsonURL)
+                }
+            } else {
+                Text("No related articles available")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+            }
+        } else if let relatedArticles = section.content as? [RelatedArticle], !relatedArticles.isEmpty {
+            // Legacy fallback - just articles without cluster summary
+            EnhancedRelatedArticlesView(articles: relatedArticles, clusterSummary: "") { jsonURL in
                 loadRelatedArticle(jsonURL: jsonURL)
             }
         } else if let relatedArticles = section.content as? [[String: Any]], !relatedArticles.isEmpty {

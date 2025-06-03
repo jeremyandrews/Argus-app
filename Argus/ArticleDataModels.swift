@@ -158,6 +158,57 @@ final class ArticleModel: Equatable {
     
     /// Rich text blob for eli5 content
     var eli5Blob: Data?
+    
+    /// Cluster summary for this article combining multiple related articles
+    var clusterSummary: String?
+    
+    /// Rich text blob for cluster summary
+    var clusterSummaryBlob: Data?
+    
+    /// Entities data stored as JSON blob
+    var entitiesData: Data?
+    
+    /// Computed property to access structured entities
+    var entities: [Entity]? {
+        get {
+            guard let data = entitiesData, !data.isEmpty else {
+                AppLogger.database.debug("No entities data found for article \(self.id)")
+                return nil
+            }
+            
+            do {
+                let decoder = JSONDecoder()
+                let decodedEntities = try decoder.decode([Entity].self, from: data)
+                AppLogger.database.debug("Successfully decoded \(decodedEntities.count) entities for article \(self.id)")
+                
+                // Log a sample of entities for debugging
+                if !decodedEntities.isEmpty {
+                    let firstEntity = decodedEntities[0]
+                    AppLogger.database.debug("First entity - Name: '\(firstEntity.name)', Type: '\(firstEntity.type)', Importance: '\(firstEntity.importance)'")
+                }
+                
+                return decodedEntities
+            } catch {
+                AppLogger.database.error("Failed to decode entitiesData for article \(self.id): \(error)")
+                return nil
+            }
+        }
+        set {
+            if let newValue = newValue, !newValue.isEmpty {
+                do {
+                    let encoder = JSONEncoder()
+                    entitiesData = try encoder.encode(newValue)
+                    AppLogger.database.debug("Stored \(newValue.count) entities for article \(self.id)")
+                } catch {
+                    AppLogger.database.error("Failed to encode entities for article \(self.id): \(error)")
+                    entitiesData = nil
+                }
+            } else {
+                entitiesData = nil
+                AppLogger.database.debug("Cleared entities for article \(self.id)")
+            }
+        }
+    }
 
     // MARK: - Additional Metadata
     
@@ -289,7 +340,10 @@ final class ArticleModel: Equatable {
         additionalInsightsBlob: Data? = nil,
         actionRecommendationsBlob: Data? = nil,
         talkingPointsBlob: Data? = nil,
-        eli5Blob: Data? = nil
+        eli5Blob: Data? = nil,
+        clusterSummary: String? = nil,
+        clusterSummaryBlob: Data? = nil,
+        entities: [Entity]? = nil
     ) {
         self.id = id
         self.jsonURL = jsonURL
@@ -369,6 +423,10 @@ final class ArticleModel: Equatable {
         
         // Store related articles as encoded data
         self.relatedArticles = relatedArticles
+        
+        // Store entities as encoded data
+        self.entities = entities
+        
         self.titleBlob = titleBlob
         self.bodyBlob = bodyBlob
         self.summaryBlob = summaryBlob
@@ -380,6 +438,8 @@ final class ArticleModel: Equatable {
         self.actionRecommendationsBlob = actionRecommendationsBlob
         self.talkingPointsBlob = talkingPointsBlob
         self.eli5Blob = eli5Blob
+        self.clusterSummary = clusterSummary
+        self.clusterSummaryBlob = clusterSummaryBlob
     }
 
     /// Regenerates missing blob data for this ArticleModel
