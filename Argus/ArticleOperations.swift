@@ -486,7 +486,7 @@ final class ArticleOperations {
     /// - Returns: Number of new articles added
     func syncContent(
         topic: String? = nil,
-        limit: Int? = 30,
+        limit: Int? = 50,
         progressHandler: ((String) -> Void)? = nil
     ) async throws -> Int {
         do {

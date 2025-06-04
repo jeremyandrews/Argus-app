@@ -58,45 +58,42 @@ After careful code review of the transition process, we've confirmed the followi
   - ✅ Migration system is properly isolated with minimal touch points
   - ✅ Architecture supports future clean removal after all users have migrated
 
-## Next Development Steps
-
-To complete the Legacy Code Removal phase, we should focus on:
-
-1. ✅ **Audit remaining UI components** (Completed):
-   - ✅ LazyLoadingQualityBadges component updated to use ArticleModel instead of NotificationData
-   - ✅ ShareSelectionView confirmed to be already using ArticleModel directly
-   - ✅ Removed NotificationData extension in NewsDetailView.swift as it was redundant
-   - ✅ Verified NewsView.swift doesn't directly use NotificationData
-
-2. ✅ **Verify AppDelegate and bootstrap code** (Completed):
-   - ✅ Confirmed all app bootstrap code has been updated to use ArticleService directly
-   - ✅ Verified no remaining references to MigrationAwareArticleService outside migration system
-   - ✅ All database queries properly use ArticleModel instead of legacy NotificationData
-   - ✅ Push notification handling uses modern ArticleService implementation
-   - ✅ Article presentation and database statistics properly use ArticleModel
-
-3. ✅ **Document migration components for future removal** (Completed):
-   - ✅ Created comprehensive documentation in code comments across all migration components:
-     - ✅ MigrationCoordinator.swift: Documented as the central entry point with dependencies and removal path
-     - ✅ MigrationService.swift: Documented core implementation and responsibilities
-     - ✅ MigrationTypes.swift: Documented shared data structures used by migration components
-     - ✅ MigrationAwareArticleService.swift: Documented compatibility layer and deprecation strategy
-     - ✅ MigrationView.swift: Documented UI component for displaying migration status
-     - ✅ MigrationModalView.swift: Documented full-screen modal UI during migration
-     - ✅ MigrationOverlay.swift: Documented visual progress component
-   - ✅ Created detailed removal plan in memory-bank/migration-removal-plan.md with:
-     - ✅ Dependency mapping between all migration components
-     - ✅ Phased removal approach with specific steps
-     - ✅ Testing strategy to validate removal doesn't break functionality
-     - ✅ Timeline recommendations for removal
-   - ✅ Added @see references between files pointing to the central removal plan
-
-4. **Maintain migration system integrity**:
-   - Preserve the one-time migration architecture without breaking changes
-   - Ensure migration state tracking prevents duplicate migrations
-   - Keep isolation of migration components to minimize impact
-
 ## Current Work Focus
+
+- **Fixed Sync Article Count Issue** (Completed):
+  - Resolved critical issue where sync was only downloading ~30 articles instead of the intended ~50
+  - Root cause analysis identified two key files where sync limits were constrained:
+    1. **ArticleService.swift** - `performBackgroundSync` method had hardcoded limits of 30 for general articles and 20 for topic-specific articles
+    2. **ArticleOperations.swift** - `syncContent` method had a default limit parameter of 30
+
+  - **Implementation Details**:
+    - **Updated ArticleService.swift**:
+      - Changed general articles sync limit from `30` to `50`
+      - Changed topic-specific sync limit from `20` to `25` (balanced for multiple topics)
+      - This affects the `performBackgroundSync` method that handles automatic background syncing
+    
+    - **Updated ArticleOperations.swift**:
+      - Changed default sync limit parameter from `30` to `50`
+      - This affects manual sync operations initiated through the UI
+    
+    - **Key Behavior Changes**:
+      - **Before**: Background sync limited to 30 general articles + 20 per topic
+      - **After**: Background sync allows up to 50 general articles + 25 per topic
+      - **Before**: Manual sync defaulted to 30 articles maximum
+      - **After**: Manual sync defaults to 50 articles maximum
+    
+    - **Maintains Target-Based Logic**: The underlying target-based processing logic (implemented earlier) remains intact and continues to:
+      - Process articles until the target number of NEW articles is reached
+      - Stop early when the target is met to save processing time
+      - Handle duplicate articles correctly without counting them toward the limit
+      - Provide proper progress reporting during sync operations
+
+  - **Benefits**:
+    - Users now receive the intended number of articles (up to 50) during sync operations
+    - Background syncs are more comprehensive while remaining efficient
+    - Manual syncs provide better coverage of available content
+    - Maintains all existing performance optimizations and error handling
+    - Preserves battery life through early termination when targets are met
 
 - **Fixed Sync Logic for Target-Based Article Processing** (Completed):
   - Resolved critical issue where sync was limited to processing only 50 articles total, regardless of how many were new vs duplicates
@@ -560,6 +557,7 @@ To complete the Legacy Code Removal phase, we should focus on:
 - **Settings Functionality**: Fixed issues with settings updates using Combine-based observation in ViewModels
 - **Enhanced Related Articles**: Added additional vector and entity similarity metrics to provide deeper insight into article relationships
 - **Sync Reliability**: Fixed target-based sync logic to ensure users always get the expected number of new articles
+- **Sync Article Count**: Resolved sync limit constraints that were preventing users from receiving the full intended 50 articles per sync
 
 ## Current Work Focus
 
@@ -654,114 +652,3 @@ To complete the Legacy Code Removal phase, we should focus on:
     - Full implementation details in `memory-bank/related-articles-implementation.md`
     - Field descriptions in `memory-bank/related-articles-fields.md`
     - Test implementation with sample data in `EnhancedRelatedArticlesTest.swift`
-
-## Recent Changes
-
-- **Fixed NewsView Empty Line Spacing Issue** (Completed):
-  - Resolved intermittent large blank spaces appearing between article tiny_summary and domain/source line in NewsView
-  - Issue was caused by combination of factors:
-    1. Imprecise height calculation in `NonSelectableRichTextView.sizeThatFits` method
-    2. Extra `.padding(.top, 5)` applied to summary content creating unwanted space
-    3. SwiftUI allowing view expansion beyond intrinsic content size
-  
-  - **Implementation Details**:
-    - **Enhanced UIComponents.swift**:
-      - Modified `NonSelectableRichTextView.sizeThatFits` to use `NSLayoutManager.usedRect(for:)` for precise text measurement
-      - Updated `updateUIView` to set UITextView frame to exact content bounds
-      - Replaced imprecise `UITextView.sizeThatFits` with exact layout manager calculations
-    
-    - **Updated NewsView.swift**:
-      - Removed `.padding(.top, 5)` from `summaryContent` function that was adding unwanted space
-      - Added `.fixedSize(horizontal: false, vertical: true)` modifier to force SwiftUI to respect exact content size
-      - Ensured consistent spacing between summary and domain/source elements
-  
-  - **Key Technical Changes**:
-    ```swift
-    // Before: Imprecise height calculation
-    let fittingSize = uiView.sizeThatFits(CGSize(
-        width: width,
-        height: UIView.layoutFittingExpandedSize.height
-    ))
-    
-    // After: Precise text measurement
-    let layoutManager = uiView.layoutManager
-    let textContainer = uiView.textContainer
-    let usedRect = layoutManager.usedRect(for: textContainer)
-    return CGSize(width: width, height: max(usedRect.height, 0))
-    ```
-  
-  - **Benefits**:
-    - Eliminated intermittent large blank spaces in article list view
-    - Consistent spacing between summary content and domain/source line
-    - Improved visual consistency between NewsView and NewsDetailView
-    - Fix applies immediately to all existing articles (calculation happens at render time)
-    - Better overall visual polish and user experience
-  
-  - **Technical Notes**:
-    - Height calculation occurs at UI render time, not article storage time
-    - Fix applies to all existing content immediately without need for new syncs
-    - Used precise text measurement rather than estimated sizing
-    - Maintained all rich text formatting while ensuring proper layout
-
-- **Fixed Tags Display Truncation Issue** (Completed):
-  - Resolved issue where tag names were being truncated with "123456...." due to insufficient column width
-  - Root cause analysis identified constraints in the 3-column adaptive grid layout:
-    1. `GridItem(.adaptive(minimum: 100, maximum: 200), spacing: 8)` was too restrictive for longer tag names
-    2. `.lineLimit(1)` with `.truncationMode(.tail)` was cutting off text instead of allowing wrapping
-    3. Tight spacing (8pt) didn't provide enough breathing room
-  
-  - **Implementation Details**:
-    - **Updated EntityTagsGrid in RelatedArticlesComponents.swift**:
-      - Changed from adaptive 3-column layout to exactly 2 flexible columns
-      - Updated grid configuration:
-        ```swift
-        // Before: Adaptive columns with restrictive width
-        private let columns = [
-            GridItem(.adaptive(minimum: 100, maximum: 200), spacing: 8)
-        ]
-        
-        // After: 2 flexible columns with better spacing
-        private let columns = [
-            GridItem(.flexible(minimum: 120), spacing: 12),
-            GridItem(.flexible(minimum: 120), spacing: 12)
-        ]
-        ```
-      
-    - **Enhanced EntityTag text display**:
-      - Replaced single-line truncation with 2-line text wrapping:
-        ```swift
-        // Before: Text truncation
-        Text(entity.name)
-            .font(.caption)
-            .lineLimit(1)
-            .truncationMode(.tail)
-        
-        // After: Text wrapping with proper alignment
-        Text(entity.name)
-            .font(.caption)
-            .lineLimit(2)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-        ```
-  
-  - **Key Benefits**:
-    - **Complete tag display**: Long tag names like "Department of Environmental Protection" now wrap to 2 lines instead of showing "Department of..."
-    - **Better layout**: 2-column design maintains visual appeal while providing more space
-    - **Improved spacing**: Increased from 8pt to 12pt for better readability
-    - **Responsive design**: Flexible columns adapt to different screen sizes
-    - **Preserved hierarchy**: Primary vs secondary tag styling remains intact
-  
-  - **Smart Adaptive Layout Features**:
-    - Exactly 2 columns for predictable layout
-    - Minimum 120pt width per column ensures readability
-    - Text wrapping allows full display without sacrificing visual design
-    - Maintains all existing visual styling and color coding
-    - Works seamlessly across iPhone and iPad screen sizes
-  
-  - **User Experience Improvements**:
-    - Users can now see complete tag names without truncation
-    - Easier to understand what entities are referenced in articles
-    - Better accessibility for users with vision needs
-    - Consistent with the rest of the app's design language
-
-- **Implemented Auto-Redirect for

@@ -409,7 +409,7 @@ final class ArticleService: ArticleServiceProtocol {
             
             // Start with "All" topics sync (limited count)
             progressHandler?("Syncing general articles...")
-            addedCount += try await syncArticlesFromServer(topic: nil, limit: 30, progressHandler: progressHandler)
+            addedCount += try await syncArticlesFromServer(topic: nil, limit: 50, progressHandler: progressHandler)
 
             // Sync each subscribed topic
             for topic in subscribedTopics {
@@ -418,7 +418,7 @@ final class ArticleService: ArticleServiceProtocol {
 
                 // Sync this topic (limited count)
                 progressHandler?("Syncing \(topic) articles...")
-                addedCount += try await syncArticlesFromServer(topic: topic, limit: 20, progressHandler: progressHandler)
+                addedCount += try await syncArticlesFromServer(topic: topic, limit: 25, progressHandler: progressHandler)
             }
 
             // Update last sync time
