@@ -8,14 +8,14 @@ struct Entity: Codable, Identifiable, Hashable {
     let normalizedName: String
     let type: String // PERSON, ORGANIZATION, LOCATION, EVENT, PRODUCT, DATE, OTHER
     let importance: String // PRIMARY, SECONDARY
-    
+
     enum CodingKeys: String, CodingKey {
         case name
         case normalizedName = "normalized_name"
         case type
         case importance
     }
-    
+
     /// Get color for entity type
     var typeColor: Color {
         switch type.uppercased() {
@@ -35,7 +35,7 @@ struct Entity: Codable, Identifiable, Hashable {
             return .gray
         }
     }
-    
+
     /// Get icon for entity type
     var typeIcon: String {
         switch type.uppercased() {
@@ -55,7 +55,7 @@ struct Entity: Codable, Identifiable, Hashable {
             return "tag.fill"
         }
     }
-    
+
     /// Whether this is a primary importance entity
     var isPrimary: Bool {
         return importance.uppercased() == "PRIMARY"
@@ -72,12 +72,12 @@ struct APIRelatedArticle: Codable {
     let similarityScore: Double
     let tinySummary: String
     let title: String
-    
+
     // New vector quality fields
     let vectorScore: Double?
     let vectorActiveDimensions: Int?
     let vectorMagnitude: Double?
-    
+
     // New entity similarity fields
     let entityOverlapCount: Int?
     let primaryOverlapCount: Int?
@@ -86,10 +86,10 @@ struct APIRelatedArticle: Codable {
     let locationOverlap: Double?
     let eventOverlap: Double?
     let temporalProximity: Double?
-    
+
     // Formula explanation
     let similarityFormula: String?
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case category
@@ -99,12 +99,12 @@ struct APIRelatedArticle: Codable {
         case similarityScore = "similarity_score"
         case tinySummary = "tiny_summary"
         case title
-        
+
         // New vector quality fields
         case vectorScore = "vector_score"
         case vectorActiveDimensions = "vector_active_dimensions"
         case vectorMagnitude = "vector_magnitude"
-        
+
         // New entity similarity fields
         case entityOverlapCount = "entity_overlap_count"
         case primaryOverlapCount = "primary_overlap_count"
@@ -113,11 +113,11 @@ struct APIRelatedArticle: Codable {
         case locationOverlap = "location_overlap"
         case eventOverlap = "event_overlap"
         case temporalProximity = "temporal_proximity"
-        
+
         // Formula explanation
         case similarityFormula = "similarity_formula"
     }
-    
+
     /// Converts API model to database model with proper date conversion
     func toRelatedArticle() -> RelatedArticle {
         return RelatedArticle(
@@ -157,12 +157,12 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
     let similarityScore: Double
     let tinySummary: String
     let title: String
-    
+
     // New vector quality fields
     let vectorScore: Double?
     let vectorActiveDimensions: Int?
     let vectorMagnitude: Double?
-    
+
     // New entity similarity fields
     let entityOverlapCount: Int?
     let primaryOverlapCount: Int?
@@ -171,10 +171,10 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
     let locationOverlap: Double?
     let eventOverlap: Double?
     let temporalProximity: Double?
-    
+
     // Formula explanation
     let similarityFormula: String?
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case category
@@ -184,12 +184,12 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         case similarityScore = "similarity_score"
         case tinySummary = "tiny_summary"
         case title
-        
+
         // New vector quality fields
         case vectorScore = "vector_score"
         case vectorActiveDimensions = "vector_active_dimensions"
         case vectorMagnitude = "vector_magnitude"
-        
+
         // New entity similarity fields
         case entityOverlapCount = "entity_overlap_count"
         case primaryOverlapCount = "primary_overlap_count"
@@ -198,11 +198,11 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         case locationOverlap = "location_overlap"
         case eventOverlap = "event_overlap"
         case temporalProximity = "temporal_proximity"
-        
+
         // Formula explanation
         case similarityFormula = "similarity_formula"
     }
-    
+
     /// Standard initializer for creating instances directly
     init(id: Int, category: String, jsonURL: String, publishedDate: Date?,
          qualityScore: Int, similarityScore: Double, tinySummary: String, title: String,
@@ -219,7 +219,8 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
          eventOverlap: Double? = nil,
          temporalProximity: Double? = nil,
          // Formula explanation
-         similarityFormula: String? = nil) {
+         similarityFormula: String? = nil)
+    {
         self.id = id
         self.category = category
         self.jsonURL = jsonURL
@@ -228,12 +229,12 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         self.similarityScore = similarityScore
         self.tinySummary = tinySummary
         self.title = title
-        
+
         // New vector quality fields
         self.vectorScore = vectorScore
         self.vectorActiveDimensions = vectorActiveDimensions
         self.vectorMagnitude = vectorMagnitude
-        
+
         // New entity similarity fields
         self.entityOverlapCount = entityOverlapCount
         self.primaryOverlapCount = primaryOverlapCount
@@ -242,11 +243,11 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         self.locationOverlap = locationOverlap
         self.eventOverlap = eventOverlap
         self.temporalProximity = temporalProximity
-        
+
         // Formula explanation
         self.similarityFormula = similarityFormula
     }
-    
+
     /// Decoder initializer for database loading where dates are stored as timestamps
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -257,7 +258,7 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         similarityScore = try container.decodeIfPresent(Double.self, forKey: .similarityScore) ?? 0.0
         tinySummary = try container.decodeIfPresent(String.self, forKey: .tinySummary) ?? ""
         title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Unknown Title"
-        
+
         // When loaded from database, published_date is stored as a timestamp
         let timestamp = try container.decodeIfPresent(Double.self, forKey: .publishedDate)
         if let timestamp = timestamp {
@@ -265,12 +266,12 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         } else {
             publishedDate = nil
         }
-        
+
         // New vector quality fields
         vectorScore = try container.decodeIfPresent(Double.self, forKey: .vectorScore)
         vectorActiveDimensions = try container.decodeIfPresent(Int.self, forKey: .vectorActiveDimensions)
         vectorMagnitude = try container.decodeIfPresent(Double.self, forKey: .vectorMagnitude)
-        
+
         // New entity similarity fields
         entityOverlapCount = try container.decodeIfPresent(Int.self, forKey: .entityOverlapCount)
         primaryOverlapCount = try container.decodeIfPresent(Int.self, forKey: .primaryOverlapCount)
@@ -279,17 +280,17 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         locationOverlap = try container.decodeIfPresent(Double.self, forKey: .locationOverlap)
         eventOverlap = try container.decodeIfPresent(Double.self, forKey: .eventOverlap)
         temporalProximity = try container.decodeIfPresent(Double.self, forKey: .temporalProximity)
-        
+
         // Formula explanation
         similarityFormula = try container.decodeIfPresent(String.self, forKey: .similarityFormula)
     }
-    
+
     // Computed properties for UI display
     var formattedDate: String {
         guard let date = publishedDate else { return "" }
         return date.formatted(.dateTime.month(.abbreviated).day().year())
     }
-    
+
     var qualityDescription: String {
         switch qualityScore {
         case 1: return "Poor"
@@ -299,133 +300,133 @@ struct RelatedArticle: Codable, Identifiable, Hashable {
         default: return "Unknown"
         }
     }
-    
+
     var similarityPercent: String {
         String(format: "%.1f%%", similarityScore * 100)
     }
-    
+
     var isSimilarityHigh: Bool {
         similarityScore >= 0.95
     }
-    
+
     var isSimilarityVeryHigh: Bool {
         similarityScore >= 0.98
     }
-    
+
     // MARK: - Vector Quality Computed Properties
-    
+
     /// Formatted vector score as percentage
     var formattedVectorScore: String? {
         guard let score = vectorScore else { return nil }
         return String(format: "%.1f%%", score * 100)
     }
-    
+
     /// Formatted vector active dimensions
     var formattedVectorDimensions: String? {
         guard let dimensions = vectorActiveDimensions else { return nil }
         return "\(dimensions)"
     }
-    
+
     /// Formatted vector magnitude
     var formattedVectorMagnitude: String? {
         guard let magnitude = vectorMagnitude else { return nil }
         return String(format: "%.2f", magnitude)
     }
-    
+
     // MARK: - Entity Similarity Computed Properties
-    
+
     /// Whether this article has any entity similarity data
     var hasEntityData: Bool {
-        return personOverlap != nil || orgOverlap != nil || 
-               locationOverlap != nil || eventOverlap != nil ||
-               temporalProximity != nil
+        return personOverlap != nil || orgOverlap != nil ||
+            locationOverlap != nil || eventOverlap != nil ||
+            temporalProximity != nil
     }
-    
+
     /// Entity overlap count as formatted string
     var formattedEntityOverlapCount: String? {
         guard let count = entityOverlapCount else { return nil }
         return "\(count) shared entities"
     }
-    
+
     /// Primary overlap count as formatted string
     var formattedPrimaryOverlapCount: String? {
         guard let count = primaryOverlapCount else { return nil }
         return "\(count) primary entities"
     }
-    
+
     /// Person overlap as percentage
     var formattedPersonOverlap: String? {
         guard let overlap = personOverlap else { return nil }
         return String(format: "%.0f%%", overlap * 100)
     }
-    
+
     /// Organization overlap as percentage
     var formattedOrgOverlap: String? {
         guard let overlap = orgOverlap else { return nil }
         return String(format: "%.0f%%", overlap * 100)
     }
-    
+
     /// Location overlap as percentage
     var formattedLocationOverlap: String? {
         guard let overlap = locationOverlap else { return nil }
         return String(format: "%.0f%%", overlap * 100)
     }
-    
+
     /// Event overlap as percentage
     var formattedEventOverlap: String? {
         guard let overlap = eventOverlap else { return nil }
         return String(format: "%.0f%%", overlap * 100)
     }
-    
+
     /// Temporal proximity as percentage
     var formattedTemporalProximity: String? {
         guard let proximity = temporalProximity else { return nil }
         return String(format: "%.0f%%", proximity * 100)
     }
-    
+
     /// Concise summary of entity similarity for UI display
     var entitySimilaritySummary: String? {
         guard hasEntityData else { return nil }
-        
+
         var components: [String] = []
-        
+
         if let personOverlap = personOverlap, personOverlap > 0 {
             components.append("Persons: \(formattedPersonOverlap!)")
         }
-        
+
         if let orgOverlap = orgOverlap, orgOverlap > 0 {
             components.append("Orgs: \(formattedOrgOverlap!)")
         }
-        
+
         if let locationOverlap = locationOverlap, locationOverlap > 0 {
             components.append("Locations: \(formattedLocationOverlap!)")
         }
-        
+
         if let eventOverlap = eventOverlap, eventOverlap > 0 {
             components.append("Events: \(formattedEventOverlap!)")
         }
-        
+
         if let temporalProximity = temporalProximity, temporalProximity > 0 {
             components.append("Temporal: \(formattedTemporalProximity!)")
         }
-        
+
         if components.isEmpty {
             return "No significant entity overlap"
         }
-        
+
         return components.joined(separator: ", ")
     }
-    
+
     /// Get a color representing the overall similarity strength
     var similarityColor: Color {
         if similarityScore >= 0.98 {
-            return .red      // Extremely high similarity
+            return .red // Extremely high similarity
         } else if similarityScore >= 0.95 {
-            return .orange   // Very high similarity
+            return .orange // Very high similarity
         } else if similarityScore >= 0.85 {
-            return .blue     // High similarity
+            return .blue // High similarity
         } else {
-            return .gray     // Moderate similarity
+            return .gray // Moderate similarity
         }
     }
 }
@@ -451,25 +452,25 @@ struct ArticleJSON {
     let logicalFallacies: String?
     let relationToTopic: String?
     let additionalInsights: String?
-    
+
     // Engine stats fields
     let engineModel: String?
     let engineElapsedTime: Double?
     let engineRawStats: String?
     let engineSystemInfo: [String: Any]?
-    
+
     // Related articles stored as structured data instead of a string
     let relatedArticles: [RelatedArticle]?
-    
+
     // New fields for R2 URL JSON payload
     let actionRecommendations: String?
     let talkingPoints: String?
     let eli5: String?
-    
+
     // NEW: Cluster summary and entities fields
     let clusterSummary: String?
     let entities: [Entity]?
-    
+
     // Article database ID from backend
     let databaseId: Int?
 }
@@ -495,25 +496,25 @@ struct PreparedArticle {
     let logicalFallacies: String?
     let relationToTopic: String?
     let additionalInsights: String?
-    
+
     // Structured engine stats
     let engineModel: String?
     let engineElapsedTime: Double?
     let engineRawStats: String?
     let engineSystemInfo: [String: Any]?
-    
+
     // Related articles stored as structured data
     let relatedArticles: [RelatedArticle]?
-    
+
     // New fields for R2 URL JSON payload
     let actionRecommendations: String?
     let talkingPoints: String?
     let eli5: String?
-    
+
     // NEW: Cluster summary and entities fields
     let clusterSummary: String?
     let entities: [Entity]?
-    
+
     // Article database ID from backend
     let databaseId: Int?
 }
@@ -540,24 +541,24 @@ func convertToPreparedArticle(_ input: ArticleJSON) -> PreparedArticle {
         logicalFallacies: input.logicalFallacies,
         relationToTopic: input.relationToTopic,
         additionalInsights: input.additionalInsights,
-        
+
         // Pass the structured engine stats fields
         engineModel: input.engineModel,
         engineElapsedTime: input.engineElapsedTime,
         engineRawStats: input.engineRawStats,
         engineSystemInfo: input.engineSystemInfo,
-        
+
         relatedArticles: input.relatedArticles,
-        
+
         // Pass the new R2 URL JSON fields
         actionRecommendations: input.actionRecommendations,
         talkingPoints: input.talkingPoints,
         eli5: input.eli5,
-        
+
         // Pass the new cluster summary and entities fields
         clusterSummary: input.clusterSummary,
         entities: input.entities,
-        
+
         // Pass the database ID
         databaseId: input.databaseId
     )
@@ -586,41 +587,43 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     let engineElapsedTime = json["elapsed_time"] as? Double
     let engineRawStats = json["stats"] as? String
     let engineSystemInfo = json["system_info"] as? [String: Any]
-    
+
     // CRITICAL FIX: Enhanced ID extraction with direct JSON dump and all keys
     AppLogger.database.debug("📊 ==== ARTICLE ID DEBUGGING ====")
     AppLogger.database.debug("🔍 EXAMINING JSON FOR ID [processArticleJSON]")
-    
+
     if let jsonData = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
-       let jsonString = String(data: jsonData, encoding: .utf8) {
+       let jsonString = String(data: jsonData, encoding: .utf8)
+    {
         // Log the first 1000 chars of the JSON to see the structure - expanded for better debugging
         let sample = String(jsonString.prefix(1000)) + (jsonString.count > 1000 ? "..." : "")
         AppLogger.database.debug("JSON sample: \(sample)")
     }
-    
+
     // Output ALL keys for comprehensive debugging
     let allKeys = Array(json.keys).sorted()
     AppLogger.database.debug("ALL JSON KEYS: \(allKeys.joined(separator: ", "))")
-    
+
     // Check nested engine_stats JSON if present (might contain ID)
     if let engineStatsStr = json["engine_stats"] as? String,
        let engineStatsData = engineStatsStr.data(using: .utf8),
-       let engineStatsDict = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any] {
+       let engineStatsDict = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
+    {
         AppLogger.database.debug("📊 ENGINE STATS JSON CONTAINS:")
         let engineStatsKeys = Array(engineStatsDict.keys).sorted()
         AppLogger.database.debug("ENGINE STATS KEYS: \(engineStatsKeys.joined(separator: ", "))")
-        
+
         if let engineId = engineStatsDict["id"] {
             AppLogger.database.debug("🔑 FOUND ID IN ENGINE STATS: \(String(describing: engineId)) (Type: \(type(of: engineId)))")
         }
     }
-    
+
     // Check for all possible ID keys - expanded list
-    let possibleIdKeys = ["id", "ID", "article_id", "articleId", "identifier", "external_id", 
+    let possibleIdKeys = ["id", "ID", "article_id", "articleId", "identifier", "external_id",
                           "database_id", "databaseId", "db_id", "dbId", "engine_id", "engineId"]
     var foundIdKey: String? = nil
     var foundIdValue: Any? = nil
-    
+
     AppLogger.database.debug("🔍 CHECKING ALL POSSIBLE ID KEYS...")
     for key in possibleIdKeys {
         if let value = json[key] {
@@ -630,13 +633,13 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
             break
         }
     }
-    
+
     // Extract the database ID, handling different possible types
     var databaseId: Int? = nil
-    
+
     // Try multiple approaches to find the ID - explicit detail logging
     AppLogger.database.debug("🔍 ATTEMPTING ID EXTRACTION...")
-    
+
     // APPROACH 1: Direct ID in JSON
     if let intId = json["id"] as? Int {
         databaseId = intId
@@ -650,11 +653,11 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     } else if let rawId = json["id"] {
         let typeString = String(describing: type(of: rawId))
         AppLogger.database.debug("⚠️ ID found but COULDN'T CONVERT to Int: \(String(describing: rawId)) (Type: \(typeString))")
-    } 
+    }
     // APPROACH 2: Alternative ID key in JSON
     else if let foundKey = foundIdKey, let value = foundIdValue {
         AppLogger.database.debug("🔄 TRYING ALTERNATIVE ID KEY: '\(foundKey)' with value: \(String(describing: value))")
-        
+
         if let intValue = value as? Int {
             databaseId = intValue
             AppLogger.database.debug("✅ SUCCESS! Alternative Int ID: \(intValue)")
@@ -667,12 +670,12 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         } else {
             AppLogger.database.debug("⚠️ Alternative ID couldn't be converted to Int: \(String(describing: value))")
         }
-    } 
+    }
     // APPROACH 3: ID in engine_stats nested JSON
     else if let engineStatsStr = json["engine_stats"] as? String,
             let engineStatsData = engineStatsStr.data(using: .utf8),
-            let engineStatsDict = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any] {
-        
+            let engineStatsDict = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
+    {
         if let engineIntId = engineStatsDict["id"] as? Int {
             databaseId = engineIntId
             AppLogger.database.debug("✅ SUCCESS! Int ID found in engine_stats: \(engineIntId)")
@@ -683,15 +686,15 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
             databaseId = Int(engineDoubleId)
             AppLogger.database.debug("✅ SUCCESS! Double ID in engine_stats, converted to Int: \(Int(engineDoubleId))")
         }
-    } 
+    }
     // APPROACH 4: No ID found anywhere
     else {
         AppLogger.database.debug("❌ NO database ID found in JSON under any common ID keys")
-        
+
         // Print all keys to help diagnose
         let keys = json.keys.joined(separator: ", ")
         AppLogger.database.debug("Available JSON keys: \(keys)")
-        
+
         // Since we couldn't find an ID, try a different approach - look in system_info
         if let systemInfo = json["system_info"] as? [String: Any] {
             AppLogger.database.debug("🔍 CHECKING SYSTEM INFO FOR ID...")
@@ -700,17 +703,17 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
                 AppLogger.database.debug("✅ SUCCESS! Int ID found in system_info: \(systemInfoId)")
             }
         }
-        
+
         // Look for any field with "id" in its name as last resort
         for key in json.keys where key.lowercased().contains("id") {
             AppLogger.database.debug("🔍 POTENTIAL ID FIELD: '\(key)' with value: \(String(describing: json[key]))")
         }
     }
-    
+
     // Extract the string ID that's separate from the numeric database ID
     // This will be used for the new id field in ArticleJSON
     var stringId = ""
-    
+
     // Try these approaches in order of preference
     if let idValue = json["id"] {
         // Direct approach: use the string value or convert other types to string
@@ -731,7 +734,7 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         stringId = jsonURL
         AppLogger.database.debug("⚠️ ID STRING: Using jsonURL as fallback: \(stringId)")
     }
-    
+
     // Final ID status report
     if let extractedId = databaseId {
         AppLogger.database.debug("✅ FINAL RESULT: Successfully extracted database ID: \(extractedId)")
@@ -740,52 +743,52 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     }
     AppLogger.database.debug("🔑 ID STRING: Final string ID: \(stringId)")
     AppLogger.database.debug("📊 ==== END ID DEBUGGING ====")
-    
-        // Extract new R2 URL JSON fields (snake_case in API response)
-        let actionRecommendations = json["action_recommendations"] as? String
-        let talkingPoints = json["talking_points"] as? String
-        let eli5Content = json["eli5"] as? String
-        
-        // Comprehensive debug logging for all content fields
-        AppLogger.database.debug("📊 JSON FIELD EXTRACTION REPORT:")
-        let fieldsList = [
-            "title": json["tiny_title"] as? String,
-            "body": json["tiny_summary"] as? String,
-            "summary": json["summary"] as? String,
-            "critical_analysis": json["critical_analysis"] as? String,
-            "logical_fallacies": json["logical_fallacies"] as? String,
-            "source_analysis": json["source_analysis"] as? String,
-            "relation_to_topic": json["relation_to_topic"] as? String,
-            "additional_insights": json["additional_insights"] as? String,
-            "action_recommendations": actionRecommendations,
-            "talking_points": talkingPoints,
-            "eli5": eli5Content
-        ]
-        
-        for (name, content) in fieldsList {
-            if let content = content, !content.isEmpty {
-                let charCount = content.count
-                let preview = content.prefix(min(30, charCount)).replacingOccurrences(of: "\n", with: " ")
-                AppLogger.database.debug("✅ Field '\(name)' found: \(charCount) chars, preview: \"\(preview)...\"")
-            } else {
-                AppLogger.database.debug("❌ Field '\(name)' is missing or empty")
-            }
+
+    // Extract new R2 URL JSON fields (snake_case in API response)
+    let actionRecommendations = json["action_recommendations"] as? String
+    let talkingPoints = json["talking_points"] as? String
+    let eli5Content = json["eli5"] as? String
+
+    // Comprehensive debug logging for all content fields
+    AppLogger.database.debug("📊 JSON FIELD EXTRACTION REPORT:")
+    let fieldsList = [
+        "title": json["tiny_title"] as? String,
+        "body": json["tiny_summary"] as? String,
+        "summary": json["summary"] as? String,
+        "critical_analysis": json["critical_analysis"] as? String,
+        "logical_fallacies": json["logical_fallacies"] as? String,
+        "source_analysis": json["source_analysis"] as? String,
+        "relation_to_topic": json["relation_to_topic"] as? String,
+        "additional_insights": json["additional_insights"] as? String,
+        "action_recommendations": actionRecommendations,
+        "talking_points": talkingPoints,
+        "eli5": eli5Content,
+    ]
+
+    for (name, content) in fieldsList {
+        if let content = content, !content.isEmpty {
+            let charCount = content.count
+            let preview = content.prefix(min(30, charCount)).replacingOccurrences(of: "\n", with: " ")
+            AppLogger.database.debug("✅ Field '\(name)' found: \(charCount) chars, preview: \"\(preview)...\"")
+        } else {
+            AppLogger.database.debug("❌ Field '\(name)' is missing or empty")
         }
-        
-        // Keep previous specific logging
-        if let actionRecs = actionRecommendations, !actionRecs.isEmpty {
-            AppLogger.database.debug("Found action_recommendations in JSON: \(actionRecs.prefix(50))...")
-        }
-        if let talkingPts = talkingPoints, !talkingPts.isEmpty {
-            AppLogger.database.debug("Found talking_points in JSON: \(talkingPts.prefix(50))...")
-        }
-    
+    }
+
+    // Keep previous specific logging
+    if let actionRecs = actionRecommendations, !actionRecs.isEmpty {
+        AppLogger.database.debug("Found action_recommendations in JSON: \(actionRecs.prefix(50))...")
+    }
+    if let talkingPts = talkingPoints, !talkingPts.isEmpty {
+        AppLogger.database.debug("Found talking_points in JSON: \(talkingPts.prefix(50))...")
+    }
+
     // Extract cluster summary
     let clusterSummary = json["cluster_summary"] as? String
     if let cluster = clusterSummary, !cluster.isEmpty {
         AppLogger.database.debug("Found cluster_summary in JSON: \(cluster.prefix(50))...")
     }
-    
+
     // Extract entities
     var parsedEntities: [Entity]? = nil
     if let entitiesArray = json["entities"] as? [[String: Any]], !entitiesArray.isEmpty {
@@ -795,7 +798,7 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
             let decoder = JSONDecoder()
             parsedEntities = try decoder.decode([Entity].self, from: data)
             AppLogger.database.debug("Successfully parsed \(parsedEntities?.count ?? 0) entities from API")
-            
+
             // Log a sample of entities for debugging
             if let entities = parsedEntities, !entities.isEmpty {
                 let firstEntity = entities[0]
@@ -805,23 +808,23 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
             AppLogger.database.error("Failed to parse entities: \(error)")
         }
     }
-    
+
     // Parse similar articles if available
     var parsedRelatedArticles: [RelatedArticle]? = nil
     if let similarArticlesArray = json["similar_articles"] as? [[String: Any]], !similarArticlesArray.isEmpty {
         do {
             AppLogger.database.debug("Found \(similarArticlesArray.count) related articles in API response")
             let data = try JSONSerialization.data(withJSONObject: similarArticlesArray)
-            
+
             // First decode using the API model that handles ISO8601 string dates from the API
             let decoder = JSONDecoder()
             let apiRelatedArticles = try decoder.decode([APIRelatedArticle].self, from: data)
-            
+
             // Convert API models to database models with proper date conversion
             parsedRelatedArticles = apiRelatedArticles.map { $0.toRelatedArticle() }
-            
+
             AppLogger.database.debug("Successfully parsed \(parsedRelatedArticles?.count ?? 0) related articles from API")
-            
+
             // Verify parsed data has valid content
             if let articles = parsedRelatedArticles, !articles.isEmpty {
                 // Log the first article to help with debugging
@@ -832,7 +835,7 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
             AppLogger.database.error("Failed to parse similar_articles: \(error)")
         }
     }
-    
+
     return ArticleJSON(
         id: stringId, // Use the string ID we extracted
         // Required fields from above guard statement
@@ -873,25 +876,25 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
         logicalFallacies: json["logical_fallacies"] as? String, // "logical_fallacies" → "logicalFallacies"
         relationToTopic: json["relation_to_topic"] as? String, // "relation_to_topic" → "relationToTopic"
         additionalInsights: json["additional_insights"] as? String, // "additional_insights" → "additionalInsights"
-        
+
         // Structured engine stats fields
         engineModel: engineModel,
         engineElapsedTime: engineElapsedTime,
         engineRawStats: engineRawStats,
         engineSystemInfo: engineSystemInfo,
-        
+
         // Add structured related articles - use our parsed result
         relatedArticles: parsedRelatedArticles,
-        
+
         // Add new R2 URL JSON fields
         actionRecommendations: actionRecommendations,
         talkingPoints: talkingPoints,
         eli5: eli5Content,
-        
+
         // Add new cluster summary and entities fields
         clusterSummary: clusterSummary,
         entities: parsedEntities,
-        
+
         // Add database ID
         databaseId: databaseId
     )

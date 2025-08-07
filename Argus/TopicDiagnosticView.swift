@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct TopicStatistic: Identifiable {
     var id: String { topic }
@@ -13,16 +13,16 @@ class TopicDiagnosticViewModel: ObservableObject {
     @Published var statistics: [TopicStatistic] = []
     @Published var isLoading = false
     @Published var totalArticleCount = 0
-    
+
     func refreshStatistics() async {
         await MainActor.run {
             isLoading = true
         }
-        
+
         do {
             let stats = try await ArticleService.shared.getTopicStatistics()
             let total = try await ArticleService.shared.getTotalArticleCount()
-            
+
             await MainActor.run {
                 self.statistics = stats
                 self.totalArticleCount = total
@@ -39,7 +39,7 @@ class TopicDiagnosticViewModel: ObservableObject {
 
 struct TopicDiagnosticView: View {
     @StateObject var viewModel = TopicDiagnosticViewModel()
-    
+
     var body: some View {
         VStack {
             HStack {
@@ -57,13 +57,13 @@ struct TopicDiagnosticView: View {
                 }
             }
             .padding()
-            
+
             if viewModel.isLoading {
                 ProgressView("Gathering statistics...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    Section(header: 
+                    Section(header:
                         HStack {
                             Text("Topic").bold().frame(width: 110, alignment: .leading)
                             Spacer()
@@ -89,7 +89,7 @@ struct TopicDiagnosticView: View {
                             }
                         }
                     }
-                    
+
                     Section {
                         Text("Total articles: \(viewModel.totalArticleCount)")
                             .font(.headline)

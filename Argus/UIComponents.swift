@@ -120,7 +120,7 @@ struct NonSelectableRichTextView: UIViewRepresentable {
     func updateUIView(_ uiView: UITextView, context _: Context) {
         // Create a mutable copy to preserve formatting but ensure proper font size
         let mutableString = NSMutableAttributedString(attributedString: attributedString)
-        
+
         // Apply system body font size to all text while preserving other attributes
         let bodyFont = UIFont.preferredFont(forTextStyle: .body)
         mutableString.enumerateAttributes(in: NSRange(location: 0, length: mutableString.length)) { attributes, range, _ in
@@ -128,12 +128,12 @@ struct NonSelectableRichTextView: UIViewRepresentable {
                 // Create a new font with the same characteristics but body font size
                 let newFont = existingFont.withSize(bodyFont.pointSize)
                 mutableString.addAttribute(.font, value: newFont, range: range)
-                
+
                 // Preserve paragraph style if it exists (affects spacing)
                 if let paragraphStyle = attributes[.paragraphStyle] {
                     mutableString.addAttribute(.paragraphStyle, value: paragraphStyle, range: range)
                 }
-                
+
                 // Preserve character spacing (kerning) if it exists
                 if let kerning = attributes[.kern] {
                     mutableString.addAttribute(.kern, value: kerning, range: range)
@@ -146,19 +146,19 @@ struct NonSelectableRichTextView: UIViewRepresentable {
 
         uiView.attributedText = mutableString
         uiView.textAlignment = .left
-        
+
         // Set the container width to match the proposal
         let width = UIScreen.main.bounds.width - 40
         uiView.textContainer.size.width = width
-        
+
         // Force the text view to be exactly the size of its content
         let layoutManager = uiView.layoutManager
         let textContainer = uiView.textContainer
         let usedRect = layoutManager.usedRect(for: textContainer)
-        
+
         // Set frame to exact content size to prevent extra spacing
         uiView.frame = CGRect(x: 0, y: 0, width: width, height: max(usedRect.height, 0))
-        
+
         uiView.invalidateIntrinsicContentSize()
         uiView.layoutIfNeeded()
     }
@@ -173,7 +173,7 @@ struct NonSelectableRichTextView: UIViewRepresentable {
         let layoutManager = uiView.layoutManager
         let textContainer = uiView.textContainer
         let usedRect = layoutManager.usedRect(for: textContainer)
-        
+
         // Return the exact height needed for the text content
         return CGSize(width: width, height: max(usedRect.height, 0))
     }

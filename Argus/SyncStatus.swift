@@ -4,19 +4,19 @@ import Foundation
 enum SyncStatus: Equatable {
     /// No sync operation is currently in progress
     case idle
-    
+
     /// Actively searching for new articles from the server
     case searching
-    
+
     /// Syncing articles with phase information
     case syncing(message: String)
-    
+
     /// Sync operation completed successfully
     case complete
-    
+
     /// Sync operation failed with an error
     case error(String)
-    
+
     /// Returns a descriptive message based on the current state
     var message: String {
         switch self {
@@ -24,16 +24,16 @@ enum SyncStatus: Equatable {
             return ""
         case .searching:
             return "Checking for new articles..."
-        case .syncing(let message):
+        case let .syncing(message):
             // Display the phase message directly
             return message
         case .complete:
             return "Articles updated"
-        case .error(let message):
+        case let .error(message):
             return "Error: \(message)"
         }
     }
-    
+
     /// Returns a system image name based on the current state
     var systemImage: String {
         switch self {
@@ -49,7 +49,7 @@ enum SyncStatus: Equatable {
             return "exclamationmark.triangle"
         }
     }
-    
+
     /// Returns whether the status should be displayed
     var shouldDisplay: Bool {
         switch self {
@@ -59,7 +59,7 @@ enum SyncStatus: Equatable {
             return true
         }
     }
-    
+
     /// Returns true if the status represents an active operation
     var isActive: Bool {
         switch self {

@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 /// A test view to preview the enhanced related articles interface
 struct RelatedArticlesTestView: View {
@@ -14,12 +14,12 @@ struct RelatedArticlesTestView: View {
             similarityScore: 0.98,
             tinySummary: "This is a test article with very high similarity scores across multiple dimensions",
             title: "AI makes breakthrough in quantum computing research",
-            
+
             // Vector quality fields
             vectorScore: 0.95,
             vectorActiveDimensions: 768,
             vectorMagnitude: 1.25,
-            
+
             // Entity similarity fields
             entityOverlapCount: 12,
             primaryOverlapCount: 5,
@@ -28,7 +28,7 @@ struct RelatedArticlesTestView: View {
             locationOverlap: 0.32,
             eventOverlap: 0.90,
             temporalProximity: 0.98,
-            
+
             // Formula explanation
             similarityFormula: "60% vector similarity (0.95) + 40% entity similarity (0.82), where entity similarity combines person (30%), organization (20%), location (15%), event (15%), and temporal (20%) factors"
         ),
@@ -42,12 +42,12 @@ struct RelatedArticlesTestView: View {
             similarityScore: 0.75,
             tinySummary: "This article has medium similarity with interesting entity overlaps in organizations",
             title: "Research institute announces quantum computing initiative",
-            
+
             // Vector quality fields
             vectorScore: 0.68,
             vectorActiveDimensions: 768,
             vectorMagnitude: 1.15,
-            
+
             // Entity similarity fields
             entityOverlapCount: 8,
             primaryOverlapCount: 3,
@@ -56,7 +56,7 @@ struct RelatedArticlesTestView: View {
             locationOverlap: 0.22,
             eventOverlap: 0.35,
             temporalProximity: 0.65,
-            
+
             // Formula explanation
             similarityFormula: "60% vector similarity (0.68) + 40% entity similarity (0.72), where entity similarity combines person (30%), organization (20%), location (15%), event (15%), and temporal (20%) factors"
         ),
@@ -65,17 +65,17 @@ struct RelatedArticlesTestView: View {
             id: 3,
             category: "Business",
             jsonURL: "https://example.com/article3.json",
-            publishedDate: Date().addingTimeInterval(-172800), // Two days ago
+            publishedDate: Date().addingTimeInterval(-172_800), // Two days ago
             qualityScore: 2,
             similarityScore: 0.60,
             tinySummary: "This article shares only a few entities but has temporal proximity",
             title: "Tech company announces financial results",
-            
+
             // Vector quality fields
             vectorScore: 0.55,
             vectorActiveDimensions: 768,
             vectorMagnitude: 1.05,
-            
+
             // Entity similarity fields
             entityOverlapCount: 4,
             primaryOverlapCount: 1,
@@ -84,20 +84,20 @@ struct RelatedArticlesTestView: View {
             locationOverlap: 0.10,
             eventOverlap: 0.15,
             temporalProximity: 0.85,
-            
+
             // Formula explanation
             similarityFormula: "60% vector similarity (0.55) + 40% entity similarity (0.48), where entity similarity combines person (30%), organization (20%), location (15%), event (15%), and temporal (20%) factors"
-        )
+        ),
     ]
-    
+
     var body: some View {
         VStack {
             Text("Enhanced Related Articles")
                 .font(.largeTitle)
                 .padding(.top, 20)
-            
+
             Divider()
-            
+
             EnhancedRelatedArticlesView(articles: articles, clusterSummary: "**TL;DR:** This is a test cluster summary showing how multiple related articles about quantum computing and AI research are connected.\n\n**Full Summary:**\nThis cluster contains articles about breakthrough developments in quantum computing research, particularly focusing on AI applications and industry initiatives. The articles span from academic research announcements to corporate financial reports, showing the broad impact of quantum computing developments across different sectors.\n\n**References:**\nHigh Quality Sources:\n- Research Institute Press Release\n- AI Quarterly Journal\n- Tech Industry Analysis\n\nMedium Quality Sources:\n- Business Financial Reports\n- Technology News Coverage") { jsonURL in
                 print("Selected article with URL: \(jsonURL)")
             }

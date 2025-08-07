@@ -286,7 +286,7 @@ private func getAttributedStringInternal<T>(
         completion?(nil)
         return nil
     }
-    
+
     let markdownText = field.getMarkdownText(from: article)
 
     guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
@@ -423,7 +423,7 @@ func verifyAllBlobs(in article: ArticleModel) -> Bool {
         .title, .body, .summary, .criticalAnalysis,
         .logicalFallacies, .sourceAnalysis, .relationToTopic,
         .additionalInsights, .actionRecommendations, .talkingPoints,
-        .eli5, .clusterSummary
+        .eli5, .clusterSummary,
     ]
 
     AppLogger.database.debug("🔍 VERIFYING ALL BLOBS for article \(article.id):")
@@ -469,7 +469,7 @@ func regenerateAllBlobs(for article: ArticleModel, force: Bool = false) -> Int {
         .title, .body, .summary, .criticalAnalysis,
         .logicalFallacies, .sourceAnalysis, .relationToTopic,
         .additionalInsights, .actionRecommendations, .talkingPoints,
-        .eli5, .clusterSummary
+        .eli5, .clusterSummary,
     ]
 
     var regeneratedCount = 0

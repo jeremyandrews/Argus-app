@@ -167,7 +167,7 @@ class APIClient {
     ///   - progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Array of ArticleJSON objects
     /// - Throws: ApiError if fetch fails
-    func fetchArticles(limit: Int = 50, topic _: String? = nil, since _: Date? = nil,
+    func fetchArticles(limit _: Int = 50, topic _: String? = nil, since _: Date? = nil,
                        allowRetries: Bool = true, progressHandler: ((String) -> Void)? = nil) async throws -> [ArticleJSON]
     {
         // Note: The backend only supports the /articles/sync endpoint, not /articles

@@ -5,7 +5,7 @@ import SwiftUI
 struct SyncStatusIndicator: View {
     /// The current sync status
     @Binding var status: SyncStatus
-    
+
     var body: some View {
         HStack(spacing: 8) {
             // Standard iOS pattern: status icon or activity indicator first
@@ -19,7 +19,7 @@ struct SyncStatusIndicator: View {
                 Image(systemName: status.systemImage)
                     .foregroundColor(colorForStatus)
             }
-            
+
             // Status text follows the indicator (standard iOS pattern)
             if status.shouldDisplay {
                 // In iOS native apps, status message is clear and includes count
@@ -32,7 +32,7 @@ struct SyncStatusIndicator: View {
         .padding(.vertical, 4)
         .animation(.easeInOut(duration: 0.3), value: status)
     }
-    
+
     /// Returns the appropriate color for the current status
     private var colorForStatus: Color {
         switch status {

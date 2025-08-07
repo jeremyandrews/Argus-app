@@ -121,12 +121,12 @@ final class ArticleOperations {
     ) async throws -> [ArticleModel] {
         // Define missing topics to watch for
         let missingTopics = Set(["Rust", "Space", "Tuscany", "Vulnerability"])
-        
+
         // Special logging for missing topics only
         if let topic = topic, missingTopics.contains(topic) {
             AppLogger.database.debug("🔍 MISSING TOPIC: Fetch requested for topic '\(topic)'")
         }
-        
+
         let container = SwiftDataContainer.shared.container
         let context = container.mainContext
 
@@ -182,11 +182,11 @@ final class ArticleOperations {
 
         do {
             var articles = try context.fetch(descriptor)
-            
+
             // Special logging for missing topics only
             if let topic = topic, missingTopics.contains(topic) {
                 AppLogger.database.debug("📊 MISSING TOPIC: Initial fetch for '\(topic)' returned \(articles.count) articles")
-                
+
                 // If no articles found, do a broader database check
                 if articles.isEmpty {
                     let topicOnlyDescriptor = FetchDescriptor<ArticleModel>(
@@ -210,7 +210,7 @@ final class ArticleOperations {
                 if let topic = topic, topic != "All", !appliedTopicFilter {
                     AppLogger.database.debug("🔍 Applying topic filter in memory: \(topic)")
                     articles = articles.filter { $0.topic == topic }
-                    
+
                     // Special logging for missing topics only
                     if missingTopics.contains(topic) {
                         AppLogger.database.debug("📊 MISSING TOPIC: After in-memory filtering, '\(topic)' has \(articles.count) articles")
@@ -491,7 +491,7 @@ final class ArticleOperations {
     ) async throws -> Int {
         do {
             let articleService = ArticleService.shared
-            
+
             // Forward the progressHandler to the service layer
             // This will provide real-time progress updates for both searching and downloading
             return try await articleService.syncArticlesFromServer(
@@ -691,7 +691,7 @@ final class ArticleOperations {
         // Get the field enum from section name
         let field = SectionNaming.fieldForSection(section)
         let normalizedKey = SectionNaming.normalizedKey(section)
-        
+
         // Log section loading details for debugging
         let hasBlobField = field.getBlob(from: model) != nil
         let hasTextField = field.getMarkdownText(from: model) != nil
@@ -702,7 +702,7 @@ final class ArticleOperations {
         if let blob = field.getBlob(from: model), !blob.isEmpty {
             do {
                 AppLogger.database.debug("⚙️ Attempting to extract attributed string from blob for \(section) (\(blob.count) bytes)")
-                
+
                 let attributedString = try NSKeyedUnarchiver.unarchivedObject(
                     ofClass: NSAttributedString.self,
                     from: blob
@@ -732,11 +732,11 @@ final class ArticleOperations {
         }
 
         AppLogger.database.debug("⚙️ PHASE 2: Blob loading failed, attempting rich text generation for \(section)")
-        
+
         // Generate attributed string from markdown
         if let attributedString = markdownToAttributedString(text, textStyle: field.textStyle) {
             AppLogger.database.debug("⚙️ GENERATED: \(section) - Created attributed string")
-            
+
             // IMPROVEMENT: Confirm the attributed string is valid
             if attributedString.length > 0 {
                 AppLogger.database.debug("✅ \(section) blob contains valid attributed string")
@@ -755,16 +755,16 @@ final class ArticleOperations {
 
                 // Save to the model and ensure it's stored in the database
                 AppLogger.database.debug("⚙️ Saving generated blob for \(section) (\(blobData.count) bytes)")
-                
+
                 // First try with the model we already have
                 let saved = saveBlobToDatabase(field: field, blobData: blobData, articleModel: model)
-                
+
                 if saved {
                     AppLogger.database.debug("✅ SAVED TO MODEL: \(section) - Successfully stored blob")
                 } else {
                     // If first attempt fails, try with a fresh model
                     AppLogger.database.warning("⚠️ Initial blob save failed for \(section), attempting with fresh model")
-                    
+
                     if let freshModel = await getArticleModelWithContext(byId: articleId) {
                         let freshSaved = saveBlobToDatabase(field: field, blobData: blobData, articleModel: freshModel)
                         if freshSaved {
@@ -776,7 +776,7 @@ final class ArticleOperations {
                         AppLogger.database.error("❌ SAVE FAILED: \(section) - Could not retrieve fresh model")
                     }
                 }
-                
+
                 // Always verify the blob was stored properly
                 Task {
                     await verifyBlobStorage(field: field, articleId: articleId)

@@ -130,7 +130,7 @@ final class NewsDetailViewModel: ObservableObject {
         if let preloadedArticle = preloadedArticle {
             currentArticle = preloadedArticle
             currentArticleModel = preloadedArticle
-        } else if currentIndex >= 0 && currentIndex < uniqueArticles.count {
+        } else if currentIndex >= 0, currentIndex < uniqueArticles.count {
             currentArticle = uniqueArticles[currentIndex]
             currentArticleModel = uniqueArticles[currentIndex]
         }
@@ -210,7 +210,7 @@ final class NewsDetailViewModel: ObservableObject {
 
         // Get the next valid index
         guard let nextIndex = getNextValidIndex(direction: direction),
-              nextIndex >= 0 && nextIndex < articles.count
+              nextIndex >= 0, nextIndex < articles.count
         else {
             return
         }
@@ -221,7 +221,7 @@ final class NewsDetailViewModel: ObservableObject {
 
         // Save current index to log the change
         let oldIndex = currentIndex
-        
+
         // IMPORTANT: Instead of immediately updating UI with unformatted content,
         // we'll extract formatted blobs first and only then update the UI
         Task(priority: .userInitiated) {
@@ -229,7 +229,7 @@ final class NewsDetailViewModel: ObservableObject {
             let startTime = Date()
             AppLogger.database.debug("🔄 Navigating from index \(oldIndex) to \(nextIndex) (article ID: \(nextArticleId))")
             AppLogger.database.debug("🔍 Container: \(String(describing: SwiftDataContainer.shared.container))")
-            
+
             // Create a loading timer that will only show loading indicator if operation takes too long
             let loadingTimerTask = Task {
                 try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
@@ -239,15 +239,15 @@ final class NewsDetailViewModel: ObservableObject {
                     }
                 }
             }
-            
+
             // 1. Get a fresh ArticleModel with valid context
             let model = await articleOperations.getArticleModelWithContext(byId: nextArticleId)
-            
+
             // 2. Extract formatted content from blobs BEFORE updating the UI
             var extractedTitle: NSAttributedString? = nil
             var extractedBody: NSAttributedString? = nil
             var extractedSummary: NSAttributedString? = nil
-            
+
             if let model = model {
                 // Log model details for diagnostics
                 AppLogger.database.debug("""
@@ -257,7 +257,7 @@ final class NewsDetailViewModel: ObservableObject {
                 - Has body blob: \(model.bodyBlob != nil)
                 - Has summary blob: \(model.summaryBlob != nil)
                 """)
-                
+
                 // Extract title blob (should always be available)
                 if let titleBlob = model.titleBlob {
                     extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
@@ -265,7 +265,7 @@ final class NewsDetailViewModel: ObservableObject {
                         from: titleBlob
                     )
                 }
-                
+
                 // Extract body blob (should always be available)
                 if let bodyBlob = model.bodyBlob {
                     extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
@@ -273,7 +273,7 @@ final class NewsDetailViewModel: ObservableObject {
                         from: bodyBlob
                     )
                 }
-                
+
                 // Extract summary blob if available
                 if let summaryBlob = model.summaryBlob {
                     extractedSummary = try? NSKeyedUnarchiver.unarchivedObject(
@@ -282,15 +282,15 @@ final class NewsDetailViewModel: ObservableObject {
                     )
                 }
             }
-            
+
             // 3. Now that we have all formatted content, update the UI all at once
             await MainActor.run {
                 // Update the index
                 currentIndex = nextIndex
-                
+
                 // Clear previous content
                 clearRichTextContent()
-                
+
                 // Update model references
                 if let model = model {
                     currentArticleModel = model
@@ -299,41 +299,41 @@ final class NewsDetailViewModel: ObservableObject {
                     // Fallback if model retrieval failed
                     currentArticle = targetArticle
                 }
-                
+
                 // CRITICAL: Set formatted content BEFORE triggering UI refresh
                 titleAttributedString = extractedTitle
                 bodyAttributedString = extractedBody
                 summaryAttributedString = extractedSummary
-                
+
                 // Reset expanded sections
                 expandedSections = Self.getDefaultExpandedSections()
-                
+
                 // Force UI refresh AFTER all content is ready
                 contentTransitionID = UUID()
                 scrollToTopTrigger = UUID()
             }
-            
+
             // After UI is updated, mark as viewed
             try? await markAsViewed()
-            
+
             // Only generate missing content if extraction failed
             if titleAttributedString == nil || bodyAttributedString == nil {
                 await loadMinimalContent()
                 AppLogger.database.debug("⚙️ Generated missing title/body content for article \(nextArticleId)")
             }
-            
+
             // Generate summary content if needed and expanded
-            if expandedSections["Summary"] == true && summaryAttributedString == nil {
+            if expandedSections["Summary"] == true, summaryAttributedString == nil {
                 loadContentForSection("Summary")
                 AppLogger.database.debug("⚙️ Generated missing summary content for article \(nextArticleId)")
             }
-            
+
             // Cancel the loading timer task and clear loading state
             loadingTimerTask.cancel()
             await MainActor.run {
                 isLoadingNextArticle = false
             }
-            
+
             let loadTime = Date().timeIntervalSince(startTime)
             AppLogger.database.debug("✅ Article \(nextArticleId) loaded in \(String(format: "%.3f", loadTime)) seconds")
         }
@@ -364,16 +364,17 @@ final class NewsDetailViewModel: ObservableObject {
         let hasTitleBlob = article.titleBlob != nil
         let hasBodyBlob = article.bodyBlob != nil
         AppLogger.database.debug("⚙️ loadMinimalContent: Title blob exists: \(hasTitleBlob), Body blob exists: \(hasBodyBlob)")
-        
+
         // Start loading with a synchronous approach for critical content
         AppLogger.database.debug("⚙️ Loading initial content synchronously for article \(article.id)")
-        
+
         // First attempt to directly load from blobs if they exist
-        if titleAttributedString == nil && article.titleBlob != nil {
+        if titleAttributedString == nil, article.titleBlob != nil {
             do {
                 let startTime = Date()
-                if let blob = article.titleBlob, 
-                   let attrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob) {
+                if let blob = article.titleBlob,
+                   let attrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob)
+                {
                     titleAttributedString = attrString
                     AppLogger.database.debug("✅ Title loaded from blob in \(Date().timeIntervalSince(startTime))s")
                 } else {
@@ -405,13 +406,14 @@ final class NewsDetailViewModel: ObservableObject {
             )
             AppLogger.database.debug("✅ Title generated in \(Date().timeIntervalSince(startTime))s")
         }
-        
+
         // Direct blob extraction for body - prioritizing formatted content
-        if bodyAttributedString == nil && article.bodyBlob != nil {
+        if bodyAttributedString == nil, article.bodyBlob != nil {
             do {
                 let startTime = Date()
                 if let blob = article.bodyBlob,
-                   let attrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob) {
+                   let attrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob)
+                {
                     bodyAttributedString = attrString
                     AppLogger.database.debug("✅ Body loaded from blob in \(Date().timeIntervalSince(startTime))s")
                 } else {
@@ -515,14 +517,14 @@ final class NewsDetailViewModel: ObservableObject {
 
             // Make sure we have an article with a valid context before proceeding
             let contextArticle = await articleOperations.getArticleModelWithContext(byId: article.id)
-            
+
             // Use the centralized loader in ArticleOperations
             if let content = await articleOperations.loadContentForSection(section: section, articleId: article.id) {
                 if !Task.isCancelled {
                     await MainActor.run {
                         // Update the content in the view model
                         updateSectionContent(section, SectionNaming.fieldForSection(section), content)
-                        
+
                         // Also update the currentArticleModel if needed
                         if self.currentArticleModel == nil || self.currentArticleModel?.modelContext == nil {
                             self.currentArticleModel = contextArticle
@@ -540,10 +542,10 @@ final class NewsDetailViewModel: ObservableObject {
                                 withRootObject: content,
                                 requiringSecureCoding: false
                             )
-                            
+
                             await MainActor.run {
                                 field.setBlob(blobData, on: contextArticle)
-                                
+
                                 // Save the context manually to ensure persistence
                                 if let context = contextArticle.modelContext {
                                     try? context.save()
@@ -791,19 +793,18 @@ final class NewsDetailViewModel: ObservableObject {
             sourceAnalysisAttributedString = content
         }
 
-        if let content = richTextContent[.relationToTopic]
-{
+        if let content = richTextContent[.relationToTopic] {
             cachedContentBySection["Relevance"] = content
         }
 
         if let content = richTextContent[.additionalInsights] {
             cachedContentBySection["Context & Perspective"] = content
         }
-        
+
         if let content = richTextContent[.actionRecommendations] {
             cachedContentBySection["What You Can Do"] = content
         }
-        
+
         if let content = richTextContent[.talkingPoints] {
             cachedContentBySection["Talking Points"] = content
         }
@@ -887,7 +888,7 @@ final class NewsDetailViewModel: ObservableObject {
         let wasExpanded = expandedSections[section] ?? false
         expandedSections[section] = !wasExpanded
 
-        if !wasExpanded && needsConversion(section) {
+        if !wasExpanded, needsConversion(section) {
             // Only load rich text content when newly expanding sections that need conversion
             loadContentForSection(section)
         }
@@ -968,7 +969,7 @@ final class NewsDetailViewModel: ObservableObject {
         var newIndex = direction == .next ? currentIndex + 1 : currentIndex - 1
 
         // Check if the index is valid and not deleted
-        while newIndex >= 0 && newIndex < articles.count {
+        while newIndex >= 0, newIndex < articles.count {
             let candidate = articles[newIndex]
             if !deletedIDs.contains(candidate.id) {
                 return newIndex

@@ -2,24 +2,24 @@ import Foundation
 import SwiftData
 import SwiftUI
 
-/// Structure for storing Argus engine processing details in a strongly-typed format 
+/// Structure for storing Argus engine processing details in a strongly-typed format
 /// This is the canonical definition - do not redefine this struct elsewhere
 struct ArgusDetailsData {
     /// The model used for processing (e.g., "mistral-small:24b-instruct-2501-fp16")
     let model: String
-    
+
     /// Processing time in seconds (e.g., 232.673831761)
     let elapsedTime: Double
-    
+
     /// When the article was processed
     let date: Date
-    
+
     /// Raw statistics string (e.g., "324871:41249:327:3:11:30")
     let stats: String
-    
+
     /// Article database ID from backend
     let databaseId: Int?
-    
+
     /// Additional system information
     let systemInfo: [String: Any]?
 }
@@ -56,7 +56,7 @@ final class ArticleModel: Equatable {
 
     /// Who or what is affected by this article
     var affected: String = ""
-    
+
     /// Database ID from the backend system
     var databaseId: Int?
 
@@ -114,13 +114,13 @@ final class ArticleModel: Equatable {
 
     /// Additional AI insights about the article
     var additionalInsights: String?
-    
+
     /// Action recommendations based on the article content
     var actionRecommendations: String?
-    
+
     /// Talking points for facilitating discussions about the article
     var talkingPoints: String?
-    
+
     /// Simplified explanation of the article (Explain Like I'm 5)
     var eli5: String?
 
@@ -149,47 +149,47 @@ final class ArticleModel: Equatable {
 
     /// Rich text blob for additional insights
     var additionalInsightsBlob: Data?
-    
+
     /// Rich text blob for action recommendations
     var actionRecommendationsBlob: Data?
-    
+
     /// Rich text blob for talking points
     var talkingPointsBlob: Data?
-    
+
     /// Rich text blob for eli5 content
     var eli5Blob: Data?
-    
+
     /// Cluster summary for this article combining multiple related articles
     var clusterSummary: String?
-    
+
     /// Rich text blob for cluster summary
     var clusterSummaryBlob: Data?
-    
+
     /// Entities data stored as JSON blob
     var entitiesData: Data?
-    
+
     /// Computed property to access structured entities
     var entities: [Entity]? {
         get {
             guard let data = entitiesData, !data.isEmpty else {
-                AppLogger.database.debug("No entities data found for article \(self.id)")
+                AppLogger.database.debug("No entities data found for article \(id)")
                 return nil
             }
-            
+
             do {
                 let decoder = JSONDecoder()
                 let decodedEntities = try decoder.decode([Entity].self, from: data)
-                AppLogger.database.debug("Successfully decoded \(decodedEntities.count) entities for article \(self.id)")
-                
+                AppLogger.database.debug("Successfully decoded \(decodedEntities.count) entities for article \(id)")
+
                 // Log a sample of entities for debugging
                 if !decodedEntities.isEmpty {
                     let firstEntity = decodedEntities[0]
                     AppLogger.database.debug("First entity - Name: '\(firstEntity.name)', Type: '\(firstEntity.type)', Importance: '\(firstEntity.importance)'")
                 }
-                
+
                 return decodedEntities
             } catch {
-                AppLogger.database.error("Failed to decode entitiesData for article \(self.id): \(error)")
+                AppLogger.database.error("Failed to decode entitiesData for article \(id): \(error)")
                 return nil
             }
         }
@@ -198,52 +198,52 @@ final class ArticleModel: Equatable {
                 do {
                     let encoder = JSONEncoder()
                     entitiesData = try encoder.encode(newValue)
-                    AppLogger.database.debug("Stored \(newValue.count) entities for article \(self.id)")
+                    AppLogger.database.debug("Stored \(newValue.count) entities for article \(id)")
                 } catch {
-                    AppLogger.database.error("Failed to encode entities for article \(self.id): \(error)")
+                    AppLogger.database.error("Failed to encode entities for article \(id): \(error)")
                     entitiesData = nil
                 }
             } else {
                 entitiesData = nil
-                AppLogger.database.debug("Cleared entities for article \(self.id)")
+                AppLogger.database.debug("Cleared entities for article \(id)")
             }
         }
     }
 
     // MARK: - Additional Metadata
-    
+
     /// Engine model identifier (e.g., "mistral-small:24b-instruct-2501-fp16")
     var engineModel: String?
-    
+
     /// Processing time in seconds (e.g., 232.673831761)
     var engineElapsedTime: Double?
-    
+
     /// Raw statistics string (e.g., "324871:41249:327:3:11:30")
     var engineRawStats: String?
-    
+
     /// Serialized system information (JSON data)
     var engineSystemInfoData: Data?
 
     /// Related articles serialized Data
     var relatedArticlesData: Data?
-    
+
     /// Computed property to access structured related articles
     var relatedArticles: [RelatedArticle]? {
         get {
-            guard let data = relatedArticlesData, !data.isEmpty else { 
-                AppLogger.database.debug("No related articles data found for article \(self.id)")
-                return nil 
+            guard let data = relatedArticlesData, !data.isEmpty else {
+                AppLogger.database.debug("No related articles data found for article \(id)")
+                return nil
             }
-            
+
             do {
                 // Create decoder with explicit date strategy
                 let decoder = JSONDecoder()
                 // Use seconds since 1970 format (default for JSONEncoder)
                 decoder.dateDecodingStrategy = .secondsSince1970
-                
+
                 let decodedArticles = try decoder.decode([RelatedArticle].self, from: data)
-                AppLogger.database.debug("Successfully decoded \(decodedArticles.count) related articles for article \(self.id)")
-                
+                AppLogger.database.debug("Successfully decoded \(decodedArticles.count) related articles for article \(id)")
+
                 // Validate that the related articles have valid data
                 if !decodedArticles.isEmpty {
                     let firstArticle = decodedArticles[0]
@@ -252,10 +252,10 @@ final class ArticleModel: Equatable {
                         AppLogger.database.debug("Published date: \(date.formatted())")
                     }
                 }
-                
+
                 return decodedArticles
             } catch {
-                AppLogger.database.error("Failed to decode relatedArticlesData for article \(self.id): \(error)")
+                AppLogger.database.error("Failed to decode relatedArticlesData for article \(id): \(error)")
                 return nil
             }
         }
@@ -268,21 +268,21 @@ final class ArticleModel: Equatable {
                             AppLogger.database.warning("Related article with empty jsonURL: ID: \(article.id), Title: '\(article.title)'")
                         }
                     }
-                    
+
                     // Create encoder with explicit date strategy
                     let encoder = JSONEncoder()
                     // Use seconds since 1970 format (default, but being explicit)
                     encoder.dateEncodingStrategy = .secondsSince1970
-                    
+
                     relatedArticlesData = try encoder.encode(newValue)
-                    AppLogger.database.debug("Stored \(newValue.count) related articles for article \(self.id)")
+                    AppLogger.database.debug("Stored \(newValue.count) related articles for article \(id)")
                 } catch {
-                    AppLogger.database.error("Failed to encode related articles for article \(self.id): \(error)")
+                    AppLogger.database.error("Failed to encode related articles for article \(id): \(error)")
                     relatedArticlesData = nil
                 }
             } else {
                 relatedArticlesData = nil
-                AppLogger.database.debug("Cleared related articles for article \(self.id)")
+                AppLogger.database.debug("Cleared related articles for article \(id)")
             }
         }
     }
@@ -377,22 +377,22 @@ final class ArticleModel: Equatable {
         self.engineModel = engineModel
         self.engineElapsedTime = engineElapsedTime
         self.engineRawStats = engineRawStats
-        
+
         // Serialize system info if provided
         if let systemInfo = engineSystemInfo {
-            self.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: systemInfo)
+            engineSystemInfoData = try? JSONSerialization.data(withJSONObject: systemInfo)
         }
-        
+
         // If no structured data but we have engineStats, try to parse it
-        if (engineModel == nil || engineElapsedTime == nil || engineRawStats == nil) && engineStats != nil {
+        if engineModel == nil || engineElapsedTime == nil || engineRawStats == nil, engineStats != nil {
             if let data = engineStats?.data(using: .utf8),
-               let engineDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                
+               let engineDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            {
                 // Parse the engine stats and extract structured fields
                 self.engineModel = self.engineModel ?? engineDict["model"] as? String
                 self.engineElapsedTime = self.engineElapsedTime ?? engineDict["elapsed_time"] as? Double
                 self.engineRawStats = self.engineRawStats ?? engineDict["stats"] as? String
-                
+
                 // ENHANCED: Extract the database ID with robust type handling if it's not already set
                 if self.databaseId == nil {
                     if let intId = engineDict["id"] as? Int {
@@ -413,20 +413,20 @@ final class ArticleModel: Equatable {
                         AppLogger.database.debug("⚠️ Initializer: ID found but couldn't convert to Int: \(String(describing: rawId)) (Type: \(typeString))")
                     }
                 }
-                
+
                 // If we have system info and no existing engine system info data
-                if self.engineSystemInfoData == nil, let sysInfo = engineDict["system_info"] as? [String: Any] {
-                    self.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
+                if engineSystemInfoData == nil, let sysInfo = engineDict["system_info"] as? [String: Any] {
+                    engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
                 }
             }
         }
-        
+
         // Store related articles as encoded data
         self.relatedArticles = relatedArticles
-        
+
         // Store entities as encoded data
         self.entities = entities
-        
+
         self.titleBlob = titleBlob
         self.bodyBlob = bodyBlob
         self.summaryBlob = summaryBlob
@@ -451,21 +451,20 @@ final class ArticleModel: Equatable {
 
     /// Computed property to access the system info
     var engineSystemInfo: [String: Any]? {
-        get {
-            guard let data = engineSystemInfoData else { return nil }
-            return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        }
+        guard let data = engineSystemInfoData else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
-    
+
     /// Computed property for structured engine stats data
     var engineDetails: ArgusDetailsData? {
         // Only generate if we have the essential fields
         guard let model = engineModel,
               let elapsed = engineElapsedTime,
-              let stats = engineRawStats else {
+              let stats = engineRawStats
+        else {
             return nil
         }
-        
+
         return ArgusDetailsData(
             model: model,
             elapsedTime: elapsed,
@@ -475,8 +474,8 @@ final class ArticleModel: Equatable {
             systemInfo: engineSystemInfo
         )
     }
-    
-    public static func == (lhs: ArticleModel, rhs: ArticleModel) -> Bool {
+
+    static func == (lhs: ArticleModel, rhs: ArticleModel) -> Bool {
         return lhs.id == rhs.id
     }
 }
@@ -502,7 +501,7 @@ final class SeenArticleModel: Equatable {
         self.date = date
     }
 
-    public static func == (lhs: SeenArticleModel, rhs: SeenArticleModel) -> Bool {
+    static func == (lhs: SeenArticleModel, rhs: SeenArticleModel) -> Bool {
         return lhs.id == rhs.id
     }
 }
@@ -539,7 +538,7 @@ final class TopicModel: Equatable {
         self.displayOrder = displayOrder
     }
 
-    public static func == (lhs: TopicModel, rhs: TopicModel) -> Bool {
+    static func == (lhs: TopicModel, rhs: TopicModel) -> Bool {
         return lhs.id == rhs.id
     }
 }
@@ -676,19 +675,19 @@ extension ArticleModel {
         get { return additionalInsights }
         set { additionalInsights = newValue }
     }
-    
+
     /// The action_recommendations property of the notification data (snake_case format)
     var action_recommendations: String? {
         get { return actionRecommendations }
         set { actionRecommendations = newValue }
     }
-    
+
     /// The talking_points property of the notification data (snake_case format)
     var talking_points: String? {
         get { return talkingPoints }
         set { talkingPoints = newValue }
     }
-    
+
     /// The eli5 property of the notification data (snake_case format)
     var eli5_text: String? {
         get { return eli5 }
@@ -704,27 +703,27 @@ extension ArticleModel {
                 var dict: [String: Any] = [
                     "model": model,
                     "elapsed_time": elapsedTime,
-                    "stats": stats
+                    "stats": stats,
                 ]
-                
+
                 // IMPORTANT: Add database ID with explicit type handling to ensure proper serialization
                 // We MUST add this before creating any copies of the dictionary
                 if let dbId = databaseId {
                     // Force dbId to be treated as NSNumber to ensure proper JSON serialization
                     dict["id"] = NSNumber(value: dbId)
-                    
+
                     // Enhanced logging to diagnose the issue
                     AppLogger.database.debug("✅ engine_stats: Adding database ID to JSON: \(dbId) (Type: \(type(of: NSNumber(value: dbId))))")
                 } else {
                     // Log when databaseId is nil to help diagnose issues
                     AppLogger.database.debug("⚠️ engine_stats: No database ID available to add to JSON (databaseId is nil)")
                 }
-                
+
                 // Now handle system info - making sure we're working with the dictionary that already has the ID
                 if let sysInfo = engineSystemInfo {
                     // Add system info to the same dictionary that already has the ID
                     dict["system_info"] = sysInfo
-                    
+
                     // Debug logging to verify the final dictionary contents before serialization
                     if let dbId = dict["id"] {
                         let dbIdString = String(describing: dbId)
@@ -733,60 +732,62 @@ extension ArticleModel {
                     } else {
                         AppLogger.database.debug("❌ engine_stats with system_info: Dictionary is MISSING ID field")
                     }
-                    
+
                     // Serialize the dictionary with system info and ID
                     if let data = try? JSONSerialization.data(withJSONObject: dict),
-                       let jsonString = String(data: data, encoding: .utf8) {
+                       let jsonString = String(data: data, encoding: .utf8)
+                    {
                         return jsonString
                     }
                 } else {
                     // Without system info - serialize the dictionary that has the ID
                     if let data = try? JSONSerialization.data(withJSONObject: dict),
-                       let jsonString = String(data: data, encoding: .utf8) {
+                       let jsonString = String(data: data, encoding: .utf8)
+                    {
                         return jsonString
                     }
                 }
             }
-            
+
             // If we don't have structured fields or serialization failed, return nil
             return nil
         }
         set {
             // Parse the new value and update structured fields
             if let newValue = newValue, let data = newValue.data(using: .utf8),
-               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            {
                 // Extract structured fields
-                self.engineModel = dict["model"] as? String
-                self.engineElapsedTime = dict["elapsed_time"] as? Double
-                self.engineRawStats = dict["stats"] as? String
-                
+                engineModel = dict["model"] as? String
+                engineElapsedTime = dict["elapsed_time"] as? Double
+                engineRawStats = dict["stats"] as? String
+
                 // ENHANCED: Extract database ID with more detailed type handling and logging
                 if let intId = dict["id"] as? Int {
                     // Direct Int case - preferred
-                    self.databaseId = intId
+                    databaseId = intId
                     AppLogger.database.debug("✅ engine_stats setter: Extracted database ID as Int: \(intId)")
                 } else if let numberVal = dict["id"] as? NSNumber {
                     // NSNumber case - common when deserialized from JSON
-                    self.databaseId = numberVal.intValue
+                    databaseId = numberVal.intValue
                     AppLogger.database.debug("✅ engine_stats setter: Extracted database ID from NSNumber: \(numberVal.intValue)")
                 } else if let stringId = dict["id"] as? String, let intFromString = Int(stringId) {
                     // String that can be converted to Int
-                    self.databaseId = intFromString
+                    databaseId = intFromString
                     AppLogger.database.debug("✅ engine_stats setter: Extracted database ID from String: \(intFromString)")
                 } else if let doubleId = dict["id"] as? Double, doubleId.truncatingRemainder(dividingBy: 1) == 0 {
                     // Double with no fractional part
-                    self.databaseId = Int(doubleId)
+                    databaseId = Int(doubleId)
                     AppLogger.database.debug("✅ engine_stats setter: Extracted database ID from Double: \(Int(doubleId))")
                 } else if let rawId = dict["id"] {
                     // ID exists but couldn't be converted to Int
                     let typeString = String(describing: type(of: rawId))
                     AppLogger.database.debug("⚠️ engine_stats setter: ID found but couldn't convert to Int: \(String(describing: rawId)) (Type: \(typeString))")
                 }
-                
+
                 // Handle system info
                 if let sysInfo = dict["system_info"] as? [String: Any] {
-                    self.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
+                    engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
                 }
             }
         }
@@ -799,9 +800,10 @@ extension ArticleModel {
                 // Use consistent encoder with explicit date strategy
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .secondsSince1970
-                
+
                 if let data = try? encoder.encode(relatedArticles),
-                   let jsonString = String(data: data, encoding: .utf8) {
+                   let jsonString = String(data: data, encoding: .utf8)
+                {
                     return jsonString
                 }
             }
@@ -813,9 +815,9 @@ extension ArticleModel {
                     // Create decoder with explicit date strategy
                     let decoder = JSONDecoder()
                     decoder.dateDecodingStrategy = .secondsSince1970
-                    
+
                     // First try to parse as an array of RelatedArticle
-                    self.relatedArticles = try decoder.decode([RelatedArticle].self, from: data)
+                    relatedArticles = try decoder.decode([RelatedArticle].self, from: data)
                 } catch {
                     // If that fails, try to parse as a raw JSON array
                     if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
@@ -824,12 +826,12 @@ extension ArticleModel {
                             // Use the same decoder with date strategy here too
                             let decoder = JSONDecoder()
                             decoder.dateDecodingStrategy = .secondsSince1970
-                            self.relatedArticles = try? decoder.decode([RelatedArticle].self, from: serializedData)
+                            relatedArticles = try? decoder.decode([RelatedArticle].self, from: serializedData)
                         }
                     }
                 }
             } else {
-                self.relatedArticles = nil
+                relatedArticles = nil
             }
         }
     }

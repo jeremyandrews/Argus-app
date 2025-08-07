@@ -330,7 +330,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
 
             do {
-                let _ = try context.fetch(FetchDescriptor<SeenArticle>())
+                _ = try context.fetch(FetchDescriptor<SeenArticle>())
             } catch {
                 AppLogger.app.error("Failed to fetch SeenArticle entries: \(error)")
             }
@@ -513,7 +513,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 additionalInsights: "Here are some additional contextual insights.",
                 engineStats: nil,
                 relatedArticles: nil,
-                
+
                 // NEW: Cluster summary and entities
                 clusterSummary: nil,
                 entities: []

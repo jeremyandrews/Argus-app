@@ -6,12 +6,12 @@ import SwiftUI
 struct EnhancedRelatedArticleRow: View {
     let article: RelatedArticle
     var onSelect: (String) -> Void
-    
+
     @State private var isExpanded = false
     @State private var showVectorDetails = false
     @State private var showEntityDetails = false
     @State private var showFormulaDetails = false
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Main content (always visible)
@@ -25,13 +25,13 @@ struct EnhancedRelatedArticleRow: View {
                         .font(.headline)
                         .foregroundColor(.blue)
                         .multilineTextAlignment(.leading)
-                    
+
                     Spacer(minLength: 8)
-                    
+
                     SimilarityBadge(similarity: article.similarityScore)
                 }
             }
-            
+
             // Date & Category
             HStack {
                 if !article.formattedDate.isEmpty {
@@ -39,9 +39,9 @@ struct EnhancedRelatedArticleRow: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
-                
+
                 Spacer()
-                
+
                 if !article.category.isEmpty {
                     Text(article.category.uppercased())
                         .font(.caption)
@@ -52,7 +52,7 @@ struct EnhancedRelatedArticleRow: View {
                         .cornerRadius(8)
                 }
             }
-            
+
             // Summary
             if !article.tinySummary.isEmpty {
                 Text(article.tinySummary)
@@ -61,14 +61,14 @@ struct EnhancedRelatedArticleRow: View {
                     .lineLimit(isExpanded ? nil : 2)
                     .padding(.bottom, 4)
             }
-            
+
             // Quality score
             if article.qualityScore > 0 {
                 Text("Quality: \(article.qualityDescription)")
                     .font(.caption)
                     .foregroundColor(.primary)
             }
-            
+
             // Expand/collapse button
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -79,14 +79,14 @@ struct EnhancedRelatedArticleRow: View {
                     Text(isExpanded ? "Hide details" : "Show similarity details")
                         .font(.caption)
                         .foregroundColor(.blue)
-                    
+
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.caption)
                         .foregroundColor(.blue)
                 }
                 .padding(.vertical, 4)
             }
-            
+
             // Expandable details
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
@@ -103,7 +103,7 @@ struct EnhancedRelatedArticleRow: View {
                         }
                     )
                     .padding(.vertical, 4)
-                    
+
                     // Entity similarity section (only if we have entity data)
                     if article.hasEntityData {
                         DisclosureGroup(
@@ -119,7 +119,7 @@ struct EnhancedRelatedArticleRow: View {
                         )
                         .padding(.vertical, 4)
                     }
-                    
+
                     // Formula explanation section (only if available)
                     if let formula = article.similarityFormula, !formula.isEmpty {
                         DisclosureGroup(
@@ -150,7 +150,7 @@ struct EnhancedRelatedArticleRow: View {
 /// Visual representation of similarity as a colored badge
 struct SimilarityBadge: View {
     let similarity: Double
-    
+
     var body: some View {
         Text("\(Int(similarity * 100))%")
             .font(.caption)
@@ -161,16 +161,16 @@ struct SimilarityBadge: View {
             .foregroundColor(.white)
             .cornerRadius(8)
     }
-    
+
     private var similarityColor: Color {
         if similarity >= 0.98 {
-            return .red      // Extremely high similarity
+            return .red // Extremely high similarity
         } else if similarity >= 0.95 {
-            return .orange   // Very high similarity
+            return .orange // Very high similarity
         } else if similarity >= 0.85 {
-            return .blue     // High similarity
+            return .blue // High similarity
         } else {
-            return .gray     // Moderate similarity
+            return .gray // Moderate similarity
         }
     }
 }
@@ -182,7 +182,7 @@ struct MetricBarView: View {
     let icon: String?
     let tooltipText: String?
     let color: Color
-    
+
     init(label: String, value: Double?, icon: String? = nil, tooltipText: String? = nil, color: Color = .blue) {
         self.label = label
         self.value = value
@@ -190,7 +190,7 @@ struct MetricBarView: View {
         self.tooltipText = tooltipText
         self.color = color
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             // Label with icon and tooltip
@@ -200,17 +200,17 @@ struct MetricBarView: View {
                         .font(.caption)
                         .foregroundColor(color)
                 }
-                
+
                 Text(label)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
+
                 if let tooltipText = tooltipText {
                     InfoTooltip(message: tooltipText)
                 }
-                
+
                 Spacer()
-                
+
                 if let value = value {
                     Text("\(Int(value * 100))%")
                         .font(.caption)
@@ -221,7 +221,7 @@ struct MetricBarView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            
+
             // Bar
             if let value = value {
                 GeometryReader { geometry in
@@ -231,7 +231,7 @@ struct MetricBarView: View {
                             .frame(width: geometry.size.width, height: 6)
                             .foregroundColor(Color.gray.opacity(0.3))
                             .cornerRadius(3)
-                        
+
                         // Value
                         Rectangle()
                             .frame(width: geometry.size.width * CGFloat(value), height: 6)
@@ -254,7 +254,7 @@ struct MetricBarView: View {
 struct InfoTooltip: View {
     let message: String
     @State private var showTooltip = false
-    
+
     var body: some View {
         Button(action: {
             withAnimation {
@@ -279,7 +279,7 @@ struct InfoTooltip: View {
 /// Displays vector similarity details
 struct VectorDetailsView: View {
     let article: RelatedArticle
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Vector Score
@@ -290,7 +290,7 @@ struct VectorDetailsView: View {
                 tooltipText: "The raw vector similarity score (cosine similarity) before any weighting is applied.",
                 color: .purple
             )
-            
+
             // Vector Properties
             HStack(spacing: 12) {
                 // Dimensions
@@ -299,25 +299,25 @@ struct VectorDetailsView: View {
                         Text("Dimensions:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        
+
                         InfoTooltip(message: "The number of dimensions in the embedding vector that contribute to similarity calculation.")
                     }
-                    
+
                     Text(article.formattedVectorDimensions ?? "N/A")
                         .font(.caption)
                         .fontWeight(.medium)
                 }
-                
+
                 // Magnitude
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Text("Magnitude:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        
+
                         InfoTooltip(message: "The L2 norm (length) of the article's embedding vector. Indicates the 'strength' of the vector representation.")
                     }
-                    
+
                     Text(article.formattedVectorMagnitude ?? "N/A")
                         .font(.caption)
                         .fontWeight(.medium)
@@ -332,7 +332,7 @@ struct VectorDetailsView: View {
 /// Displays entity similarity details
 struct EntityDetailsView: View {
     let article: RelatedArticle
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Entity Counts
@@ -343,32 +343,32 @@ struct EntityDetailsView: View {
                         Text("Total Entities:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        
+
                         InfoTooltip(message: "The total number of entities (people, organizations, locations, events) that appear in both articles.")
                     }
-                    
+
                     Text(article.formattedEntityOverlapCount ?? "N/A")
                         .font(.caption)
                         .fontWeight(.medium)
                 }
-                
+
                 // Primary Entities
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Text("Primary Entities:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        
+
                         InfoTooltip(message: "The number of PRIMARY importance entities that appear in both articles. These are main subjects and have greater weight.")
                     }
-                    
+
                     Text(article.formattedPrimaryOverlapCount ?? "N/A")
                         .font(.caption)
                         .fontWeight(.medium)
                 }
             }
             .padding(.bottom, 4)
-            
+
             // Person Overlap
             MetricBarView(
                 label: "Person Overlap",
@@ -377,7 +377,7 @@ struct EntityDetailsView: View {
                 tooltipText: "Similarity based on people mentioned in both articles.",
                 color: .blue
             )
-            
+
             // Organization Overlap
             MetricBarView(
                 label: "Organization Overlap",
@@ -386,7 +386,7 @@ struct EntityDetailsView: View {
                 tooltipText: "Similarity based on organizations mentioned in both articles.",
                 color: .orange
             )
-            
+
             // Location Overlap
             MetricBarView(
                 label: "Location Overlap",
@@ -395,7 +395,7 @@ struct EntityDetailsView: View {
                 tooltipText: "Similarity based on locations mentioned in both articles.",
                 color: .green
             )
-            
+
             // Event Overlap
             MetricBarView(
                 label: "Event Overlap",
@@ -404,7 +404,7 @@ struct EntityDetailsView: View {
                 tooltipText: "Similarity based on events mentioned in both articles.",
                 color: .pink
             )
-            
+
             // Temporal Proximity
             MetricBarView(
                 label: "Temporal Proximity",
@@ -422,14 +422,14 @@ struct EntityDetailsView: View {
 /// Displays the similarity formula explanation
 struct FormulaExplanationView: View {
     let formula: String
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Title
             Text("How the similarity score was calculated:")
                 .font(.caption)
                 .foregroundColor(.secondary)
-            
+
             // Formula
             Text(formula)
                 .font(.caption)
@@ -437,7 +437,7 @@ struct FormulaExplanationView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(UIColor.systemGray6))
                 .cornerRadius(8)
-            
+
             // Help text
             Text("This formula combines vector similarity (based on content meaning) with entity similarity (based on shared named entities) to determine how closely related the articles are.")
                 .font(.caption2)
@@ -454,10 +454,10 @@ struct EnhancedRelatedArticlesView: View {
     let articles: [RelatedArticle]
     let clusterSummary: String
     let onArticleSelected: (String) -> Void
-    
+
     @State private var showError = false
     @State private var errorMessage = "Sorry, this article doesn't exist."
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Header and explanation
@@ -465,12 +465,12 @@ struct EnhancedRelatedArticlesView: View {
                 Text("Related Articles")
                     .font(.headline)
                     .padding(.bottom, 4)
-                
+
                 Spacer()
-                
+
                 InfoTooltip(message: "Articles that are related to this one based on content similarity, shared entities (people, organizations, locations), and temporal proximity.")
             }
-            
+
             // Cluster summary (if available)
             if !clusterSummary.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -478,7 +478,7 @@ struct EnhancedRelatedArticlesView: View {
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.primary)
-                    
+
                     Text(clusterSummary)
                         .font(.body)
                         .lineSpacing(2)
@@ -491,7 +491,7 @@ struct EnhancedRelatedArticlesView: View {
                 .cornerRadius(8)
                 .padding(.bottom, 8)
             }
-            
+
             // Articles list
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
@@ -510,7 +510,7 @@ struct EnhancedRelatedArticlesView: View {
                 }
             }
             .frame(maxHeight: 500)
-            
+
             // Diagnostic info
             Text("Found \(articles.count) related articles")
                 .font(.caption)
@@ -535,7 +535,7 @@ struct EnhancedRelatedArticlesView: View {
 /// View for displaying extracted entities as tags
 struct TagsView: View {
     let entities: [Entity]
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Primary entities (shown first)
@@ -546,21 +546,21 @@ struct TagsView: View {
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.primary)
-                    
+
                     EntityTagsGrid(entities: primaryEntities, isPrimarySection: true)
                 }
             }
-            
+
             // All entities in a grid
             VStack(alignment: .leading, spacing: 8) {
                 Text("All Tags")
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .foregroundColor(.primary)
-                
+
                 EntityTagsGrid(entities: entities, isPrimarySection: false)
             }
-            
+
             // Summary info
             Text("\(entities.count) tags (\(entities.filter { $0.isPrimary }.count) primary)")
                 .font(.caption)
@@ -574,13 +574,13 @@ struct TagsView: View {
 struct EntityTagsGrid: View {
     let entities: [Entity]
     let isPrimarySection: Bool
-    
+
     // Create a 2-column flexible grid layout for better tag display
     private let columns = [
         GridItem(.flexible(minimum: 120), spacing: 12),
-        GridItem(.flexible(minimum: 120), spacing: 12)
+        GridItem(.flexible(minimum: 120), spacing: 12),
     ]
-    
+
     var body: some View {
         LazyVGrid(columns: columns, spacing: 8) {
             ForEach(entities, id: \.id) { entity in
@@ -594,13 +594,13 @@ struct EntityTagsGrid: View {
 struct EntityTag: View {
     let entity: Entity
     let isPrimary: Bool
-    
+
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: entity.typeIcon)
                 .font(.caption2)
                 .foregroundColor(entity.typeColor)
-            
+
             Text(entity.name)
                 .font(.caption)
                 .lineLimit(2)

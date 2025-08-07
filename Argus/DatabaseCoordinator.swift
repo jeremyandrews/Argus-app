@@ -875,7 +875,7 @@ actor DatabaseCoordinator {
         article.articleTitle = data.articleTitle
         article.affected = data.affected
         article.domain = data.domain
-        
+
         // Update database ID
         article.databaseId = data.databaseId
 
@@ -914,7 +914,7 @@ actor DatabaseCoordinator {
             article.engineSystemInfoData = try? JSONSerialization.data(withJSONObject: sysInfo)
         }
         article.relatedArticles = data.relatedArticles
-        
+
         // Update new fields
         article.clusterSummary = data.clusterSummary
         article.entities = data.entities
@@ -1203,42 +1203,42 @@ extension DatabaseCoordinator {
         let sourcesQuality = json["sources_quality"] as? Int
         let argumentQuality = json["argument_quality"] as? Int
         let quality: Int? = (json["quality"] as? Double).map { Int($0) }
-        
+
         // Extract engine stats fields directly from the JSON
         let engineModel = json["model"] as? String
         let engineElapsedTime = json["elapsed_time"] as? Double
         let engineRawStats = json["stats"] as? String
         let engineSystemInfo = json["system_info"] as? [String: Any]
-        
+
         // Extract the new R2 URL JSON fields
         let actionRecommendations = json["action_recommendations"] as? String
         let talkingPoints = json["talking_points"] as? String
         let eli5Content = json["eli5"] as? String
-        
+
         // Extract the database ID with robust type handling
         var databaseId: Int? = nil
-        
+
         // First try as direct Int
         if let intId = json["id"] as? Int {
             databaseId = intId
             logger.debug("✅ DatabaseCoordinator: Extracted database ID as Int: \(intId)")
-        } 
+        }
         // Then try as String that can be converted to Int
         else if let stringId = json["id"] as? String, let intFromString = Int(stringId) {
             databaseId = intFromString
             logger.debug("✅ DatabaseCoordinator: Extracted database ID from String: \(intFromString)")
-        } 
+        }
         // Finally try as Double with no fractional part
         else if let doubleId = json["id"] as? Double, doubleId.truncatingRemainder(dividingBy: 1) == 0 {
             databaseId = Int(doubleId)
             logger.debug("✅ DatabaseCoordinator: Extracted database ID from Double: \(Int(doubleId))")
-        } 
+        }
         // Log if ID exists but couldn't be converted
         else if let rawId = json["id"] {
             let typeString = String(describing: type(of: rawId))
             logger.debug("⚠️ DatabaseCoordinator: ID found but couldn't convert to Int: \(String(describing: rawId)) (Type: \(typeString))")
         }
-        
+
         // Final log to show if we got a database ID
         if let databaseId = databaseId {
             logger.debug("🔑 DatabaseCoordinator: Will use database ID: \(databaseId)")
@@ -1247,7 +1247,7 @@ extension DatabaseCoordinator {
         }
 
         // Create the article JSON object
-        
+
         // Extract string ID from available sources for new id parameter
         let stringId: String
         if let idValue = json["id"] {
@@ -1264,9 +1264,9 @@ extension DatabaseCoordinator {
             // Fallback to URL as ID
             stringId = jsonURL
         }
-        
+
         return ArticleJSON(
-            id: stringId,  // Add the required id parameter
+            id: stringId, // Add the required id parameter
             title: title,
             body: body,
             jsonURL: jsonURL,
@@ -1301,7 +1301,7 @@ extension DatabaseCoordinator {
     }
 
     // We're moving the domain extraction function directly into this file to avoid cloud build issues
-    
+
     /// Helper function to extract the domain from a URL
     ///
     /// This extracts the domain portion from a URL string by:
@@ -1382,13 +1382,13 @@ extension DatabaseCoordinator {
         guard let entitiesArray = json["entities"] as? [[String: Any]] else {
             return []
         }
-        
+
         do {
             let data = try JSONSerialization.data(withJSONObject: entitiesArray)
             let decoder = JSONDecoder()
             return try decoder.decode([Entity].self, from: data)
         } catch {
-            self.logger.error("Failed to decode entities: \(error)")
+            logger.error("Failed to decode entities: \(error)")
             return []
         }
     }
@@ -1402,19 +1402,19 @@ extension DatabaseCoordinator {
         do {
             // Convert dictionaries to JSON data
             let data = try JSONSerialization.data(withJSONObject: similarArticles)
-            
+
             // Decode to RelatedArticle array
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            
+
             let relatedArticles = try decoder.decode([RelatedArticle].self, from: data)
             if !relatedArticles.isEmpty {
                 return relatedArticles
             }
         } catch {
-            self.logger.error("Failed to decode similar articles: \(error)")
+            logger.error("Failed to decode similar articles: \(error)")
         }
-        
+
         return nil
     }
 }

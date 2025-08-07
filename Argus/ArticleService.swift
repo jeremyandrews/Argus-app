@@ -196,7 +196,7 @@ final class ArticleService: ArticleServiceProtocol {
         do {
             let context = ModelContext(modelContainer)
             let articleModels = try context.fetch(fetchDescriptor)
-            
+
             AppLogger.database.debug("Found \(articleModels.count) articles matching search: \(queryText)")
             return articleModels
         } catch {
@@ -371,7 +371,7 @@ final class ArticleService: ArticleServiceProtocol {
         do {
             // Signal that we're checking for articles
             progressHandler?("Checking for new articles...")
-            
+
             // Fetch articles from server - API will send ALL unseen articles
             let remoteArticles = try await apiClient.fetchArticles(
                 topic: topic,
@@ -397,7 +397,7 @@ final class ArticleService: ArticleServiceProtocol {
         var addedCount = 0
         let updatedCount = 0
         let deletedCount = 0
-        
+
         // Initial progress - searching
         progressHandler?("Starting background sync...")
 
@@ -406,7 +406,7 @@ final class ArticleService: ArticleServiceProtocol {
             // Fetch subscribed topics
             let subscriptions = await SubscriptionsView().loadSubscriptions()
             let subscribedTopics = subscriptions.filter { $0.value.isSubscribed }.keys
-            
+
             // Start with "All" topics sync (limited count)
             progressHandler?("Syncing general articles...")
             addedCount += try await syncArticlesFromServer(topic: nil, limit: 50, progressHandler: progressHandler)
@@ -432,7 +432,7 @@ final class ArticleService: ArticleServiceProtocol {
                 clearCache() // This now runs on cacheQueue
                 continuation.resume()
             }
-            
+
             // Final progress message
             progressHandler?("Background sync completed - found \(addedCount) new articles")
 
@@ -501,21 +501,21 @@ final class ArticleService: ArticleServiceProtocol {
     private func generateInitialRichText(for article: ArticleModel) {
         // Generate the basic rich text for immediate display directly on ArticleModel
         AppLogger.database.debug("Generating initial rich text for article \(article.id)")
-        
+
         // Generate for title
         if article.titleBlob == nil || article.titleBlob?.isEmpty == true {
             let titleText = article.title
             if !titleText.isEmpty {
                 if let attributedString = markdownToAttributedString(titleText, textStyle: RichTextField.title.textStyle) {
                     AppLogger.database.debug("✅ Generated title rich text")
-                    
+
                     // Archive to data
                     do {
                         let blobData = try NSKeyedArchiver.archivedData(
                             withRootObject: attributedString,
                             requiringSecureCoding: false
                         )
-                        
+
                         // Set the blob directly on ArticleModel
                         article.titleBlob = blobData
                     } catch {
@@ -524,21 +524,21 @@ final class ArticleService: ArticleServiceProtocol {
                 }
             }
         }
-        
+
         // Generate for body
         if article.bodyBlob == nil || article.bodyBlob?.isEmpty == true {
             let bodyText = article.body
             if !bodyText.isEmpty {
                 if let attributedString = markdownToAttributedString(bodyText, textStyle: RichTextField.body.textStyle) {
                     AppLogger.database.debug("✅ Generated body rich text")
-                    
+
                     // Archive to data
                     do {
                         let blobData = try NSKeyedArchiver.archivedData(
                             withRootObject: attributedString,
                             requiringSecureCoding: false
                         )
-                        
+
                         // Set the blob directly on ArticleModel
                         article.bodyBlob = blobData
                     } catch {
@@ -603,10 +603,10 @@ final class ArticleService: ArticleServiceProtocol {
         // Process each article
         for articleModel in articleModels {
             diagnosedCount += 1
-            
+
             // Add to details log
             detailsLog += "Article \(articleModel.id): "
-            
+
             // Directly check if blobs exist and are valid
             let verificationResults = verifyArticleBlobs(articleModel)
             let allBlobsValid = verificationResults.allValid
@@ -622,7 +622,7 @@ final class ArticleService: ArticleServiceProtocol {
 
                 // Regenerate each field that needs it
                 var regeneratedCount = 0
-                
+
                 for field in RichTextField.allCases {
                     if !verificationResults.validFields.contains(field.rawValue) || forceRegenerate {
                         if regenerateRichTextForField(field, on: articleModel) {
@@ -634,7 +634,7 @@ final class ArticleService: ArticleServiceProtocol {
                 if regeneratedCount > 0 {
                     repairedCount += 1
                     detailsLog += "Regenerated \(regeneratedCount) blobs.\n"
-                    
+
                     // Save the changes
                     try context.save()
                 } else {
@@ -650,18 +650,18 @@ final class ArticleService: ArticleServiceProtocol {
 
         return (diagnosedCount, repairedCount, detailsLog)
     }
-    
+
     /// Verifies all blobs in an ArticleModel
     /// - Parameter article: The article to verify
     /// - Returns: A tuple containing validation results and missing fields
     private func verifyArticleBlobs(_ article: ArticleModel) -> (allValid: Bool, validFields: Set<String>, missingFields: [String]) {
         var validFields = Set<String>()
         var missingFields = [String]()
-        
+
         // Check each field
         for field in RichTextField.allCases {
             let blobData = field.getBlob(from: article)
-            
+
             // A field is valid if it has blob data and it can be unarchived
             if let data = blobData, !data.isEmpty {
                 do {
@@ -673,14 +673,14 @@ final class ArticleService: ArticleServiceProtocol {
                     // Failed to unarchive
                 }
             }
-            
+
             // If we get here, the field is invalid or missing
             missingFields.append(field.rawValue)
         }
-        
+
         return (missingFields.isEmpty, validFields, missingFields)
     }
-    
+
     /// Regenerates rich text for a specific field on an ArticleModel
     /// - Parameters:
     ///   - field: The field to regenerate
@@ -715,24 +715,24 @@ final class ArticleService: ArticleServiceProtocol {
         case .clusterSummary:
             text = article.clusterSummary
         }
-        
+
         // Skip if no text
         guard let unwrappedText = text, !unwrappedText.isEmpty else {
             return false
         }
-        
+
         // Generate attributed string
         guard let attributedString = markdownToAttributedString(unwrappedText, textStyle: field.textStyle) else {
             return false
         }
-        
+
         // Archive and save
         do {
             let blobData = try NSKeyedArchiver.archivedData(
                 withRootObject: attributedString,
                 requiringSecureCoding: false
             )
-            
+
             // Set the blob on the article model
             field.setBlob(blobData, on: article)
             return true
@@ -762,7 +762,7 @@ final class ArticleService: ArticleServiceProtocol {
                 AppLogger.database.error("Article not found with ID: \(articleId)")
                 return nil
             }
-            
+
             AppLogger.database.debug("Generating rich text content for field: \(String(describing: field)) on article \(articleId)")
 
             // First try to get from existing blob
@@ -779,7 +779,7 @@ final class ArticleService: ArticleServiceProtocol {
                     AppLogger.database.error("Failed to unarchive blob for \(String(describing: field)): \(error)")
                 }
             }
-            
+
             // If no blob or failed to load, create fresh
             let markdownText: String?
             switch field {
@@ -808,24 +808,24 @@ final class ArticleService: ArticleServiceProtocol {
             case .clusterSummary:
                 markdownText = articleModel.clusterSummary
             }
-            
+
             guard let unwrappedText = markdownText, !unwrappedText.isEmpty else {
                 AppLogger.database.warning("No text available for field: \(String(describing: field))")
                 return nil
             }
-            
+
             AppLogger.database.debug("⚙️ Converting markdown to attributed string (length: \(unwrappedText.count), preview: \"\(unwrappedText.prefix(50))...\")")
-            
+
             // Generate the attributed string
             let startTime = Date()
             let attributedString = markdownToAttributedString(
                 unwrappedText,
                 textStyle: field.textStyle
             )
-            
+
             let duration = Date().timeIntervalSince(startTime)
             AppLogger.database.debug("✅ Markdown conversion completed in \(String(format: "%.4f", duration))s (result length: \(unwrappedText.count))")
-            
+
             if let attributedString = attributedString {
                 // Archive to data
                 do {
@@ -833,20 +833,20 @@ final class ArticleService: ArticleServiceProtocol {
                         withRootObject: attributedString,
                         requiringSecureCoding: false
                     )
-                    
+
                     // Set the blob on the article model
                     field.setBlob(blobData, on: articleModel)
-                    
+
                     // Save the context
                     try context.save()
                     AppLogger.database.debug("✅ Saved \(String(describing: field)) blob to database (\(blobData.count) bytes) - verified")
                 } catch {
                     AppLogger.database.error("❌ Failed to save blob for \(String(describing: field)): \(error)")
                 }
-                
+
                 return attributedString
             }
-            
+
             return nil
         } catch {
             AppLogger.database.error("Error generating rich text content: \(error)")
@@ -857,25 +857,19 @@ final class ArticleService: ArticleServiceProtocol {
     // MARK: - Private Helper Methods
 
     // New target-based method with phase progress reporting
-    private func processRemoteArticles(_ articles: [ArticleJSON], targetNewArticles: Int = 50, progressHandler: ((String) -> Void)? = nil) async throws -> Int {
+    private func processRemoteArticles(_ articles: [ArticleJSON], targetNewArticles _: Int = 50, progressHandler: ((String) -> Void)? = nil) async throws -> Int {
         guard !articles.isEmpty else { return 0 }
 
-        AppLogger.database.debug("🎯 Processing \(articles.count) articles with target of \(targetNewArticles) new articles")
+        AppLogger.database.debug("🎯 Processing \(articles.count) articles (processing ALL articles from server)")
         progressHandler?("Processing articles...")
-        
+
         var addedCount = 0
         let context = ModelContext(modelContainer)
-        
-        AppLogger.database.debug("🔄 Starting target-based article processing")
-        
-        // Process articles until we reach target or process all
-        for (index, article) in articles.enumerated() {
-            // Check if we've reached our target
-            if addedCount >= targetNewArticles {
-                AppLogger.database.debug("🎯 Reached target of \(targetNewArticles) new articles, stopping early (processed \(index + 1) of \(articles.count))")
-                break
-            }
-            
+
+        AppLogger.database.debug("🔄 Starting article processing")
+
+        // Process ALL articles the server sends (no early termination)
+        for (_, article) in articles.enumerated() {
             // Extract the jsonURL for checking duplicates
             let jsonURLString = article.jsonURL
 
@@ -893,7 +887,7 @@ final class ArticleService: ArticleServiceProtocol {
             if existingArticles.isEmpty {
                 // Create a new ArticleModel
                 let date = Date()
-                
+
                 let newArticle = ArticleModel(
                     id: UUID(),
                     jsonURL: article.jsonURL,
@@ -927,15 +921,15 @@ final class ArticleService: ArticleServiceProtocol {
                     engineSystemInfo: article.engineSystemInfo,
                     databaseId: article.databaseId,
                     relatedArticles: article.relatedArticles,
-                    
+
                     // NEW: Cluster summary and entities
                     clusterSummary: article.clusterSummary,
                     entities: article.entities
                 )
-                
+
                 context.insert(newArticle)
                 addedCount += 1
-                
+
                 // Save every 10 articles to avoid large transactions
                 if addedCount % 10 == 0 {
                     try context.save()
@@ -943,15 +937,15 @@ final class ArticleService: ArticleServiceProtocol {
                 }
             }
         }
-        
+
         // Final save for any remaining articles
         try context.save()
         AppLogger.database.debug("✅ Final save completed - added \(addedCount) new articles")
-        
-        // Generate rich text for new articles
+
+        // Generate rich text for new articles in batches
         if addedCount > 0 {
             AppLogger.database.debug("⚙️ Generating rich text for \(addedCount) new articles")
-            
+
             // Fetch the new articles we just added
             let timeThreshold = Date().addingTimeInterval(-30) // Last 30 seconds
             var newArticleDescriptor = FetchDescriptor<ArticleModel>(
@@ -959,16 +953,29 @@ final class ArticleService: ArticleServiceProtocol {
             )
             newArticleDescriptor.sortBy = [SortDescriptor(\.addedDate, order: .reverse)]
             newArticleDescriptor.fetchLimit = addedCount
-            
+
             let newArticles = try context.fetch(newArticleDescriptor)
-            
-            // Generate rich text for each new article
-            for article in newArticles {
-                await generateInitialRichText(for: article)
+
+            // Process rich text generation in smaller batches for better performance
+            let richTextBatchSize = 10
+            for batchStart in stride(from: 0, to: newArticles.count, by: richTextBatchSize) {
+                let batchEnd = min(batchStart + richTextBatchSize, newArticles.count)
+                AppLogger.database.debug("⚙️ Generating rich text for batch \(batchStart / richTextBatchSize + 1): articles \(batchStart + 1)-\(batchEnd) of \(newArticles.count)")
+
+                // Update progress
+                progressHandler?("Processing articles (\(batchEnd) of \(newArticles.count))...")
+
+                for i in batchStart ..< batchEnd {
+                    // Generate rich text directly on the ArticleModel
+                    await generateInitialRichText(for: newArticles[i])
+                }
+
+                // Save after each batch of rich text generation
+                try context.save()
+                AppLogger.database.debug("✅ Completed and saved rich text batch \(batchStart / richTextBatchSize + 1)")
             }
-            
-            try context.save()
-            AppLogger.database.debug("✅ Rich text generation completed for \(addedCount) new articles")
+
+            AppLogger.database.debug("✅ Rich text generation completed for all \(addedCount) new articles")
         }
 
         // Clear cache safely as we have new data
@@ -976,7 +983,7 @@ final class ArticleService: ArticleServiceProtocol {
             clearCache()
             continuation.resume()
         }
-        
+
         // Update final progress message
         progressHandler?("Found \(addedCount) new articles")
 
@@ -1071,29 +1078,29 @@ final class ArticleService: ArticleServiceProtocol {
             throw ArticleServiceError.databaseError(underlyingError: error)
         }
     }
-    
+
     // MARK: - Topic Statistics
-    
+
     /// Get statistics for all topics in the database
     func getTopicStatistics() async throws -> [TopicStatistic] {
         let context = ModelContext(modelContainer)
-        
+
         // Fetch all articles
         let allArticles = try context.fetch(FetchDescriptor<ArticleModel>())
-        
+
         // Group by topic
         var topicStats: [String: TopicStatistic] = [:]
-        
+
         for article in allArticles {
             let topic = article.topic ?? "Uncategorized"
-            
+
             var stat = topicStats[topic] ?? TopicStatistic(
                 topic: topic,
                 totalCount: 0,
                 unreadCount: 0,
                 bookmarkedCount: 0
             )
-            
+
             // Update counts
             stat = TopicStatistic(
                 topic: topic,
@@ -1101,13 +1108,13 @@ final class ArticleService: ArticleServiceProtocol {
                 unreadCount: stat.unreadCount + (article.isViewed ? 0 : 1),
                 bookmarkedCount: stat.bookmarkedCount + (article.isBookmarked ? 1 : 0)
             )
-            
+
             topicStats[topic] = stat
         }
-        
+
         return Array(topicStats.values).sorted { $0.topic < $1.topic }
     }
-    
+
     /// Get total article count
     func getTotalArticleCount() async throws -> Int {
         let context = ModelContext(modelContainer)

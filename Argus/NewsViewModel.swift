@@ -36,7 +36,7 @@ final class NewsViewModel: ObservableObject {
 
     /// Flag indicating if loading more pages is in progress
     @Published var isLoadingMorePages = false
-    
+
     /// Current sync status (for the indicator)
     @Published var syncStatus: SyncStatus = .idle
 
@@ -63,7 +63,7 @@ final class NewsViewModel: ObservableObject {
     var pageSize: Int = 30
 
     /// The last loaded date for pagination
-    var lastLoadedDate: Date? = nil
+    var lastLoadedDate: Date?
 
     /// Flag indicating if an update is needed but pending due to active scrolling
     var pendingUpdateNeeded = false
@@ -72,7 +72,7 @@ final class NewsViewModel: ObservableObject {
     private var lastFilterChangeTime = Date.distantPast
 
     /// Task that handles debounced filter updates
-    private var filterChangeDebouncer: Task<Void, Never>? = nil
+    private var filterChangeDebouncer: Task<Void, Never>?
 
     /// Cache of articles by topic for quick topic switching
     private var articleCache: [String: [ArticleModel]] = [:]
@@ -109,7 +109,7 @@ final class NewsViewModel: ObservableObject {
 
         // Setup observers for settings changes
         setupUserDefaultsObservers()
-        
+
         // Add observer for background sync completion
         NotificationCenter.default.addObserver(
             self,
@@ -120,7 +120,7 @@ final class NewsViewModel: ObservableObject {
 
         AppLogger.database.debug("NewsViewModel initialized with container: \(String(describing: SwiftDataContainer.shared.container))")
     }
-    
+
     /// Handler for background sync completion notification
     @objc private func handleBackgroundSyncCompleted() {
         Task {
@@ -185,53 +185,53 @@ final class NewsViewModel: ObservableObject {
             // Clear loading state
             isLoading = false
 
-            AppLogger.database.debug("✅ Refreshed articles: loaded \(self.filteredArticles.count) articles")
+            AppLogger.database.debug("✅ Refreshed articles: loaded \(filteredArticles.count) articles")
         } catch {
             self.error = error
             isLoading = false
             AppLogger.database.error("❌ Error refreshing articles: \(error)")
         }
     }
-    
+
     /// Refreshes articles and performs auto-redirect if the current topic has no content
     @MainActor
     func refreshWithAutoRedirectIfNeeded() async {
         // First do the normal refresh
         await refreshArticles()
-        
+
         // Then check if we need to redirect
-        if filteredArticles.isEmpty && selectedTopic != "All" {
-            AppLogger.database.debug("No content for topic '\(self.selectedTopic)', auto-redirecting to 'All'")
-            
+        if filteredArticles.isEmpty, selectedTopic != "All" {
+            AppLogger.database.debug("No content for topic '\(selectedTopic)', auto-redirecting to 'All'")
+
             // Revert to "All" topic
             selectedTopic = "All"
-            
+
             // Save the preference
             saveUserPreferences()
-            
+
             // Refresh with "All" topics
             await refreshArticles()
         }
     }
-    
+
     /// Refreshes the view after background sync completes
     @MainActor
     func refreshAfterBackgroundSync() async {
         // Refresh with current filters
         await refreshArticles()
-        
+
         // Check for empty topic and auto-redirect if needed
-        if filteredArticles.isEmpty && selectedTopic != "All" {
+        if filteredArticles.isEmpty, selectedTopic != "All" {
             selectedTopic = "All"
             saveUserPreferences()
             await refreshArticles()
         }
-        
+
         // Check for new topics that might have appeared
         // and update the topic bar
         do {
             allArticles = try await articleOperations.fetchArticles(
-                topic: "All", 
+                topic: "All",
                 showUnreadOnly: showUnreadOnly,
                 showBookmarkedOnly: showBookmarkedOnly
             )
@@ -243,7 +243,7 @@ final class NewsViewModel: ObservableObject {
 
     /// Loads more articles for pagination
     func loadMoreArticles() async {
-        guard hasMoreContent && !isLoadingMorePages else { return }
+        guard hasMoreContent, !isLoadingMorePages else { return }
 
         isLoadingMorePages = true
 
@@ -324,7 +324,7 @@ final class NewsViewModel: ObservableObject {
             // Set status to complete
             syncStatus = .complete
             isLoading = false
-            
+
             // Schedule a task to reset to idle after a delay
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
@@ -332,7 +332,7 @@ final class NewsViewModel: ObservableObject {
                     syncStatus = .idle
                 }
             }
-            
+
             AppLogger.database.debug("✅ Synced with server: added \(addedCount) articles")
         } catch {
             // Set error status
@@ -340,7 +340,7 @@ final class NewsViewModel: ObservableObject {
             isLoading = false
             self.error = error
             AppLogger.database.error("❌ Error syncing with server: \(error)")
-            
+
             // Schedule a task to reset to idle after a delay
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
@@ -369,17 +369,17 @@ final class NewsViewModel: ObservableObject {
             // If cache miss, do a full refresh
             await refreshArticles()
         }
-        
+
         // Auto-redirect to "All" if no content is available for the selected topic
-        if filteredArticles.isEmpty && topic != "All" {
+        if filteredArticles.isEmpty, topic != "All" {
             AppLogger.database.debug("No content for topic '\(topic)', auto-redirecting to 'All'")
-            
+
             // Revert to "All" topic
             selectedTopic = "All"
-            
+
             // Save the preference
             saveUserPreferences()
-            
+
             // Refresh with "All" topics
             await refreshArticles()
         }
@@ -712,7 +712,7 @@ final class NewsViewModel: ObservableObject {
     /// Updates filtered articles based on current filters
     func updateFilteredArticles(isBackgroundUpdate _: Bool = false, force: Bool = false, isActivelyScrolling: Bool = false) async {
         // If actively scrolling, just mark that we need an update later
-        if isActivelyScrolling && !force {
+        if isActivelyScrolling, !force {
             pendingUpdateNeeded = true
             return
         }

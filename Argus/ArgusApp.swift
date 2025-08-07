@@ -77,8 +77,8 @@ struct ArgusApp: App {
                 if status == CloudKitHealthMonitor.HealthStatus.failed.rawValue {
                     cloudKitAlertMessage = "CloudKit sync is currently unavailable. Your data will be stored locally until iCloud is available again."
                     showCloudKitStatusAlert = true
-                } else if status == CloudKitHealthMonitor.HealthStatus.healthy.rawValue &&
-                    previousStatus == CloudKitHealthMonitor.HealthStatus.failed.rawValue
+                } else if status == CloudKitHealthMonitor.HealthStatus.healthy.rawValue,
+                          previousStatus == CloudKitHealthMonitor.HealthStatus.failed.rawValue
                 {
                     cloudKitAlertMessage = "CloudKit sync has been restored. Your data will now sync across your devices."
                     showCloudKitStatusAlert = true
@@ -247,7 +247,7 @@ struct ArgusApp: App {
     }
 
     /// Ensures that the required database tables exist, creating them if necessary
-    private static func ensureRequiredTablesExist(db: OpaquePointer?) throws {
+    private static func ensureRequiredTablesExist(db _: OpaquePointer?) throws {
         AppLogger.database.info("Creating required database tables if needed")
 
         // Force the recreation of the schema by re-instantiating the model container
@@ -304,12 +304,12 @@ struct ArgusApp: App {
 
             // Continue with other stats directly for logging - using ArticleModel
             // These counts are only used for logging in safeCount and not needed for further calculations
-            let _ = safeCount(
+            _ = safeCount(
                 FetchDescriptor<ArticleModel>(predicate: #Predicate { !$0.isViewed }),
                 label: "Unviewed articles"
             )
 
-            let _ = safeCount(
+            _ = safeCount(
                 FetchDescriptor<ArticleModel>(predicate: #Predicate { $0.isBookmarked }),
                 label: "Bookmarked articles"
             )
@@ -320,7 +320,7 @@ struct ArgusApp: App {
             let daysSetting = UserDefaults.standard.integer(forKey: "autoDeleteDays")
             if daysSetting > 0 {
                 let cutoffDate = Calendar.current.date(byAdding: .day, value: -daysSetting, to: Date())!
-                let _ = safeCount(
+                _ = safeCount(
                     FetchDescriptor<ArticleModel>(
                         predicate: #Predicate { article in
                             article.addedDate < cutoffDate &&

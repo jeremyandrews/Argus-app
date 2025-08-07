@@ -260,18 +260,18 @@ struct NewsDetailView: View {
         if let section = initiallyExpandedSection {
             expandedSections[section] = true
         }
-        
+
         // Log the article fields status for debugging
         logArticleFieldsStatus()
     }
-    
+
     /// Logs a comprehensive summary of all content fields and their blob status
     private func logArticleFieldsStatus() {
         guard let article = currentNotification else {
             AppLogger.database.debug("📊 ARTICLE FIELDS STATUS: No article available")
             return
         }
-        
+
         AppLogger.database.debug("""
         📊 ARTICLE FIELDS STATUS: ID=\(article.id)
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -280,7 +280,7 @@ struct NewsDetailView: View {
         - jsonURL: \(article.jsonURL)
         - topic: \(article.topic ?? "nil")
         - isViewed: \(article.isViewed)
-        
+
         📝 CONTENT FIELDS:
         - title: \(fieldStatus(article.title))
         - body: \(fieldStatus(article.body))
@@ -293,7 +293,7 @@ struct NewsDetailView: View {
         - actionRecommendations: \(fieldStatus(article.actionRecommendations))
         - talkingPoints: \(fieldStatus(article.talkingPoints))
         - eli5: \(fieldStatus(article.eli5))
-        
+
         📦 BLOB FIELDS:
         - titleBlob: \(blobStatus(article.titleBlob))
         - bodyBlob: \(blobStatus(article.bodyBlob))
@@ -308,24 +308,24 @@ struct NewsDetailView: View {
         - eli5Blob: \(blobStatus(article.eli5Blob))
         """)
     }
-    
+
     /// Helper to format a string field status with preview
     private func fieldStatus(_ field: String?) -> String {
         guard let field = field, !field.isEmpty else {
             return "❌ MISSING"
         }
-        
+
         let charCount = field.count
         let preview = field.prefix(min(40, charCount)).replacingOccurrences(of: "\n", with: " ")
         return "✅ (\(charCount) chars) \"\(preview)...\""
     }
-    
+
     /// Helper to format a blob field status
     private func blobStatus(_ blob: Data?) -> String {
         guard let blob = blob, !blob.isEmpty else {
             return "❌ (Not generated yet - normal)"
         }
-        
+
         let sizeInKB = Double(blob.count) / 1024.0
         return "✅ (\(String(format: "%.1f", sizeInKB)) KB)"
     }
@@ -462,9 +462,9 @@ struct NewsDetailView: View {
         // 3) "Simple Breakdown"
         // Look for snake_case key in JSON first (as received from backend)
         // Then fall back to camelCase key (as stored in content dictionary)
-        let eli5Content = n.eli5 ?? 
-                        (json["eli5"] as? String ?? 
-                        json["eli5_text"] as? String ?? "")
+        let eli5Content = n.eli5 ??
+            (json["eli5"] as? String ??
+                json["eli5_text"] as? String ?? "")
         // Only add the section if there's content
         if !eli5Content.isEmpty {
             sections.append(ContentSection(header: "Simple Breakdown", content: eli5Content))
@@ -475,24 +475,24 @@ struct NewsDetailView: View {
         if !insights.isEmpty {
             sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
-        
+
         // 5) "Talking Points"
         // Look for snake_case key in JSON first (as received from backend)
         // Then fall back to camelCase key (as stored in content dictionary)
-        let talkingPoints = n.talkingPoints ?? 
-                        (json["talking_points"] as? String ?? 
-                            json["talkingPoints"] as? String ?? "")
+        let talkingPoints = n.talkingPoints ??
+            (json["talking_points"] as? String ??
+                json["talkingPoints"] as? String ?? "")
         // Only add the section if there's content
         if !talkingPoints.isEmpty {
             sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
         }
-        
-        // 6) "What You Can Do" 
+
+        // 6) "What You Can Do"
         // Look for snake_case key in JSON first (as received from backend)
         // Then fall back to camelCase key (as stored in content dictionary)
-        let recommendations = n.actionRecommendations ?? 
-                            (json["action_recommendations"] as? String ?? 
-                            json["actionRecommendations"] as? String ?? "")
+        let recommendations = n.actionRecommendations ??
+            (json["action_recommendations"] as? String ??
+                json["actionRecommendations"] as? String ?? "")
         // Only add the section if there's content
         if !recommendations.isEmpty {
             sections.append(ContentSection(header: "What You Can Do", content: recommendations))
@@ -556,11 +556,11 @@ struct NewsDetailView: View {
             let clusterSummary = n.clusterSummary ?? ""
             AppLogger.database.debug("Found \(relatedArticles.count) related articles in article: \(n.id)")
             AppLogger.database.debug("Cluster summary for article \(n.id): '\(clusterSummary.isEmpty ? "EMPTY" : clusterSummary.prefix(50))...'")
-            
+
             // Include cluster summary with related articles
             let relatedArticlesData: [String: Any] = [
                 "articles": relatedArticles,
-                "clusterSummary": clusterSummary
+                "clusterSummary": clusterSummary,
             ]
             sections.append(ContentSection(header: "Related Articles", content: relatedArticlesData))
         } else {
@@ -639,7 +639,7 @@ struct NewsDetailView: View {
         // Force refresh UI
         contentTransitionID = viewModel.contentTransitionID
         scrollToTopTrigger = UUID()
-        
+
         // Log the article fields for the new article once it's loaded
         Task {
             // Add a small delay to ensure the article has been fully loaded
@@ -706,39 +706,39 @@ struct NewsDetailView: View {
         let loadingTask = Task {
             // First mark this section as loading in our local state
             await MainActor.run {
-                sectionLoadingTasks[section] = Task {}  // Just a placeholder task to indicate loading
+                sectionLoadingTasks[section] = Task {} // Just a placeholder task to indicate loading
             }
-            
+
             // Delegate to ViewModel which handles the actual loading and persistence
             viewModel.loadContentForSection(section)
-            
+
             // Check if content is available after a short delay (give time for loading)
             try? await Task.sleep(for: .seconds(0.5))
-            
+
             // Monitor loading until either content is available or timeout occurs
             let startTime = Date()
             let timeout = 10.0 // seconds
-            
+
             while !Task.isCancelled {
                 if Date().timeIntervalSince(startTime) > timeout {
                     // Timeout occurred, stop monitoring
                     break
                 }
-                
+
                 // Check if content is now available
                 let hasContent = await MainActor.run {
-                    return viewModel.getAttributedStringForSection(section) != nil
+                    viewModel.getAttributedStringForSection(section) != nil
                 }
-                
+
                 if hasContent {
                     // Content loaded successfully
                     break
                 }
-                
+
                 // Wait before checking again
                 try? await Task.sleep(for: .seconds(0.5))
             }
-            
+
             // Update loading state only if this task wasn't cancelled
             if !Task.isCancelled {
                 await MainActor.run {
@@ -810,8 +810,7 @@ struct NewsDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 32)
-            }
-            else if let n = currentNotification {
+            } else if let n = currentNotification {
                 // Title - use rich text if available, otherwise fall back to plain text
                 Group {
                     if let titleAttrString = viewModel.titleAttributedString {
@@ -930,7 +929,7 @@ struct NewsDetailView: View {
             if let n = currentNotification {
                 let contentDict = buildContentDictionary(from: n)
                 let sections = getSections(from: contentDict)
-                
+
                 // Use onAppear to update the content dictionary without affecting the view hierarchy
                 Color.clear
                     .frame(width: 0, height: 0)
@@ -956,7 +955,7 @@ struct NewsDetailView: View {
                                 Text(section.header)
                                     .font(.headline)
                                 Spacer()
-                            
+
                                 Image(systemName: "chevron.right")
                                     .rotationEffect(.degrees(expandedSections[section.header] ?? false ? 90 : 0))
                             }
@@ -1000,8 +999,8 @@ struct NewsDetailView: View {
     private func needsConversion(_ sectionHeader: String) -> Bool {
         switch sectionHeader {
         case "Summary", "Critical Analysis", "Logical Fallacies",
-            "Source Analysis", "Relevance", "Context & Perspective",
-            "What You Can Do", "Talking Points", "Simple Breakdown":
+             "Source Analysis", "Relevance", "Context & Perspective",
+             "What You Can Do", "Talking Points", "Simple Breakdown":
             return true
         case "Argus Engine Stats", "Preview", "Tags", "Related Articles":
             return false
@@ -1030,13 +1029,13 @@ struct NewsDetailView: View {
             )
         }
     }
-    
+
     private func toggleBookmark() {
         Task {
             await viewModel.toggleBookmark()
         }
     }
-    
+
     private func deleteNotification() {
         Task {
             await viewModel.deleteArticle()
@@ -1049,23 +1048,23 @@ struct NewsDetailView: View {
             }
         }
     }
-    
+
     /// Helper method to get a cached attributed string for a section
     private func getAttributedStringForSection(_ section: String) -> NSAttributedString? {
         let cachedContent = viewModel.getAttributedStringForSection(section)
-        
-        if cachedContent == nil && !isSectionLoading(section) {
+
+        if cachedContent == nil, !isSectionLoading(section) {
             AppLogger.database.warning("⚠️ View requested cached content for \(section) but it was nil despite being reported as loaded")
         }
-        
+
         return cachedContent
     }
-    
+
     /// Helper function to check if section content is being loaded
     private func isSectionLoading(_ section: String) -> Bool {
         return sectionLoadingTasks[section] != nil
     }
-    
+
     /// Mark the current article as viewed
     private func markAsViewed() {
         Task {
@@ -1085,7 +1084,7 @@ struct NewsDetailView: View {
             }
         }
     }
-    
+
     /// Load the minimal content needed for the initial display
     private func loadInitialMinimalContent() {
         // Only proceed if we have a notification
@@ -1096,70 +1095,73 @@ struct NewsDetailView: View {
 
         // Set loading state to true
         isLoadingNextArticle = true
-        
+
         // Ensure the Summary section is expanded
         expandedSections["Summary"] = true
 
         // Immediately check if formatted content (blobs) already exists and show only formatted content
-        if let titleBlob = article.titleBlob, 
-           let bodyBlob = article.bodyBlob {
+        if let titleBlob = article.titleBlob,
+           let bodyBlob = article.bodyBlob
+        {
             do {
-                // Try to extract the formatted content directly 
+                // Try to extract the formatted content directly
                 if let titleAttrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: titleBlob),
-                   let bodyAttrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob) {
-                    
+                   let bodyAttrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
+                {
                     // Set the formatted content directly (avoid showing unformatted content first)
                     viewModel.titleAttributedString = titleAttrString
                     viewModel.bodyAttributedString = bodyAttrString
-                    
+
                     // We have formatted content, clear loading state
                     isLoadingNextArticle = false
-                    
+
                     // Then continue loading the rest in the background
                     Task {
                         // After the initial content is displayed, load the Summary section
                         loadContentForSection("Summary")
                         AppLogger.database.debug("✅ Summary section load triggered for initial view")
                     }
-                    
+
                     return
                 }
             } catch {
                 AppLogger.database.error("❌ Error extracting existing blobs: \(error)")
             }
         }
-        
-        // If we don't have blobs or extraction failed, use async loading with loading indicator 
+
+        // If we don't have blobs or extraction failed, use async loading with loading indicator
         Task {
             // Load the title and body
             await viewModel.loadMinimalContent()
-            
+
             // Only clear loading state after content is ready
             await MainActor.run {
                 isLoadingNextArticle = false
             }
-            
+
             AppLogger.database.debug("✅ Minimal content loaded for article ID: \(article.id)")
-            
+
             // After minimal content is loaded, force load the Summary section
             loadContentForSection("Summary")
             AppLogger.database.debug("✅ Summary section load triggered for initial view")
         }
     }
-    
+
     /// Generate content for a section
     @ViewBuilder
     private func sectionContent(for section: ContentSection) -> some View {
         switch section.header {
         // MARK: - Summary
+
         case "Summary":
             SectionContentView(
                 section: section,
                 attributedString: getAttributedStringForSection(section.header),
                 isLoading: isSectionLoading(section.header)
             )
-            
+
         // MARK: - Source Analysis
+
         case "Source Analysis":
             VStack(alignment: .leading, spacing: 10) {
                 // Source type and domain info
@@ -1215,10 +1217,11 @@ struct NewsDetailView: View {
             .padding(.horizontal, 8)
             .padding(.top, 6)
             .textSelection(.enabled)
-            
+
         // MARK: - Critical Analysis, Logical Fallacies, Relevance, Context & Perspective, What You Can Do, Talking Points
-        case "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective", 
-            "What You Can Do", "Talking Points", "Simple Breakdown":
+
+        case "Critical Analysis", "Logical Fallacies", "Relevance", "Context & Perspective",
+             "What You Can Do", "Talking Points", "Simple Breakdown":
             SectionContentView(
                 section: section,
                 attributedString: getAttributedStringForSection(section.header),
@@ -1230,68 +1233,71 @@ struct NewsDetailView: View {
                 let contentPreview = content.prefix(30)
                 AppLogger.database.debug("Rendering section: \(section.header) with content preview: \(contentPreview)...")
             }
-            
-// MARK: - Tags
-case "Tags":
-    VStack(alignment: .leading, spacing: 8) {
-        if let entities = section.content as? [Entity], !entities.isEmpty {
-            TagsView(entities: entities)
-        } else {
-            Text("No tags available")
-                .font(.callout)
-                .foregroundColor(.secondary)
-        }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, 12)
-    .padding(.top, 6)
-            
-// MARK: - Related Articles
-case "Related Articles":
-    VStack(alignment: .leading, spacing: 8) {
-        if let relatedData = section.content as? [String: Any] {
-            // Handle the new format with articles and cluster summary
-            if let relatedArticles = relatedData["articles"] as? [RelatedArticle], !relatedArticles.isEmpty {
-                let clusterSummary = relatedData["clusterSummary"] as? String ?? ""
-                EnhancedRelatedArticlesView(articles: relatedArticles, clusterSummary: clusterSummary) { jsonURL in
-                    loadRelatedArticle(jsonURL: jsonURL)
+
+        // MARK: - Tags
+
+        case "Tags":
+            VStack(alignment: .leading, spacing: 8) {
+                if let entities = section.content as? [Entity], !entities.isEmpty {
+                    TagsView(entities: entities)
+                } else {
+                    Text("No tags available")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
                 }
-            } else {
-                Text("No related articles available")
-                    .font(.callout)
-                    .foregroundColor(.secondary)
             }
-        } else if let relatedArticles = section.content as? [RelatedArticle], !relatedArticles.isEmpty {
-            // Legacy fallback - just articles without cluster summary
-            EnhancedRelatedArticlesView(articles: relatedArticles, clusterSummary: "") { jsonURL in
-                loadRelatedArticle(jsonURL: jsonURL)
-            }
-        } else if let relatedArticles = section.content as? [[String: Any]], !relatedArticles.isEmpty {
-            // Legacy fallback for compatibility during transition
-            VStack(spacing: 6) {
-                ProgressView()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+
+        // MARK: - Related Articles
+
+        case "Related Articles":
+            VStack(alignment: .leading, spacing: 8) {
+                if let relatedData = section.content as? [String: Any] {
+                    // Handle the new format with articles and cluster summary
+                    if let relatedArticles = relatedData["articles"] as? [RelatedArticle], !relatedArticles.isEmpty {
+                        let clusterSummary = relatedData["clusterSummary"] as? String ?? ""
+                        EnhancedRelatedArticlesView(articles: relatedArticles, clusterSummary: clusterSummary) { jsonURL in
+                            loadRelatedArticle(jsonURL: jsonURL)
+                        }
+                    } else {
+                        Text("No related articles available")
+                            .font(.callout)
+                            .foregroundColor(.secondary)
+                    }
+                } else if let relatedArticles = section.content as? [RelatedArticle], !relatedArticles.isEmpty {
+                    // Legacy fallback - just articles without cluster summary
+                    EnhancedRelatedArticlesView(articles: relatedArticles, clusterSummary: "") { jsonURL in
+                        loadRelatedArticle(jsonURL: jsonURL)
+                    }
+                } else if let relatedArticles = section.content as? [[String: Any]], !relatedArticles.isEmpty {
+                    // Legacy fallback for compatibility during transition
+                    VStack(spacing: 6) {
+                        ProgressView()
+                            .padding()
+                        Text("Converting related articles data...")
+                            .font(.callout)
+                    }
+                    .frame(maxWidth: .infinity)
                     .padding()
-                Text("Converting related articles data...")
-                    .font(.callout)
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-        } else {
-            VStack(spacing: 6) {
-                ProgressView()
+                } else {
+                    VStack(spacing: 6) {
+                        ProgressView()
+                            .padding()
+                        Text("Loading related articles...")
+                            .font(.callout)
+                    }
+                    .frame(maxWidth: .infinity)
                     .padding()
-                Text("Loading related articles...")
-                    .font(.callout)
+                }
             }
-            .frame(maxWidth: .infinity)
-            .padding()
-        }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, 12)
-    .padding(.top, 6)
-            
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+
         // MARK: - Argus Engine Stats
+
         case "Argus Engine Stats":
             if let details = section.content as? ArgusDetailsData {
                 if let rawMarkdown = details.systemInfo?["raw_markdown"] as? [String: Any],
@@ -1318,8 +1324,9 @@ case "Related Articles":
                     .font(.callout)
                     .foregroundColor(.secondary)
             }
-            
+
         // MARK: - Preview
+
         case "Preview":
             VStack(spacing: 8) {
                 if let urlString = section.content as? String,
@@ -1339,8 +1346,9 @@ case "Related Articles":
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            
+
         // MARK: - Default fallback
+
         default:
             Text(section.content as? String ?? "")
                 .font(.callout)
@@ -1352,7 +1360,7 @@ case "Related Articles":
                 .textSelection(.enabled)
         }
     }
-    
+
     private func sourceTypeIcon(for sourceType: String) -> String {
         switch sourceType.lowercased() {
         case "press", "news":
@@ -1386,7 +1394,7 @@ case "Related Articles":
             return .gray
         }
     }
-    
+
     /// Parse engine stats JSON into a structured type with enhanced diagnostics
     /// - Parameters:
     ///   - jsonString: The JSON string containing engine stats
@@ -1396,7 +1404,7 @@ case "Related Articles":
     private func parseEngineStatsJSON(_ jsonString: String, fallbackDate: Date, fallbackArticle: ArticleModel? = nil) -> ArgusDetailsData? {
         // Log the raw json string for complete debugging context
         AppLogger.database.debug("📊 ENGINE STATS RAW JSON: \(jsonString.prefix(500))")
-        
+
         // Try to parse as JSON first
         if let data = jsonString.data(using: .utf8),
            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -1405,23 +1413,23 @@ case "Related Articles":
             let model = dict["model"] as? String ?? ""
             let elapsedTime = dict["elapsed_time"] as? Double ?? 0.0
             let stats = dict["stats"] as? String ?? "0:0:0:0:0:0"
-            
+
             // ENHANCED: Extract database ID with comprehensive diagnostics
             var databaseId: Int? = nil
-            
+
             // Log all dict keys and values with clear structure for easier scanning
             AppLogger.database.debug("📊 ENGINE STATS PARSED DICTIONARY - Top Level Keys:")
             for key in dict.keys.sorted() {
                 AppLogger.database.debug("  • \(key)")
             }
-            
+
             AppLogger.database.debug("📊 ENGINE STATS DICTIONARY - Detailed Contents:")
             for (key, value) in dict {
                 let typeString = String(describing: type(of: value))
                 let valueString = String(describing: value)
                 AppLogger.database.debug("  Key: \(key), Value: \(valueString) (Type: \(typeString))")
             }
-            
+
             AppLogger.database.debug("🔍 ENGINE STATS - Attempting ID Extraction:")
             if let intId = dict["id"] as? Int {
                 // Direct Int case - preferred
@@ -1447,18 +1455,18 @@ case "Related Articles":
                 // No ID found
                 AppLogger.database.debug("❌ ENGINE STATS: No 'id' key found in dictionary")
             }
-            
+
             // If no ID was found in the JSON, check the fallback article
-            if databaseId == nil && fallbackArticle?.databaseId != nil {
+            if databaseId == nil, fallbackArticle?.databaseId != nil {
                 databaseId = fallbackArticle!.databaseId
                 AppLogger.database.debug("🔄 ENGINE STATS: Using fallback ID from article model: \(databaseId!)")
             }
-            
+
             let systemInfo = dict["system_info"] as? [String: Any]
-            
+
             // Summary log with final decision
             AppLogger.database.debug("📋 ENGINE STATS SUMMARY: model=\(model), time=\(elapsedTime), stats=\(stats), databaseId=\(databaseId?.description ?? "nil")")
-            
+
             return ArgusDetailsData(
                 model: model,
                 elapsedTime: elapsedTime,
@@ -1471,7 +1479,7 @@ case "Related Articles":
 
         // If JSON parsing fails, create a hardcoded object with the raw text
         AppLogger.database.debug("⚠️ ENGINE STATS PARSE FAILURE: Could not parse JSON, using fallback values")
-        
+
         // Still use the fallback article's database ID if available
         let fallbackId = fallbackArticle?.databaseId
         if fallbackId != nil {
@@ -1479,7 +1487,7 @@ case "Related Articles":
         } else {
             AppLogger.database.debug("❌ ENGINE STATS FALLBACK: No database ID available (fallback article has nil ID)")
         }
-        
+
         return ArgusDetailsData(
             model: "Unknown",
             elapsedTime: 0.0,
@@ -1489,15 +1497,15 @@ case "Related Articles":
             systemInfo: ["raw_content": jsonString as Any]
         )
     }
-    
+
     // This function has been replaced by direct JSON decoding with RelatedArticle
 
-// This struct needs to be deleted from here as we're moving it outside the NewsDetailView struct
-    
+    // This struct needs to be deleted from here as we're moving it outside the NewsDetailView struct
+
     /// Load a related article using its JSON URL
     private func loadRelatedArticle(jsonURL: String) {
         AppLogger.database.debug("Loading related article with jsonURL: \(jsonURL)")
-        
+
         Task {
             // Perform the fetch directly on the MainActor
             await MainActor.run {
@@ -1508,7 +1516,7 @@ case "Related Articles":
                             article.jsonURL == jsonURL
                         }
                     ))
-                    
+
                     // Process results
                     if let foundArticle = foundArticles.first {
                         // Create a dedicated view model for this article
@@ -1518,20 +1526,21 @@ case "Related Articles":
                             currentIndex: 0,
                             initiallyExpandedSection: "Summary"
                         )
-                        
+
                         // Present the detail view
                         let detailView = NewsDetailView(viewModel: articleViewModel)
                         let hostingController = UIHostingController(rootView: detailView)
-                        
+
                         // Get the top view controller to present from
                         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                            let window = windowScene.windows.first,
-                           let rootVC = window.rootViewController {
+                           let rootVC = window.rootViewController
+                        {
                             var topVC = rootVC
                             while let presentedVC = topVC.presentedViewController {
                                 topVC = presentedVC
                             }
-                            
+
                             // Present the view controller
                             topVC.present(hostingController, animated: true)
                         }
@@ -1544,7 +1553,7 @@ case "Related Articles":
             }
         }
     }
-    
+
     /// Helper function to build content dictionary from an article
     private func buildContentDictionary(from article: ArticleModel) -> [String: Any] {
         var content: [String: Any] = [:]
@@ -1553,7 +1562,7 @@ case "Related Articles":
         if let domain = article.domain {
             content["url"] = "https://\(domain)"
         }
-        
+
         // Add database ID if available
         if let dbId = article.databaseId {
             content["id"] = dbId
@@ -1570,7 +1579,7 @@ case "Related Articles":
         content["logicalFallacies"] = article.logicalFallacies
         content["relationToTopic"] = article.relationToTopic
         content["additionalInsights"] = article.additionalInsights
-        
+
         // Add both camelCase and snake_case keys for the new fields
         // This ensures compatibility with both formats
         content["actionRecommendations"] = article.actionRecommendations
@@ -1578,32 +1587,32 @@ case "Related Articles":
         content["talkingPoints"] = article.talkingPoints
         content["talking_points"] = article.talkingPoints
 
-            // For source analysis, create a dictionary with the text and source type
-            if let sourceAnalysis = article.sourceAnalysis {
-                content["sourceAnalysis"] = [
-                    "text": sourceAnalysis,
-                    "sourceType": article.sourceType ?? "",
-                ]
-            }
-            
-            // Always include action recommendations and talking points in both formats
-            // Important: Even if they're nil, we'll store empty strings to ensure the fields exist
-            let actionRecs = article.actionRecommendations ?? ""
-            let talkingPts = article.talkingPoints ?? ""
-            
-            // Store in both snake_case and camelCase to handle any format in the JSON
-            content["action_recommendations"] = actionRecs
-            content["actionRecommendations"] = actionRecs
-            content["talking_points"] = talkingPts
-            content["talkingPoints"] = talkingPts
-            
-            // Log the presence of these fields for debugging
-            if !actionRecs.isEmpty {
-                AppLogger.database.debug("What You Can Do present: \(actionRecs.prefix(50))...")
-            }
-            if !talkingPts.isEmpty {
-                AppLogger.database.debug("Talking Points present: \(talkingPts.prefix(50))...")
-            }
+        // For source analysis, create a dictionary with the text and source type
+        if let sourceAnalysis = article.sourceAnalysis {
+            content["sourceAnalysis"] = [
+                "text": sourceAnalysis,
+                "sourceType": article.sourceType ?? "",
+            ]
+        }
+
+        // Always include action recommendations and talking points in both formats
+        // Important: Even if they're nil, we'll store empty strings to ensure the fields exist
+        let actionRecs = article.actionRecommendations ?? ""
+        let talkingPts = article.talkingPoints ?? ""
+
+        // Store in both snake_case and camelCase to handle any format in the JSON
+        content["action_recommendations"] = actionRecs
+        content["actionRecommendations"] = actionRecs
+        content["talking_points"] = talkingPts
+        content["talkingPoints"] = talkingPts
+
+        // Log the presence of these fields for debugging
+        if !actionRecs.isEmpty {
+            AppLogger.database.debug("What You Can Do present: \(actionRecs.prefix(50))...")
+        }
+        if !talkingPts.isEmpty {
+            AppLogger.database.debug("Talking Points present: \(talkingPts.prefix(50))...")
+        }
 
         // Transfer engine stats and similar articles as is
         if let engineStats = article.engine_stats,
@@ -1636,7 +1645,8 @@ case "Related Articles":
         if let relatedArticles = article.relatedArticles {
             // Convert to JSON array for content dictionary
             if let data = try? JSONEncoder().encode(relatedArticles),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+            {
                 content["similarArticles"] = json
                 AppLogger.database.debug("Added \(json.count) related articles to content dictionary")
             } else {
@@ -1648,7 +1658,7 @@ case "Related Articles":
 
         return content
     }
-    
+
     /// Helper view for displaying section content
     struct SectionContentView: View {
         let section: ContentSection
@@ -1683,7 +1693,7 @@ case "Related Articles":
                         Text("Unable to display formatted content")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                            
+
                         // Last resort display of raw content without conversion
                         let rawContent = section.content as? String ?? "No content available"
                         Text(rawContent)
@@ -1719,7 +1729,7 @@ struct ContentSection {
 struct ArgusDetailsView: View {
     let data: ArgusDetailsData
     let article: ArticleModel?
-    
+
     // Initialize with both the data and the article to check for IDs from multiple sources
     init(data: ArgusDetailsData, article: ArticleModel? = nil) {
         self.data = data
@@ -1731,17 +1741,18 @@ struct ArgusDetailsView: View {
             // Extract IDs for later display
             let dbIdFromData = data.databaseId
             let dbIdFromArticle = article?.databaseId
-            
+
             // Prepare article ID extraction
             let articleIdFromURL: String? = {
-                if let jsonURL = article?.jsonURL, 
+                if let jsonURL = article?.jsonURL,
                    let urlParts = jsonURL.split(separator: "/").last?.split(separator: "."),
-                   let idPart = urlParts.first {
+                   let idPart = urlParts.first
+                {
                     return String(idPart)
                 }
                 return nil
             }()
-            
+
             Text("Generated with \(data.model) in \(String(format: "%.2f", data.elapsedTime)) seconds.")
                 .font(.system(size: 14, weight: .regular, design: .monospaced))
                 .textSelection(.enabled)
@@ -1789,7 +1800,7 @@ struct ArgusDetailsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            
+
             // Display Database ID after uptime information
             if let dbId = dbIdFromData ?? dbIdFromArticle {
                 Text("DATABASE ID: \(dbId)")
@@ -1797,7 +1808,7 @@ struct ArgusDetailsView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-                
+
             // Display Article ID after Database ID
             if let articleId = articleIdFromURL {
                 Text("ARTICLE ID: \(articleId)")
@@ -2229,13 +2240,13 @@ struct ShareSelectionView: View {
 
                 case "Context & Perspective":
                     sectionContent = notification.additionalInsights
-                    
+
                 case "Talking Points":
                     sectionContent = notification.talkingPoints
-                    
+
                 case "What You Can Do":
                     sectionContent = notification.actionRecommendations
-    
+
                 case "Simple Breakdown":
                     sectionContent = notification.eli5
 
@@ -2246,7 +2257,7 @@ struct ShareSelectionView: View {
                         if let dbId = details.databaseId {
                             statsText += "**Database ID:** \(dbId)\n"
                         }
-                        
+
                         // Append the rest of the stats content
                         statsText += """
                         **Model:** \(details.model)
@@ -2256,7 +2267,7 @@ struct ShareSelectionView: View {
                         **Received:** \(details.date.formatted(.dateTime.month().day().year().hour().minute().second()))
                         """
                         sectionContent = statsText
-                        
+
                         if let systemInfo = details.systemInfo {
                             sectionContent! += formatSystemInfo(systemInfo)
                         }
@@ -2350,46 +2361,46 @@ struct ShareSelectionView: View {
 
     private func getSections(from json: [String: Any]) -> [ContentSection] {
         var sections: [ContentSection] = []
-        
+
         // Share view specific sections first
         sections.append(ContentSection(header: "Title", content: notification.title))
         sections.append(ContentSection(header: "Brief Summary", content: notification.body))
         sections.append(ContentSection(header: "Article URL", content: json["url"] as? String ?? ""))
-        
+
         // Follow the same order as the main view for content sections
         sections.append(ContentSection(header: "Summary", content: notification.summary ?? ""))
         sections.append(ContentSection(header: "Relevance", content: notification.relationToTopic ?? ""))
-        
+
         // Simple Breakdown
         let eli5Content = notification.eli5 ?? ""
         if !eli5Content.isEmpty {
             sections.append(ContentSection(header: "Simple Breakdown", content: eli5Content))
         }
-        
+
         // Context & Perspective
         let insights = notification.additionalInsights ?? ""
         if !insights.isEmpty {
             sections.append(ContentSection(header: "Context & Perspective", content: insights))
         }
-        
+
         // Talking Points
         let talkingPoints = notification.talkingPoints ?? ""
         if !talkingPoints.isEmpty {
             sections.append(ContentSection(header: "Talking Points", content: talkingPoints))
         }
-        
+
         // What You Can Do
         let recommendations = notification.actionRecommendations ?? ""
         if !recommendations.isEmpty {
             sections.append(ContentSection(header: "What You Can Do", content: recommendations))
         }
-        
+
         // Source Analysis
         sections.append(ContentSection(header: "Source Analysis", content: notification.sourceAnalysis ?? ""))
-        
+
         // Critical Analysis
         sections.append(ContentSection(header: "Critical Analysis", content: notification.criticalAnalysis ?? ""))
-        
+
         // Logical Fallacies
         sections.append(ContentSection(header: "Logical Fallacies", content: notification.logicalFallacies ?? ""))
 
@@ -2440,7 +2451,6 @@ struct ActivityViewController: UIViewControllerRepresentable {
 
     func updateUIViewController(_: UIActivityViewController, context _: Context) {}
 }
-
 
 /// SafariView for displaying web content
 struct SafariView: UIViewControllerRepresentable {

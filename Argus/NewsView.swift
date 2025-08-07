@@ -304,13 +304,13 @@ struct NewsView: View {
                 Text("No news is good news.")
                     .font(.title2)
                     .fontWeight(.bold)
-                
+
                 Text(getEmptyStateMessage())
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
                     .padding(.bottom, 4)
-                
+
                 // Filter information in paragraph form
                 Text(getFiltersInfoText())
                     .font(.subheadline)
@@ -333,7 +333,7 @@ struct NewsView: View {
         .frame(maxWidth: .infinity, alignment: .top)
         .padding()
     }
-    
+
     // Helper to get active subscriptions for the empty state view
     private func getActiveSubscriptions() -> [String] {
         return viewModel.subscriptions
@@ -341,34 +341,34 @@ struct NewsView: View {
             .map { $0.key }
             .sorted()
     }
-    
+
     // Helper to create subscription info paragraph
     private func getSubscriptionsInfoText() -> String {
         let activeSubscriptions = getActiveSubscriptions()
-        
+
         if activeSubscriptions.isEmpty {
             return "You don't have any active subscriptions. Visit the Subscriptions tab to subscribe to topics that interest you."
         } else {
             return "You're currently subscribed to: \(activeSubscriptions.joined(separator: ", ")). Articles from these topics will appear here when available."
         }
     }
-    
+
     // Helper to create filters info paragraph
     private func getFiltersInfoText() -> String {
         var activeFilters = [String]()
-        
+
         if viewModel.showUnreadOnly {
             activeFilters.append("Unread Only")
         }
-        
+
         if viewModel.showBookmarkedOnly {
             activeFilters.append("Bookmarked Only")
         }
-        
+
         if viewModel.selectedTopic != "All" {
             activeFilters.append("Topic: \(viewModel.selectedTopic)")
         }
-        
+
         if activeFilters.isEmpty {
             return "No filters are currently active. Pull down to refresh and check for new articles."
         } else {
@@ -608,12 +608,12 @@ struct NewsView: View {
             struct DetailViewWrapper: View {
                 let viewModel: NewsDetailViewModel
                 @Environment(\.modelContext) var modelContext
-                
+
                 var body: some View {
                     NewsDetailView(viewModel: viewModel)
                 }
             }
-            
+
             let detailView = DetailViewWrapper(viewModel: viewModel)
 
             let hostingController = UIHostingController(rootView: detailView)
@@ -1007,21 +1007,20 @@ struct NewsView: View {
             // The selectedArticleIds are cleared in the ViewModel's performBatchOperation
         }
     }
-    
-    
+
     // MARK: - Filter View
-    
+
     private struct FilterView: View {
         @Binding var showUnreadOnly: Bool
         @Binding var showBookmarkedOnly: Bool
         var onFilterChanged: () -> Void
-        
+
         var body: some View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Filter Articles")
                     .font(.headline)
                     .padding(.top, 10)
-                
+
                 VStack(alignment: .leading, spacing: 16) {
                     Toggle(isOn: $showUnreadOnly) {
                         Label("Unread Only", systemImage: "envelope.badge")
@@ -1029,7 +1028,7 @@ struct NewsView: View {
                     .onChange(of: showUnreadOnly) { _, _ in
                         onFilterChanged()
                     }
-                    
+
                     Toggle(isOn: $showBookmarkedOnly) {
                         Label("Bookmarked Only", systemImage: "bookmark.fill")
                     }
@@ -1037,31 +1036,31 @@ struct NewsView: View {
                         onFilterChanged()
                     }
                 }
-                
+
                 Text("Changes are applied immediately")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 10)
-                
+
                 Spacer()
             }
             .padding(.horizontal, 20)
         }
     }
-    
+
     // MARK: - Article Operations
-    
+
     private func toggleReadStatus(_ article: ArticleModel) {
         Task {
             await viewModel.toggleReadStatus(for: article)
         }
     }
-    
+
     private func toggleBookmark(_ article: ArticleModel) {
         Task {
             await viewModel.toggleBookmark(for: article)
         }
     }
-    
+
     // Helper functions that existed in the original code
 }

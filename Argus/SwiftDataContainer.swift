@@ -78,7 +78,7 @@ class SwiftDataContainer {
             SeenArticleModel.self,
             TopicModel.self,
         ])
-        
+
         // Migration functionality has been completely removed
         // For schema evolution, we'll use standard SwiftData versioning when needed
 
@@ -180,7 +180,7 @@ class SwiftDataContainer {
                 do {
                     // Create emergency config inside the do block
                     let emergencyConfig = ModelConfiguration(schema: schema, url: tempURL)
-                    
+
                     // This line can throw an error
                     container = try ModelContainer(for: schema, configurations: [emergencyConfig])
 

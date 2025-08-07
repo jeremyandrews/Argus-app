@@ -42,7 +42,7 @@ class TestArticleService: ObservableObject {
                 affected: "Test Users",
                 publishDate: Date(),
                 topic: "Test Topic",
-                
+
                 // NEW: Cluster summary and entities
                 clusterSummary: nil,
                 entities: []
@@ -149,7 +149,7 @@ class TestArticleService: ObservableObject {
                             affected: "Test Users Group \(i % 3 + 1)",
                             publishDate: Date().addingTimeInterval(-Double(i * 3600)), // Varied publish dates
                             topic: topics[i % topicsCount].name,
-                            
+
                             // NEW: Cluster summary and entities
                             clusterSummary: nil,
                             entities: []
