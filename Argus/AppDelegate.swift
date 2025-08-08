@@ -301,14 +301,26 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 // Process it using ArticleService (safely unwrap optional)
                 if let articleData = articleData {
                     _ = try await ArticleService.shared.processArticleData([articleData])
+                    
+                    // 3. Quality filtering: Check if article meets user's quality threshold
+                    let qualityFilter = await MainActor.run {
+                        UserDefaults.standard.qualityFilter
+                    }
+                    
+                    // Check if we should show notification based on quality filter
+                    if await self.shouldShowNotificationForArticle(jsonURL: jsonURL, qualityFilter: qualityFilter) {
+                        AppLogger.app.info("Notification allowed: Article meets quality threshold (\(qualityFilter))")
+                        await finish(.newData)
+                    } else {
+                        AppLogger.app.info("Notification filtered: Article does not meet quality threshold (\(qualityFilter))")
+                        // Still complete successfully but don't show notification
+                        await finish(.newData)
+                    }
                 } else {
                     ModernizationLogger.log(.warning, component: .apiClient,
                                             message: "Remote notification contained no article data for URL: \(jsonURL)")
                     throw NSError(domain: "com.argus", code: 404, userInfo: [NSLocalizedDescriptionKey: "No article data found"])
                 }
-
-                // Success
-                await finish(.newData)
             } catch {
                 AppLogger.app.error("Failed to process push notification article: \(error)")
                 await finish(.failed)
@@ -452,6 +464,106 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: matchingIDs)
             }
         }
+    }
+
+    /// Determines if a notification should be shown for an article based on quality filtering
+    /// - Parameters:
+    ///   - jsonURL: The JSON URL of the article to check
+    ///   - qualityFilter: The quality filter setting ("All", "Fair+", "Good+")
+    /// - Returns: True if the notification should be shown, false if it should be filtered
+    private func shouldShowNotificationForArticle(jsonURL: String, qualityFilter: String) async -> Bool {
+        // If no quality filtering is enabled, always show notifications
+        guard qualityFilter != "All" else {
+            return true
+        }
+        
+        // Get the article quality scores from the database (only extract Sendable data)
+        let container = SwiftDataContainer.shared.container
+        let context = container.mainContext
+        
+        do {
+            // Extract only the quality scores we need (Sendable data) from within MainActor context
+            let qualityData = try await MainActor.run {
+                let descriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { $0.jsonURL == jsonURL }
+                )
+                
+                let articles = try context.fetch(descriptor)
+                
+                guard let article = articles.first else {
+                    return nil as (sourcesQuality: Int?, argumentQuality: Int?)?
+                }
+                
+                // Extract only Sendable data (Int values)
+                return (sourcesQuality: article.sourcesQuality, argumentQuality: article.argumentQuality)
+            }
+            
+            guard let (sourcesQuality, argumentQuality) = qualityData else {
+                // If we can't find the article, allow the notification
+                AppLogger.app.warning("Could not find article for quality filtering, allowing notification")
+                return true
+            }
+            
+            // Apply the same quality threshold logic as ArticleOperations
+            let meetsThreshold = meetsQualityThresholdWithScores(sourcesQuality: sourcesQuality, argumentQuality: argumentQuality, filter: qualityFilter)
+            
+            AppLogger.app.info("Quality filter check for notification - Article: sourcesQuality=\(sourcesQuality ?? 0), argumentQuality=\(argumentQuality ?? 0), Filter: \(qualityFilter), Meets threshold: \(meetsThreshold)")
+            
+            return meetsThreshold
+        } catch {
+            AppLogger.app.error("Error checking article quality for notification: \(error)")
+            // If there's an error, allow the notification to be safe
+            return true
+        }
+    }
+    
+    /// Helper method that works with quality scores directly to avoid Sendable issues
+    /// - Parameters:
+    ///   - sourcesQuality: The sources quality score
+    ///   - argumentQuality: The argument quality score
+    ///   - filter: The quality filter (\"All\", \"Fair+\", \"Good+\")
+    /// - Returns: True if the scores meet the threshold, false otherwise
+    private func meetsQualityThresholdWithScores(sourcesQuality: Int?, argumentQuality: Int?, filter: String) -> Bool {
+        let sources = sourcesQuality ?? 0
+        let arguments = argumentQuality ?? 0
+        
+        let result: Bool
+        switch filter {
+        case "Fair+":
+            // Show articles with sourcesQuality ≥ 2 AND argumentQuality ≥ 2
+            result = sources >= 2 && arguments >= 2
+        case "Good+":
+            // Show articles with sourcesQuality ≥ 3 AND argumentQuality ≥ 3
+            result = sources >= 3 && arguments >= 3
+        default: // "All"
+            result = true
+        }
+        
+        return result
+    }
+    
+    /// Determines if an article meets the specified quality threshold using same logic as ArticleOperations
+    /// - Parameters:
+    ///   - article: The article to check
+    ///   - filter: The quality filter ("All", "Fair+", "Good+")
+    /// - Returns: True if the article meets the threshold, false otherwise
+    private func meetsQualityThreshold(_ article: ArticleModel, filter: String) -> Bool {
+        let sourcesQuality = article.sourcesQuality ?? 0
+        let argumentQuality = article.argumentQuality ?? 0
+        
+        let result: Bool
+        switch filter {
+        case "Fair+":
+            // Show articles with sourcesQuality ≥ 2 AND argumentQuality ≥ 2
+            result = sourcesQuality >= 2 && argumentQuality >= 2
+        case "Good+":
+            // Show articles with sourcesQuality ≥ 3 AND argumentQuality ≥ 3
+            result = sourcesQuality >= 3 && argumentQuality >= 3
+        default: // "All"
+            result = true
+        }
+        
+        return result
     }
 
     private func authenticateDeviceIfNeeded() {
