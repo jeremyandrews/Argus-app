@@ -15,6 +15,7 @@ extension UserDefaults {
         static let useReaderMode = "useReaderMode"
         static let allowCellularSync = "allowCellularSync"
         static let autoDeleteDays = "autoDeleteDays"
+        static let qualityFilter = "qualityFilter"
     }
 }
 
@@ -32,7 +33,7 @@ extension UserDefaults {
     }
 
     @objc var showUnreadOnly: Bool {
-        get { bool(forKey: Keys.showUnreadOnly) }
+        get { object(forKey: Keys.showUnreadOnly) == nil ? true : bool(forKey: Keys.showUnreadOnly) }
         set { set(newValue, forKey: Keys.showUnreadOnly) }
     }
 
@@ -64,6 +65,11 @@ extension UserDefaults {
     @objc var autoDeleteDays: Int {
         get { object(forKey: Keys.autoDeleteDays) == nil ? 3 : integer(forKey: Keys.autoDeleteDays) }
         set { set(newValue, forKey: Keys.autoDeleteDays) }
+    }
+
+    @objc var qualityFilter: String {
+        get { string(forKey: Keys.qualityFilter) ?? "Fair+" }
+        set { set(newValue, forKey: Keys.qualityFilter) }
     }
 }
 

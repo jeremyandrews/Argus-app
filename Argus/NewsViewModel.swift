@@ -57,6 +57,9 @@ final class NewsViewModel: ObservableObject {
     /// The current grouping style
     @Published var groupingStyle: String = "none"
 
+    /// The current quality filter
+    @Published var qualityFilter: String = "All"
+
     // MARK: - Pagination State
 
     /// The page size for pagination
@@ -150,7 +153,8 @@ final class NewsViewModel: ObservableObject {
             let allArticlesWithoutTopicFilter = try await articleOperations.fetchArticles(
                 topic: "All", // This fetches articles for all topics
                 showUnreadOnly: showUnreadOnly,
-                showBookmarkedOnly: showBookmarkedOnly
+                showBookmarkedOnly: showBookmarkedOnly,
+                qualityFilter: qualityFilter
             )
 
             // Update allArticles for topic bar generation
@@ -158,11 +162,12 @@ final class NewsViewModel: ObservableObject {
 
             // If a specific topic is selected, fetch articles with that topic filter
             if selectedTopic != "All" {
-                // Fetch articles with the selected topic
+                // Fetch articles with the selected topic AND quality filter
                 let topicFilteredArticles = try await articleOperations.fetchArticles(
                     topic: selectedTopic,
                     showUnreadOnly: showUnreadOnly,
-                    showBookmarkedOnly: showBookmarkedOnly
+                    showBookmarkedOnly: showBookmarkedOnly,
+                    qualityFilter: qualityFilter
                 )
 
                 // Update filteredArticles with the topic-filtered articles
@@ -233,7 +238,8 @@ final class NewsViewModel: ObservableObject {
             allArticles = try await articleOperations.fetchArticles(
                 topic: "All",
                 showUnreadOnly: showUnreadOnly,
-                showBookmarkedOnly: showBookmarkedOnly
+                showBookmarkedOnly: showBookmarkedOnly,
+                qualityFilter: qualityFilter
             )
         } catch {
             AppLogger.database.error("Error refreshing all articles: \(error)")
@@ -263,6 +269,7 @@ final class NewsViewModel: ObservableObject {
                 topic: selectedTopic,
                 showUnreadOnly: showUnreadOnly,
                 showBookmarkedOnly: showBookmarkedOnly,
+                qualityFilter: qualityFilter,
                 limit: pageSize
             )
 
@@ -433,6 +440,29 @@ final class NewsViewModel: ObservableObject {
         await updateGroupedArticles()
     }
 
+    /// Applies a new quality filter
+    /// - Parameter qualityFilter: The quality filter to apply
+    func applyQualityFilter(_ qualityFilter: String) async {
+        AppLogger.database.debug("🔄 Applying quality filter: \(qualityFilter)")
+        
+        self.qualityFilter = qualityFilter
+
+        // Save preference
+        saveUserPreferences()
+
+        // Clear cache to force fresh fetch
+        isCacheValid = false
+        articleCache.removeAll()
+
+        // Refresh articles with new quality filter
+        await refreshArticles()
+        
+        AppLogger.database.debug("✅ Quality filter applied: \(qualityFilter) - Filtered articles: \(self.filteredArticles.count)")
+        
+        // Update badge count after quality filter change
+        NotificationUtils.updateAppBadgeCount()
+    }
+
     // MARK: - Public Methods - Article Operations
 
     /// Toggles the read status of an article
@@ -599,6 +629,7 @@ final class NewsViewModel: ObservableObject {
         sortOrder = defaults.sortOrder
         groupingStyle = defaults.groupingStyle // Now uses "date" as default
         selectedTopic = defaults.selectedTopic
+        qualityFilter = defaults.qualityFilter
     }
 
     /// Sets up observers for UserDefaults changes
@@ -668,6 +699,25 @@ final class NewsViewModel: ObservableObject {
                 }
             }
             .store(in: &userDefaultsSubscriptions)
+
+        // Observe qualityFilter changes
+        defaults.publisher(for: \.qualityFilter)
+            .removeDuplicates(by: { first, second in
+                // Custom equality check to avoid compiler warning
+                String(describing: first) == String(describing: second)
+            })
+            .sink { [weak self] newValue in
+                guard let self = self, self.qualityFilter != newValue else { return }
+
+                Task { @MainActor in
+                    self.qualityFilter = newValue
+                    await self.refreshArticles()
+                    
+                    // Update badge count after quality filter change
+                    NotificationUtils.updateAppBadgeCount()
+                }
+            }
+            .store(in: &userDefaultsSubscriptions)
     }
 
     /// Saves user preferences to UserDefaults
@@ -678,6 +728,7 @@ final class NewsViewModel: ObservableObject {
         defaults.sortOrder = sortOrder
         defaults.groupingStyle = groupingStyle
         defaults.selectedTopic = selectedTopic
+        defaults.qualityFilter = qualityFilter
     }
 
     // MARK: - Additional Methods for the View

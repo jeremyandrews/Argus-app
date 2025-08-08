@@ -1052,30 +1052,71 @@ final class ArticleService: ArticleServiceProtocol {
         return removedCount
     }
 
-    /// Counts the number of unviewed articles in the database
-    /// - Returns: The count of unviewed articles
+    /// Counts the number of unviewed articles in the database, applying active quality filter
+    /// - Returns: The count of unviewed articles that pass the current quality filter
     @MainActor
     func countUnviewedArticles() async throws -> Int {
         do {
             let container = SwiftDataContainer.shared.container
             let context = container.mainContext
 
-            // Create a fetch descriptor for ArticleModel with predicate for !isViewed
+            // Get the current quality filter from UserDefaults
+            let qualityFilter = UserDefaults.standard.qualityFilter
+            
+            // If quality filter is "All", use the optimized count approach
+            if qualityFilter == "All" {
+                let descriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate<ArticleModel> { article in
+                        !article.isViewed
+                    }
+                )
+                let count = try context.fetchCount(descriptor)
+                ModernizationLogger.log(.debug, component: .articleService,
+                                        message: "Fetched unviewed article count (no quality filter): \(count)")
+                return count
+            }
+            
+            // For quality filters, we need to fetch articles and filter in memory
+            // since SwiftData predicates can't handle the quality threshold logic
             let descriptor = FetchDescriptor<ArticleModel>(
                 predicate: #Predicate<ArticleModel> { article in
                     !article.isViewed
                 }
             )
-
-            // Fetch count with detailed logging
-            let count = try context.fetchCount(descriptor)
+            
+            let unviewedArticles = try context.fetch(descriptor)
+            
+            // Apply quality filter in memory
+            let filteredArticles = unviewedArticles.filter { article in
+                meetsQualityThreshold(article, filter: qualityFilter)
+            }
+            
+            let count = filteredArticles.count
             ModernizationLogger.log(.debug, component: .articleService,
-                                    message: "Fetched unviewed article count: \(count)")
+                                    message: "Fetched unviewed article count with quality filter '\(qualityFilter)': \(count) (from \(unviewedArticles.count) total unviewed)")
             return count
         } catch {
             ModernizationLogger.log(.error, component: .articleService,
                                     message: "Error fetching unviewed article count: \(error.localizedDescription)")
             throw ArticleServiceError.databaseError(underlyingError: error)
+        }
+    }
+    
+    /// Determines if an article meets the specified quality threshold
+    /// - Parameters:
+    ///   - article: The article to check
+    ///   - filter: The quality filter ("All", "Fair+", "Good+")
+    /// - Returns: True if the article meets the threshold, false otherwise
+    private func meetsQualityThreshold(_ article: ArticleModel, filter: String) -> Bool {
+        switch filter {
+        case "Fair+":
+            // Show articles with quality 2 or higher (Fair, Good, Strong)
+            return (article.quality ?? 0) >= 2
+        case "Good+":
+            // Show articles with quality 3 or higher (Good, Strong) 
+            return (article.quality ?? 0) >= 3
+        default: // "All"
+            return true
         }
     }
 

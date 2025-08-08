@@ -17,7 +17,7 @@ struct NewsView: View {
 
     /// UI State
     @State private var isFilterViewPresented: Bool = false
-    @State private var filterViewHeight: CGFloat = 200
+    @State private var filterViewHeight: CGFloat = 280
     @State private var showDeleteConfirmation = false
     @State private var articleToDelete: ArticleModel?
     @State var isActivelyScrolling: Bool = false
@@ -44,7 +44,7 @@ struct NewsView: View {
 
     /// Determines if any filter is active
     private var isAnyFilterActive: Bool {
-        viewModel.showUnreadOnly || viewModel.showBookmarkedOnly
+        viewModel.showUnreadOnly || viewModel.showBookmarkedOnly || viewModel.qualityFilter != "All"
     }
 
     /// List of topics to show in topic bar
@@ -857,12 +857,17 @@ struct NewsView: View {
                     get: { viewModel.showBookmarkedOnly },
                     set: { viewModel.showBookmarkedOnly = $0 }
                 ),
+                qualityFilter: Binding(
+                    get: { viewModel.qualityFilter },
+                    set: { viewModel.qualityFilter = $0 }
+                ),
                 onFilterChanged: {
                     Task {
                         await viewModel.applyFilters(
                             showUnreadOnly: viewModel.showUnreadOnly,
                             showBookmarkedOnly: viewModel.showBookmarkedOnly
                         )
+                        await viewModel.applyQualityFilter(viewModel.qualityFilter)
                     }
                 }
             )
@@ -1013,6 +1018,7 @@ struct NewsView: View {
     private struct FilterView: View {
         @Binding var showUnreadOnly: Bool
         @Binding var showBookmarkedOnly: Bool
+        @Binding var qualityFilter: String
         var onFilterChanged: () -> Void
 
         var body: some View {
@@ -1034,6 +1040,23 @@ struct NewsView: View {
                     }
                     .onChange(of: showBookmarkedOnly) { _, _ in
                         onFilterChanged()
+                    }
+
+                    // Quality Filter Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Quality Filter", systemImage: "star.circle")
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+
+                        Picker("Quality Filter", selection: $qualityFilter) {
+                            Text("All").tag("All")
+                            Text("Fair+").tag("Fair+")
+                            Text("Good+").tag("Good+")
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: qualityFilter) { _, _ in
+                            onFilterChanged()
+                        }
                     }
                 }
 

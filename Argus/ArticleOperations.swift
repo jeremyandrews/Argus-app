@@ -110,6 +110,7 @@ final class ArticleOperations {
     ///   - topic: Optional topic to filter by
     ///   - showUnreadOnly: Whether to show only unread articles
     ///   - showBookmarkedOnly: Whether to show only bookmarked articles
+    ///   - qualityFilter: Quality filter to apply ("All", "Fair+", "Good+")
     ///   - limit: Maximum number of articles to return
     /// - Returns: Array of articles matching the criteria
     @MainActor
@@ -117,6 +118,7 @@ final class ArticleOperations {
         topic: String?,
         showUnreadOnly: Bool,
         showBookmarkedOnly: Bool,
+        qualityFilter: String = "All",
         limit: Int? = nil
     ) async throws -> [ArticleModel] {
         // Define missing topics to watch for
@@ -228,6 +230,19 @@ final class ArticleOperations {
                     AppLogger.database.debug("🔍 Applying bookmark filter in memory")
                     articles = articles.filter { $0.isBookmarked }
                 }
+            }
+
+            // Apply quality filter in memory (always client-side since server cannot filter)
+            if qualityFilter != "All" {
+                AppLogger.database.debug("🔍 Applying quality filter in memory: \(qualityFilter)")
+                let beforeCount = articles.count
+                
+                articles = articles.filter { article in
+                    meetsQualityThreshold(article, filter: qualityFilter)
+                }
+                
+                let afterCount = articles.count
+                AppLogger.database.debug("🔍 Quality filter reduced articles from \(beforeCount) to \(afterCount)")
             }
 
             AppLogger.database.debug("✅ Fetched \(articles.count) articles with filters")
@@ -596,6 +611,37 @@ final class ArticleOperations {
                 return a.publishDate > b.publishDate
             }
         }
+    }
+
+    // MARK: - Quality Filter Operations
+
+    /// Determines if an article meets the specified quality threshold
+    /// - Parameters:
+    ///   - article: The article to check
+    ///   - filter: The quality filter ("All", "Fair+", "Good+")
+    /// - Returns: True if the article meets the threshold, false otherwise
+    private func meetsQualityThreshold(_ article: ArticleModel, filter: String) -> Bool {
+        let sourcesQuality = article.sourcesQuality ?? 0
+        let argumentQuality = article.argumentQuality ?? 0
+        
+        let result: Bool
+        switch filter {
+        case "Fair+":
+            // Show articles with sourcesQuality ≥ 2 OR argumentQuality ≥ 2
+            result = sourcesQuality >= 2 || argumentQuality >= 2
+        case "Good+":
+            // Show articles with sourcesQuality ≥ 3 OR argumentQuality ≥ 3
+            result = sourcesQuality >= 3 || argumentQuality >= 3
+        default: // "All"
+            result = true
+        }
+        
+        // Debug logging for problematic case
+        if filter == "Good+" && (sourcesQuality == 1 && argumentQuality == 2) {
+            AppLogger.database.debug("🔍 QUALITY DEBUG: Article with Proof: Poor (\(sourcesQuality)) and Logic: Fair (\(argumentQuality)) - Filter: \(filter) - Result: \(result)")
+        }
+        
+        return result
     }
 
     // MARK: - Batch Operations
