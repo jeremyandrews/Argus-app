@@ -561,6 +561,33 @@ After careful code review of the transition process, we've confirmed the followi
 
 ## Current Work Focus
 
+- **Fixed Sync Performance Regression** (Completed):
+  - Identified and resolved critical performance issue introduced in commit `377116f` ("fix spacing; fix synching")
+  - Root cause analysis revealed that batched rich text processing was removed, causing sync operations to take minutes instead of seconds
+  - **Performance regression details**:
+    - **Before**: Rich text generated in batches of 5 articles with intermediate saves
+    - **After**: All rich text generated at once for all 50+ articles, held in memory until final save
+    - **Impact**: Memory pressure, no progress feedback, large database transactions
+  
+  - **Implementation fixes**:
+    - **Restored batched rich text processing**: Process articles in batches of 10 with intermediate saves
+    - **Removed early termination**: Process ALL articles the server sends (no artificial 50-article limit)
+    - **Added progress feedback**: Users see "Processing articles (X of Y)..." during rich text generation
+    - **Optimized transaction size**: Smaller, more frequent database saves prevent memory issues
+    
+  - **Key behavior changes**:
+    - **Before regression**: Batched processing with progress updates every 5 articles
+    - **During regression**: All-at-once processing with no progress feedback
+    - **After fix**: Batched processing with progress updates every 10 articles
+    - **Processing scope**: Now processes ALL articles from server instead of stopping at target limit
+    
+  - **Benefits**:
+    - Sync performance restored to pre-regression levels (seconds instead of minutes)
+    - Better memory management through smaller batches
+    - Progress feedback keeps users informed during longer operations
+    - No missed articles due to artificial processing limits
+    - Maintains all existing rich text quality for "above the fold" content
+
 - **Fixed Tags Section Implementation** (Completed):
   - Resolved issue where Tags section was not appearing in the UI despite being partially implemented
   - Root cause analysis identified two missing pieces in the data storage pipeline:

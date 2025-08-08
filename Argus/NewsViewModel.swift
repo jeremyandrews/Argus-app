@@ -185,7 +185,7 @@ final class NewsViewModel: ObservableObject {
             // Clear loading state
             isLoading = false
 
-            AppLogger.database.debug("✅ Refreshed articles: loaded \(filteredArticles.count) articles")
+            AppLogger.database.debug("✅ Refreshed articles: loaded \(self.filteredArticles.count) articles")
         } catch {
             self.error = error
             isLoading = false
@@ -201,7 +201,7 @@ final class NewsViewModel: ObservableObject {
 
         // Then check if we need to redirect
         if filteredArticles.isEmpty, selectedTopic != "All" {
-            AppLogger.database.debug("No content for topic '\(selectedTopic)', auto-redirecting to 'All'")
+            AppLogger.database.debug("No content for topic '\(self.selectedTopic)', auto-redirecting to 'All'")
 
             // Revert to "All" topic
             selectedTopic = "All"
