@@ -307,14 +307,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                         UserDefaults.standard.qualityFilter
                     }
                     
+                    AppLogger.app.info("Processing notification with quality filter: \(qualityFilter)")
+                    
                     // Check if we should show notification based on quality filter
                     if await self.shouldShowNotificationForArticle(jsonURL: jsonURL, qualityFilter: qualityFilter) {
                         AppLogger.app.info("Notification allowed: Article meets quality threshold (\(qualityFilter))")
                         await finish(.newData)
                     } else {
-                        AppLogger.app.info("Notification filtered: Article does not meet quality threshold (\(qualityFilter))")
-                        // Still complete successfully but don't show notification
-                        await finish(.newData)
+                        AppLogger.app.info("Notification filtered: Article does not meet quality threshold (\(qualityFilter)) - suppressing notification")
+                        // Return .noData to prevent iOS from showing the notification
+                        await finish(.noData)
                     }
                 } else {
                     ModernizationLogger.log(.warning, component: .apiClient,
@@ -469,13 +471,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Determines if a notification should be shown for an article based on quality filtering
     /// - Parameters:
     ///   - jsonURL: The JSON URL of the article to check
-    ///   - qualityFilter: The quality filter setting ("All", "Fair+", "Good+")
+    ///   - qualityFilter: The quality filter setting (\"All\", \"Fair+\", \"Good+\")
     /// - Returns: True if the notification should be shown, false if it should be filtered
     private func shouldShowNotificationForArticle(jsonURL: String, qualityFilter: String) async -> Bool {
         // If no quality filtering is enabled, always show notifications
         guard qualityFilter != "All" else {
+            AppLogger.app.info("Quality filter is 'All' - allowing all notifications")
             return true
         }
+        
+        AppLogger.app.info("Checking quality for notification: filter=\(qualityFilter), url=\(jsonURL)")
         
         // Get the article quality scores from the database (only extract Sendable data)
         let container = SwiftDataContainer.shared.container
@@ -500,14 +505,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             
             guard let (sourcesQuality, argumentQuality) = qualityData else {
                 // If we can't find the article, allow the notification
-                AppLogger.app.warning("Could not find article for quality filtering, allowing notification")
+                AppLogger.app.warning("Could not find article for quality filtering, allowing notification: \(jsonURL)")
                 return true
             }
             
             // Apply the same quality threshold logic as ArticleOperations
             let meetsThreshold = meetsQualityThresholdWithScores(sourcesQuality: sourcesQuality, argumentQuality: argumentQuality, filter: qualityFilter)
             
-            AppLogger.app.info("Quality filter check for notification - Article: sourcesQuality=\(sourcesQuality ?? 0), argumentQuality=\(argumentQuality ?? 0), Filter: \(qualityFilter), Meets threshold: \(meetsThreshold)")
+            AppLogger.app.info("Quality check result: \(meetsThreshold ? "ALLOW" : "BLOCK") notification (sources: \(sourcesQuality ?? 0), argument: \(argumentQuality ?? 0), filter: \(qualityFilter))")
             
             return meetsThreshold
         } catch {
@@ -530,13 +535,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let result: Bool
         switch filter {
         case "Fair+":
-            // Show articles with sourcesQuality ≥ 2 AND argumentQuality ≥ 2
             result = sources >= 2 && arguments >= 2
+            AppLogger.app.info("Fair+ filter check: sources=\(sources)>=2 (\(sources >= 2)), argument=\(arguments)>=2 (\(arguments >= 2)), result=\(result)")
         case "Good+":
-            // Show articles with sourcesQuality ≥ 3 AND argumentQuality ≥ 3
             result = sources >= 3 && arguments >= 3
+            AppLogger.app.info("Good+ filter check: sources=\(sources)>=3 (\(sources >= 3)), argument=\(arguments)>=3 (\(arguments >= 3)), result=\(result)")
         default: // "All"
             result = true
+            AppLogger.app.info("All filter: allowing notification")
         }
         
         return result
