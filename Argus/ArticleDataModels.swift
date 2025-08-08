@@ -172,14 +172,14 @@ final class ArticleModel: Equatable {
     var entities: [Entity]? {
         get {
             guard let data = entitiesData, !data.isEmpty else {
-                AppLogger.database.debug("No entities data found for article \(id)")
+                AppLogger.database.debug("No entities data found for article \(self.id)")
                 return nil
             }
 
             do {
                 let decoder = JSONDecoder()
                 let decodedEntities = try decoder.decode([Entity].self, from: data)
-                AppLogger.database.debug("Successfully decoded \(decodedEntities.count) entities for article \(id)")
+                AppLogger.database.debug("Successfully decoded \(decodedEntities.count) entities for article \(self.id)")
 
                 // Log a sample of entities for debugging
                 if !decodedEntities.isEmpty {
@@ -189,7 +189,7 @@ final class ArticleModel: Equatable {
 
                 return decodedEntities
             } catch {
-                AppLogger.database.error("Failed to decode entitiesData for article \(id): \(error)")
+                AppLogger.database.error("Failed to decode entitiesData for article \(self.id): \(error)")
                 return nil
             }
         }
@@ -198,14 +198,14 @@ final class ArticleModel: Equatable {
                 do {
                     let encoder = JSONEncoder()
                     entitiesData = try encoder.encode(newValue)
-                    AppLogger.database.debug("Stored \(newValue.count) entities for article \(id)")
+                    AppLogger.database.debug("Stored \(newValue.count) entities for article \(self.id)")
                 } catch {
-                    AppLogger.database.error("Failed to encode entities for article \(id): \(error)")
+                    AppLogger.database.error("Failed to encode entities for article \(self.id): \(error)")
                     entitiesData = nil
                 }
             } else {
                 entitiesData = nil
-                AppLogger.database.debug("Cleared entities for article \(id)")
+                AppLogger.database.debug("Cleared entities for article \(self.id)")
             }
         }
     }
@@ -231,7 +231,7 @@ final class ArticleModel: Equatable {
     var relatedArticles: [RelatedArticle]? {
         get {
             guard let data = relatedArticlesData, !data.isEmpty else {
-                AppLogger.database.debug("No related articles data found for article \(id)")
+                AppLogger.database.debug("No related articles data found for article \(self.id)")
                 return nil
             }
 
@@ -242,7 +242,7 @@ final class ArticleModel: Equatable {
                 decoder.dateDecodingStrategy = .secondsSince1970
 
                 let decodedArticles = try decoder.decode([RelatedArticle].self, from: data)
-                AppLogger.database.debug("Successfully decoded \(decodedArticles.count) related articles for article \(id)")
+                AppLogger.database.debug("Successfully decoded \(decodedArticles.count) related articles for article \(self.id)")
 
                 // Validate that the related articles have valid data
                 if !decodedArticles.isEmpty {
@@ -255,7 +255,7 @@ final class ArticleModel: Equatable {
 
                 return decodedArticles
             } catch {
-                AppLogger.database.error("Failed to decode relatedArticlesData for article \(id): \(error)")
+                AppLogger.database.error("Failed to decode relatedArticlesData for article \(self.id): \(error)")
                 return nil
             }
         }
@@ -275,14 +275,14 @@ final class ArticleModel: Equatable {
                     encoder.dateEncodingStrategy = .secondsSince1970
 
                     relatedArticlesData = try encoder.encode(newValue)
-                    AppLogger.database.debug("Stored \(newValue.count) related articles for article \(id)")
+                    AppLogger.database.debug("Stored \(newValue.count) related articles for article \(self.id)")
                 } catch {
-                    AppLogger.database.error("Failed to encode related articles for article \(id): \(error)")
+                    AppLogger.database.error("Failed to encode related articles for article \(self.id): \(error)")
                     relatedArticlesData = nil
                 }
             } else {
                 relatedArticlesData = nil
-                AppLogger.database.debug("Cleared related articles for article \(id)")
+                AppLogger.database.debug("Cleared related articles for article \(self.id)")
             }
         }
     }
