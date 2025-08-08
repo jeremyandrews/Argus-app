@@ -627,11 +627,11 @@ final class ArticleOperations {
         let result: Bool
         switch filter {
         case "Fair+":
-            // Show articles with sourcesQuality ≥ 2 OR argumentQuality ≥ 2
-            result = sourcesQuality >= 2 || argumentQuality >= 2
+            // Show articles with sourcesQuality ≥ 2 AND argumentQuality ≥ 2
+            result = sourcesQuality >= 2 && argumentQuality >= 2
         case "Good+":
-            // Show articles with sourcesQuality ≥ 3 OR argumentQuality ≥ 3
-            result = sourcesQuality >= 3 || argumentQuality >= 3
+            // Show articles with sourcesQuality ≥ 3 AND argumentQuality ≥ 3
+            result = sourcesQuality >= 3 && argumentQuality >= 3
         default: // "All"
             result = true
         }
