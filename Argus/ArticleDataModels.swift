@@ -560,6 +560,28 @@ enum TopicPriority: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - Quality Filter Helper Extension
+
+extension ArticleModel {
+    /// Determines if this article meets the specified quality threshold
+    /// Uses OR logic: article passes if EITHER sourcesQuality OR argumentQuality meets threshold
+    /// - Parameter filter: The quality filter ("All", "Fair+", "Good+")
+    /// - Returns: True if the article meets the threshold, false otherwise
+    func meetsQualityThreshold(_ filter: String) -> Bool {
+        let sources = self.sourcesQuality ?? 0
+        let arguments = self.argumentQuality ?? 0
+        
+        switch filter {
+        case "Fair+":
+            return sources >= 2 && arguments >= 2
+        case "Good+":
+            return sources >= 3 && arguments >= 3
+        default: // "All"
+            return true
+        }
+    }
+}
+
 // MARK: - API Compatibility Extensions
 
 /// Typealias for backward compatibility

@@ -1108,16 +1108,7 @@ final class ArticleService: ArticleServiceProtocol {
     ///   - filter: The quality filter ("All", "Fair+", "Good+")
     /// - Returns: True if the article meets the threshold, false otherwise
     private func meetsQualityThreshold(_ article: ArticleModel, filter: String) -> Bool {
-        switch filter {
-        case "Fair+":
-            // Show articles with quality 2 or higher (Fair, Good, Strong)
-            return (article.quality ?? 0) >= 2
-        case "Good+":
-            // Show articles with quality 3 or higher (Good, Strong) 
-            return (article.quality ?? 0) >= 3
-        default: // "All"
-            return true
-        }
+        return article.meetsQualityThreshold(filter)
     }
 
     // MARK: - Topic Statistics

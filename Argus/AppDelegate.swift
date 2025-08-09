@@ -544,28 +544,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return result
     }
     
-    /// Determines if an article meets the specified quality threshold using same logic as ArticleOperations
+    /// Determines if an article meets the specified quality threshold using shared helper
     /// - Parameters:
     ///   - article: The article to check
     ///   - filter: The quality filter ("All", "Fair+", "Good+")
     /// - Returns: True if the article meets the threshold, false otherwise
     private func meetsQualityThreshold(_ article: ArticleModel, filter: String) -> Bool {
-        let sourcesQuality = article.sourcesQuality ?? 0
-        let argumentQuality = article.argumentQuality ?? 0
-        
-        let result: Bool
-        switch filter {
-        case "Fair+":
-            // Show articles with sourcesQuality ≥ 2 AND argumentQuality ≥ 2
-            result = sourcesQuality >= 2 && argumentQuality >= 2
-        case "Good+":
-            // Show articles with sourcesQuality ≥ 3 AND argumentQuality ≥ 3
-            result = sourcesQuality >= 3 && argumentQuality >= 3
-        default: // "All"
-            result = true
-        }
-        
-        return result
+        return article.meetsQualityThreshold(filter)
     }
 
     private func authenticateDeviceIfNeeded() {
