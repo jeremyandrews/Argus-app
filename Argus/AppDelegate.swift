@@ -278,49 +278,71 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
         }
 
-        // 1. Validate push data
-        guard
-            let aps = userInfo["aps"] as? [String: AnyObject],
-            let contentAvailable = aps["content-available"] as? Int,
-            contentAvailable == 1,
-            let data = userInfo["data"] as? [String: AnyObject],
-            let jsonURL = data["json_url"] as? String, !jsonURL.isEmpty
-        else {
+        // Process both visible notifications (with aps.alert) and silent notifications
+        let hasAlert = (userInfo["aps"] as? [String: Any])?["alert"] != nil
+        let contentAvailable = userInfo["content-available"] as? Int ?? 0
+        
+        guard hasAlert || contentAvailable == 1 else {
+            AppLogger.app.info("Notification has no alert and is not content-available, ignoring")
             Task { @MainActor in
                 await finish(.noData)
             }
             return
         }
 
+        // Extract URL from the notification payload
+        guard let urlString = userInfo["url"] as? String,
+              let url = URL(string: urlString) else {
+            AppLogger.app.error("No URL found in push notification payload")
+            Task { @MainActor in
+                await finish(.noData)
+            }
+            return
+        }
+
+        AppLogger.app.info("Processing push notification for URL: \(url)")
+
         // 2. Process the article using modern API
         Task.detached {
             do {
                 // Fetch the article data using APIClient
-                let articleData = try await APIClient.shared.fetchArticleByURL(jsonURL: jsonURL)
+                let articleData = try await APIClient.shared.fetchArticleByURL(jsonURL: url.absoluteString)
 
                 // Process it using ArticleService (safely unwrap optional)
                 if let articleData = articleData {
                     _ = try await ArticleService.shared.processArticleData([articleData])
                     
-                    // 3. Quality filtering: Check if article meets user's quality threshold
-                    let qualityFilter = await MainActor.run {
-                        UserDefaults.standard.qualityFilter
+                    // For visible notifications, check quality filtering before allowing notification
+                    if hasAlert {
+                        // Extract quality scores directly from article data
+                        let sourcesQuality = articleData.sourcesQuality
+                        let argumentQuality = articleData.argumentQuality
+                        
+                        // Get user's quality filter setting
+                        let qualityFilter = await MainActor.run {
+                            UserDefaults.standard.qualityFilter
+                        }
+                        
+                        // Check if notification should be shown based on quality filter
+                        if await !self.shouldShowNotificationWithQualityScores(sourcesQuality: sourcesQuality, argumentQuality: argumentQuality, filter: qualityFilter) {
+                            AppLogger.app.info("Article filtered by quality settings, removing notification and processing silently")
+                            
+                            // Remove the notification from notification center
+                            await MainActor.run {
+                                self.removeNotificationFromCenter(url: url)
+                            }
+                            
+                            // Return noData for filtered notifications to avoid showing them
+                            await finish(.noData)
+                            return
+                        }
                     }
                     
-                    AppLogger.app.info("Processing notification with quality filter: \(qualityFilter)")
-                    
-                    // Check if we should show notification based on quality filter
-                    if await self.shouldShowNotificationForArticle(jsonURL: jsonURL, qualityFilter: qualityFilter) {
-                        AppLogger.app.info("Notification allowed: Article meets quality threshold (\(qualityFilter))")
-                        await finish(.newData)
-                    } else {
-                        AppLogger.app.info("Notification filtered: Article does not meet quality threshold (\(qualityFilter)) - suppressing notification")
-                        // Return .noData to prevent iOS from showing the notification
-                        await finish(.noData)
-                    }
+                    AppLogger.app.info("Notification allowed: Article meets quality requirements")
+                    await finish(.newData)
                 } else {
                     ModernizationLogger.log(.warning, component: .apiClient,
-                                            message: "Remote notification contained no article data for URL: \(jsonURL)")
+                                            message: "Remote notification contained no article data for URL: \(url.absoluteString)")
                     throw NSError(domain: "com.argus", code: 404, userInfo: [NSLocalizedDescriptionKey: "No article data found"])
                 }
             } catch {
@@ -468,58 +490,32 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
-    /// Determines if a notification should be shown for an article based on quality filtering
-    /// - Parameters:
-    ///   - jsonURL: The JSON URL of the article to check
-    ///   - qualityFilter: The quality filter setting (\"All\", \"Fair+\", \"Good+\")
-    /// - Returns: True if the notification should be shown, false if it should be filtered
-    private func shouldShowNotificationForArticle(jsonURL: String, qualityFilter: String) async -> Bool {
-        // If no quality filtering is enabled, always show notifications
-        guard qualityFilter != "All" else {
-            AppLogger.app.info("Quality filter is 'All' - allowing all notifications")
+    private func shouldShowNotificationWithQualityScores(sourcesQuality: Int?, argumentQuality: Int?, filter: String) -> Bool {
+        // If quality scores are missing, show the notification
+        guard let sourcesQuality = sourcesQuality,
+              let argumentQuality = argumentQuality else {
+            AppLogger.app.info("Quality scores missing from notification payload, showing notification")
             return true
         }
         
-        AppLogger.app.info("Checking quality for notification: filter=\(qualityFilter), url=\(jsonURL)")
+        return meetsQualityThresholdWithScores(
+            sourcesQuality: sourcesQuality,
+            argumentQuality: argumentQuality,
+            filter: filter
+        )
+    }
+    
+    @MainActor
+    private func removeNotificationFromCenter(url: URL) {
+        let center = UNUserNotificationCenter.current()
         
-        // Get the article quality scores from the database (only extract Sendable data)
-        let container = SwiftDataContainer.shared.container
-        let context = container.mainContext
+        // Create a unique identifier based on the URL
+        let identifier = "article_\(url.absoluteString.hash)"
         
-        do {
-            // Extract only the quality scores we need (Sendable data) from within MainActor context
-            let qualityData = try await MainActor.run {
-                let descriptor = FetchDescriptor<ArticleModel>(
-                    predicate: #Predicate<ArticleModel> { $0.jsonURL == jsonURL }
-                )
-                
-                let articles = try context.fetch(descriptor)
-                
-                guard let article = articles.first else {
-                    return nil as (sourcesQuality: Int?, argumentQuality: Int?)?
-                }
-                
-                // Extract only Sendable data (Int values)
-                return (sourcesQuality: article.sourcesQuality, argumentQuality: article.argumentQuality)
-            }
-            
-            guard let (sourcesQuality, argumentQuality) = qualityData else {
-                // If we can't find the article, allow the notification
-                AppLogger.app.warning("Could not find article for quality filtering, allowing notification: \(jsonURL)")
-                return true
-            }
-            
-            // Apply the same quality threshold logic as ArticleOperations
-            let meetsThreshold = meetsQualityThresholdWithScores(sourcesQuality: sourcesQuality, argumentQuality: argumentQuality, filter: qualityFilter)
-            
-            AppLogger.app.info("Quality check result: \(meetsThreshold ? "ALLOW" : "BLOCK") notification (sources: \(sourcesQuality ?? 0), argument: \(argumentQuality ?? 0), filter: \(qualityFilter))")
-            
-            return meetsThreshold
-        } catch {
-            AppLogger.app.error("Error checking article quality for notification: \(error)")
-            // If there's an error, allow the notification to be safe
-            return true
-        }
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+        
+        AppLogger.app.info("Removed notification from center for URL: \(url)")
     }
     
     /// Helper method that works with quality scores directly to avoid Sendable issues
