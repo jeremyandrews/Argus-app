@@ -42,22 +42,6 @@ struct TopicDiagnosticView: View {
 
     var body: some View {
         VStack {
-            HStack {
-                Text("Topic Statistics")
-                    .font(.title)
-                    .fontWeight(.bold)
-                Spacer()
-                Button(action: {
-                    Task {
-                        await viewModel.refreshStatistics()
-                    }
-                }) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.title3)
-                }
-            }
-            .padding()
-
             if viewModel.isLoading {
                 ProgressView("Gathering statistics...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -103,6 +87,17 @@ struct TopicDiagnosticView: View {
             }
         }
         .navigationTitle("Topic Statistics")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    Task {
+                        await viewModel.refreshStatistics()
+                    }
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+        }
     }
 }
 
