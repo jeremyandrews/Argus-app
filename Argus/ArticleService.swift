@@ -1111,11 +1111,65 @@ final class ArticleService: ArticleServiceProtocol {
         return article.meetsQualityThreshold(filter)
     }
 
+    /// Mark all unread articles in a specific topic as read
+    /// - Parameter topic: The topic to mark all articles as read for
+    /// - Returns: The number of articles marked as read
+    func markAllArticlesAsRead(forTopic topic: String) async throws -> Int {
+        let context = ModelContext(modelContainer)
+        
+        // Fetch all unread articles for this topic
+        let predicate = #Predicate<ArticleModel> { article in
+            (article.topic == topic || (topic == "Uncategorized" && article.topic == nil)) &&
+            !article.isViewed
+        }
+        
+        let fetchDescriptor = FetchDescriptor<ArticleModel>(predicate: predicate)
+        let unreadArticles = try context.fetch(fetchDescriptor)
+        
+        AppLogger.database.debug("Found \(unreadArticles.count) unread articles in topic '\(topic)' to mark as read")
+        
+        // Mark each article as read
+        for article in unreadArticles {
+            article.isViewed = true
+        }
+        
+        // Save the count before async operations to avoid Sendable issues
+        let markedCount = unreadArticles.count
+        
+        // Save all changes at once
+        try context.save()
+        
+        // Clear cache safely since article states have changed
+        await withCheckedContinuation { continuation in
+            clearCache()
+            continuation.resume()
+        }
+        
+        // Update badge count
+        await NotificationUtils.updateAppBadgeCount()
+        
+        // Post notification for views to update
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: Notification.Name("BulkArticleReadStatusChanged"),
+                object: nil,
+                userInfo: ["topic": topic, "count": markedCount]
+            )
+        }
+        
+        AppLogger.database.debug("Successfully marked \(markedCount) articles as read in topic '\(topic)'")
+        
+        return markedCount
+    }
+
     // MARK: - Topic Statistics
 
     /// Get statistics for all topics in the database
     func getTopicStatistics() async throws -> [TopicStatistic] {
         let context = ModelContext(modelContainer)
+
+        // Get current quality filter
+        let currentQualityFilter = UserDefaults.standard.qualityFilter
 
         // Fetch all articles
         let allArticles = try context.fetch(FetchDescriptor<ArticleModel>())
@@ -1126,19 +1180,37 @@ final class ArticleService: ArticleServiceProtocol {
         for article in allArticles {
             let topic = article.topic ?? "Uncategorized"
 
+            // Check if article meets quality threshold
+            let meetsQualityFilter = article.meetsQualityThreshold(currentQualityFilter)
+
             var stat = topicStats[topic] ?? TopicStatistic(
                 topic: topic,
                 totalCount: 0,
                 unreadCount: 0,
-                bookmarkedCount: 0
+                bookmarkedCount: 0,
+                filteredTotalCount: 0,
+                filteredUnreadCount: 0,
+                filteredBookmarkedCount: 0
             )
 
-            // Update counts
+            // Update all-content counts
+            let newTotalCount = stat.totalCount + 1
+            let newUnreadCount = stat.unreadCount + (article.isViewed ? 0 : 1)
+            let newBookmarkedCount = stat.bookmarkedCount + (article.isBookmarked ? 1 : 0)
+
+            // Update filtered counts (only if article meets quality threshold)
+            let newFilteredTotalCount = stat.filteredTotalCount + (meetsQualityFilter ? 1 : 0)
+            let newFilteredUnreadCount = stat.filteredUnreadCount + (meetsQualityFilter && !article.isViewed ? 1 : 0)
+            let newFilteredBookmarkedCount = stat.filteredBookmarkedCount + (meetsQualityFilter && article.isBookmarked ? 1 : 0)
+
             stat = TopicStatistic(
                 topic: topic,
-                totalCount: stat.totalCount + 1,
-                unreadCount: stat.unreadCount + (article.isViewed ? 0 : 1),
-                bookmarkedCount: stat.bookmarkedCount + (article.isBookmarked ? 1 : 0)
+                totalCount: newTotalCount,
+                unreadCount: newUnreadCount,
+                bookmarkedCount: newBookmarkedCount,
+                filteredTotalCount: newFilteredTotalCount,
+                filteredUnreadCount: newFilteredUnreadCount,
+                filteredBookmarkedCount: newFilteredBookmarkedCount
             )
 
             topicStats[topic] = stat
