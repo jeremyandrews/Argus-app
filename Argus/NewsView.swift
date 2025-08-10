@@ -12,6 +12,7 @@ struct NewsView: View {
 
     @Environment(\.editMode) private var editMode
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     // MARK: - State
 
@@ -59,8 +60,24 @@ struct NewsView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationView {
-            ZStack(alignment: .bottom) {
+        // Conditional NavigationView - only wrap on iPhone
+        Group {
+            if horizontalSizeClass == .regular {
+                // iPad: Don't wrap in NavigationView since we're already in a NavigationSplitView
+                mainContent
+            } else {
+                // iPhone: Wrap in NavigationView for standalone navigation
+                NavigationView {
+                    mainContent
+                }
+            }
+        }
+    }
+    
+    // MARK: - Main Content View
+    
+    private var mainContent: some View {
+        ZStack(alignment: .bottom) {
                 // Main List containing header, topic bar, and articles
                 List(selection: $viewModel.selectedArticleIds) {
                     // Header Section
@@ -658,7 +675,8 @@ struct NewsView: View {
             // Quality Badges
             badgesView(article)
         }
-        .padding()
+        .padding(horizontalSizeClass == .regular ? 20 : 16) // More padding on iPad
+        .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity) // Limit width on iPad for better readability
         .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
         .cornerRadius(10)
         .id(article.id)
@@ -1084,6 +1102,4 @@ struct NewsView: View {
             await viewModel.toggleBookmark(for: article)
         }
     }
-
-    // Helper functions that existed in the original code
 }
