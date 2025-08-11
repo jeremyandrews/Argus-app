@@ -26,10 +26,6 @@ struct AccessibleAttributedText: UIViewRepresentable {
         // Make sure it expands to fit content
         textView.setContentCompressionResistancePriority(.required, for: .vertical)
 
-        // CRITICAL: Set width explicitly to screen width minus padding
-        let screenWidth = UIScreen.main.bounds.width - 32
-        textView.textContainer.size.width = screenWidth
-
         // Disable scrolling indicators
         textView.showsHorizontalScrollIndicator = false
         textView.showsVerticalScrollIndicator = false
@@ -57,8 +53,7 @@ struct AccessibleAttributedText: UIViewRepresentable {
             uiView.attributedText = attributedString
         }
 
-        let screenWidth = UIScreen.main.bounds.width - 32
-        uiView.textContainer.size.width = screenWidth
+        // Let SwiftUI handle the width constraints
 
         // Ensure we update the layout
         uiView.setNeedsLayout()
@@ -66,18 +61,20 @@ struct AccessibleAttributedText: UIViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize {
-        // If a width is provided, use that, otherwise use screen width minus padding
-        let width = proposal.width ?? UIScreen.main.bounds.width - 32
-        uiView.textContainer.size.width = width
+        // Use the container's proposed width with safe padding
+        let availableWidth = proposal.width ?? 300
+        let textWidth = max(availableWidth - 40, 200) // Leave padding and ensure minimum width
+        
+        uiView.textContainer.size.width = textWidth
         uiView.layoutIfNeeded()
 
         // Calculate height that fits all content
         let fittingSize = uiView.sizeThatFits(CGSize(
-            width: width,
+            width: textWidth,
             height: UIView.layoutFittingExpandedSize.height
         ))
 
-        return fittingSize
+        return CGSize(width: availableWidth, height: fittingSize.height)
     }
 }
 
@@ -104,14 +101,15 @@ struct NonSelectableRichTextView: UIViewRepresentable {
 
         // Make sure text view expands to fit content
         textView.setContentCompressionResistancePriority(.required, for: .vertical)
-
-        // Force `UITextView` to wrap by constraining its width
-        textView.translatesAutoresizingMaskIntoConstraints = false
         textView.setContentHuggingPriority(.required, for: .horizontal)
         textView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        // Force `UITextView` to wrap by constraining its width
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Add width constraint that will be updated in sizeThatFits
         NSLayoutConstraint.activate([
-            textView.widthAnchor.constraint(lessThanOrEqualToConstant: UIScreen.main.bounds.width - 40), // Ensures wrapping
+            textView.widthAnchor.constraint(lessThanOrEqualToConstant: 300) // Initial fallback
         ])
 
         return textView
@@ -147,26 +145,21 @@ struct NonSelectableRichTextView: UIViewRepresentable {
         uiView.attributedText = mutableString
         uiView.textAlignment = .left
 
-        // Set the container width to match the proposal
-        let width = UIScreen.main.bounds.width - 40
-        uiView.textContainer.size.width = width
-
-        // Force the text view to be exactly the size of its content
-        let layoutManager = uiView.layoutManager
-        let textContainer = uiView.textContainer
-        let usedRect = layoutManager.usedRect(for: textContainer)
-
-        // Set frame to exact content size to prevent extra spacing
-        uiView.frame = CGRect(x: 0, y: 0, width: width, height: max(usedRect.height, 0))
-
         uiView.invalidateIntrinsicContentSize()
         uiView.layoutIfNeeded()
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize {
-        // If a width is provided, use that, otherwise use screen width minus padding
-        let width = proposal.width ?? UIScreen.main.bounds.width - 40
-        uiView.textContainer.size.width = width
+        // Use the container's proposed width with safe padding
+        let availableWidth = proposal.width ?? 300
+        let textWidth = max(availableWidth - 40, 200) // Leave padding and ensure minimum width
+        
+        // Update the width constraint
+        if let widthConstraint = uiView.constraints.first(where: { $0.firstAttribute == .width }) {
+            widthConstraint.constant = textWidth
+        }
+        
+        uiView.textContainer.size.width = textWidth
         uiView.layoutIfNeeded()
 
         // Use precise text measurement to avoid extra spacing
@@ -175,7 +168,7 @@ struct NonSelectableRichTextView: UIViewRepresentable {
         let usedRect = layoutManager.usedRect(for: textContainer)
 
         // Return the exact height needed for the text content
-        return CGSize(width: width, height: max(usedRect.height, 0))
+        return CGSize(width: availableWidth, height: max(usedRect.height, 0))
     }
 }
 
@@ -199,14 +192,10 @@ struct RichTextView: UIViewRepresentable {
         // Ensure the text always starts at the same left margin
         textView.textAlignment = .left
 
-        // Force `UITextView` to wrap by constraining its width
-        textView.translatesAutoresizingMaskIntoConstraints = false
+        // Make sure text view expands to fit content
+        textView.setContentCompressionResistancePriority(.required, for: .vertical)
         textView.setContentHuggingPriority(.required, for: .horizontal)
         textView.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        NSLayoutConstraint.activate([
-            textView.widthAnchor.constraint(lessThanOrEqualToConstant: UIScreen.main.bounds.width - 40), // Ensures wrapping
-        ])
 
         return textView
     }

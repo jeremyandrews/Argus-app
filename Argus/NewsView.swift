@@ -135,9 +135,11 @@ struct NewsView: View {
                     Section {
                         headerView
                             .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets())
 
                         topicsBar
                             .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets())
                     }
 
                     // Content Section - either empty state or articles
@@ -339,6 +341,7 @@ struct NewsView: View {
                     .padding(.leading, 8)
             }
         }
+        .padding(.horizontal, 20)
         .background(Color(UIColor.systemBackground))
     }
 
@@ -370,6 +373,7 @@ struct NewsView: View {
                     }
                 }
             }
+            .padding(.horizontal, 20)
         }
         .padding(.vertical, 8)
         .background(Color(UIColor.systemGray6))
@@ -798,27 +802,9 @@ struct NewsView: View {
         }
         
         private func calculateHorizontalPadding() -> CGFloat {
-            let safeAreaLeading = layoutDimensions.safeAreaInsets.leading
-            let safeAreaTrailing = layoutDimensions.safeAreaInsets.trailing
-            let screenWidth = layoutDimensions.screenWidth
-            let contentWidth = screenWidth - safeAreaLeading - safeAreaTrailing
-            
-            // Calculate appropriate padding based on screen size and orientation
-            if contentWidth > 600 && !layoutDimensions.isIPad {
-                // On wide iPhone screens in landscape, use more padding to prevent text from being too wide
-                let extraPadding = (contentWidth * 0.05) // 5% padding on each side
-                let finalPadding = max(16, extraPadding)
-                
-                // Debug logging
-                print("🔍 Layout Debug - Screen: \(screenWidth), Content: \(contentWidth), SafeArea: L=\(safeAreaLeading) R=\(safeAreaTrailing), Padding: \(finalPadding)")
-                
-                return finalPadding
-            } else {
-                // For normal cases, use minimal padding
-                let finalPadding: CGFloat = layoutDimensions.isIPad ? 12 : 10
-                print("🔍 Layout Debug - Normal case - Screen: \(screenWidth), Content: \(contentWidth), Padding: \(finalPadding)")
-                return finalPadding
-            }
+            // Match the explicit padding used by header and topic bar
+            // Both header and topic bar now use 20 points horizontal padding
+            return 20
         }
         
         // Helper views
@@ -838,7 +824,6 @@ struct NewsView: View {
                 .fontWeight(.semibold)
                 .lineLimit(3)
                 .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .truncationMode(.tail)
                 .textSelection(.disabled)
         }
@@ -876,7 +861,6 @@ struct NewsView: View {
                             .foregroundColor(.secondary)
                             .lineLimit(3)
                             .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                             .truncationMode(.tail)
                             .textSelection(.disabled)
                     }
