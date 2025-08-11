@@ -2,6 +2,35 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+// MARK: - Layout Environment
+
+/// Environment key for current layout dimensions
+struct LayoutDimensionsKey: EnvironmentKey {
+    static let defaultValue = LayoutDimensions()
+}
+
+/// Layout dimensions that track current screen state
+struct LayoutDimensions {
+    let screenWidth: CGFloat
+    let safeAreaInsets: EdgeInsets
+    let isIPad: Bool
+    let orientationId: UUID
+    
+    init(screenWidth: CGFloat = 0, safeAreaInsets: EdgeInsets = EdgeInsets(), isIPad: Bool = false, orientationId: UUID = UUID()) {
+        self.screenWidth = screenWidth
+        self.safeAreaInsets = safeAreaInsets
+        self.isIPad = isIPad
+        self.orientationId = orientationId
+    }
+}
+
+extension EnvironmentValues {
+    var layoutDimensions: LayoutDimensions {
+        get { self[LayoutDimensionsKey.self] }
+        set { self[LayoutDimensionsKey.self] = newValue }
+    }
+}
+
 struct NewsView: View {
     // MARK: - View Model
 
@@ -14,8 +43,10 @@ struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     
-    // State to force view refresh on orientation changes
+    // Enhanced layout state management
+    @State private var layoutDimensions = LayoutDimensions()
     @State private var orientationChangeId = UUID()
+    @State private var useIPadLayout: Bool = false
     
     // MARK: - Device Detection & Layout Logic
     
@@ -24,16 +55,9 @@ struct NewsView: View {
         UIDevice.current.userInterfaceIdiom == .pad
     }
     
-    /// True if we should use iPad-specific layout (iPad OR iPhone in landscape with regular width)
+    /// True if we should use iPad-specific layout (iPad only, not iPhone in landscape)
     private var shouldUseIPadLayout: Bool {
-        // Always use iPad layout for actual iPads
-        if isIPad {
-            return true
-        }
-        
-        // For iPhones, use iPad-style layout only in landscape with regular width
-        // This ensures proper responsive behavior during orientation changes
-        return horizontalSizeClass == .regular
+        return isIPad
     }
 
     // MARK: - State
@@ -82,17 +106,22 @@ struct NewsView: View {
     // MARK: - Body
 
     var body: some View {
-        // Conditional NavigationView - only wrap on iPhone
-        Group {
-            if shouldUseIPadLayout {
-                // iPad: Don't wrap in NavigationView since we're already in a NavigationSplitView
+        // Wrap in GeometryReader to capture current screen dimensions
+        GeometryReader { geometry in
+            NavigationStack {
                 mainContent
-            } else {
-                // iPhone: Wrap in NavigationView for standalone navigation
-                NavigationView {
-                    mainContent
-                }
             }
+            .environment(\.layoutDimensions, LayoutDimensions(
+                screenWidth: geometry.size.width,
+                safeAreaInsets: EdgeInsets(
+                    top: geometry.safeAreaInsets.top,
+                    leading: geometry.safeAreaInsets.leading,
+                    bottom: geometry.safeAreaInsets.bottom,
+                    trailing: geometry.safeAreaInsets.trailing
+                ),
+                isIPad: isIPad,
+                orientationId: orientationChangeId
+            ))
         }
     }
     
@@ -105,11 +134,9 @@ struct NewsView: View {
                     // Header Section
                     Section {
                         headerView
-                            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
                             .listRowSeparator(.hidden)
 
                         topicsBar
-                            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
                             .listRowSeparator(.hidden)
                     }
 
@@ -117,7 +144,6 @@ struct NewsView: View {
                     if viewModel.filteredArticles.isEmpty {
                         Section {
                             emptyStateView
-                                .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
                                 .listRowSeparator(.hidden)
                         }
                     } else {
@@ -125,16 +151,16 @@ struct NewsView: View {
                         ForEach(viewModel.groupedArticles, id: \.key) { group in
                             if !group.key.isEmpty {
                                 Section(header: Text(group.key)) {
-                                    ForEach(group.articles.uniqued(), id: \.id) { article in
-                                        ArticleRow(
-                                            article: article,
-                                            editMode: editMode,
-                                            selectedArticleIDs: $viewModel.selectedArticleIds
-                                        )
-                                        .onAppear {
-                                            loadMoreArticlesIfNeeded(currentItem: article)
-                                        }
-                                    }
+                        ForEach(group.articles.uniqued(), id: \.id) { article in
+                            ArticleRow(
+                                article: article,
+                                editMode: editMode,
+                                selectedArticleIDs: $viewModel.selectedArticleIds
+                            )
+                            .onAppear {
+                                loadMoreArticlesIfNeeded(currentItem: article)
+                            }
+                        }
                                 }
                             } else {
                                 // Single group with no header
@@ -190,14 +216,31 @@ struct NewsView: View {
                 }
                 // Initial setup
                 .onAppear {
+                    // Set initial layout state
+                    useIPadLayout = isIPad || horizontalSizeClass == .regular
+                    
                     Task {
                         await viewModel.refreshArticles()
                     }
                 }
                 // Force view refresh when size class changes (orientation changes)
                 .onChange(of: horizontalSizeClass) { _, _ in
-                    // Force re-evaluation of shouldUseIPadLayout by changing the view ID
-                    orientationChangeId = UUID()
+                    // Update layout state and force refresh
+                    let newLayoutState = isIPad || horizontalSizeClass == .regular
+                    
+                    // Use a more aggressive animation approach
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        useIPadLayout = newLayoutState
+                        // Force immediate state update
+                        orientationChangeId = UUID()
+                    }
+                    
+                    // Additional forced refresh after a brief delay to ensure all cells update
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            orientationChangeId = UUID()
+                        }
+                    }
                 }
                 // Apply the orientation change ID to force view refresh
                 .id(orientationChangeId)
@@ -296,7 +339,6 @@ struct NewsView: View {
                     .padding(.leading, 8)
             }
         }
-        .padding()
         .background(Color(UIColor.systemBackground))
     }
 
@@ -328,7 +370,6 @@ struct NewsView: View {
                     }
                 }
             }
-            .padding(.horizontal)
         }
         .padding(.vertical, 8)
         .background(Color(UIColor.systemGray6))
@@ -678,174 +719,224 @@ struct NewsView: View {
         editMode: Binding<EditMode>?,
         selectedArticleIDs: Binding<Set<ArticleModel.ID>>
     ) -> some View {
-        // Create a local state to track the animation
-        let isUnread = !article.isViewed
+        ArticleRowContent(
+            article: article,
+            editMode: editMode,
+            selectedArticleIDs: selectedArticleIDs,
+            shouldUseIPadLayout: shouldUseIPadLayout,
+            openArticle: openArticle,
+            toggleReadStatus: toggleReadStatus,
+            loadMoreArticlesIfNeeded: loadMoreArticlesIfNeeded,
+            viewModel: viewModel
+        )
+    }
+    
+    // Enhanced ArticleRow that uses environment-based layout
+    private struct ArticleRowContent: View {
+        let article: ArticleModel
+        let editMode: Binding<EditMode>?
+        let selectedArticleIDs: Binding<Set<ArticleModel.ID>>
+        let shouldUseIPadLayout: Bool
+        let openArticle: (ArticleModel) -> Void
+        let toggleReadStatus: (ArticleModel) -> Void
+        let loadMoreArticlesIfNeeded: (ArticleModel) -> Void
+        let viewModel: NewsViewModel
+        
+        @Environment(\.layoutDimensions) private var layoutDimensions
+        
+        var body: some View {
+            let isUnread = !article.isViewed
+            
+            // Use environment-based layout identifier that includes screen width and orientation
+            let layoutIdentifier = "\(article.id)-\(layoutDimensions.orientationId)-\(Int(layoutDimensions.screenWidth))"
+            
+            // Calculate explicit width constraint based on current screen dimensions
+            let availableWidth = calculateAvailableWidth()
+            
+            VStack(alignment: .leading, spacing: 10) {
+                // Top row
+                headerRow
 
-        return VStack(alignment: .leading, spacing: 10) {
-            // Top row
-            headerRow(article)
+                // Title
+                titleView
 
-            // Title
-            titleView(article)
+                // Publication Date
+                publicationDateView
 
-            // Publication Date
-            publicationDateView(article)
+                // Summary
+                summaryContent
 
-            // Summary
-            summaryContent(article)
+                // Affected Field
+                affectedFieldView
 
-            // Affected Field
-            affectedFieldView(article)
+                // Domain
+                domainView
 
-            // Domain
-            domainView(article)
-
-            // Quality Badges
-            badgesView(article)
-        }
-        .padding(shouldUseIPadLayout ? 20 : 16) // More padding on iPad
-        .frame(maxWidth: shouldUseIPadLayout ? 700 : .infinity) // Limit width on iPad for better readability
-        .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
-        .cornerRadius(10)
-        .id(article.id)
-        .onLongPressGesture {
-            withAnimation {
-                editMode?.wrappedValue = .active
-                selectedArticleIDs.wrappedValue.insert(article.id)
+                // Quality Badges
+                badgesView
+            }
+            .padding()
+            .frame(width: availableWidth, alignment: .leading) // Explicit width constraint
+            .frame(maxWidth: availableWidth) // Secondary constraint for safety
+            .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
+            .cornerRadius(10)
+            .id(layoutIdentifier) // Force recreation with environment changes
+            .onLongPressGesture {
+                withAnimation {
+                    editMode?.wrappedValue = .active
+                    selectedArticleIDs.wrappedValue.insert(article.id)
+                }
+            }
+            .onTapGesture {
+                openArticle(article)
+            }
+            .onTapGesture(count: 2) {
+                toggleReadStatus(article)
+            }
+            .onAppear {
+                loadMoreArticlesIfNeeded(article)
+                Task {
+                    await viewModel.generateBodyBlobIfNeeded(articleID: article.id)
+                }
             }
         }
-        // Single tap gesture to open article
-        .onTapGesture {
-            openArticle(article)
+        
+        private func calculateAvailableWidth() -> CGFloat {
+            let screenWidth = layoutDimensions.screenWidth
+            let safeAreaLeading = layoutDimensions.safeAreaInsets.leading
+            let safeAreaTrailing = layoutDimensions.safeAreaInsets.trailing
+            let listPadding: CGFloat = 32 // Standard List padding
+            
+            // Calculate available width accounting for safe areas and list padding
+            let availableWidth = screenWidth - safeAreaLeading - safeAreaTrailing - listPadding
+            
+            return max(availableWidth, 200) // Minimum width fallback
         }
-        // Double tap gesture to toggle read status
-        .onTapGesture(count: 2) {
-            toggleReadStatus(article)
-        }
-        .onAppear {
-            loadMoreArticlesIfNeeded(currentItem: article)
-
-            // If the blob doesn't exist yet, generate and save it
-            Task {
-                await viewModel.generateBodyBlobIfNeeded(articleID: article.id)
+        
+        // Helper views
+        private var headerRow: some View {
+            HStack(spacing: 8) {
+                if let topic = article.topic, !topic.isEmpty {
+                    TopicPill(topic: topic)
+                }
+                Spacer()
+                BookmarkButton(article: article, toggleBookmark: toggleBookmark)
             }
         }
-    }
-
-    // Helper functions for each part of the row
-    private func headerRow(_ article: ArticleModel) -> some View {
-        HStack(spacing: 8) {
-            if let topic = article.topic, !topic.isEmpty {
-                TopicPill(topic: topic)
-            }
-            Spacer()
-            BookmarkButton(article: article)
+        
+        private var titleView: some View {
+            Text(article.title)
+                .font(.headline)
+                .lineLimit(3)
+                .textSelection(.disabled)
         }
-    }
-
-    private func titleView(_ article: ArticleModel) -> some View {
-        Text(article.title)
-            .font(.headline)
-            .lineLimit(3)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.disabled)
-    }
-
-    private let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
-    private func publicationDateView(_ article: ArticleModel) -> some View {
-        Group {
+        
+        private let dateFormatter: DateFormatter = {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            return formatter
+        }()
+        
+        private var publicationDateView: some View {
             Text(dateFormatter.string(from: article.publishDate))
                 .font(.footnote)
                 .foregroundColor(.secondary)
                 .textSelection(.disabled)
         }
-    }
-
-    // Summary content from extensions
-    private func summaryContent(_ article: ArticleModel) -> some View {
-        Group {
-            if !article.body.isEmpty {
-                if let bodyBlobData = article.bodyBlob,
-                   let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                       ofClass: NSAttributedString.self,
-                       from: bodyBlobData
-                   )
-                {
-                    // Use NonSelectableRichTextView to match NewsDetailView's rendering
-                    NonSelectableRichTextView(attributedString: attributedString)
+        
+        private var summaryContent: some View {
+            Group {
+                if !article.body.isEmpty {
+                    if let bodyBlobData = article.bodyBlob,
+                       let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                           ofClass: NSAttributedString.self,
+                           from: bodyBlobData
+                       )
+                    {
+                        NonSelectableRichTextView(attributedString: attributedString)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.disabled)
+                    } else {
+                        Text(article.body)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .textSelection(.disabled)
+                    }
+                }
+            }
+        }
+        
+        private var affectedFieldView: some View {
+            Group {
+                if !article.affected.isEmpty {
+                    Text(article.affected)
+                        .font(.caption)
                         .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.disabled)
-                } else {
-                    // Fallback to plain text with original styling
-                    Text(article.body)
-                        .font(.subheadline) // Keep the original font size
-                        .foregroundColor(.secondary) // Keep the original color
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(2)
+                        .padding(.top, 3)
                         .textSelection(.disabled)
                 }
             }
         }
-    }
-
-    // Affected field from extensions
-    private func affectedFieldView(_ article: ArticleModel) -> some View {
-        Group {
-            if !article.affected.isEmpty {
-                Text(article.affected)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
+        
+        private var domainView: some View {
+            Group {
+                if let domain = article.domain, !domain.isEmpty {
+                    DomainSourceView(
+                        domain: domain,
+                        sourceType: article.sourceType,
+                        onTap: {
+                            openArticle(article)
+                        },
+                        onSourceTap: {
+                            openArticle(article)
+                        }
+                    )
                     .padding(.top, 3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.disabled)
+                }
             }
         }
-    }
-
-    private func domainView(_ article: ArticleModel) -> some View {
-        Group {
-            if let domain = article.domain, !domain.isEmpty {
-                DomainSourceView(
-                    domain: domain,
+        
+        private var badgesView: some View {
+            HStack {
+                QualityBadges(
+                    sourcesQuality: article.sourcesQuality,
+                    argumentQuality: article.argumentQuality,
                     sourceType: article.sourceType,
-                    onTap: {
-                        // We'll just use the default tap behavior here like before
-                        openArticle(article)
-                    },
-                    onSourceTap: {
-                        // Also open the article when source type is tapped
+                    scrollToSection: .constant(nil),
+                    onBadgeTap: { _ in
                         openArticle(article)
                     }
                 )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 3)
-                .textSelection(.disabled)
+            }
+            .padding(.top, 5)
+        }
+        
+        private func toggleBookmark(_ article: ArticleModel) {
+            Task {
+                await viewModel.toggleBookmark(for: article)
             }
         }
     }
-
-    private func badgesView(_ article: ArticleModel) -> some View {
-        HStack {
-            // Show quality badges directly
-            QualityBadges(
-                sourcesQuality: article.sourcesQuality,
-                argumentQuality: article.argumentQuality,
-                sourceType: article.sourceType,
-                scrollToSection: .constant(nil),
-                onBadgeTap: { _ in
-                    openArticle(article)
-                }
-            )
+    
+    // Simplified bookmark button component
+    private struct BookmarkButton: View {
+        let article: ArticleModel
+        let toggleBookmark: (ArticleModel) -> Void
+        
+        var body: some View {
+            Button {
+                toggleBookmark(article)
+            } label: {
+                Image(systemName: article.isBookmarked ? "bookmark.fill" : "bookmark")
+                    .foregroundColor(article.isBookmarked ? .blue : .gray)
+            }
+            .buttonStyle(.plain)
         }
-        .padding(.top, 5)
     }
 
     private func handleScrollBegin() {
@@ -870,17 +961,6 @@ struct NewsView: View {
                 }
             }
         }
-    }
-
-    // Simplified bookmark icon on the trailing side
-    private func BookmarkButton(article: ArticleModel) -> some View {
-        Button {
-            toggleBookmark(article)
-        } label: {
-            Image(systemName: article.isBookmarked ? "bookmark.fill" : "bookmark")
-                .foregroundColor(article.isBookmarked ? .blue : .gray)
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Toolbar and Filter Sheet
@@ -1115,6 +1195,20 @@ struct NewsView: View {
             }
             .padding(.horizontal, 20)
         }
+    }
+
+    // MARK: - Layout Helpers
+    
+    private func calculateAvailableWidth(layoutDimensions: LayoutDimensions) -> CGFloat {
+        let screenWidth = layoutDimensions.screenWidth
+        let safeAreaLeading = layoutDimensions.safeAreaInsets.leading
+        let safeAreaTrailing = layoutDimensions.safeAreaInsets.trailing
+        let listPadding: CGFloat = 32 // Standard List padding
+        
+        // Calculate available width accounting for safe areas and list padding
+        let availableWidth = screenWidth - safeAreaLeading - safeAreaTrailing - listPadding
+        
+        return max(availableWidth, 200) // Minimum width fallback
     }
 
     // MARK: - Article Operations
