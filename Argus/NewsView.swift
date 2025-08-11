@@ -750,9 +750,6 @@ struct NewsView: View {
             // Use environment-based layout identifier that includes screen width and orientation
             let layoutIdentifier = "\(article.id)-\(layoutDimensions.orientationId)-\(Int(layoutDimensions.screenWidth))"
             
-            // Calculate explicit width constraint based on current screen dimensions
-            let availableWidth = calculateAvailableWidth()
-            
             VStack(alignment: .leading, spacing: 10) {
                 // Top row
                 headerRow
@@ -775,9 +772,8 @@ struct NewsView: View {
                 // Quality Badges
                 badgesView
             }
-            .padding()
-            .frame(width: availableWidth, alignment: .leading) // Explicit width constraint
-            .frame(maxWidth: availableWidth) // Secondary constraint for safety
+            .padding(.vertical, 8)
+            .padding(.horizontal, calculateHorizontalPadding())
             .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
             .cornerRadius(10)
             .id(layoutIdentifier) // Force recreation with environment changes
@@ -801,16 +797,28 @@ struct NewsView: View {
             }
         }
         
-        private func calculateAvailableWidth() -> CGFloat {
-            let screenWidth = layoutDimensions.screenWidth
+        private func calculateHorizontalPadding() -> CGFloat {
             let safeAreaLeading = layoutDimensions.safeAreaInsets.leading
             let safeAreaTrailing = layoutDimensions.safeAreaInsets.trailing
-            let listPadding: CGFloat = 32 // Standard List padding
+            let screenWidth = layoutDimensions.screenWidth
+            let contentWidth = screenWidth - safeAreaLeading - safeAreaTrailing
             
-            // Calculate available width accounting for safe areas and list padding
-            let availableWidth = screenWidth - safeAreaLeading - safeAreaTrailing - listPadding
-            
-            return max(availableWidth, 200) // Minimum width fallback
+            // Calculate appropriate padding based on screen size and orientation
+            if contentWidth > 600 && !layoutDimensions.isIPad {
+                // On wide iPhone screens in landscape, use more padding to prevent text from being too wide
+                let extraPadding = (contentWidth * 0.05) // 5% padding on each side
+                let finalPadding = max(16, extraPadding)
+                
+                // Debug logging
+                print("🔍 Layout Debug - Screen: \(screenWidth), Content: \(contentWidth), SafeArea: L=\(safeAreaLeading) R=\(safeAreaTrailing), Padding: \(finalPadding)")
+                
+                return finalPadding
+            } else {
+                // For normal cases, use minimal padding
+                let finalPadding: CGFloat = layoutDimensions.isIPad ? 12 : 10
+                print("🔍 Layout Debug - Normal case - Screen: \(screenWidth), Content: \(contentWidth), Padding: \(finalPadding)")
+                return finalPadding
+            }
         }
         
         // Helper views
@@ -827,7 +835,11 @@ struct NewsView: View {
         private var titleView: some View {
             Text(article.title)
                 .font(.headline)
+                .fontWeight(.semibold)
                 .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .truncationMode(.tail)
                 .textSelection(.disabled)
         }
         
@@ -862,7 +874,10 @@ struct NewsView: View {
                         Text(article.body)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+                            .lineLimit(3)
                             .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .truncationMode(.tail)
                             .textSelection(.disabled)
                     }
                 }
