@@ -14,6 +14,9 @@ struct NewsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     
+    // State to force view refresh on orientation changes
+    @State private var orientationChangeId = UUID()
+    
     // MARK: - Device Detection & Layout Logic
     
     /// True if running on iPad (regardless of orientation)
@@ -191,6 +194,13 @@ struct NewsView: View {
                         await viewModel.refreshArticles()
                     }
                 }
+                // Force view refresh when size class changes (orientation changes)
+                .onChange(of: horizontalSizeClass) { _, _ in
+                    // Force re-evaluation of shouldUseIPadLayout by changing the view ID
+                    orientationChangeId = UUID()
+                }
+                // Apply the orientation change ID to force view refresh
+                .id(orientationChangeId)
                 // Handle scrolling for better performance
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 10)
