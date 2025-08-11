@@ -13,6 +13,25 @@ struct NewsView: View {
     @Environment(\.editMode) private var editMode
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    
+    // MARK: - Device Detection & Layout Logic
+    
+    /// True if running on iPad (regardless of orientation)
+    private var isIPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+    
+    /// True if we should use iPad-specific layout (iPad OR iPhone in landscape with regular width)
+    private var shouldUseIPadLayout: Bool {
+        // Always use iPad layout for actual iPads
+        if isIPad {
+            return true
+        }
+        
+        // For iPhones, use iPad-style layout only in landscape with regular width
+        // This ensures proper responsive behavior during orientation changes
+        return horizontalSizeClass == .regular
+    }
 
     // MARK: - State
 
@@ -62,7 +81,7 @@ struct NewsView: View {
     var body: some View {
         // Conditional NavigationView - only wrap on iPhone
         Group {
-            if horizontalSizeClass == .regular {
+            if shouldUseIPadLayout {
                 // iPad: Don't wrap in NavigationView since we're already in a NavigationSplitView
                 mainContent
             } else {
@@ -223,7 +242,6 @@ struct NewsView: View {
                 }
             }
         }
-    }
 
     // Central handler for all filter changes
     private func handleFilterChange(topicChanged: Bool = false, newTopic: String? = nil, isDataChange _: Bool = false) {
@@ -675,8 +693,8 @@ struct NewsView: View {
             // Quality Badges
             badgesView(article)
         }
-        .padding(horizontalSizeClass == .regular ? 20 : 16) // More padding on iPad
-        .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity) // Limit width on iPad for better readability
+        .padding(shouldUseIPadLayout ? 20 : 16) // More padding on iPad
+        .frame(maxWidth: shouldUseIPadLayout ? 700 : .infinity) // Limit width on iPad for better readability
         .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
         .cornerRadius(10)
         .id(article.id)
@@ -1102,4 +1120,5 @@ struct NewsView: View {
             await viewModel.toggleBookmark(for: article)
         }
     }
+    
 }
