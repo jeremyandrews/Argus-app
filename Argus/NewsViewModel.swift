@@ -40,6 +40,9 @@ final class NewsViewModel: ObservableObject {
     /// Current sync status (for the indicator)
     @Published var syncStatus: SyncStatus = .idle
 
+    /// Flag indicating if a sync operation is currently in progress
+    @Published private(set) var isSyncing: Bool = false
+
     // MARK: - Filter State
 
     /// The currently selected topic
@@ -306,6 +309,16 @@ final class NewsViewModel: ObservableObject {
 
     /// Performs a sync with the server for updated content
     func syncWithServer() async {
+        // Prevent concurrent sync operations
+        guard !isSyncing else {
+            AppLogger.sync.info("Sync already in progress, ignoring duplicate request")
+            return
+        }
+        
+        // Set sync state
+        isSyncing = true
+        defer { isSyncing = false }
+        
         // Set status to searching and loading state
         syncStatus = .searching
         isLoading = true

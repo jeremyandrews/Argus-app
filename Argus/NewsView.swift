@@ -188,6 +188,8 @@ struct NewsView: View {
                         await viewModel.syncWithServer()
                     }
                 }
+                // Disable pull-to-refresh when sync is already in progress
+                .disabled(viewModel.isSyncing)
                 // Add the toolbar item for the sync status in the navigation bar
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
@@ -1223,5 +1225,6 @@ struct NewsView: View {
             await viewModel.toggleBookmark(for: article)
         }
     }
+    
     
 }
