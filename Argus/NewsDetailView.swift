@@ -814,7 +814,12 @@ struct NewsDetailView: View {
                 // Title - use rich text if available, otherwise fall back to plain text
                 Group {
                     if let titleAttrString = viewModel.titleAttributedString {
-                        NonSelectableRichTextView(attributedString: titleAttrString)
+                        Text(titleAttrString.string)
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .textSelection(.disabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
@@ -836,9 +841,13 @@ struct NewsDetailView: View {
                 // Body - use rich text if available, otherwise fall back to plain text
                 Group {
                     if let bodyAttrString = viewModel.bodyAttributedString {
-                        NonSelectableRichTextView(attributedString: bodyAttrString)
+                        Text(bodyAttrString.string)
+                            .font(.body)
+                            .foregroundColor(.primary)
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .textSelection(.disabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
                         Text(n.body)
@@ -1669,13 +1678,17 @@ struct NewsDetailView: View {
             Group {
                 if let attributedString = attributedString {
                     // Show formatted rich text when available - NO ANIMATIONS
-                    NonSelectableRichTextView(attributedString: attributedString)
+                    Text(attributedString.string)
+                        .font(.body)
+                        .foregroundColor(.primary)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 4)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
-                        .textSelection(.enabled)
                 } else if isLoading {
                     // Show loading indicator when content is being generated - NO ANIMATIONS
                     VStack(spacing: 8) {

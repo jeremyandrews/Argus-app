@@ -53,7 +53,10 @@ struct AccessibleAttributedText: UIViewRepresentable {
             uiView.attributedText = attributedString
         }
 
-        // Let SwiftUI handle the width constraints
+        // Configure text container to show all content
+        uiView.textContainer.maximumNumberOfLines = 0  // Show all lines
+        uiView.textContainer.lineBreakMode = .byWordWrapping
+        uiView.textContainer.widthTracksTextView = true
 
         // Ensure we update the layout
         uiView.setNeedsLayout()
@@ -61,17 +64,22 @@ struct AccessibleAttributedText: UIViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize {
-        // Use the container's proposed width with safe padding
-        let availableWidth = proposal.width ?? 300
-        let textWidth = max(availableWidth - 40, 200) // Leave padding and ensure minimum width
+        // Use the container's proposed width directly
+        let availableWidth = proposal.width ?? UIScreen.main.bounds.width
         
-        uiView.textContainer.size.width = textWidth
+        // Set up the text container to use the full width
+        uiView.textContainer.size.width = availableWidth
+        uiView.textContainer.maximumNumberOfLines = 0  // Ensure unlimited lines for sizing
+        uiView.textContainer.lineBreakMode = .byWordWrapping
+        
+        // Ensure the text view uses the correct width for calculation
+        uiView.bounds.size.width = availableWidth
         uiView.layoutIfNeeded()
 
-        // Calculate height that fits all content
+        // Calculate height that fits all content with no height constraint
         let fittingSize = uiView.sizeThatFits(CGSize(
-            width: textWidth,
-            height: UIView.layoutFittingExpandedSize.height
+            width: availableWidth,
+            height: CGFloat.greatestFiniteMagnitude  // Use max height to ensure all content is measured
         ))
 
         return CGSize(width: availableWidth, height: fittingSize.height)
@@ -82,93 +90,93 @@ struct NonSelectableRichTextView: UIViewRepresentable {
     let attributedString: NSAttributedString
     var lineLimit: Int? = nil
 
-    func makeUIView(context _: Context) -> UITextView {
+    func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.isEditable = false
         textView.isScrollEnabled = false
-        textView.isSelectable = false // Disable selection
+        textView.isSelectable = false
         textView.backgroundColor = .clear
-
-        // Remove default padding
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
-
-        // Enable Dynamic Type
         textView.adjustsFontForContentSizeCategory = true
-
-        // Ensure the text always starts at the same left margin
         textView.textAlignment = .left
-
-        // Make sure text view expands to fit content
-        textView.setContentCompressionResistancePriority(.required, for: .vertical)
-        textView.setContentHuggingPriority(.required, for: .horizontal)
-        textView.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        // Force `UITextView` to wrap by constraining its width
-        textView.translatesAutoresizingMaskIntoConstraints = false
         
-        // Add width constraint that will be updated in sizeThatFits
-        NSLayoutConstraint.activate([
-            textView.widthAnchor.constraint(lessThanOrEqualToConstant: 300) // Initial fallback
-        ])
-
+        // CRITICAL: Set up constraints for proper sizing - FIXED PRIORITIES
+        textView.setContentCompressionResistancePriority(.required, for: .vertical)
+        textView.setContentHuggingPriority(.defaultLow, for: .vertical) // Changed back to defaultLow to prevent compression
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        
         return textView
     }
 
-    func updateUIView(_ uiView: UITextView, context _: Context) {
-        // Create a mutable copy to preserve formatting but ensure proper font size
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        // Process the attributed string to ensure consistent font sizing
         let mutableString = NSMutableAttributedString(attributedString: attributedString)
-
-        // Apply system body font size to all text while preserving other attributes
         let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+        
         mutableString.enumerateAttributes(in: NSRange(location: 0, length: mutableString.length)) { attributes, range, _ in
             if let existingFont = attributes[.font] as? UIFont {
-                // Create a new font with the same characteristics but body font size
                 let newFont = existingFont.withSize(bodyFont.pointSize)
                 mutableString.addAttribute(.font, value: newFont, range: range)
-
-                // Preserve paragraph style if it exists (affects spacing)
+                
+                // Preserve other attributes
                 if let paragraphStyle = attributes[.paragraphStyle] {
                     mutableString.addAttribute(.paragraphStyle, value: paragraphStyle, range: range)
                 }
-
-                // Preserve character spacing (kerning) if it exists
                 if let kerning = attributes[.kern] {
                     mutableString.addAttribute(.kern, value: kerning, range: range)
                 }
             } else {
-                // If no font exists, add the body font
                 mutableString.addAttribute(.font, value: bodyFont, range: range)
             }
         }
 
         uiView.attributedText = mutableString
-        uiView.textAlignment = .left
-
-        uiView.invalidateIntrinsicContentSize()
+        
+        // CRITICAL: Configure text container for unlimited lines - FORCE SETTINGS
+        uiView.textContainer.lineBreakMode = .byWordWrapping
+        uiView.textContainer.widthTracksTextView = true
+        uiView.textContainer.maximumNumberOfLines = 0 // Always unlimited
+        
+        // Additional forced settings to ensure expansion
+        uiView.translatesAutoresizingMaskIntoConstraints = true
+        
+        // Force immediate layout calculation
+        uiView.setNeedsLayout()
         uiView.layoutIfNeeded()
+        uiView.sizeToFit()
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context _: Context) -> CGSize {
-        // Use the container's proposed width with safe padding
-        let availableWidth = proposal.width ?? 300
-        let textWidth = max(availableWidth - 40, 200) // Leave padding and ensure minimum width
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize {
+        let availableWidth = proposal.width ?? UIScreen.main.bounds.width
         
-        // Update the width constraint
-        if let widthConstraint = uiView.constraints.first(where: { $0.firstAttribute == .width }) {
-            widthConstraint.constant = textWidth
-        }
+        // AGGRESSIVE FIX: Force text container to unlimited height and proper width
+        uiView.textContainer.size = CGSize(width: availableWidth, height: CGFloat.greatestFiniteMagnitude)
+        uiView.textContainer.maximumNumberOfLines = 0 // Force unlimited
+        uiView.textContainer.lineBreakMode = .byWordWrapping
+        uiView.textContainer.widthTracksTextView = true
         
-        uiView.textContainer.size.width = textWidth
-        uiView.layoutIfNeeded()
-
-        // Use precise text measurement to avoid extra spacing
-        let layoutManager = uiView.layoutManager
-        let textContainer = uiView.textContainer
-        let usedRect = layoutManager.usedRect(for: textContainer)
-
-        // Return the exact height needed for the text content
-        return CGSize(width: availableWidth, height: max(usedRect.height, 0))
+        // Set frame explicitly to match available width
+        uiView.frame = CGRect(x: 0, y: 0, width: availableWidth, height: CGFloat.greatestFiniteMagnitude)
+        
+        // Force layout update
+        uiView.layoutManager.ensureLayout(for: uiView.textContainer)
+        
+        // Get the actual used rect for the text
+        let usedRect = uiView.layoutManager.usedRect(for: uiView.textContainer)
+        let calculatedHeight = ceil(usedRect.height)
+        
+        // Debug logging
+        print("🔍 NonSelectableRichTextView sizing:")
+        print("  - Proposed width: \(availableWidth)")
+        print("  - Used rect height: \(calculatedHeight)")
+        print("  - Text length: \(attributedString.length)")
+        print("  - Max lines: \(uiView.textContainer.maximumNumberOfLines)")
+        
+        // Return size with calculated height (minimum 20 for visibility)
+        let finalHeight = max(calculatedHeight, 20)
+        return CGSize(width: availableWidth, height: finalHeight)
     }
 }
 

@@ -804,9 +804,17 @@ struct NewsView: View {
         }
         
         private func calculateHorizontalPadding() -> CGFloat {
-            // Match the explicit padding used by header and topic bar
-            // Both header and topic bar now use 20 points horizontal padding
-            return 20
+            // Use responsive padding based on screen width
+            let screenWidth = layoutDimensions.screenWidth
+            
+            // Calculate responsive padding
+            let paddingPercentage: CGFloat = 0.05 // 5% padding on each side
+            let minimumPadding: CGFloat = 16
+            let maximumPadding: CGFloat = 20 // Keep consistent with header/topic bar max
+            
+            let calculatedPadding = max(minimumPadding, min(screenWidth * paddingPercentage, maximumPadding))
+            
+            return calculatedPadding
         }
         
         // Helper views
@@ -824,9 +832,9 @@ struct NewsView: View {
             Text(article.title)
                 .font(.headline)
                 .fontWeight(.semibold)
-                .lineLimit(3)
+                .lineLimit(nil)  // Allow unlimited lines for title
+                .fixedSize(horizontal: false, vertical: true)  // Allow vertical expansion
                 .multilineTextAlignment(.leading)
-                .truncationMode(.tail)
                 .textSelection(.disabled)
         }
         
@@ -847,23 +855,27 @@ struct NewsView: View {
         private var summaryContent: some View {
             Group {
                 if !article.body.isEmpty {
+                    // TEMPORARY TEST: Force use of SwiftUI Text to isolate the issue
+                    // Bypassing NonSelectableRichTextView to test if UIKit component is the problem
                     if let bodyBlobData = article.bodyBlob,
                        let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
                            ofClass: NSAttributedString.self,
                            from: bodyBlobData
                        )
                     {
-                        NonSelectableRichTextView(attributedString: attributedString)
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        // Extract plain text from attributed string for testing
+                        Text(attributedString.string)
+                            .font(.body)  // Changed to .body to match the UIKit component font size
+                            .foregroundColor(.primary)  // Changed from .secondary to .primary for better readability
+                            .lineLimit(nil)  // Allow full text display
+                            .multilineTextAlignment(.leading)
                             .textSelection(.disabled)
                     } else {
                         Text(article.body)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .lineLimit(3)
+                            .font(.body)  // Changed to .body to match the UIKit component font size
+                            .foregroundColor(.primary)  // Changed from .secondary to .primary for better readability
+                            .lineLimit(nil)  // Allow full text display
                             .multilineTextAlignment(.leading)
-                            .truncationMode(.tail)
                             .textSelection(.disabled)
                     }
                 }
