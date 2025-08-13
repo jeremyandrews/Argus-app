@@ -218,20 +218,28 @@ class APIClient {
     private func fetchArticleURLs(allowRetries: Bool = true) async throws -> [String] {
         // Query the database for existing articles to avoid requesting content we already have
         do {
-            // Get access to the SwiftData container
-            let container = SwiftDataContainer.shared.container
-            let context = ModelContext(container)
-
-            // Calculate timestamp from 12 hours ago
-            let twelveHoursAgo = Calendar.current.date(byAdding: .hour, value: -12, to: Date()) ?? Date()
-
-            // Create a fetch descriptor for ArticleModel to get recently added articles
-            let descriptor = FetchDescriptor<ArticleModel>(
-                predicate: #Predicate { $0.addedDate >= twelveHoursAgo }
-            )
-
-            // Fetch articles from the last 12 hours
-            let recentArticles = try context.fetch(descriptor)
+            // Use background context to avoid blocking main thread
+            let recentArticles = await BackgroundContextManager.shared.performBackgroundTask { context in
+                // Calculate timestamp from 12 hours ago
+                let twelveHoursAgo = Calendar.current.date(byAdding: .hour, value: -12, to: Date()) ?? Date()
+                
+                // Create a fetch descriptor for ArticleModel to get recently added articles
+                var descriptor = FetchDescriptor<ArticleModel>(
+                    predicate: #Predicate { $0.addedDate >= twelveHoursAgo }
+                )
+                
+                // Add optimization hints
+                descriptor.sortBy = [SortDescriptor(\.addedDate, order: .reverse)]
+                descriptor.fetchLimit = 200  // Limit early to reduce scan size
+                
+                // Fetch articles from the last 12 hours
+                do {
+                    return try context.fetch(descriptor)
+                } catch {
+                    // Return empty array on error to allow fallback
+                    return []
+                }
+            }
 
             // Extract the jsonURL values (skip empty ones)
             let seenArticleURLs = recentArticles.compactMap { $0.jsonURL.isEmpty ? nil : $0.jsonURL }
