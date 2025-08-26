@@ -1199,30 +1199,25 @@ final class NewsViewModel: ObservableObject {
         }
         
         // Use user-initiated priority for visible articles
-        await Task(priority: .userInitiated) {
+        await Task(priority: .userInitiated) { @MainActor in
             if let article = await articleOperations.getArticleModelWithContext(byId: articleID) {
-                // Extract rich text content in parallel
-                async let titleTask = extractAttributedContent(.title, from: article)
-                async let bodyTask = extractAttributedContent(.body, from: article)
-                async let summaryTask = extractAttributedContent(.summary, from: article)
+                // Extract rich text content sequentially on MainActor to avoid Sendable issues
+                let title = await extractAttributedContent(.title, from: article)
+                let body = await extractAttributedContent(.body, from: article)
+                let summary = await extractAttributedContent(.summary, from: article)
                 
-                // Wait for all extractions to complete
-                let (title, body, summary) = await (titleTask, bodyTask, summaryTask)
+                // Cache the results (already on main actor)
+                let cacheEntry = RichTextCacheEntry(
+                    title: title,
+                    body: body,
+                    summary: summary,
+                    timestamp: Date()
+                )
+                richTextCache[articleID] = cacheEntry
                 
-                // Cache the results on main actor
-                await MainActor.run {
-                    let cacheEntry = RichTextCacheEntry(
-                        title: title,
-                        body: body,
-                        summary: summary,
-                        timestamp: Date()
-                    )
-                    richTextCache[articleID] = cacheEntry
-                    
-                    // Clean up expired entries periodically
-                    if richTextCache.count > 50 {
-                        cleanupExpiredRichTextCache()
-                    }
+                // Clean up expired entries periodically
+                if richTextCache.count > 50 {
+                    cleanupExpiredRichTextCache()
                 }
             }
         }.value
@@ -1237,6 +1232,7 @@ final class NewsViewModel: ObservableObject {
     }
     
     /// Extracts attributed content from blob or generates if missing
+    @MainActor
     private func extractAttributedContent(_ field: RichTextField, from article: ArticleModel) async -> NSAttributedString? {
         // First try to extract from existing blob
         if let blob = field.getBlob(from: article),
@@ -1247,14 +1243,12 @@ final class NewsViewModel: ObservableObject {
             return attributedString
         }
         
-        // If blob doesn't exist, generate content on main actor
-        return await MainActor.run {
-            return articleOperations.getAttributedContent(
-                for: field,
-                from: article,
-                createIfMissing: true
-            )
-        }
+        // If blob doesn't exist, generate content (already on main actor)
+        return articleOperations.getAttributedContent(
+            for: field,
+            from: article,
+            createIfMissing: true
+        )
     }
     
     /// Cleans up expired rich text cache entries

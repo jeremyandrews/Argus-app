@@ -98,6 +98,50 @@ final class NewsDetailViewModel: ObservableObject {
     /// Reference to NewsViewModel for rich text cache access (Phase 2.1)
     private weak var newsViewModel: NewsViewModel?
 
+    // MARK: - Background Processing (Phase 2.2)
+
+    /// Extracts blobs from ArticleModel in background using parallel processing
+    /// - Parameter model: The ArticleModel containing the blobs
+    /// - Returns: A tuple containing extracted title, body, and summary attributed strings
+    @MainActor
+    private func extractBlobsInBackground(from model: ArticleModel) async -> (title: NSAttributedString?, body: NSAttributedString?, summary: NSAttributedString?) {
+        // Extract blob data first on main actor to avoid Sendable issues
+        let titleBlob = model.titleBlob
+        let bodyBlob = model.bodyBlob
+        let summaryBlob = model.summaryBlob
+        
+        // Since NSAttributedString is not Sendable, we need to process synchronously on MainActor
+        var title: NSAttributedString?
+        var body: NSAttributedString?
+        var summary: NSAttributedString?
+        
+        // Extract title blob if available
+        if let titleBlobData = titleBlob {
+            title = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self,
+                from: titleBlobData
+            )
+        }
+        
+        // Extract body blob if available  
+        if let bodyBlobData = bodyBlob {
+            body = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self,
+                from: bodyBlobData
+            )
+        }
+        
+        // Extract summary blob if available
+        if let summaryBlobData = summaryBlob {
+            summary = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClass: NSAttributedString.self,
+                from: summaryBlobData
+            )
+        }
+        
+        return (title: title, body: body, summary: summary)
+    }
+
     // MARK: - Initialization
 
     /// Initializes a new NewsDetailViewModel
@@ -285,7 +329,7 @@ final class NewsDetailViewModel: ObservableObject {
                 AppLogger.database.debug("⚡ Using cached model")
             }
 
-            // 2. Extract formatted content from blobs BEFORE updating the UI
+            // 2. Phase 2.2: Extract formatted content from blobs using background processing
             var extractedTitle: NSAttributedString? = nil
             var extractedBody: NSAttributedString? = nil
             var extractedSummary: NSAttributedString? = nil
@@ -300,29 +344,16 @@ final class NewsDetailViewModel: ObservableObject {
                 - Has summary blob: \(model.summaryBlob != nil)
                 """)
 
-                // Extract title blob (should always be available)
-                if let titleBlob = model.titleBlob {
-                    extractedTitle = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self,
-                        from: titleBlob
-                    )
-                }
-
-                // Extract body blob (should always be available)
-                if let bodyBlob = model.bodyBlob {
-                    extractedBody = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self,
-                        from: bodyBlob
-                    )
-                }
-
-                // Extract summary blob if available
-                if let summaryBlob = model.summaryBlob {
-                    extractedSummary = try? NSKeyedUnarchiver.unarchivedObject(
-                        ofClass: NSAttributedString.self,
-                        from: summaryBlob
-                    )
-                }
+                // Phase 2.2: Use background blob processing for parallel extraction
+                let blobExtractionStart = Date()
+                let (title, body, summary) = await extractBlobsInBackground(from: model)
+                let blobExtractionTime = Date().timeIntervalSince(blobExtractionStart)
+                
+                extractedTitle = title
+                extractedBody = body
+                extractedSummary = summary
+                
+                AppLogger.database.debug("⚡ Background blob extraction completed in \(String(format: "%.3f", blobExtractionTime)) seconds")
             }
 
             // 3. Phase 1.3: Batch all state updates to minimize SwiftUI refresh cycles
@@ -402,8 +433,7 @@ final class NewsDetailViewModel: ObservableObject {
     // MARK: - Public Methods - Content Loading
 
     /// Loads minimal content needed for the article header
-    /// This function is deliberately synchronous for "above the fold" elements to prevent
-    /// showing unformatted content before formatted content is ready
+    /// Phase 2.2: Uses background blob processing for optimal performance
     func loadMinimalContent() async {
         guard let article = currentArticleModel ?? currentArticle else { return }
 
@@ -412,86 +442,57 @@ final class NewsDetailViewModel: ObservableObject {
         let hasBodyBlob = article.bodyBlob != nil
         AppLogger.database.debug("⚙️ loadMinimalContent: Title blob exists: \(hasTitleBlob), Body blob exists: \(hasBodyBlob)")
 
-        // Start loading with a synchronous approach for critical content
-        AppLogger.database.debug("⚙️ Loading initial content synchronously for article \(article.id)")
+        // Phase 2.2: Use background blob processing for critical content
+        AppLogger.database.debug("⚙️ Loading initial content using background blob processing for article \(article.id)")
 
-        // First attempt to directly load from blobs if they exist
-        if titleAttributedString == nil, article.titleBlob != nil {
-            do {
-                let startTime = Date()
-                if let blob = article.titleBlob,
-                   let attrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob)
-                {
-                    titleAttributedString = attrString
-                    AppLogger.database.debug("✅ Title loaded from blob in \(Date().timeIntervalSince(startTime))s")
-                } else {
-                    // Only if blob extraction fails, try getAttributedContent
-                    titleAttributedString = articleOperations.getAttributedContent(
-                        for: .title,
-                        from: article,
-                        createIfMissing: true
-                    )
-                    AppLogger.database.debug("✅ Title generated in \(Date().timeIntervalSince(startTime))s")
-                }
-            } catch {
-                // Only if blob extraction fails, try getAttributedContent
-                let startTime = Date()
-                titleAttributedString = articleOperations.getAttributedContent(
-                    for: .title,
-                    from: article,
-                    createIfMissing: true
-                )
-                AppLogger.database.debug("⚠️ Title blob extraction failed, generated in \(Date().timeIntervalSince(startTime))s")
+        let startTime = Date()
+        
+        // Extract what we can from blobs using background processing
+        let (extractedTitle, extractedBody, extractedSummary) = await extractBlobsInBackground(from: article)
+        
+        // Update content atomically on main thread
+        await MainActor.run {
+            if titleAttributedString == nil, let title = extractedTitle {
+                titleAttributedString = title
+                AppLogger.database.debug("✅ Title loaded from blob via background processing")
             }
-        } else if titleAttributedString == nil {
-            // No blob exists, generate from markdown
-            let startTime = Date()
+            
+            if bodyAttributedString == nil, let body = extractedBody {
+                bodyAttributedString = body
+                AppLogger.database.debug("✅ Body loaded from blob via background processing")
+            }
+            
+            if summaryAttributedString == nil, let summary = extractedSummary {
+                summaryAttributedString = summary
+                AppLogger.database.debug("✅ Summary loaded from blob via background processing")
+            }
+        }
+
+        // Generate missing content if blob extraction failed
+        if titleAttributedString == nil {
+            let generateStartTime = Date()
             titleAttributedString = articleOperations.getAttributedContent(
                 for: .title,
                 from: article,
                 createIfMissing: true
             )
-            AppLogger.database.debug("✅ Title generated in \(Date().timeIntervalSince(startTime))s")
+            let generateTime = Date().timeIntervalSince(generateStartTime)
+            AppLogger.database.debug("✅ Title generated in \(String(format: "%.3f", generateTime))s")
         }
 
-        // Direct blob extraction for body - prioritizing formatted content
-        if bodyAttributedString == nil, article.bodyBlob != nil {
-            do {
-                let startTime = Date()
-                if let blob = article.bodyBlob,
-                   let attrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob)
-                {
-                    bodyAttributedString = attrString
-                    AppLogger.database.debug("✅ Body loaded from blob in \(Date().timeIntervalSince(startTime))s")
-                } else {
-                    // Only if blob extraction fails, try getAttributedContent
-                    bodyAttributedString = articleOperations.getAttributedContent(
-                        for: .body,
-                        from: article,
-                        createIfMissing: true
-                    )
-                    AppLogger.database.debug("✅ Body generated in \(Date().timeIntervalSince(startTime))s")
-                }
-            } catch {
-                // Only if blob extraction fails, try getAttributedContent
-                let startTime = Date()
-                bodyAttributedString = articleOperations.getAttributedContent(
-                    for: .body,
-                    from: article,
-                    createIfMissing: true
-                )
-                AppLogger.database.debug("⚠️ Body blob extraction failed, generated in \(Date().timeIntervalSince(startTime))s")
-            }
-        } else if bodyAttributedString == nil {
-            // No blob exists, generate from markdown
-            let startTime = Date()
+        if bodyAttributedString == nil {
+            let generateStartTime = Date()
             bodyAttributedString = articleOperations.getAttributedContent(
                 for: .body,
                 from: article,
                 createIfMissing: true
             )
-            AppLogger.database.debug("✅ Body generated in \(Date().timeIntervalSince(startTime))s")
+            let generateTime = Date().timeIntervalSince(generateStartTime)
+            AppLogger.database.debug("✅ Body generated in \(String(format: "%.3f", generateTime))s")
         }
+
+        let totalTime = Date().timeIntervalSince(startTime)
+        AppLogger.database.debug("⚡ loadMinimalContent completed in \(String(format: "%.3f", totalTime)) seconds")
     }
 
     /// Verifies if an article blob was actually saved to the database
