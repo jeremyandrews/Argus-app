@@ -573,6 +573,49 @@ final class NewsViewModel: ObservableObject {
         
         return (hitRate: hitRate, entries: totalEntries, oldestEntry: oldestEntry)
     }
+    
+    /// Get memory usage statistics for performance monitoring
+    func getMemoryUsageStatistics() -> (memoryUsage: Double, cacheMemoryMB: Double, articlesInMemory: Int) {
+        // Get current memory usage
+        let memoryUsage = getCurrentMemoryUsage()
+        
+        // Estimate cache memory usage
+        let cacheMemoryMB = estimateCacheMemoryUsage()
+        
+        // Count articles currently held in memory
+        let articlesInMemory = filteredArticles.count + allArticles.count
+        
+        return (memoryUsage: memoryUsage, cacheMemoryMB: cacheMemoryMB, articlesInMemory: articlesInMemory)
+    }
+    
+    /// Get current memory usage in MB
+    private func getCurrentMemoryUsage() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
+        
+        let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_,
+                         task_flavor_t(MACH_TASK_BASIC_INFO),
+                         $0,
+                         &count)
+            }
+        }
+        
+        if kerr == KERN_SUCCESS {
+            return Double(info.resident_size) / 1024.0 / 1024.0 // Convert to MB
+        }
+        
+        return 0.0
+    }
+    
+    /// Estimate cache memory usage in MB
+    private func estimateCacheMemoryUsage() -> Double {
+        let articlesPerEntry = articleCache.values.map { $0.articles.count }.reduce(0, +)
+        // Rough estimate: each article ~2KB in memory
+        let estimatedCacheSize = Double(articlesPerEntry) * 2.0 / 1024.0 // Convert to MB
+        return estimatedCacheSize
+    }
 
     // MARK: - Public Methods - Article Operations
 
@@ -905,20 +948,39 @@ final class NewsViewModel: ObservableObject {
         NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
     }
 
-    /// Generates a blob for an article body if needed
-    func generateBodyBlobIfNeeded(articleID: UUID) async {
-        // Access the article directly from SwiftData
-        if let article = await articleOperations.getArticleModelWithContext(byId: articleID) {
-            if article.bodyBlob == nil {
-                // Use the rich text generation capabilities
-                // Since this needs to run on the main actor for UI work
+    /// Generates essential blobs for an article if needed (title and body only - "above the fold" content)
+    /// This is optimized for topic switching performance by only processing essential content
+    func generateEssentialBlobsIfNeeded(articleID: UUID) async {
+        // Only process "above the fold" content for fast NewsView display
+        // This approach is intentional and maintains the optimized architecture
+        
+        // Use low priority to avoid blocking UI during topic switches
+        await Task(priority: .background) {
+            // Access the article directly from SwiftData
+            if let article = await articleOperations.getArticleModelWithContext(byId: articleID) {
+                // Only generate essential fields if missing
+                let needsTitle = article.titleBlob == nil
+                let needsBody = article.bodyBlob == nil
+                
+                // Skip if both blobs already exist
+                guard needsTitle || needsBody else { return }
+                
+                // Process on main actor since NSAttributedString requires it
                 await MainActor.run {
-                    // This runs on the main actor which is required for NSAttributedString handling
-                    _ = articleOperations.getAttributedContent(for: .body, from: article, createIfMissing: true)
+                    // Generate title blob if needed
+                    if needsTitle && !article.title.isEmpty {
+                        _ = articleOperations.getAttributedContent(for: .title, from: article, createIfMissing: true)
+                    }
+                    
+                    // Generate body blob if needed  
+                    if needsBody && !article.body.isEmpty {
+                        _ = articleOperations.getAttributedContent(for: .body, from: article, createIfMissing: true)
+                    }
                 }
             }
-        }
+        }.value
     }
+    
 
     /// Updates filtered articles based on current filters
     func updateFilteredArticles(isBackgroundUpdate _: Bool = false, force: Bool = false, isActivelyScrolling: Bool = false) async {

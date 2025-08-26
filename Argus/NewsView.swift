@@ -795,7 +795,7 @@ struct NewsView: View {
             .onAppear {
                 loadMoreArticlesIfNeeded(article)
                 Task {
-                    await viewModel.generateBodyBlobIfNeeded(articleID: article.id)
+                    await viewModel.generateEssentialBlobsIfNeeded(articleID: article.id)
                 }
             }
         }
