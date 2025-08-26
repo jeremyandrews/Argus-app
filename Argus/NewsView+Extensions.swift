@@ -47,12 +47,13 @@ extension NewsView {
 
         AppLogger.database.debug("Opening article with ID: \(article.id) at index \(index) of \(articlesSnapshot.count) articles")
 
-        // STEP 3: Create view model with our snapshot
+        // STEP 3: Create view model with our snapshot and pass NewsViewModel for rich text cache access
         let detailViewModel = NewsDetailViewModel(
             articles: articlesSnapshot,
             allArticles: viewModel.allArticles,
             currentIndex: index,
-            initiallyExpandedSection: "Summary"
+            initiallyExpandedSection: "Summary",
+            newsViewModel: viewModel
         )
 
         // Create the detail view wrapper

@@ -245,6 +245,13 @@ final class NewsDetailViewModel: ObservableObject {
 
         // Setup observers for settings changes
         setupUserDefaultsObservers()
+        
+        // Phase 2.3: Start initial preloading of adjacent articles after initialization
+        Task.detached(priority: .background) {
+            // Small delay to let UI settle first
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            await self.preloadAdjacentArticles()
+        }
     }
 
     deinit {
@@ -414,7 +421,128 @@ final class NewsDetailViewModel: ObservableObject {
 
             let loadTime = Date().timeIntervalSince(startTime)
             AppLogger.database.debug("✅ Article \(nextArticleId) loaded in \(String(format: "%.3f", loadTime)) seconds")
+            
+            // Phase 2.3: Smart Content Preloading - preload adjacent articles after navigation
+            Task.detached(priority: .background) {
+                await self.preloadAdjacentArticles()
+            }
         }
+    }
+    
+    // MARK: - Smart Content Preloading (Phase 2.3)
+    
+    /// Preloads adjacent articles to improve navigation performance
+    /// This implements Phase 2.3 of the optimization plan
+    private func preloadAdjacentArticles() async {
+        let currentIdx = await MainActor.run { currentIndex }
+        let articlesCount = await MainActor.run { articles.count }
+        
+        guard articlesCount > 0 else { return }
+        
+        let nextIndex = currentIdx + 1
+        let prevIndex = currentIdx - 1
+        
+        AppLogger.database.debug("🚀 Preloading adjacent articles - current: \(currentIdx), next: \(nextIndex), prev: \(prevIndex)")
+        
+        // Preload next and previous articles in parallel
+        await withTaskGroup(of: Void.self) { group in
+            // Preload next article
+            if nextIndex < articlesCount {
+                group.addTask { [weak self] in
+                    await self?.preloadArticle(at: nextIndex)
+                }
+            }
+            
+            // Preload previous article  
+            if prevIndex >= 0 {
+                group.addTask { [weak self] in
+                    await self?.preloadArticle(at: prevIndex)
+                }
+            }
+            
+            // Wait for both preloading tasks to complete
+            await group.waitForAll()
+        }
+        
+        AppLogger.database.debug("✅ Adjacent articles preloading completed")
+    }
+    
+    /// Preloads a single article at the specified index
+    /// - Parameter index: The index of the article to preload
+    private func preloadArticle(at index: Int) async {
+        // Capture articles array safely for use in background task
+        let articles = await MainActor.run { self.articles }
+        
+        guard index >= 0, index < articles.count else { return }
+        
+        let article = articles[index]
+        let articleId = article.id
+        
+        // Check if article is already cached
+        let isCached = await MainActor.run { getCachedModel(for: articleId) != nil }
+        if isCached {
+            AppLogger.database.debug("⚡ Article at index \(index) already cached, skipping preload")
+            return
+        }
+        
+        // Check if rich text cache already has this content
+        let newsViewModel = await MainActor.run { self.newsViewModel }
+        if let newsViewModel = newsViewModel,
+           let cachedContent = newsViewModel.getCachedRichText(for: articleId),
+           cachedContent.title != nil || cachedContent.body != nil {
+            AppLogger.database.debug("⚡ Article at index \(index) already in rich text cache, skipping blob preload")
+            return
+        }
+        
+        AppLogger.database.debug("📥 Preloading article at index \(index) (ID: \(articleId))")
+        
+        let startTime = Date()
+        
+        // Fetch article model with context
+        let model = await articleOperations.getArticleModelWithContext(byId: articleId)
+        
+        guard let model = model else {
+            AppLogger.database.warning("⚠️ Could not fetch article model for preloading at index \(index)")
+            return
+        }
+        
+        // Cache the model for faster navigation
+        await MainActor.run {
+            cacheModel(model)
+        }
+        
+        // Check if blobs already exist before generating
+        let hasTitle = model.titleBlob != nil && !(model.titleBlob?.isEmpty ?? true)
+        let hasBody = model.bodyBlob != nil && !(model.bodyBlob?.isEmpty ?? true)
+        let hasSummary = model.summaryBlob != nil && !(model.summaryBlob?.isEmpty ?? true)
+        
+        if hasTitle && hasBody && hasSummary {
+            AppLogger.database.debug("⚡ Article at index \(index) already has all blobs, preload complete")
+            return
+        }
+        
+        // Generate missing blobs in background
+        let blobGenerationStart = Date()
+        
+        // Generate title blob if missing
+        if !hasTitle {
+            _ = articleOperations.getAttributedContent(for: .title, from: model, createIfMissing: true)
+        }
+        
+        // Generate body blob if missing  
+        if !hasBody {
+            _ = articleOperations.getAttributedContent(for: .body, from: model, createIfMissing: true)
+        }
+        
+        // Generate summary blob if missing
+        if !hasSummary {
+            _ = articleOperations.getAttributedContent(for: .summary, from: model, createIfMissing: true)
+        }
+        
+        let blobGenerationTime = Date().timeIntervalSince(blobGenerationStart)
+        let totalTime = Date().timeIntervalSince(startTime)
+        
+        AppLogger.database.debug("✅ Preloaded article at index \(index) in \(String(format: "%.3f", totalTime))s (blob generation: \(String(format: "%.3f", blobGenerationTime))s)")
     }
 
     /// Validates and adjusts the current index if needed
