@@ -94,6 +94,9 @@ final class NewsDetailViewModel: ObservableObject {
 
     /// Operations service for article business logic
     private let articleOperations: ArticleOperations
+    
+    /// Reference to NewsViewModel for rich text cache access (Phase 2.1)
+    private weak var newsViewModel: NewsViewModel?
 
     // MARK: - Initialization
 
@@ -107,6 +110,7 @@ final class NewsDetailViewModel: ObservableObject {
     ///   - preloadedTitle: Optional preloaded title attributed string
     ///   - preloadedBody: Optional preloaded body attributed string
     ///   - articleOperations: The article operations service to use
+    ///   - newsViewModel: NewsViewModel instance for rich text cache access
     init(
         articles: [ArticleModel],
         allArticles: [ArticleModel],
@@ -116,7 +120,8 @@ final class NewsDetailViewModel: ObservableObject {
         preloadedTitle: NSAttributedString? = nil,
         preloadedBody: NSAttributedString? = nil,
         preloadedSummary: NSAttributedString? = nil,
-        articleOperations: ArticleOperations = ArticleOperations()
+        articleOperations: ArticleOperations = ArticleOperations(),
+        newsViewModel: NewsViewModel? = nil
     ) {
         // Apply uniqueness to prevent duplicate IDs in collections
         let uniqueArticles = articles.uniqued()
@@ -129,6 +134,7 @@ final class NewsDetailViewModel: ObservableObject {
         self.allArticles = uniqueAllArticles
         self.currentIndex = min(currentIndex, uniqueArticles.count - 1)
         self.articleOperations = articleOperations
+        self.newsViewModel = newsViewModel
 
         // Set initial preloaded content if available and pre-cache for performance
         if let preloadedArticle = preloadedArticle {
@@ -156,6 +162,23 @@ final class NewsDetailViewModel: ObservableObject {
         // Set default expanded sections
         if expandedSections["Summary"] == nil {
             expandedSections["Summary"] = true
+        }
+
+        // Phase 2.1: Load from rich text cache if available and no preloaded content
+        if let articleId = currentArticle?.id,
+           let newsViewModel = newsViewModel,
+           let cachedContent = newsViewModel.getCachedRichText(for: articleId) {
+            
+            // Use cached content if we don't already have preloaded content
+            if titleAttributedString == nil {
+                titleAttributedString = cachedContent.title
+            }
+            if bodyAttributedString == nil {
+                bodyAttributedString = cachedContent.body
+            }
+            if summaryAttributedString == nil {
+                summaryAttributedString = cachedContent.summary
+            }
         }
 
         // Record container diagnostics for debugging

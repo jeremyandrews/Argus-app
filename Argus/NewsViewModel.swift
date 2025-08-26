@@ -163,6 +163,23 @@ final class NewsViewModel: ObservableObject {
     /// Cache metrics instance for performance monitoring
     private var cacheMetrics = CacheMetrics()
 
+    // MARK: - Phase 2.1: Rich Text Cache for Article Opening Performance
+    
+    /// Rich text content cache for immediate article opening
+    private var richTextCache: [UUID: RichTextCacheEntry] = [:]
+    
+    /// Rich text cache entry with timestamp for expiration
+    struct RichTextCacheEntry {
+        let title: NSAttributedString?
+        let body: NSAttributedString?
+        let summary: NSAttributedString?
+        let timestamp: Date
+        
+        var isExpired: Bool {
+            Date().timeIntervalSince(timestamp) > 600 // 10 minutes
+        }
+    }
+
     // MARK: - Dependencies
 
     /// Operations service for article business logic
@@ -1173,15 +1190,94 @@ final class NewsViewModel: ObservableObject {
         NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
     }
 
+    /// Phase 2.1: Pre-extracts rich text content for fast article opening
+    /// This provides immediate access to formatted content without waiting for blob extraction
+    func preExtractRichText(for articleID: UUID) async {
+        // Check if already cached and not expired
+        if let cached = richTextCache[articleID], !cached.isExpired {
+            return
+        }
+        
+        // Use user-initiated priority for visible articles
+        await Task(priority: .userInitiated) {
+            if let article = await articleOperations.getArticleModelWithContext(byId: articleID) {
+                // Extract rich text content in parallel
+                async let titleTask = extractAttributedContent(.title, from: article)
+                async let bodyTask = extractAttributedContent(.body, from: article)
+                async let summaryTask = extractAttributedContent(.summary, from: article)
+                
+                // Wait for all extractions to complete
+                let (title, body, summary) = await (titleTask, bodyTask, summaryTask)
+                
+                // Cache the results on main actor
+                await MainActor.run {
+                    let cacheEntry = RichTextCacheEntry(
+                        title: title,
+                        body: body,
+                        summary: summary,
+                        timestamp: Date()
+                    )
+                    richTextCache[articleID] = cacheEntry
+                    
+                    // Clean up expired entries periodically
+                    if richTextCache.count > 50 {
+                        cleanupExpiredRichTextCache()
+                    }
+                }
+            }
+        }.value
+    }
+    
+    /// Gets pre-extracted rich text content from cache for immediate use
+    func getCachedRichText(for articleID: UUID) -> RichTextCacheEntry? {
+        guard let cached = richTextCache[articleID], !cached.isExpired else {
+            return nil
+        }
+        return cached
+    }
+    
+    /// Extracts attributed content from blob or generates if missing
+    private func extractAttributedContent(_ field: RichTextField, from article: ArticleModel) async -> NSAttributedString? {
+        // First try to extract from existing blob
+        if let blob = field.getBlob(from: article),
+           let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+               ofClass: NSAttributedString.self,
+               from: blob
+           ) {
+            return attributedString
+        }
+        
+        // If blob doesn't exist, generate content on main actor
+        return await MainActor.run {
+            return articleOperations.getAttributedContent(
+                for: field,
+                from: article,
+                createIfMissing: true
+            )
+        }
+    }
+    
+    /// Cleans up expired rich text cache entries
+    private func cleanupExpiredRichTextCache() {
+        let expiredKeys = richTextCache.compactMap { key, entry in
+            entry.isExpired ? key : nil
+        }
+        
+        for key in expiredKeys {
+            richTextCache.removeValue(forKey: key)
+        }
+        
+        AppLogger.database.debug("Cleaned up \(expiredKeys.count) expired rich text cache entries")
+    }
+
     /// Generates essential blobs for an article if needed (title and body only - "above the fold" content)
     /// This is optimized for topic switching performance by only processing essential content
     func generateEssentialBlobsIfNeeded(articleID: UUID) async {
-        // Only process "above the fold" content for fast NewsView display
-        // This approach is intentional and maintains the optimized architecture
+        // Phase 2.1: Pre-extract rich text for immediate access
+        await preExtractRichText(for: articleID)
         
-        // Use low priority to avoid blocking UI during topic switches
+        // Also generate blobs in background for persistence
         await Task(priority: .background) {
-            // Access the article directly from SwiftData
             if let article = await articleOperations.getArticleModelWithContext(byId: articleID) {
                 // Only generate essential fields if missing
                 let needsTitle = article.titleBlob == nil
