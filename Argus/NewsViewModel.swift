@@ -102,9 +102,20 @@ final class NewsViewModel: ObservableObject {
         let articles: [ArticleModel]
         let timestamp: Date
         let filters: CacheFilters
+        let accessCount: Int
+        let lastAccessTime: Date
         
         var isExpired: Bool {
             Date().timeIntervalSince(timestamp) > 300 // 5 minutes
+        }
+        
+        var isStale: Bool {
+            Date().timeIntervalSince(timestamp) > 120 // 2 minutes - refresh in background
+        }
+        
+        var accessFrequency: Double {
+            let timeSinceCreation = max(Date().timeIntervalSince(timestamp), 1)
+            return Double(accessCount) / timeSinceCreation
         }
     }
     
@@ -116,6 +127,41 @@ final class NewsViewModel: ObservableObject {
         let sortOrder: String
         let groupingStyle: String
     }
+    
+    /// Cache performance metrics for monitoring
+    private struct CacheMetrics {
+        var hitCount: Int = 0
+        var missCount: Int = 0
+        var totalRequests: Int = 0
+        var backgroundWarmedTopics: Set<String> = []
+        var lastMetricsReset: Date = Date()
+        
+        var hitRate: Double {
+            guard totalRequests > 0 else { return 0.0 }
+            return Double(hitCount) / Double(totalRequests)
+        }
+        
+        mutating func recordHit() {
+            hitCount += 1
+            totalRequests += 1
+        }
+        
+        mutating func recordMiss() {
+            missCount += 1
+            totalRequests += 1
+        }
+        
+        mutating func reset() {
+            hitCount = 0
+            missCount = 0
+            totalRequests = 0
+            backgroundWarmedTopics.removeAll()
+            lastMetricsReset = Date()
+        }
+    }
+    
+    /// Cache metrics instance for performance monitoring
+    private var cacheMetrics = CacheMetrics()
 
     // MARK: - Dependencies
 
@@ -731,7 +777,7 @@ final class NewsViewModel: ObservableObject {
         )
     }
 
-    /// Tries to load articles from cache for immediate response with smart validation
+    /// Tries to load articles from cache for immediate response with enhanced metrics and stale-while-revalidate
     /// - Parameter topic: The topic to load
     /// - Returns: Whether articles were loaded from cache
     private func tryLoadFromCache(topic: String) -> Bool {
@@ -748,20 +794,78 @@ final class NewsViewModel: ObservableObject {
            !cachedEntry.isExpired,
            cachedEntry.filters == currentFilters {
             
+            // Record cache hit
+            cacheMetrics.recordHit()
+            
+            // Update access tracking for this cache entry
+            let updatedEntry = CachedArticles(
+                articles: cachedEntry.articles,
+                timestamp: cachedEntry.timestamp,
+                filters: cachedEntry.filters,
+                accessCount: cachedEntry.accessCount + 1,
+                lastAccessTime: Date()
+            )
+            articleCache[topic] = updatedEntry
+            
             filteredArticles = cachedEntry.articles
+            
             // Create task to update grouping based on cached articles
             Task {
                 await updateGroupedArticles()
             }
-            AppLogger.database.debug("Smart cache hit for topic: \(topic)")
+            
+            // If cache is stale but not expired, schedule background refresh
+            if cachedEntry.isStale {
+                Task.detached(priority: .background) { [weak self] in
+                    await self?.refreshArticlesInBackground(for: topic, filters: currentFilters)
+                }
+                AppLogger.database.debug("Cache hit with background refresh for stale topic: \(topic)")
+            } else {
+                AppLogger.database.debug("Fresh cache hit for topic: \(topic)")
+            }
+            
             return true
         }
         
-        AppLogger.database.debug("Smart cache miss for topic: \(topic) - expired: \(self.articleCache[topic]?.isExpired ?? true)")
+        // Record cache miss
+        cacheMetrics.recordMiss()
+        
+        let expiredStatus = articleCache[topic]?.isExpired ?? true
+        let filtersMatch = articleCache[topic]?.filters == currentFilters
+        AppLogger.database.debug("Cache miss for topic: \(topic) - expired: \(expiredStatus), filters match: \(filtersMatch)")
+        
         return false
     }
+    
+    /// Background refresh for stale cache entries (stale-while-revalidate pattern)
+    private func refreshArticlesInBackground(for topic: String, filters: CacheFilters) async {
+        do {
+            let backgroundArticles = try await articleOperations.fetchArticles(
+                topic: topic == "All" ? nil : topic,
+                showUnreadOnly: filters.showUnreadOnly,
+                showBookmarkedOnly: filters.showBookmarkedOnly,
+                qualityFilter: filters.qualityFilter
+            )
+            
+            // Update cache with fresh data
+            await MainActor.run {
+                let freshEntry = CachedArticles(
+                    articles: backgroundArticles,
+                    timestamp: Date(),
+                    filters: filters,
+                    accessCount: articleCache[topic]?.accessCount ?? 1,
+                    lastAccessTime: Date()
+                )
+                articleCache[topic] = freshEntry
+                
+                AppLogger.database.debug("Background refresh completed for topic: \(topic) - \(backgroundArticles.count) articles")
+            }
+        } catch {
+            AppLogger.database.warning("Background refresh failed for topic: \(topic) - \(error)")
+        }
+    }
 
-    /// Updates the article cache with new articles using smart caching
+    /// Updates the article cache with new articles using smart caching with enhanced metadata
     /// - Parameter articles: The articles to cache
     private func updateArticleCache(_ articles: [ArticleModel]) {
         let currentFilters = CacheFilters(
@@ -772,11 +876,16 @@ final class NewsViewModel: ObservableObject {
             groupingStyle: groupingStyle
         )
         
-        // Create cache entry with metadata
+        let now = Date()
+        
+        // Create cache entry with enhanced metadata - preserve access count if updating existing entry
+        let existingAccessCount = articleCache[selectedTopic]?.accessCount ?? 0
         let cachedEntry = CachedArticles(
             articles: articles,
-            timestamp: Date(),
-            filters: currentFilters
+            timestamp: now,
+            filters: currentFilters,
+            accessCount: max(1, existingAccessCount), // Ensure at least 1 access
+            lastAccessTime: now
         )
         
         // Update cache for current topic
@@ -787,35 +896,151 @@ final class NewsViewModel: ObservableObject {
             // We now want to preserve the "All" entries in the cache for topic bar generation
             // If allArticles is populated, use it to update the "All" cache
             if !allArticles.isEmpty {
+                let existingAllAccessCount = articleCache["All"]?.accessCount ?? 0
                 let allTopicsEntry = CachedArticles(
                     articles: allArticles,
-                    timestamp: Date(),
-                    filters: currentFilters
+                    timestamp: now,
+                    filters: currentFilters,
+                    accessCount: max(1, existingAllAccessCount),
+                    lastAccessTime: now
                 )
                 articleCache["All"] = allTopicsEntry
             }
         }
 
-        lastCacheUpdate = Date()
+        lastCacheUpdate = now
         isCacheValid = true
         
-        // Perform memory-aware cache cleanup
-        performMemoryAwareCacheCleanup()
+        // Perform memory-aware cache cleanup with frequency-based prioritization
+        performIntelligentCacheCleanup()
     }
     
-    /// Memory-aware cache cleanup to prevent excessive memory usage
-    private func performMemoryAwareCacheCleanup() {
-        let maxCacheEntries = 10 // Keep cache for last 10 topic/filter combinations
+    /// Intelligent cache cleanup with frequency-based prioritization and memory awareness
+    private func performIntelligentCacheCleanup() {
+        let maxCacheEntries = 12 // Slightly higher limit for intelligent cleanup
+        let memoryPressureThreshold = 80.0 // MB
         
         guard articleCache.count > maxCacheEntries else { return }
         
-        // Sort by timestamp and keep only the most recent entries
-        let sortedEntries = articleCache.sorted { $0.value.timestamp > $1.value.timestamp }
-        let entriesToKeep = sortedEntries.prefix(maxCacheEntries)
+        let currentMemory = estimateCacheMemoryUsage()
+        let isMemoryPressure = currentMemory > memoryPressureThreshold
         
-        self.articleCache = Dictionary(uniqueKeysWithValues: entriesToKeep.map { ($0.key, $0.value) })
+        // Calculate cleanup priority: higher score = keep longer
+        let scoredEntries = articleCache.map { (topic, entry) in
+            var score = 0.0
+            
+            // Recency score (0-1, newer is better)
+            let ageInMinutes = Date().timeIntervalSince(entry.timestamp) / 60.0
+            let recencyScore = max(0, 1 - (ageInMinutes / 30.0)) // Decay over 30 minutes
+            
+            // Access frequency score (normalized)
+            let frequencyScore = min(1.0, entry.accessFrequency * 10.0) // Scale frequency
+            
+            // Special topics score ("All" is always important)
+            let specialScore = (topic == "All") ? 0.5 : 0.0
+            
+            // Recent access score
+            let lastAccessAge = Date().timeIntervalSince(entry.lastAccessTime) / 60.0
+            let accessRecencyScore = max(0, 1 - (lastAccessAge / 15.0)) // Decay over 15 minutes
+            
+            // Combine scores with weights
+            score = (recencyScore * 0.3) + (frequencyScore * 0.3) + (specialScore * 0.2) + (accessRecencyScore * 0.2)
+            
+            return (topic: topic, entry: entry, score: score)
+        }
         
-        AppLogger.database.debug("Cache cleanup: keeping \(self.articleCache.count) entries")
+        // Sort by score descending (keep highest scoring entries)
+        let sortedByScore = scoredEntries.sorted { $0.score > $1.score }
+        
+        // Determine how many entries to keep based on memory pressure
+        let targetCount = isMemoryPressure ? max(6, maxCacheEntries / 2) : maxCacheEntries
+        let entriesToKeep = sortedByScore.prefix(targetCount)
+        
+        // Update cache
+        let newCache = Dictionary(uniqueKeysWithValues: entriesToKeep.map { ($0.topic, $0.entry) })
+        let removedCount = articleCache.count - newCache.count
+        
+        self.articleCache = newCache
+        
+        AppLogger.database.debug("Intelligent cache cleanup: removed \(removedCount) entries, keeping \(self.articleCache.count) (memory pressure: \(isMemoryPressure))")
+    }
+    
+    /// Get comprehensive cache performance statistics for monitoring and optimization
+    func getComprehensiveCacheStatistics() -> (
+        hitRate: Double, 
+        totalRequests: Int,
+        entries: Int, 
+        memoryUsageMB: Double,
+        oldestEntry: Date?,
+        averageAccessCount: Double,
+        staleEntries: Int,
+        topTopics: [(topic: String, accessCount: Int, lastAccess: Date)]
+    ) {
+        let totalEntries = articleCache.count
+        let memoryUsage = estimateCacheMemoryUsage()
+        let oldestEntry = articleCache.values.map(\.timestamp).min()
+        
+        // Calculate average access count
+        let totalAccess = articleCache.values.map(\.accessCount).reduce(0, +)
+        let averageAccessCount = totalEntries > 0 ? Double(totalAccess) / Double(totalEntries) : 0.0
+        
+        // Count stale entries
+        let staleEntries = articleCache.values.filter(\.isStale).count
+        
+        // Get top accessed topics
+        let topTopics = articleCache
+            .map { (topic: $0.key, accessCount: $0.value.accessCount, lastAccess: $0.value.lastAccessTime) }
+            .sorted { $0.accessCount > $1.accessCount }
+            .prefix(5)
+            .map { $0 }
+        
+        return (
+            hitRate: cacheMetrics.hitRate,
+            totalRequests: cacheMetrics.totalRequests,
+            entries: totalEntries,
+            memoryUsageMB: memoryUsage,
+            oldestEntry: oldestEntry,
+            averageAccessCount: averageAccessCount,
+            staleEntries: staleEntries,
+            topTopics: Array(topTopics)
+        )
+    }
+    
+    /// Reset cache metrics for fresh performance monitoring period
+    func resetCacheMetrics() {
+        cacheMetrics.reset()
+        AppLogger.database.debug("Cache metrics reset")
+    }
+    
+    /// Get detailed cache report for performance analysis
+    func getCachePerformanceReport() -> String {
+        let stats = getComprehensiveCacheStatistics()
+        let memoryStats = getMemoryUsageStatistics()
+        
+        let report = """
+        📊 Cache Performance Report
+        
+        🎯 Hit Rate: \(String(format: "%.1f", stats.hitRate * 100))%
+        📈 Total Requests: \(stats.totalRequests)
+        🗂️ Cache Entries: \(stats.entries)
+        💾 Cache Memory: \(String(format: "%.1f", stats.memoryUsageMB)) MB
+        📅 Oldest Entry: \(stats.oldestEntry?.formatted(date: .abbreviated, time: .shortened) ?? "None")
+        🔄 Average Accesses: \(String(format: "%.1f", stats.averageAccessCount))
+        ⏰ Stale Entries: \(stats.staleEntries)
+        
+        💻 Total Memory: \(String(format: "%.1f", memoryStats.memoryUsage)) MB
+        📄 Articles in Memory: \(memoryStats.articlesInMemory)
+        
+        🏆 Top Topics:
+        \(stats.topTopics.prefix(3).map { "   • \($0.topic): \($0.accessCount) accesses" }.joined(separator: "\n"))
+        
+        📈 Performance Metrics:
+        • Cache Efficiency: \(stats.hitRate > 0.7 ? "Excellent" : stats.hitRate > 0.5 ? "Good" : "Needs Improvement")
+        • Memory Usage: \(stats.memoryUsageMB < 50 ? "Optimal" : stats.memoryUsageMB < 100 ? "Acceptable" : "High")
+        • Staleness: \(stats.staleEntries == 0 ? "All Fresh" : "\(stats.staleEntries) stale entries")
+        """
+        
+        return report
     }
 
     /// Loads subscriptions for topic filtering
