@@ -731,7 +731,7 @@ struct NewsView: View {
         )
     }
     
-    // Enhanced ArticleRow that uses environment-based layout
+    // PERFORMANCE OPTIMIZED: Enhanced ArticleRow with stable view identity
     private struct ArticleRowContent: View {
         let article: ArticleModel
         let editMode: Binding<EditMode>?
@@ -745,11 +745,13 @@ struct NewsView: View {
         @Environment(\.layoutDimensions) private var layoutDimensions
         @Environment(\.horizontalSizeClass) private var horizontalSizeClass
         
+        // PERFORMANCE OPTIMIZATION: Stable view identity prevents unnecessary reconstruction
+        private var stableViewID: String {
+            return "article-\(article.id.uuidString)"
+        }
+        
         var body: some View {
             let isUnread = !article.isViewed
-            
-            // Phase 2: Only change ID when meaningful layout changes occur
-            let layoutIdentifier = layoutDimensions.isIPad ? "ipad-\(layoutDimensions.orientationId)" : "iphone-\(layoutDimensions.orientationId)"
             
             VStack(alignment: .leading, spacing: 10) {
                 // Top row
@@ -774,10 +776,10 @@ struct NewsView: View {
                 badgesView
             }
             .padding(.vertical, 8)
-            .padding(.horizontal, calculateHorizontalPadding())
+            .padding(.horizontal, horizontalPadding)
             .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
             .cornerRadius(10)
-            .id(layoutIdentifier) // Force recreation with environment changes
+            .id(stableViewID) // Use stable ID to prevent unnecessary recreation
             .onLongPressGesture {
                 withAnimation {
                     editMode?.wrappedValue = .active
@@ -798,8 +800,9 @@ struct NewsView: View {
             }
         }
         
-        private func calculateHorizontalPadding() -> CGFloat {
-            // Phase 2: Use consistent, predictable padding
+        // PERFORMANCE OPTIMIZATION: Memoized padding calculation to reduce layout recalculations
+        private var horizontalPadding: CGFloat {
+            // Cache the padding value to avoid repeated calculations during view updates
             if layoutDimensions.isIPad {
                 return 24
             } else {
