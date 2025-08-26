@@ -54,6 +54,10 @@ final class NewsDetailViewModel: ObservableObject {
 
     /// Set of deleted article IDs
     @Published var deletedIDs: Set<UUID> = []
+    
+    // MARK: - Model Cache (Phase 1.2)
+    private var modelCache: [UUID: ArticleModel] = [:]
+    private let maxCacheSize = 10
 
     // MARK: - Rich Text Content Cache
 
@@ -126,13 +130,18 @@ final class NewsDetailViewModel: ObservableObject {
         self.currentIndex = min(currentIndex, uniqueArticles.count - 1)
         self.articleOperations = articleOperations
 
-        // Set initial preloaded content if available
+        // Set initial preloaded content if available and pre-cache for performance
         if let preloadedArticle = preloadedArticle {
             currentArticle = preloadedArticle
             currentArticleModel = preloadedArticle
+            // Phase 1.2: Cache the preloaded article for faster future access
+            cacheModel(preloadedArticle)
         } else if currentIndex >= 0, currentIndex < uniqueArticles.count {
-            currentArticle = uniqueArticles[currentIndex]
-            currentArticleModel = uniqueArticles[currentIndex]
+            let initialArticle = uniqueArticles[currentIndex]
+            currentArticle = initialArticle
+            currentArticleModel = initialArticle
+            // Phase 1.2: Cache the initial article for faster navigation
+            cacheModel(initialArticle)
         }
 
         titleAttributedString = preloadedTitle
@@ -232,7 +241,7 @@ final class NewsDetailViewModel: ObservableObject {
 
             // Create a loading timer that will only show loading indicator if operation takes too long
             let loadingTimerTask = Task {
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds maximum
                 if !Task.isCancelled {
                     await MainActor.run {
                         isLoadingNextArticle = true
@@ -240,8 +249,18 @@ final class NewsDetailViewModel: ObservableObject {
                 }
             }
 
-            // 1. Get a fresh ArticleModel with valid context
-            let model = await articleOperations.getArticleModelWithContext(byId: nextArticleId)
+            // 1. Phase 1.2: Try cache first
+            var model: ArticleModel? = getCachedModel(for: nextArticleId)
+            
+            if model == nil {
+                AppLogger.database.debug("🔍 Model not cached, fetching from database")
+                model = await articleOperations.getArticleModelWithContext(byId: nextArticleId)
+                if let fetchedModel = model {
+                    cacheModel(fetchedModel)
+                }
+            } else {
+                AppLogger.database.debug("⚡ Using cached model")
+            }
 
             // 2. Extract formatted content from blobs BEFORE updating the UI
             var extractedTitle: NSAttributedString? = nil
@@ -283,8 +302,10 @@ final class NewsDetailViewModel: ObservableObject {
                 }
             }
 
-            // 3. Now that we have all formatted content, update the UI all at once
+            // 3. Phase 1.3: Batch all state updates to minimize SwiftUI refresh cycles
             await MainActor.run {
+                // Batch ALL state updates together to trigger only one SwiftUI refresh cycle
+                
                 // Update the index
                 currentIndex = nextIndex
 
@@ -308,9 +329,12 @@ final class NewsDetailViewModel: ObservableObject {
                 // Reset expanded sections
                 expandedSections = Self.getDefaultExpandedSections()
 
-                // Force UI refresh AFTER all content is ready
+                // Force UI refresh AFTER all content is ready - batched at the end
                 contentTransitionID = UUID()
                 scrollToTopTrigger = UUID()
+                
+                // Single explicit UI update notification for all changes
+                objectWillChange.send()
             }
 
             // After UI is updated, mark as viewed
@@ -994,6 +1018,24 @@ final class NewsDetailViewModel: ObservableObject {
         logicalFallaciesAttributedString = nil
         sourceAnalysisAttributedString = nil
         cachedContentBySection = [:]
+    }
+    
+    // MARK: - Cache Management (Phase 1.2)
+    
+    private func getCachedModel(for articleId: UUID) -> ArticleModel? {
+        return modelCache[articleId]
+    }
+    
+    private func cacheModel(_ model: ArticleModel) {
+        // Remove oldest entries if cache is full
+        if modelCache.count >= maxCacheSize {
+            let keysToRemove = Array(modelCache.keys.prefix(modelCache.count - maxCacheSize + 1))
+            for key in keysToRemove {
+                modelCache.removeValue(forKey: key)
+            }
+        }
+        
+        modelCache[model.id] = model
     }
 
     /// Cancels all active section loading tasks
