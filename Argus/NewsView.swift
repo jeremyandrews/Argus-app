@@ -188,8 +188,8 @@ struct NewsView: View {
                         await viewModel.syncWithServer()
                     }
                 }
-                // Disable pull-to-refresh when sync is already in progress
-                .disabled(viewModel.isSyncing)
+                // Note: Removed .disabled(viewModel.isSyncing) as it was causing complete UI freeze
+                // The refreshable modifier already handles preventing multiple simultaneous refresh operations
                 // Add the toolbar item for the sync status in the navigation bar
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {

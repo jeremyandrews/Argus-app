@@ -41,7 +41,12 @@ final class NewsViewModel: ObservableObject {
     @Published var syncStatus: SyncStatus = .idle
 
     /// Flag indicating if a sync operation is currently in progress
-    @Published private(set) var isSyncing: Bool = false
+    var isSyncing: Bool {
+        switch syncStatus {
+        case .idle, .complete: return false  // UI responsive when idle or complete
+        case .searching, .syncing, .error: return true
+        }
+    }
 
     // MARK: - Filter State
 
@@ -314,10 +319,6 @@ final class NewsViewModel: ObservableObject {
             AppLogger.sync.info("Sync already in progress, ignoring duplicate request")
             return
         }
-        
-        // Set sync state
-        isSyncing = true
-        defer { isSyncing = false }
         
         // Set status to searching and loading state
         syncStatus = .searching
