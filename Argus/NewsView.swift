@@ -229,19 +229,14 @@ struct NewsView: View {
                 }
                 // Force view refresh when size class changes (orientation changes)
                 .onChange(of: horizontalSizeClass) { _, _ in
-                    // Update layout state and force refresh
+                    // Update layout state with single, gentle animation
                     let newLayoutState = isIPad || horizontalSizeClass == .regular
                     
-                    // Use a more aggressive animation approach
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        useIPadLayout = newLayoutState
-                        // Force immediate state update
-                        orientationChangeId = UUID()
-                    }
-                    
-                    // Additional forced refresh after a brief delay to ensure all cells update
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                    // Only animate if layout actually changed
+                    if useIPadLayout != newLayoutState {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            useIPadLayout = newLayoutState
+                            // Only update orientation ID if we actually need layout changes
                             orientationChangeId = UUID()
                         }
                     }
