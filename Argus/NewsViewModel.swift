@@ -85,14 +85,37 @@ final class NewsViewModel: ObservableObject {
     /// Task that handles debounced filter updates
     private var filterChangeDebouncer: Task<Void, Never>?
 
-    /// Cache of articles by topic for quick topic switching
-    private var articleCache: [String: [ArticleModel]] = [:]
-
+    /// Cache of articles by topic for quick topic switching with metadata
+    private var articleCache: [String: CachedArticles] = [:]
+    
     /// Timestamp of the last cache update
     private var lastCacheUpdate = Date.distantPast
-
+    
     /// Flag indicating if the cache is valid
     private var isCacheValid = false
+    
+    /// Track topic access for predictive loading
+    private var topicAccessPatterns: [String: Date] = [:]
+    
+    /// Cache entry structure with metadata for smart invalidation
+    private struct CachedArticles {
+        let articles: [ArticleModel]
+        let timestamp: Date
+        let filters: CacheFilters
+        
+        var isExpired: Bool {
+            Date().timeIntervalSince(timestamp) > 300 // 5 minutes
+        }
+    }
+    
+    /// Filter combination for cache validation
+    private struct CacheFilters: Hashable {
+        let showUnreadOnly: Bool
+        let showBookmarkedOnly: Bool
+        let qualityFilter: String
+        let sortOrder: String
+        let groupingStyle: String
+    }
 
     // MARK: - Dependencies
 
@@ -374,22 +397,32 @@ final class NewsViewModel: ObservableObject {
 
     // MARK: - Public Methods - Filter Operations
 
-    /// Applies a new topic filter
+    /// Applies a new topic filter with smart caching and predictive loading
     /// - Parameter topic: The topic to filter by
     func applyTopicFilter(_ topic: String) async {
+        let previousTopic = selectedTopic
+        
         // Update the topic filter
         selectedTopic = topic
+
+        // Track topic access for predictive loading
+        topicAccessPatterns[topic] = Date()
 
         AppLogger.database.debug("Applying topic filter: \(topic)")
 
         // Try to use cache for immediate response
         if tryLoadFromCache(topic: topic) {
+            AppLogger.database.debug("Cache hit for topic: \(topic)")
             // Still refresh in the background to ensure up-to-date data
             await refreshArticles()
         } else {
+            AppLogger.database.debug("Cache miss for topic: \(topic), performing full refresh")
             // If cache miss, do a full refresh
             await refreshArticles()
         }
+
+        // Trigger predictive loading for adjacent topics
+        await predictiveLoadAdjacentTopics(currentTopic: topic, previousTopic: previousTopic)
 
         // Auto-redirect to "All" if no content is available for the selected topic
         if filteredArticles.isEmpty, topic != "All" {
@@ -403,6 +436,33 @@ final class NewsViewModel: ObservableObject {
 
             // Refresh with "All" topics
             await refreshArticles()
+        }
+    }
+    
+    /// Predictive loading for adjacent topics based on access patterns
+    private func predictiveLoadAdjacentTopics(currentTopic: String, previousTopic: String?) async {
+        // Get all available topics from our subscriptions
+        let allTopics = Array(_subscriptions.keys).sorted()
+        
+        guard !allTopics.isEmpty else { return }
+        
+        // Use ArticleOperations background preloading with a background context
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [weak self] in
+                guard let self = self else { return }
+                
+                // Create a background context for preloading
+                let container = SwiftDataContainer.shared.container
+                let backgroundContext = ModelContext(container)
+                
+                await ArticleOperations.preloadAdjacentTopics(
+                    currentTopic: currentTopic,
+                    allTopics: allTopics,
+                    showUnreadOnly: self.showUnreadOnly,
+                    qualityFilter: self.qualityFilter,
+                    context: backgroundContext
+                )
+            }
         }
     }
 
@@ -454,7 +514,7 @@ final class NewsViewModel: ObservableObject {
         await updateGroupedArticles()
     }
 
-    /// Applies a new quality filter
+    /// Applies a new quality filter with smart cache invalidation
     /// - Parameter qualityFilter: The quality filter to apply
     func applyQualityFilter(_ qualityFilter: String) async {
         AppLogger.database.debug("🔄 Applying quality filter: \(qualityFilter)")
@@ -464,9 +524,8 @@ final class NewsViewModel: ObservableObject {
         // Save preference
         saveUserPreferences()
 
-        // Clear cache to force fresh fetch
-        isCacheValid = false
-        articleCache.removeAll()
+        // Smart cache invalidation - only clear entries that don't match new filter
+        invalidateCacheForFilterChange()
 
         // Refresh articles with new quality filter
         await refreshArticles()
@@ -475,6 +534,44 @@ final class NewsViewModel: ObservableObject {
         
         // Update badge count after quality filter change
         NotificationUtils.updateAppBadgeCount()
+    }
+    
+    /// Smart cache invalidation - only invalidates affected cache entries
+    private func invalidateCacheForFilterChange() {
+        let currentFilters = CacheFilters(
+            showUnreadOnly: showUnreadOnly,
+            showBookmarkedOnly: showBookmarkedOnly,
+            qualityFilter: qualityFilter,
+            sortOrder: sortOrder,
+            groupingStyle: groupingStyle
+        )
+        
+        // Remove only cache entries that don't match current filters
+        self.articleCache = self.articleCache.compactMapValues { cachedEntry in
+            if cachedEntry.filters == currentFilters && !cachedEntry.isExpired {
+                return cachedEntry // Keep valid cache entry
+            }
+            return nil // Remove invalid cache entry
+        }
+        
+        // Update cache validity
+        isCacheValid = !articleCache.isEmpty
+        
+        AppLogger.database.debug("Smart cache invalidation: kept \(self.articleCache.count) valid entries")
+    }
+    
+    /// Get cache statistics for performance monitoring
+    func getCacheStatistics() -> (hitRate: Double, entries: Int, oldestEntry: Date?) {
+        let totalEntries = articleCache.count
+        let oldestEntry = self.articleCache.values.map(\.timestamp).min()
+        
+        // Calculate approximate hit rate based on recent access patterns
+        let recentAccesses = topicAccessPatterns.count
+        let hitRate = totalEntries > 0 && recentAccesses > 0 
+            ? min(1.0, Double(totalEntries) / Double(recentAccesses))
+            : 0.0
+        
+        return (hitRate: hitRate, entries: totalEntries, oldestEntry: oldestEntry)
     }
 
     // MARK: - Public Methods - Article Operations
@@ -591,42 +688,91 @@ final class NewsViewModel: ObservableObject {
         )
     }
 
-    /// Tries to load articles from cache for immediate response
+    /// Tries to load articles from cache for immediate response with smart validation
     /// - Parameter topic: The topic to load
     /// - Returns: Whether articles were loaded from cache
     private func tryLoadFromCache(topic: String) -> Bool {
-        // Check if cache is valid
-        if isCacheValid && Date().timeIntervalSince(lastCacheUpdate) < 60.0 {
-            if let cachedArticles = articleCache[topic] {
-                filteredArticles = cachedArticles
-                // Create task to update grouping based on cached articles
-                Task {
-                    await updateGroupedArticles()
-                }
-                return true
+        let currentFilters = CacheFilters(
+            showUnreadOnly: showUnreadOnly,
+            showBookmarkedOnly: showBookmarkedOnly,
+            qualityFilter: qualityFilter,
+            sortOrder: sortOrder,
+            groupingStyle: groupingStyle
+        )
+        
+        // Check if cache entry exists and is valid
+        if let cachedEntry = articleCache[topic],
+           !cachedEntry.isExpired,
+           cachedEntry.filters == currentFilters {
+            
+            filteredArticles = cachedEntry.articles
+            // Create task to update grouping based on cached articles
+            Task {
+                await updateGroupedArticles()
             }
+            AppLogger.database.debug("Smart cache hit for topic: \(topic)")
+            return true
         }
+        
+        AppLogger.database.debug("Smart cache miss for topic: \(topic) - expired: \(self.articleCache[topic]?.isExpired ?? true)")
         return false
     }
 
-    /// Updates the article cache with new articles
+    /// Updates the article cache with new articles using smart caching
     /// - Parameter articles: The articles to cache
     private func updateArticleCache(_ articles: [ArticleModel]) {
+        let currentFilters = CacheFilters(
+            showUnreadOnly: showUnreadOnly,
+            showBookmarkedOnly: showBookmarkedOnly,
+            qualityFilter: qualityFilter,
+            sortOrder: sortOrder,
+            groupingStyle: groupingStyle
+        )
+        
+        // Create cache entry with metadata
+        let cachedEntry = CachedArticles(
+            articles: articles,
+            timestamp: Date(),
+            filters: currentFilters
+        )
+        
         // Update cache for current topic
-        articleCache[selectedTopic] = articles
+        articleCache[selectedTopic] = cachedEntry
 
         // Update "All" cache if we're not already in "All"
         if selectedTopic != "All" {
             // We now want to preserve the "All" entries in the cache for topic bar generation
             // If allArticles is populated, use it to update the "All" cache
             if !allArticles.isEmpty {
-                articleCache["All"] = allArticles
+                let allTopicsEntry = CachedArticles(
+                    articles: allArticles,
+                    timestamp: Date(),
+                    filters: currentFilters
+                )
+                articleCache["All"] = allTopicsEntry
             }
-            // Otherwise, we don't touch the existing "All" cache if it exists
         }
 
         lastCacheUpdate = Date()
         isCacheValid = true
+        
+        // Perform memory-aware cache cleanup
+        performMemoryAwareCacheCleanup()
+    }
+    
+    /// Memory-aware cache cleanup to prevent excessive memory usage
+    private func performMemoryAwareCacheCleanup() {
+        let maxCacheEntries = 10 // Keep cache for last 10 topic/filter combinations
+        
+        guard articleCache.count > maxCacheEntries else { return }
+        
+        // Sort by timestamp and keep only the most recent entries
+        let sortedEntries = articleCache.sorted { $0.value.timestamp > $1.value.timestamp }
+        let entriesToKeep = sortedEntries.prefix(maxCacheEntries)
+        
+        self.articleCache = Dictionary(uniqueKeysWithValues: entriesToKeep.map { ($0.key, $0.value) })
+        
+        AppLogger.database.debug("Cache cleanup: keeping \(self.articleCache.count) entries")
     }
 
     /// Loads subscriptions for topic filtering

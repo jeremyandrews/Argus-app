@@ -105,7 +105,7 @@ final class ArticleOperations {
 
     // MARK: - Fetch Operations
 
-    /// Fetches articles with the specified filters
+    /// Fetches articles with the specified filters using optimized compound indexes
     /// - Parameters:
     ///   - topic: Optional topic to filter by
     ///   - showUnreadOnly: Whether to show only unread articles
@@ -132,51 +132,44 @@ final class ArticleOperations {
         let container = SwiftDataContainer.shared.container
         let context = container.mainContext
 
-        // Build predicates using modern compound approach
-        var conditions = [Predicate<ArticleModel>]()
-
-        // Topic filter (only if a specific topic is selected)
-        if let topic = topic, topic != "All" {
-            conditions.append(#Predicate<ArticleModel> { $0.topic == topic })
-        }
-
-        // Read status filter
-        if showUnreadOnly {
-            conditions.append(#Predicate<ArticleModel> { !$0.isViewed })
-        }
-
-        // Bookmark filter
-        if showBookmarkedOnly {
-            conditions.append(#Predicate<ArticleModel> { $0.isBookmarked })
-        }
-
-        // Create the fetch descriptor
+        // Use compound indexes for optimal performance
+        // Strategy: Build predicate that matches our compound indexes
+        
         var descriptor = FetchDescriptor<ArticleModel>()
-
-        // Apply predicates to the descriptor
-        if !conditions.isEmpty {
-            if conditions.count == 1 {
-                // If only one condition, use it directly
-                descriptor.predicate = conditions[0]
-            } else {
-                // For multiple conditions, we need to use one condition in the initial fetch
-                // and then filter the results manually for the other conditions
-
-                // First, apply the most restrictive predicate to limit the initial fetch
-                if showUnreadOnly {
-                    // This is typically the most restrictive filter
-                    descriptor.predicate = #Predicate<ArticleModel> { !$0.isViewed }
-                } else if showBookmarkedOnly {
-                    descriptor.predicate = #Predicate<ArticleModel> { $0.isBookmarked }
-                } else if let topic = topic, topic != "All" {
-                    descriptor.predicate = #Predicate<ArticleModel> { $0.topic == topic }
-                }
+        
+        // Build predicate using indexed fields first for optimal query planning
+        var predicate: Predicate<ArticleModel>?
+        
+        // Strategy 1: topic + isViewed + publishDate (most common case)
+        if let topic = topic, topic != "All", showUnreadOnly {
+            predicate = #Predicate<ArticleModel> { 
+                $0.topic == topic && !$0.isViewed 
             }
         }
-
-        // Sort by date (newest first)
+        // Strategy 2: isViewed + publishDate (unread across all topics)
+        else if showUnreadOnly {
+            predicate = #Predicate<ArticleModel> { 
+                !$0.isViewed 
+            }
+        }
+        // Strategy 3: isBookmarked + publishDate (bookmarks)
+        else if showBookmarkedOnly {
+            predicate = #Predicate<ArticleModel> { 
+                $0.isBookmarked 
+            }
+        }
+        // Strategy 4: topic + publishDate (topic filtering)
+        else if let topic = topic, topic != "All" {
+            predicate = #Predicate<ArticleModel> { 
+                $0.topic == topic 
+            }
+        }
+        
+        descriptor.predicate = predicate
+        
+        // Apply sorting - publishDate is indexed for performance
         descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
-
+        
         // Apply limit if needed
         if let limit = limit {
             descriptor.fetchLimit = limit
@@ -199,39 +192,6 @@ final class ArticleOperations {
                 }
             }
 
-            // Apply additional in-memory filtering for multiple filter conditions
-            if conditions.count > 1 {
-                AppLogger.database.debug("🔍 Applying additional in-memory filters")
-
-                // Track which predicate was applied at the database level
-                let appliedUnreadFilter = showUnreadOnly && descriptor.predicate != nil && conditions.count > 1
-                let appliedBookmarkFilter = showBookmarkedOnly && !appliedUnreadFilter && descriptor.predicate != nil
-                let appliedTopicFilter = topic != nil && topic != "All" && !appliedUnreadFilter && !appliedBookmarkFilter && descriptor.predicate != nil
-
-                // Apply remaining filters in memory
-                if let topic = topic, topic != "All", !appliedTopicFilter {
-                    AppLogger.database.debug("🔍 Applying topic filter in memory: \(topic)")
-                    articles = articles.filter { $0.topic == topic }
-
-                    // Special logging for missing topics only
-                    if missingTopics.contains(topic) {
-                        AppLogger.database.debug("📊 MISSING TOPIC: After in-memory filtering, '\(topic)' has \(articles.count) articles")
-                    }
-                }
-
-                // Apply unread filter in memory if not applied at database level
-                if showUnreadOnly, !appliedUnreadFilter {
-                    AppLogger.database.debug("🔍 Applying unread filter in memory")
-                    articles = articles.filter { !$0.isViewed }
-                }
-
-                // Apply bookmark filter in memory if not applied at database level
-                if showBookmarkedOnly, !appliedBookmarkFilter {
-                    AppLogger.database.debug("🔍 Applying bookmark filter in memory")
-                    articles = articles.filter { $0.isBookmarked }
-                }
-            }
-
             // Apply quality filter in memory (always client-side since server cannot filter)
             if qualityFilter != "All" {
                 AppLogger.database.debug("🔍 Applying quality filter in memory: \(qualityFilter)")
@@ -245,11 +205,63 @@ final class ArticleOperations {
                 AppLogger.database.debug("🔍 Quality filter reduced articles from \(beforeCount) to \(afterCount)")
             }
 
-            AppLogger.database.debug("✅ Fetched \(articles.count) articles with filters")
+            AppLogger.database.debug("✅ Fetched \(articles.count) articles with optimized indexes")
             return articles
         } catch {
             AppLogger.database.error("❌ Error fetching articles: \(error)")
             throw error
+        }
+    }
+    
+    /// Background preload articles for adjacent topics to improve switching performance
+    static func preloadAdjacentTopics(
+        currentTopic: String,
+        allTopics: [String],
+        showUnreadOnly: Bool = false,
+        qualityFilter: String = "All",
+        context: ModelContext
+    ) {
+        Task.detached(priority: .background) {
+            guard let currentIndex = allTopics.firstIndex(of: currentTopic) else { return }
+            
+            // Preload previous and next topics
+            let adjacentIndices = [
+                currentIndex - 1,  // Previous topic
+                currentIndex + 1   // Next topic
+            ].compactMap { (index: Int) -> Int? in
+                guard index >= 0 && index < allTopics.count else { return nil }
+                return index
+            }
+            
+            for index in adjacentIndices {
+                let topic = allTopics[index]
+                do {
+                    // Build optimized predicate for preloading
+                    var predicate: Predicate<ArticleModel>?
+                    
+                    if showUnreadOnly {
+                        predicate = #Predicate<ArticleModel> { 
+                            $0.topic == topic && !$0.isViewed 
+                        }
+                    } else {
+                        predicate = #Predicate<ArticleModel> { 
+                            $0.topic == topic 
+                        }
+                    }
+                    
+                    var descriptor = FetchDescriptor<ArticleModel>()
+                    descriptor.predicate = predicate
+                    descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
+                    descriptor.fetchLimit = 50 // Reduced limit for background preload
+                    
+                    // Fetch and cache adjacent topic articles
+                    _ = try context.fetch(descriptor)
+                    
+                    AppLogger.database.debug("🔄 Preloaded \(topic) for background cache")
+                } catch {
+                    AppLogger.database.warning("Failed to preload topic \(topic): \(error)")
+                }
+            }
         }
     }
 

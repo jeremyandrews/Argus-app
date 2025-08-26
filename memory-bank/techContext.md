@@ -60,6 +60,25 @@
 - The UI is jittery during the sync process: needs to be fixed
 - Sometimes duplicate content is displayed: needs to be fixed
 
+## Critical Architecture Decisions (DO NOT CHANGE)
+
+### Rich Text Processing Strategy
+The app uses a two-tier rich text processing approach that is intentionally optimized:
+
+**Tier 1 - "Above the Fold" Content (Pre-processed)**:
+- Title and body (tiny_summary) fields are converted to rich text immediately
+- Stored as blobs for fast retrieval in NewsView
+- Enables instant article display and fast article opening
+- Essential for smooth user experience in the main news list
+
+**Tier 2 - "Below the Fold" Content (On-demand)**:
+- Summary, critical analysis, logical fallacies, etc. are processed only when viewed
+- Converted to rich text when sections are expanded in detail view
+- Minimizes memory usage and initial loading time
+- Provides optimal balance between performance and resource usage
+
+**Rationale**: This approach ensures the main NewsView renders quickly while keeping memory usage reasonable. Changing this architecture would reduce both usability and performance.
+
 ## Development Workflow
 - **Feature Branches**: Development of new features in isolated branches
 - **Code Review**: Pull request review process

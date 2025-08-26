@@ -889,3 +889,33 @@ This file captures important patterns, preferences, and project intelligence tha
   @MainActor
   private func provideTempContent(_ section: String, _ field: RichTextField, _ message: String) {
       // Create a temporary attributed string to show status
+
+## Critical Architecture Decisions (DO NOT CHANGE)
+
+### Rich Text Processing Strategy
+The app uses a two-tier rich text processing approach that is intentionally optimized and should NEVER be modified:
+
+**Tier 1 - "Above the Fold" Content (Pre-processed)**:
+- Title and body (tiny_summary) fields are converted to rich text immediately
+- Stored as blobs for fast retrieval in NewsView
+- Enables instant article display and fast article opening
+- Essential for smooth user experience in the main news list
+
+**Tier 2 - "Below the Fold" Content (On-demand)**:
+- Summary, critical analysis, logical fallacies, etc. are processed only when viewed
+- Converted to rich text when sections are expanded in detail view
+- Minimizes memory usage and initial loading time
+- Provides optimal balance between performance and resource usage
+
+**Rationale**: This approach ensures the main NewsView renders quickly while keeping memory usage reasonable. Any attempt to change this architecture would reduce both usability and performance of the application.
+
+**Implementation Pattern**:
+```swift
+// CORRECT APPROACH: Pre-process "above the fold" content only
+let aboveTheFoldFields: [RichTextField] = [.title, .body] // tiny_summary
+// These are processed immediately for fast NewsView display and article opening
+
+// CORRECT APPROACH: Process other fields on-demand only when viewed
+let onDemandFields: [RichTextField] = [.summary, .criticalAnalysis, .logicalFallacies, ...]
+// These are processed only when sections are expanded in detail view
+```
