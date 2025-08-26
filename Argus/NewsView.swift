@@ -744,12 +744,13 @@ struct NewsView: View {
         let viewModel: NewsViewModel
         
         @Environment(\.layoutDimensions) private var layoutDimensions
+        @Environment(\.horizontalSizeClass) private var horizontalSizeClass
         
         var body: some View {
             let isUnread = !article.isViewed
             
-            // Use environment-based layout identifier that includes screen width and orientation
-            let layoutIdentifier = "\(article.id)-\(layoutDimensions.orientationId)-\(Int(layoutDimensions.screenWidth))"
+            // Phase 2: Only change ID when meaningful layout changes occur
+            let layoutIdentifier = layoutDimensions.isIPad ? "ipad-\(layoutDimensions.orientationId)" : "iphone-\(layoutDimensions.orientationId)"
             
             VStack(alignment: .leading, spacing: 10) {
                 // Top row
@@ -799,17 +800,13 @@ struct NewsView: View {
         }
         
         private func calculateHorizontalPadding() -> CGFloat {
-            // Use responsive padding based on screen width
-            let screenWidth = layoutDimensions.screenWidth
-            
-            // Calculate responsive padding
-            let paddingPercentage: CGFloat = 0.05 // 5% padding on each side
-            let minimumPadding: CGFloat = 16
-            let maximumPadding: CGFloat = 20 // Keep consistent with header/topic bar max
-            
-            let calculatedPadding = max(minimumPadding, min(screenWidth * paddingPercentage, maximumPadding))
-            
-            return calculatedPadding
+            // Phase 2: Use consistent, predictable padding
+            if layoutDimensions.isIPad {
+                return 24
+            } else {
+                // For iPhones, use fixed padding to avoid layout thrashing
+                return horizontalSizeClass == .regular ? 20 : 16
+            }
         }
         
         // Helper views
