@@ -248,8 +248,7 @@ final class NewsDetailViewModel: ObservableObject {
         
         // Phase 2.3: Start initial preloading of adjacent articles after initialization
         Task.detached(priority: .background) {
-            // Small delay to let UI settle first
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            // Start preloading immediately - no need to wait
             await self.preloadAdjacentArticles()
         }
     }
