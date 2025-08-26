@@ -184,9 +184,8 @@ struct NewsView: View {
                 .environment(\.editMode, editMode)
                 // Pull-to-refresh for the entire list
                 .refreshable {
-                    Task {
-                        await viewModel.syncWithServer()
-                    }
+                    // Phase 3: Ensure smooth sync operation
+                    await viewModel.syncWithServer()
                 }
                 // Note: Removed .disabled(viewModel.isSyncing) as it was causing complete UI freeze
                 // The refreshable modifier already handles preventing multiple simultaneous refresh operations
