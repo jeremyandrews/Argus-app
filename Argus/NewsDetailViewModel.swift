@@ -313,9 +313,9 @@ final class NewsDetailViewModel: ObservableObject {
             AppLogger.database.debug("🔄 Navigating from index \(oldIndex) to \(nextIndex) (article ID: \(nextArticleId))")
             AppLogger.database.debug("🔍 Container: \(String(describing: SwiftDataContainer.shared.container))")
 
-            // Create a loading timer that will only show loading indicator if operation takes too long
+            // Create a loading timer that will show loading indicator immediately if content takes time
             let loadingTimerTask = Task {
-                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds maximum
+                // No artificial delay - show loading indicator immediately if needed
                 if !Task.isCancelled {
                     await MainActor.run {
                         isLoadingNextArticle = true
@@ -470,13 +470,19 @@ final class NewsDetailViewModel: ObservableObject {
     /// Preloads a single article at the specified index
     /// - Parameter index: The index of the article to preload
     private func preloadArticle(at index: Int) async {
-        // Capture articles array safely for use in background task
-        let articles = await MainActor.run { self.articles }
+        // Capture article ID safely for use in background task (avoiding Sendable issues with ArticleModel)
+        let articleId: UUID
+        let articlesCount: Int
         
-        guard index >= 0, index < articles.count else { return }
+        // Extract only the UUID and count on MainActor to avoid Sendable issues
+        (articleId, articlesCount) = await MainActor.run {
+            guard index >= 0, index < self.articles.count else { 
+                return (UUID(), 0) // Return dummy values that will be caught by guard below
+            }
+            return (self.articles[index].id, self.articles.count)
+        }
         
-        let article = articles[index]
-        let articleId = article.id
+        guard articlesCount > 0 && index >= 0 && index < articlesCount else { return }
         
         // Check if article is already cached
         let isCached = await MainActor.run { getCachedModel(for: articleId) != nil }
