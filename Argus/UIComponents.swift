@@ -324,6 +324,37 @@ extension Date {
     }
 }
 
+// MARK: - Article Position Counter Component
+
+struct ArticlePositionCounter: View {
+    let currentPosition: Int
+    let totalCount: Int
+    var isCompact: Bool = false
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("\(currentPosition)")
+                .font(isCompact ? .caption : .subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.primary)
+            
+            Text("of")
+                .font(isCompact ? .caption2 : .caption)
+                .foregroundColor(.secondary)
+            
+            Text("\(totalCount)")
+                .font(isCompact ? .caption : .subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(8)
+        .opacity(0.9)
+    }
+}
+
 // MARK: - Domain Source Component
 
 struct DomainSourceView: View {

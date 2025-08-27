@@ -346,6 +346,15 @@ struct NewsDetailView: View {
             .padding(.leading, 8)
 
             Spacer()
+            
+            // Article position counter
+            ArticlePositionCounter(
+                currentPosition: viewModel.currentIndex + 1,
+                totalCount: viewModel.articles.count,
+                isCompact: true
+            )
+
+            Spacer()
 
             HStack(spacing: 32) {
                 Button {
