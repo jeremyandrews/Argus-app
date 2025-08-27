@@ -24,6 +24,12 @@ struct ContentView: View {
             } detail: {
                 NewsView(tabBarHeight: $tabBarHeight)
             }
+            .onAppear {
+                // Phase 2.1: App Launch Sync - Schedule initial sync after app launch
+                Task {
+                    await AutoSyncCoordinator.shared.scheduleInitialSync()
+                }
+            }
         } else {
             // iPhone Layout (existing TabView)
             ZStack(alignment: .bottom) {
@@ -54,6 +60,12 @@ struct ContentView: View {
                 )
                 .onPreferenceChange(TabBarHeightPreferenceKey.self) { value in
                     tabBarHeight = value
+                }
+                .onAppear {
+                    // Phase 2.1: App Launch Sync - Schedule initial sync after app launch
+                    Task {
+                        await AutoSyncCoordinator.shared.scheduleInitialSync()
+                    }
                 }
             }
         }

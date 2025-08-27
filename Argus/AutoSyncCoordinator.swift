@@ -32,6 +32,13 @@ final class AutoSyncCoordinator: ObservableObject {
     private var initialSyncScheduled = false
     private var backgroundTime: Date?
     
+    // Phase 2.2: Enhanced periodic sync state
+    private var lastUserInteractionTime = Date()
+    private var consecutiveFailures = 0
+    private var maxConsecutiveFailures = 3
+    private var baseRetryDelay: TimeInterval = 120 // 2 minutes
+    private let userInteractionIdleThreshold: TimeInterval = 30 // 30 seconds
+    
     // MARK: - Dependencies
     
     private let articleService: ArticleServiceProtocol
@@ -179,23 +186,43 @@ final class AutoSyncCoordinator: ObservableObject {
         return savedInterval > 0 ? savedInterval : periodicSyncInterval
     }
     
-    /// Performs periodic sync if conditions are met
+    /// Performs periodic sync if conditions are met - Phase 2.2 Enhanced
     private func performPeriodicSyncIfNeeded() async {
         guard autoSyncEnabled else { return }
+        
+        // Update next scheduled sync time
+        let interval = getCurrentSyncInterval()
+        nextScheduledSync = Date().addingTimeInterval(interval)
         
         // Check throttling conditions
         if let lastSync = self.lastAutoSyncTime {
             let timeSinceLastSync = Date().timeIntervalSince(lastSync)
             if timeSinceLastSync < minSyncInterval {
-                logger.debug("Sync throttled - only \(timeSinceLastSync)s since last sync")
+                logger.debug("Sync throttled - only \(Int(timeSinceLastSync))s since last sync")
                 return
             }
         }
         
-        // Check if user is actively using the app
+        // Phase 2.2: Enhanced user interaction detection
         if isUserActivelyInteracting() {
             logger.debug("Sync deferred - user is actively interacting")
             return
+        }
+        
+        // Phase 2.2: Battery and power mode checks
+        guard await shouldAllowSyncForBattery() else {
+            logger.debug("Sync deferred - battery constraints")
+            return
+        }
+        
+        // Phase 2.2: Progressive backoff for consecutive failures
+        if consecutiveFailures >= maxConsecutiveFailures {
+            let backoffDelay = calculateBackoffDelay()
+            if let lastSync = lastAutoSyncTime,
+               Date().timeIntervalSince(lastSync) < backoffDelay {
+                logger.debug("Sync deferred - progressive backoff active (\(self.consecutiveFailures) failures)")
+                return
+            }
         }
         
         await performAutoSyncIfNeeded(context: .periodic)
@@ -260,13 +287,19 @@ final class AutoSyncCoordinator: ObservableObject {
             lastAutoSyncTime = Date()
             UserDefaults.standard.set(lastAutoSyncTime, forKey: "lastAutoSyncTime")
             
+            // Phase 2.2: Reset failure counter on success
+            consecutiveFailures = 0
+            
             logger.info("Auto-sync completed successfully - added: \(result.addedCount), duration: \(result.duration)s")
             
             // Schedule next background sync
             backgroundTaskManager.scheduleBackgroundRefresh()
             
         } catch {
-            logger.error("Auto-sync failed: \(error)")
+            // Phase 2.2: Track consecutive failures for progressive backoff
+            consecutiveFailures += 1
+            
+            logger.error("Auto-sync failed (failure #\(self.consecutiveFailures)): \(error)")
             
             // Schedule retry with exponential backoff
             scheduleRetrySync()
@@ -298,11 +331,67 @@ final class AutoSyncCoordinator: ObservableObject {
         }
     }
     
-    /// Checks if user is actively interacting with the app
+    /// Phase 2.2: Enhanced user interaction detection
     private func isUserActivelyInteracting() -> Bool {
-        // Simple heuristic - check if app has been in foreground recently
-        // In Phase 2, this could be enhanced with more sophisticated detection
-        return backgroundTime == nil
+        // Check if app is in background
+        guard backgroundTime == nil else { return false }
+        
+        // Check if recent user interaction occurred
+        let timeSinceInteraction = Date().timeIntervalSince(lastUserInteractionTime)
+        if timeSinceInteraction < userInteractionIdleThreshold {
+            return true
+        }
+        
+        // Additional checks could include:
+        // - Touch events monitoring
+        // - Navigation changes
+        // - Scroll events
+        // For now, use conservative approach
+        return false
+    }
+    
+    /// Phase 2.2: Battery and power mode awareness
+    private func shouldAllowSyncForBattery() async -> Bool {
+        return await withCheckedContinuation { continuation in
+            // Check if device is in Low Power Mode
+            if ProcessInfo.processInfo.isLowPowerModeEnabled {
+                logger.debug("Sync deferred - Low Power Mode enabled")
+                continuation.resume(returning: false)
+                return
+            }
+            
+            // Check battery level if available
+            #if os(iOS)
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            let batteryLevel = UIDevice.current.batteryLevel
+            UIDevice.current.isBatteryMonitoringEnabled = false
+            
+            // Defer sync if battery is very low (below 20%)
+            if batteryLevel > 0 && batteryLevel < 0.2 {
+                logger.debug("Sync deferred - battery level too low (\(Int(batteryLevel * 100))%)")
+                continuation.resume(returning: false)
+                return
+            }
+            #endif
+            
+            continuation.resume(returning: true)
+        }
+    }
+    
+    /// Phase 2.2: Calculate progressive backoff delay
+    private func calculateBackoffDelay() -> TimeInterval {
+        // Exponential backoff: baseDelay * 2^(failures - maxFailures)
+        let exponent = max(0, consecutiveFailures - maxConsecutiveFailures)
+        let backoffMultiplier = pow(2.0, Double(exponent))
+        let delay = baseRetryDelay * backoffMultiplier
+        
+        // Cap at maximum of 30 minutes
+        return min(delay, 1800)
+    }
+    
+    /// Update user interaction timestamp (call this from UI events)
+    func recordUserInteraction() {
+        lastUserInteractionTime = Date()
     }
 }
 
