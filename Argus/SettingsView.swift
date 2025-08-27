@@ -18,6 +18,12 @@ struct SettingsView: View {
     @AppStorage("useReaderMode") private var useReaderMode: Bool = true
     @AppStorage("allowCellularSync") private var allowCellularSync: Bool = false
 
+    private var versionInfo: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"
+        return "Version \(version) (Build \(build))"
+    }
+
     var body: some View {
         NavigationView {
             Form {
@@ -78,11 +84,7 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                             .padding(.top, 5)
                     }
-                } header: {
-                    Text("Display Preferences")
-                }
 
-                Section {
                     VStack(alignment: .leading) {
                         Toggle("Show Unread Count on App Icon", isOn: $showBadge)
 
@@ -91,7 +93,11 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                             .padding(.top, 5)
                     }
+                } header: {
+                    Text("Display Preferences")
+                }
 
+                Section {
                     VStack(alignment: .leading) {
                         Toggle("Allow Sync on Cellular Data", isOn: $allowCellularSync)
 
@@ -101,7 +107,7 @@ struct SettingsView: View {
                             .padding(.top, 5)
                     }
                 } header: {
-                    Text("Notifications")
+                    Text("Synchronization")
                 }
 
                 Section {
@@ -124,6 +130,10 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
 
                         Text("The name \"Argus\" is inspired by Argus Panoptes, the all-seeing giant in Greek mythology, reflecting the program's ability to monitor and analyze numerous information sources.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+
+                        Text(versionInfo)
                             .font(.footnote)
                             .foregroundColor(.secondary)
 
