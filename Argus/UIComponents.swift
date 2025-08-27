@@ -330,6 +330,45 @@ struct ArticlePositionCounter: View {
     let currentPosition: Int
     let totalCount: Int
     var isCompact: Bool = false
+    var onBulkAction: ((BulkMarkingAction) -> Void)? = nil
+    
+    @State private var isLongPressing = false
+    @State private var showActionDialog = false
+    @State private var selectedAction: BulkMarkingAction?
+    
+    /// Bulk marking actions available through long press
+    enum BulkMarkingAction {
+        case markAllRead
+        case markAllUnread
+        
+        var title: String {
+            switch self {
+            case .markAllRead: return "Mark All as Read"
+            case .markAllUnread: return "Mark All as Unread"
+            }
+        }
+        
+        var icon: String {
+            switch self {
+            case .markAllRead: return "envelope.open"
+            case .markAllUnread: return "envelope.badge"
+            }
+        }
+        
+        var confirmationTitle: String {
+            switch self {
+            case .markAllRead: return "Mark All Read?"
+            case .markAllUnread: return "Mark All Unread?"
+            }
+        }
+        
+        var confirmationMessage: String {
+            switch self {
+            case .markAllRead: return "This will mark all articles in the current filtered set as read."
+            case .markAllUnread: return "This will mark all articles in the current filtered set as unread."
+            }
+        }
+    }
     
     var body: some View {
         HStack(spacing: 4) {
@@ -349,9 +388,69 @@ struct ArticlePositionCounter: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(
+            (isLongPressing ? Color.blue.opacity(0.3) : Color(UIColor.secondarySystemBackground))
+                .animation(.easeInOut(duration: 0.2), value: isLongPressing)
+        )
         .cornerRadius(8)
         .opacity(0.9)
+        .scaleEffect(isLongPressing ? 1.05 : 1.0)
+        .animation(.easeInOut(duration: 0.2), value: isLongPressing)
+        .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 10, perform: {
+            // Long press completed - show action selection
+            performHapticFeedback(.heavy)
+            showActionDialog = true
+        }, onPressingChanged: { isPressing in
+            // Provide immediate feedback when long press starts/stops
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isLongPressing = isPressing
+            }
+            
+            if isPressing {
+                // Haptic feedback when long press begins
+                performHapticFeedback(.light)
+            }
+        })
+        .confirmationDialog("Bulk Actions", isPresented: $showActionDialog, titleVisibility: .visible) {
+            Button(BulkMarkingAction.markAllRead.title) {
+                selectedAction = .markAllRead
+            }
+            
+            Button(BulkMarkingAction.markAllUnread.title) {
+                selectedAction = .markAllUnread
+            }
+            
+            Button("Cancel", role: .cancel) {
+                selectedAction = nil
+            }
+        } message: {
+            Text("Choose an action for all \(totalCount) articles in the current filtered set.")
+        }
+        .alert(
+            selectedAction?.confirmationTitle ?? "",
+            isPresented: Binding<Bool>(
+                get: { selectedAction != nil },
+                set: { if !$0 { selectedAction = nil } }
+            ),
+            presenting: selectedAction
+        ) { action in
+            Button("Cancel", role: .cancel) {
+                selectedAction = nil
+            }
+            
+            Button(action.title.replacingOccurrences(of: "Mark All as ", with: "Mark "), role: .destructive) {
+                onBulkAction?(action)
+                selectedAction = nil
+            }
+        } message: { action in
+            Text(action.confirmationMessage)
+        }
+    }
+    
+    /// Performs haptic feedback using iOS standard patterns
+    private func performHapticFeedback(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        let impactFeedback = UIImpactFeedbackGenerator(style: style)
+        impactFeedback.impactOccurred()
     }
 }
 

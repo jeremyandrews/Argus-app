@@ -347,12 +347,15 @@ struct NewsDetailView: View {
 
             Spacer()
             
-            // Article position counter
-            ArticlePositionCounter(
-                currentPosition: viewModel.currentIndex + 1,
-                totalCount: viewModel.articles.count,
-                isCompact: true
-            )
+        // Article position counter with bulk actions
+        ArticlePositionCounter(
+            currentPosition: viewModel.currentIndex + 1,
+            totalCount: viewModel.articles.count,
+            isCompact: true,
+            onBulkAction: { action in
+                handleBulkAction(action)
+            }
+        )
 
             Spacer()
 
@@ -650,7 +653,7 @@ struct NewsDetailView: View {
         scrollToTopTrigger = UUID()
 
         // Log the article fields for the new article once it's loaded
-        Task {
+        Task<Void, Never> {
             // Add a small delay to ensure the article has been fully loaded
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             await MainActor.run {
@@ -1100,6 +1103,43 @@ struct NewsDetailView: View {
             } catch {
                 AppLogger.database.error("Failed to mark article as viewed: \(error)")
             }
+        }
+    }
+
+    /// Handles bulk actions from the ArticlePositionCounter
+    @MainActor
+    private func handleBulkAction(_ action: ArticlePositionCounter.BulkMarkingAction) {
+        // Capture the article IDs immediately
+        let articleIds = viewModel.articles.map { $0.id }
+        
+        // Use Task without complex type annotations - Swift 6 compatible
+        Task {
+            // Already on MainActor due to function annotation
+            let articleOperations = ArticleOperations()
+            
+            // Perform background operations
+            switch action {
+            case .markAllRead:
+                AppLogger.database.debug("Bulk marking \(articleIds.count) articles as read")
+                _ = await articleOperations.markArticles(ids: articleIds, asRead: true)
+                
+            case .markAllUnread:
+                AppLogger.database.debug("Bulk marking \(articleIds.count) articles as unread")
+                _ = await articleOperations.markArticles(ids: articleIds, asRead: false)
+            }
+            
+            // UI updates are already on MainActor
+            self.contentTransitionID = UUID()
+            
+            // Post notification for other parts of the app
+            NotificationCenter.default.post(
+                name: Notification.Name("BulkArticleStatusChanged"),
+                object: nil,
+                userInfo: [
+                    "action": action,
+                    "articleCount": articleIds.count
+                ]
+            )
         }
     }
 
