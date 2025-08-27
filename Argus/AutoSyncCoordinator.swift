@@ -39,6 +39,12 @@ final class AutoSyncCoordinator: ObservableObject {
     private var baseRetryDelay: TimeInterval = 120 // 2 minutes
     private let userInteractionIdleThreshold: TimeInterval = 30 // 30 seconds
     
+    // Phase 2.3: Enhanced foreground return sync state
+    private var lastForegroundTime: Date?
+    private let shortBackgroundThreshold: TimeInterval = 300 // 5 minutes
+    private let mediumBackgroundThreshold: TimeInterval = 1800 // 30 minutes
+    private let longBackgroundThreshold: TimeInterval = 3600 // 1 hour
+    
     // MARK: - Dependencies
     
     private let articleService: ArticleServiceProtocol
@@ -228,19 +234,60 @@ final class AutoSyncCoordinator: ObservableObject {
         await performAutoSyncIfNeeded(context: .periodic)
     }
     
-    /// Handles app returning from background
+    /// Handles app returning from background with progressive sync frequency - Phase 2.3 Enhanced
     private func handleForegroundReturn() async {
         guard let backgroundTime = backgroundTime else { return }
         
         let backgroundDuration = Date().timeIntervalSince(backgroundTime)
-        logger.debug("App returned from background after \(backgroundDuration)s")
+        logger.debug("App returned from background after \(Int(backgroundDuration))s")
         
-        if backgroundDuration > foregroundReturnThreshold {
-            logger.info("Triggering sync after \(backgroundDuration)s in background")
+        // Phase 2.3: Progressive sync frequency based on background duration
+        let shouldSync = determineIfSyncNeededForBackgroundDuration(backgroundDuration)
+        
+        if shouldSync {
+            let durationCategory = categorizeBackgroundDuration(backgroundDuration)
+            logger.info("Triggering \(durationCategory) sync after \(Int(backgroundDuration))s in background")
             await performAutoSyncIfNeeded(context: .foregroundReturn)
+        } else {
+            logger.debug("Skipping sync - background duration (\(Int(backgroundDuration))s) below threshold")
         }
         
+        // Update foreground return tracking
+        lastForegroundTime = Date()
         self.backgroundTime = nil
+    }
+    
+    /// Phase 2.3: Determines if sync is needed based on background duration
+    private func determineIfSyncNeededForBackgroundDuration(_ duration: TimeInterval) -> Bool {
+        // Always sync if backgrounded longer than short threshold (5 minutes)
+        if duration >= shortBackgroundThreshold {
+            return true
+        }
+        
+        // For shorter durations, check if enough time has passed since last sync
+        if let lastSync = lastAutoSyncTime {
+            let timeSinceLastSync = Date().timeIntervalSince(lastSync)
+            // If last sync was more than 10 minutes ago and we were backgrounded for 2+ minutes, sync
+            if duration >= 120 && timeSinceLastSync >= 600 {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    /// Phase 2.3: Categorizes background duration for logging
+    private func categorizeBackgroundDuration(_ duration: TimeInterval) -> String {
+        switch duration {
+        case 0..<shortBackgroundThreshold:
+            return "quick"
+        case shortBackgroundThreshold..<mediumBackgroundThreshold:
+            return "standard"
+        case mediumBackgroundThreshold..<longBackgroundThreshold:
+            return "medium-delay"
+        default:
+            return "long-delay"
+        }
     }
     
     /// Records when app goes to background
@@ -392,6 +439,16 @@ final class AutoSyncCoordinator: ObservableObject {
     /// Update user interaction timestamp (call this from UI events)
     func recordUserInteraction() {
         lastUserInteractionTime = Date()
+    }
+    
+    /// Phase 2.3: Cleanup resources when coordinator is deallocated
+    deinit {
+        // Cancel all Combine subscriptions (can be done synchronously)
+        cancellables.removeAll()
+        
+        // Stop periodic sync timer directly (avoiding main actor isolation issues)
+        periodicSyncTimer?.invalidate()
+        periodicSyncTimer = nil
     }
 }
 
