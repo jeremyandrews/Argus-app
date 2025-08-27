@@ -97,20 +97,27 @@ struct SettingsView: View {
                     Text("Display Preferences")
                 }
 
+                // Phase 3.1: Auto-Sync Settings Interface
                 Section {
-                    VStack(alignment: .leading) {
-                        Toggle("Allow Sync on Cellular Data", isOn: $allowCellularSync)
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Basic cellular sync toggle
+                        VStack(alignment: .leading) {
+                            Toggle("Allow Sync on Cellular Data", isOn: $allowCellularSync)
 
-                        Text("When disabled, articles will only be synchronized when connected to WiFi to save data. High-priority notifications will still be delivered immediately.")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 5)
+                            Text("When disabled, articles will only be synchronized when connected to WiFi to save data. High-priority notifications will still be delivered immediately.")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 2)
+                        }
+                        
+                        Divider()
+                        
+                        // Phase 3.1: Streamlined Auto-Sync Controls
+                        AutoSyncControlsView()
                     }
                 } header: {
                     Text("Synchronization")
                 }
-
-                AutoSyncSettingsView()
 
                 Section {
                     VStack(alignment: .leading) {

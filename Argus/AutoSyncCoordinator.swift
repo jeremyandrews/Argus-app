@@ -16,6 +16,7 @@ final class AutoSyncCoordinator: ObservableObject {
     @Published var lastAutoSyncTime: Date?
     @Published var autoSyncEnabled = true
     @Published var nextScheduledSync: Date?
+    @Published var syncFrequencyMinutes = 10
     
     // MARK: - Configuration
     
@@ -110,10 +111,10 @@ final class AutoSyncCoordinator: ObservableObject {
     
     /// Updates the sync frequency
     func updateSyncFrequency(_ minutes: Int) {
-        let newInterval = TimeInterval(minutes * 60)
-        guard newInterval != periodicSyncInterval else { return }
+        guard minutes != syncFrequencyMinutes else { return }
         
-        UserDefaults.standard.set(newInterval, forKey: "autoSyncFrequencyMinutes")
+        syncFrequencyMinutes = minutes
+        UserDefaults.standard.autoSyncFrequencyMinutes = minutes
         logger.info("Updated sync frequency to \(minutes) minutes")
         
         // Restart periodic sync with new interval
@@ -128,12 +129,18 @@ final class AutoSyncCoordinator: ObservableObject {
         await performAutoSyncIfNeeded(context: .manual)
     }
     
+    // MARK: - Phase 3.1: Manual sync trigger (alias for UI compatibility)
+    func performManualSync() async {
+        await triggerManualSync()
+    }
+    
     // MARK: - Private Implementation
     
     /// Loads persisted state from UserDefaults
     private func loadPersistedState() {
         autoSyncEnabled = UserDefaults.standard.object(forKey: "autoSyncEnabled") as? Bool ?? true
         lastAutoSyncTime = UserDefaults.standard.object(forKey: "lastAutoSyncTime") as? Date
+        syncFrequencyMinutes = UserDefaults.standard.autoSyncFrequencyMinutes
         
         // Only log significant state information to reduce noise
         if !autoSyncEnabled {
