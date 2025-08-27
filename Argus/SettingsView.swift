@@ -110,6 +110,8 @@ struct SettingsView: View {
                     Text("Synchronization")
                 }
 
+                AutoSyncSettingsView()
+
                 Section {
                     VStack(alignment: .leading) {
                         Toggle("Use Reader Mode When Available", isOn: $useReaderMode)

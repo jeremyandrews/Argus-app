@@ -588,222 +588,61 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     let engineRawStats = json["stats"] as? String
     let engineSystemInfo = json["system_info"] as? [String: Any]
 
-    // CRITICAL FIX: Enhanced ID extraction with direct JSON dump and all keys
-    AppLogger.database.debug("📊 ==== ARTICLE ID DEBUGGING ====")
-    AppLogger.database.debug("🔍 EXAMINING JSON FOR ID [processArticleJSON]")
-
-    if let jsonData = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
-       let jsonString = String(data: jsonData, encoding: .utf8)
-    {
-        // Log the first 1000 chars of the JSON to see the structure - expanded for better debugging
-        let sample = String(jsonString.prefix(1000)) + (jsonString.count > 1000 ? "..." : "")
-        AppLogger.database.debug("JSON sample: \(sample)")
-    }
-
-    // Output ALL keys for comprehensive debugging
-    let allKeys = Array(json.keys).sorted()
-    AppLogger.database.debug("ALL JSON KEYS: \(allKeys.joined(separator: ", "))")
-
-    // Check nested engine_stats JSON if present (might contain ID)
-    if let engineStatsStr = json["engine_stats"] as? String,
-       let engineStatsData = engineStatsStr.data(using: .utf8),
-       let engineStatsDict = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
-    {
-        AppLogger.database.debug("📊 ENGINE STATS JSON CONTAINS:")
-        let engineStatsKeys = Array(engineStatsDict.keys).sorted()
-        AppLogger.database.debug("ENGINE STATS KEYS: \(engineStatsKeys.joined(separator: ", "))")
-
-        if let engineId = engineStatsDict["id"] {
-            AppLogger.database.debug("🔑 FOUND ID IN ENGINE STATS: \(String(describing: engineId)) (Type: \(type(of: engineId)))")
-        }
-    }
-
-    // Check for all possible ID keys - expanded list
-    let possibleIdKeys = ["id", "ID", "article_id", "articleId", "identifier", "external_id",
-                          "database_id", "databaseId", "db_id", "dbId", "engine_id", "engineId"]
-    var foundIdKey: String? = nil
-    var foundIdValue: Any? = nil
-
-    AppLogger.database.debug("🔍 CHECKING ALL POSSIBLE ID KEYS...")
-    for key in possibleIdKeys {
-        if let value = json[key] {
-            AppLogger.database.debug("✅ FOUND ID KEY: '\(key)' with value: \(String(describing: value)) (Type: \(type(of: value)))")
-            foundIdKey = key
-            foundIdValue = value
-            break
-        }
-    }
-
     // Extract the database ID, handling different possible types
     var databaseId: Int? = nil
-
-    // Try multiple approaches to find the ID - explicit detail logging
-    AppLogger.database.debug("🔍 ATTEMPTING ID EXTRACTION...")
-
-    // APPROACH 1: Direct ID in JSON
-    if let intId = json["id"] as? Int {
-        databaseId = intId
-        AppLogger.database.debug("✅ SUCCESS! Direct Int ID found in JSON: \(intId)")
-    } else if let stringId = json["id"] as? String, let intFromString = Int(stringId) {
-        databaseId = intFromString
-        AppLogger.database.debug("✅ SUCCESS! String ID found in JSON, converted to Int: \(intFromString)")
-    } else if let doubleId = json["id"] as? Double, doubleId.truncatingRemainder(dividingBy: 1) == 0 {
-        databaseId = Int(doubleId)
-        AppLogger.database.debug("✅ SUCCESS! Double ID found in JSON, converted to Int: \(Int(doubleId))")
-    } else if let rawId = json["id"] {
-        let typeString = String(describing: type(of: rawId))
-        AppLogger.database.debug("⚠️ ID found but COULDN'T CONVERT to Int: \(String(describing: rawId)) (Type: \(typeString))")
-    }
-    // APPROACH 2: Alternative ID key in JSON
-    else if let foundKey = foundIdKey, let value = foundIdValue {
-        AppLogger.database.debug("🔄 TRYING ALTERNATIVE ID KEY: '\(foundKey)' with value: \(String(describing: value))")
-
-        if let intValue = value as? Int {
-            databaseId = intValue
-            AppLogger.database.debug("✅ SUCCESS! Alternative Int ID: \(intValue)")
-        } else if let stringValue = value as? String, let intFromString = Int(stringValue) {
-            databaseId = intFromString
-            AppLogger.database.debug("✅ SUCCESS! Alternative String ID converted to Int: \(intFromString)")
-        } else if let doubleValue = value as? Double, doubleValue.truncatingRemainder(dividingBy: 1) == 0 {
-            databaseId = Int(doubleValue)
-            AppLogger.database.debug("✅ SUCCESS! Alternative Double ID converted to Int: \(Int(doubleValue))")
-        } else {
-            AppLogger.database.debug("⚠️ Alternative ID couldn't be converted to Int: \(String(describing: value))")
-        }
-    }
-    // APPROACH 3: ID in engine_stats nested JSON
-    else if let engineStatsStr = json["engine_stats"] as? String,
-            let engineStatsData = engineStatsStr.data(using: .utf8),
-            let engineStatsDict = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any]
-    {
-        if let engineIntId = engineStatsDict["id"] as? Int {
-            databaseId = engineIntId
-            AppLogger.database.debug("✅ SUCCESS! Int ID found in engine_stats: \(engineIntId)")
-        } else if let engineStringId = engineStatsDict["id"] as? String, let intFromString = Int(engineStringId) {
-            databaseId = intFromString
-            AppLogger.database.debug("✅ SUCCESS! String ID in engine_stats, converted to Int: \(intFromString)")
-        } else if let engineDoubleId = engineStatsDict["id"] as? Double, engineDoubleId.truncatingRemainder(dividingBy: 1) == 0 {
-            databaseId = Int(engineDoubleId)
-            AppLogger.database.debug("✅ SUCCESS! Double ID in engine_stats, converted to Int: \(Int(engineDoubleId))")
-        }
-    }
-    // APPROACH 4: No ID found anywhere
-    else {
-        AppLogger.database.debug("❌ NO database ID found in JSON under any common ID keys")
-
-        // Print all keys to help diagnose
-        let keys = json.keys.joined(separator: ", ")
-        AppLogger.database.debug("Available JSON keys: \(keys)")
-
-        // Since we couldn't find an ID, try a different approach - look in system_info
-        if let systemInfo = json["system_info"] as? [String: Any] {
-            AppLogger.database.debug("🔍 CHECKING SYSTEM INFO FOR ID...")
-            if let systemInfoId = systemInfo["id"] as? Int {
-                databaseId = systemInfoId
-                AppLogger.database.debug("✅ SUCCESS! Int ID found in system_info: \(systemInfoId)")
-            }
-        }
-
-        // Look for any field with "id" in its name as last resort
-        for key in json.keys where key.lowercased().contains("id") {
-            AppLogger.database.debug("🔍 POTENTIAL ID FIELD: '\(key)' with value: \(String(describing: json[key]))")
-        }
-    }
-
-    // Extract the string ID that's separate from the numeric database ID
-    // This will be used for the new id field in ArticleJSON
     var stringId = ""
 
-    // Try these approaches in order of preference
-    if let idValue = json["id"] {
-        // Direct approach: use the string value or convert other types to string
-        if let strValue = idValue as? String {
-            stringId = strValue
-            AppLogger.database.debug("✅ ID STRING: Using direct string value: \(strValue)")
-        } else {
-            // For non-string types, convert to string
-            stringId = String(describing: idValue)
-            AppLogger.database.debug("✅ ID STRING: Converted \(type(of: idValue)) to string: \(stringId)")
+    // Try multiple approaches to find the ID
+    if let intId = json["id"] as? Int {
+        databaseId = intId
+        stringId = String(intId)
+    } else if let stringIdValue = json["id"] as? String {
+        stringId = stringIdValue
+        databaseId = Int(stringIdValue)
+    } else if let doubleId = json["id"] as? Double, doubleId.truncatingRemainder(dividingBy: 1) == 0 {
+        databaseId = Int(doubleId)
+        stringId = String(Int(doubleId))
+    } else if let engineStatsStr = json["engine_stats"] as? String,
+              let engineStatsData = engineStatsStr.data(using: .utf8),
+              let engineStatsDict = try? JSONSerialization.jsonObject(with: engineStatsData) as? [String: Any],
+              let engineId = engineStatsDict["id"] {
+        if let engineIntId = engineId as? Int {
+            databaseId = engineIntId
+            stringId = String(engineIntId)
+        } else if let engineStringId = engineId as? String {
+            stringId = engineStringId
+            databaseId = Int(engineStringId)
         }
     } else if let jsonURLParts = jsonURL.split(separator: "/").last?.split(separator: "."), let idPart = jsonURLParts.first {
         // Extract from JSON URL (e.g., "articles/bbc-12345.json" → "bbc-12345")
         stringId = String(idPart)
-        AppLogger.database.debug("✅ ID STRING: Extracted from jsonURL: \(stringId)")
     } else {
         // Last resort: use the jsonURL as ID
         stringId = jsonURL
-        AppLogger.database.debug("⚠️ ID STRING: Using jsonURL as fallback: \(stringId)")
     }
 
-    // Final ID status report
-    if let extractedId = databaseId {
-        AppLogger.database.debug("✅ FINAL RESULT: Successfully extracted database ID: \(extractedId)")
-    } else {
-        AppLogger.database.debug("❌ FINAL RESULT: Failed to extract any database ID")
+    // Only log if there's an issue with ID extraction
+    if databaseId == nil && stringId.isEmpty {
+        AppLogger.database.error("Failed to extract database ID from article JSON")
     }
-    AppLogger.database.debug("🔑 ID STRING: Final string ID: \(stringId)")
-    AppLogger.database.debug("📊 ==== END ID DEBUGGING ====")
 
     // Extract new R2 URL JSON fields (snake_case in API response)
     let actionRecommendations = json["action_recommendations"] as? String
     let talkingPoints = json["talking_points"] as? String
     let eli5Content = json["eli5"] as? String
 
-    // Comprehensive debug logging for all content fields
-    AppLogger.database.debug("📊 JSON FIELD EXTRACTION REPORT:")
-    let fieldsList = [
-        "title": json["tiny_title"] as? String,
-        "body": json["tiny_summary"] as? String,
-        "summary": json["summary"] as? String,
-        "critical_analysis": json["critical_analysis"] as? String,
-        "logical_fallacies": json["logical_fallacies"] as? String,
-        "source_analysis": json["source_analysis"] as? String,
-        "relation_to_topic": json["relation_to_topic"] as? String,
-        "additional_insights": json["additional_insights"] as? String,
-        "action_recommendations": actionRecommendations,
-        "talking_points": talkingPoints,
-        "eli5": eli5Content,
-    ]
-
-    for (name, content) in fieldsList {
-        if let content = content, !content.isEmpty {
-            let charCount = content.count
-            let preview = content.prefix(min(30, charCount)).replacingOccurrences(of: "\n", with: " ")
-            AppLogger.database.debug("✅ Field '\(name)' found: \(charCount) chars, preview: \"\(preview)...\"")
-        } else {
-            AppLogger.database.debug("❌ Field '\(name)' is missing or empty")
-        }
-    }
-
-    // Keep previous specific logging
-    if let actionRecs = actionRecommendations, !actionRecs.isEmpty {
-        AppLogger.database.debug("Found action_recommendations in JSON: \(actionRecs.prefix(50))...")
-    }
-    if let talkingPts = talkingPoints, !talkingPts.isEmpty {
-        AppLogger.database.debug("Found talking_points in JSON: \(talkingPts.prefix(50))...")
-    }
+    // Reduced field extraction logging - only log missing required fields
 
     // Extract cluster summary
     let clusterSummary = json["cluster_summary"] as? String
-    if let cluster = clusterSummary, !cluster.isEmpty {
-        AppLogger.database.debug("Found cluster_summary in JSON: \(cluster.prefix(50))...")
-    }
 
     // Extract entities
     var parsedEntities: [Entity]? = nil
     if let entitiesArray = json["entities"] as? [[String: Any]], !entitiesArray.isEmpty {
         do {
-            AppLogger.database.debug("Found \(entitiesArray.count) entities in API response")
             let data = try JSONSerialization.data(withJSONObject: entitiesArray)
             let decoder = JSONDecoder()
             parsedEntities = try decoder.decode([Entity].self, from: data)
-            AppLogger.database.debug("Successfully parsed \(parsedEntities?.count ?? 0) entities from API")
-
-            // Log a sample of entities for debugging
-            if let entities = parsedEntities, !entities.isEmpty {
-                let firstEntity = entities[0]
-                AppLogger.database.debug("Sample entity - Name: '\(firstEntity.name)', Type: '\(firstEntity.type)', Importance: '\(firstEntity.importance)'")
-            }
         } catch {
             AppLogger.database.error("Failed to parse entities: \(error)")
         }
@@ -813,7 +652,6 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
     var parsedRelatedArticles: [RelatedArticle]? = nil
     if let similarArticlesArray = json["similar_articles"] as? [[String: Any]], !similarArticlesArray.isEmpty {
         do {
-            AppLogger.database.debug("Found \(similarArticlesArray.count) related articles in API response")
             let data = try JSONSerialization.data(withJSONObject: similarArticlesArray)
 
             // First decode using the API model that handles ISO8601 string dates from the API
@@ -822,15 +660,6 @@ func processArticleJSON(_ json: [String: Any]) -> ArticleJSON? {
 
             // Convert API models to database models with proper date conversion
             parsedRelatedArticles = apiRelatedArticles.map { $0.toRelatedArticle() }
-
-            AppLogger.database.debug("Successfully parsed \(parsedRelatedArticles?.count ?? 0) related articles from API")
-
-            // Verify parsed data has valid content
-            if let articles = parsedRelatedArticles, !articles.isEmpty {
-                // Log the first article to help with debugging
-                let firstArticle = articles[0]
-                AppLogger.database.debug("Sample related article - ID: \(firstArticle.id), Title: '\(firstArticle.title)', URL: '\(firstArticle.jsonURL)'")
-            }
         } catch {
             AppLogger.database.error("Failed to parse similar_articles: \(error)")
         }

@@ -174,8 +174,7 @@ class APIClient {
         // The parameters (limit, topic, since) are kept for backward compatibility
         // but won't be used by the server.
 
-        ModernizationLogger.log(.info, component: .apiClient,
-                                message: "Fetching articles using the articles/sync endpoint")
+        // Reduced logging - only log significant events
 
         // We need to get a list of article URLs first
         let articleURLs = try await fetchArticleURLs(allowRetries: allowRetries)
@@ -186,8 +185,7 @@ class APIClient {
             return []
         }
 
-        ModernizationLogger.log(.info, component: .apiClient,
-                                message: "Retrieved \(articleURLs.count) article URLs, fetching content...")
+        // Removed repetitive fetching logging to reduce noise
 
         // Update progress to downloading phase
         progressHandler?("Downloading new articles...")
@@ -244,8 +242,7 @@ class APIClient {
             // Extract the jsonURL values (skip empty ones)
             let seenArticleURLs = recentArticles.compactMap { $0.jsonURL.isEmpty ? nil : $0.jsonURL }
 
-            ModernizationLogger.log(.info, component: .apiClient,
-                                    message: "Syncing with \(seenArticleURLs.count) articles from last 12 hours")
+            // Reduced routine sync logging
 
             // If we have too many, limit to avoid excessive payload size
             let limitedURLs = seenArticleURLs.count > 200 ? Array(seenArticleURLs.prefix(200)) : seenArticleURLs
@@ -344,8 +341,7 @@ class APIClient {
             url = validURL
         }
 
-        ModernizationLogger.log(.debug, component: .apiClient,
-                                message: "Fetching article by URL: \(jsonURL)")
+        // Removed excessive debug logging for routine article fetching
 
         do {
             return try await performAuthenticatedRequestWithDecoding(to: url, method: "GET") { data in
@@ -402,16 +398,14 @@ class APIClient {
         let url = URL(string: baseURL + "/articles/sync")!
         let payload = ["seen_articles": seenArticles]
 
-        ModernizationLogger.log(.debug, component: .apiClient,
-                                message: "Syncing \(seenArticles.count) articles with server")
+        // Reduced routine sync logging  
 
         do {
             return try await performAuthenticatedRequestWithDecoding(to: url, method: "POST", body: payload) { data in
                 do {
                     let response = try JSONDecoder().decode([String: [String]].self, from: data)
                     let unseenArticles = response["unseen_articles"] ?? []
-                    ModernizationLogger.log(.info, component: .apiClient,
-                                            message: "Sync successful. Found \(unseenArticles.count) unseen articles.")
+                    // Removed repetitive sync logging to reduce noise
                     return unseenArticles
                 } catch {
                     self.logger.error("Error decoding sync response: \(error.localizedDescription)")
@@ -613,22 +607,18 @@ class APIClient {
         }
 
         let statusCode = httpResponse.statusCode
-        logger.info("Response status code: \(statusCode)")
-
-        // Log more detailed information for important status codes
+        
+        // Only log errors and unusual status codes to reduce noise
         switch statusCode {
         case 200 ..< 300:
-            ModernizationLogger.log(.debug, component: .apiClient,
-                                    message: "Successful response: \(statusCode)")
+            // Success - no logging needed for routine operations
+            break
         case 400 ..< 500:
-            ModernizationLogger.log(.warning, component: .apiClient,
-                                    message: "Client error response: \(statusCode)")
+            logger.warning("Client error response: \(statusCode)")
         case 500 ..< 600:
-            ModernizationLogger.log(.error, component: .apiClient,
-                                    message: "Server error response: \(statusCode)")
+            logger.error("Server error response: \(statusCode)")
         default:
-            ModernizationLogger.log(.warning, component: .apiClient,
-                                    message: "Unusual status code: \(statusCode)")
+            logger.warning("Unusual status code: \(statusCode)")
         }
 
         // Log response headers for debugging

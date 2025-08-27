@@ -215,7 +215,6 @@ final class NewsViewModel: ObservableObject {
             object: nil
         )
 
-        AppLogger.database.debug("NewsViewModel initialized with container: \(String(describing: SwiftDataContainer.shared.container))")
     }
 
     /// Handler for background sync completion notification
@@ -284,11 +283,10 @@ final class NewsViewModel: ObservableObject {
             // Clear loading state
             isLoading = false
 
-            AppLogger.database.debug("✅ Refreshed articles: loaded \(self.filteredArticles.count) articles")
         } catch {
             self.error = error
             isLoading = false
-            AppLogger.database.error("❌ Error refreshing articles: \(error)")
+            AppLogger.database.error("Error refreshing articles: \(error)")
         }
     }
 
@@ -300,7 +298,6 @@ final class NewsViewModel: ObservableObject {
 
         // Then check if we need to redirect
         if filteredArticles.isEmpty, selectedTopic != "All" {
-            AppLogger.database.debug("No content for topic '\(self.selectedTopic)', auto-redirecting to 'All'")
 
             // Revert to "All" topic
             selectedTopic = "All"
@@ -336,7 +333,7 @@ final class NewsViewModel: ObservableObject {
                 qualityFilter: qualityFilter
             )
         } catch {
-            AppLogger.database.error("Error refreshing all articles: \(error)")
+            AppLogger.database.error("Error loading articles: \(error)")
             // Keep existing articles if fetch fails
         }
     }
@@ -402,7 +399,6 @@ final class NewsViewModel: ObservableObject {
     func syncWithServer() async {
         // Prevent concurrent sync operations
         guard !isSyncing else {
-            AppLogger.sync.info("Sync already in progress, ignoring duplicate request")
             return
         }
         
@@ -440,13 +436,12 @@ final class NewsViewModel: ObservableObject {
                 }
             }
 
-            AppLogger.database.debug("✅ Synced with server: added \(addedCount) articles")
         } catch {
             // Set error status
             syncStatus = .error(error.localizedDescription)
             isLoading = false
             self.error = error
-            AppLogger.database.error("❌ Error syncing with server: \(error)")
+            AppLogger.database.error("Error syncing with server: \(error)")
 
             // Schedule a task to reset to idle after a delay
             Task { @MainActor in
@@ -471,15 +466,12 @@ final class NewsViewModel: ObservableObject {
         // Track topic access for predictive loading
         topicAccessPatterns[topic] = Date()
 
-        AppLogger.database.debug("Applying topic filter: \(topic)")
 
         // Try to use cache for immediate response
         if tryLoadFromCache(topic: topic) {
-            AppLogger.database.debug("Cache hit for topic: \(topic)")
             // Still refresh in the background to ensure up-to-date data
             await refreshArticles()
         } else {
-            AppLogger.database.debug("Cache miss for topic: \(topic), performing full refresh")
             // If cache miss, do a full refresh
             await refreshArticles()
         }

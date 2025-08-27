@@ -37,6 +37,11 @@ struct ArgusApp: App {
 
                         // Register background tasks
                         registerBackgroundTasks()
+                        
+                        // Initialize auto-sync coordinator
+                        Task {
+                            await AutoSyncCoordinator.shared.scheduleInitialSync()
+                        }
                     }
                     .onChange(of: scenePhase) { _, newPhase in
                         if newPhase == .active {

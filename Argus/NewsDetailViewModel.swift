@@ -231,12 +231,10 @@ final class NewsDetailViewModel: ObservableObject {
         // Ensure we have a valid ArticleModel with context
         Task {
             if let articleId = currentArticle?.id, currentArticleModel?.modelContext == nil {
-                AppLogger.database.debug("🔍 ViewModel Init: Ensuring ArticleModel has valid context for ID: \(articleId)")
-                let model = await articleOperations.getArticleModelWithContext(byId: articleId)
+                    let model = await articleOperations.getArticleModelWithContext(byId: articleId)
 
                 if let model = model {
-                    AppLogger.database.debug("✅ ViewModel Init: Retrieved ArticleModel with valid context")
-                    await MainActor.run {
+                        await MainActor.run {
                         self.currentArticleModel = model
                     }
                 }
@@ -301,16 +299,11 @@ final class NewsDetailViewModel: ObservableObject {
         let targetArticle = articles[nextIndex]
         let nextArticleId = targetArticle.id
 
-        // Save current index to log the change
-        let oldIndex = currentIndex
-
         // IMPORTANT: Instead of immediately updating UI with unformatted content,
         // we'll extract formatted blobs first and only then update the UI
         Task(priority: .userInitiated) {
             // Start timing for diagnostics
             let startTime = Date()
-            AppLogger.database.debug("🔄 Navigating from index \(oldIndex) to \(nextIndex) (article ID: \(nextArticleId))")
-            AppLogger.database.debug("🔍 Container: \(String(describing: SwiftDataContainer.shared.container))")
 
             // Create a loading timer that will show loading indicator immediately if content takes time
             let loadingTimerTask = Task {
@@ -326,13 +319,11 @@ final class NewsDetailViewModel: ObservableObject {
             var model: ArticleModel? = getCachedModel(for: nextArticleId)
             
             if model == nil {
-                AppLogger.database.debug("🔍 Model not cached, fetching from database")
                 model = await articleOperations.getArticleModelWithContext(byId: nextArticleId)
                 if let fetchedModel = model {
                     cacheModel(fetchedModel)
                 }
             } else {
-                AppLogger.database.debug("⚡ Using cached model")
             }
 
             // 2. Phase 2.2: Extract formatted content from blobs using background processing
@@ -342,24 +333,14 @@ final class NewsDetailViewModel: ObservableObject {
 
             if let model = model {
                 // Log model details for diagnostics
-                AppLogger.database.debug("""
-                ✅ Retrieved ArticleModel with ID: \(model.id)
-                - Has context: \(model.modelContext != nil)
-                - Has title blob: \(model.titleBlob != nil)
-                - Has body blob: \(model.bodyBlob != nil)
-                - Has summary blob: \(model.summaryBlob != nil)
-                """)
 
                 // Phase 2.2: Use background blob processing for parallel extraction
-                let blobExtractionStart = Date()
                 let (title, body, summary) = await extractBlobsInBackground(from: model)
-                let blobExtractionTime = Date().timeIntervalSince(blobExtractionStart)
                 
                 extractedTitle = title
                 extractedBody = body
                 extractedSummary = summary
                 
-                AppLogger.database.debug("⚡ Background blob extraction completed in \(String(format: "%.3f", blobExtractionTime)) seconds")
             }
 
             // 3. Phase 1.3: Batch all state updates to minimize SwiftUI refresh cycles

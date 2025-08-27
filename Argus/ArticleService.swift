@@ -860,13 +860,10 @@ final class ArticleService: ArticleServiceProtocol {
     private func processRemoteArticles(_ articles: [ArticleJSON], targetNewArticles _: Int = 50, progressHandler: ((String) -> Void)? = nil) async throws -> Int {
         guard !articles.isEmpty else { return 0 }
 
-        AppLogger.database.debug("🎯 Processing \(articles.count) articles (processing ALL articles from server)")
         progressHandler?("Processing articles...")
 
         var addedCount = 0
         let context = ModelContext(modelContainer)
-
-        AppLogger.database.debug("🔄 Starting article processing")
 
         // Process ALL articles the server sends (no early termination)
         for (_, article) in articles.enumerated() {
@@ -940,7 +937,6 @@ final class ArticleService: ArticleServiceProtocol {
 
         // Final save for any remaining articles
         try context.save()
-        AppLogger.database.debug("✅ Final save completed - added \(addedCount) new articles")
 
         // Generate rich text for new articles in batches
         if addedCount > 0 {
@@ -1314,14 +1310,9 @@ final class ArticleService: ArticleServiceProtocol {
 
     // Private implementation for synchronous clearing
     private func doClearCache() {
-        ModernizationLogger.log(.debug, component: .articleService,
-                                message: "Clearing cache with \(cacheKeys.count) keys")
-
+        // Removed excessive logging - cache clearing is routine operation
         cache.removeAllObjects()
         cacheKeys.removeAll()
         lastCacheUpdate = Date.distantPast
-
-        ModernizationLogger.log(.debug, component: .articleService,
-                                message: "Cache cleared")
     }
 }
