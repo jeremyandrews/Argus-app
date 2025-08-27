@@ -29,60 +29,105 @@ class PreloadManager {
     }
 
     // Preload a batch of articles that will likely be viewed soon
-    func preloadArticles(_ articles: [ArticleModel], currentIndex: Int) {
+    // Enhanced to preload Next-3 and Previous-3 articles for faster navigation
+    // Swift 6 compatible version using article IDs
+    func preloadArticlesByIds(_ articleIds: [UUID], currentIndex: Int) {
         // Cancel any existing preload task
         preloadTask?.cancel()
 
         // Start a new preload task
         preloadTask = Task(priority: .background) {
-            // Calculate which articles to preload (next few after current)
-            let startIndex = currentIndex + 1
-            let endIndex = min(startIndex + 5, articles.count)
+            // Calculate which articles to preload (3 in each direction from current)
+            let nextStartIndex = currentIndex + 1
+            let nextEndIndex = min(nextStartIndex + 3, articleIds.count)
+            let prevStartIndex = max(0, currentIndex - 3)
+            let prevEndIndex = currentIndex
 
-            guard startIndex < articles.count else { return }
+            AppLogger.database.debug("🚀 PreloadManager: Preloading articles around index \(currentIndex)")
+            AppLogger.database.debug("   Next: \(nextStartIndex) to \(nextEndIndex-1)")
+            AppLogger.database.debug("   Prev: \(prevStartIndex) to \(prevEndIndex-1)")
 
-            // Preload each article
-            for index in startIndex ..< endIndex {
-                if Task.isCancelled { break }
+            var preloadedCount = 0
 
-                let article = articles[index]
+            // Preload next 3 articles
+            if nextStartIndex < articleIds.count {
+                for index in nextStartIndex ..< nextEndIndex {
+                    if Task.isCancelled { break }
 
-                // Skip if already preloaded
-                if await isPreloaded(article.id) {
-                    continue
-                }
+                    let articleId = articleIds[index]
 
-                // Mark as preloaded
-                await markAsPreloaded(article.id)
-
-                // Use ArticleOperations to process blob generation
-                let operations = ArticleOperations()
-
-                // Extract the article ID (which is Sendable) to use inside MainActor
-                let articleId = article.id
-
-                // Generate blobs for key fields - everything related to ArticleModel must run on MainActor
-                // for Swift 6 sendability compliance
-                // Use Task with @MainActor annotation to handle async operations on the MainActor
-                await Task { @MainActor in
-                    // Within MainActor, get a fresh ArticleModel with context
-                    if let articleWithContext = await operations.getArticleModelWithContext(byId: articleId) {
-                        // These operations already run on the main actor since they involve NSAttributedString
-                        _ = operations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
-                        _ = operations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
-
-                        AppLogger.database.debug("✅ Preloaded blobs for article \(articleId)")
-                    } else {
-                        AppLogger.database.warning("⚠️ Could not preload article \(articleId) - context not available")
+                    // Skip if already preloaded (no-op for already preloaded articles)
+                    if await isPreloaded(articleId) {
+                        AppLogger.database.debug("⚡ Article at index \(index) already preloaded, skipping")
+                        continue
                     }
-                }.value
 
-                // Schedule processing through the queue manager as a fallback
-                await ProcessingQueueManager.shared.scheduleProcessing(for: article.id)
+                    // Mark as preloaded
+                    await markAsPreloaded(articleId)
 
-                // Small delay between articles
-                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                    await preloadSingleArticleById(articleId, index: index)
+                    preloadedCount += 1
+
+                    // Small delay between articles
+                    try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                }
             }
+
+            // Preload previous 3 articles  
+            if prevEndIndex > prevStartIndex {
+                for index in (prevStartIndex ..< prevEndIndex).reversed() {
+                    if Task.isCancelled { break }
+
+                    let articleId = articleIds[index]
+
+                    // Skip if already preloaded (no-op for already preloaded articles)
+                    if await isPreloaded(articleId) {
+                        AppLogger.database.debug("⚡ Article at index \(index) already preloaded, skipping")
+                        continue
+                    }
+
+                    // Mark as preloaded
+                    await markAsPreloaded(articleId)
+
+                    await preloadSingleArticleById(articleId, index: index)
+                    preloadedCount += 1
+
+                    // Small delay between articles
+                    try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                }
+            }
+
+            AppLogger.database.debug("✅ PreloadManager: Completed preloading \(preloadedCount) articles")
         }
+    }
+    
+    // Legacy method maintained for backward compatibility
+    func preloadArticles(_ articles: [ArticleModel], currentIndex: Int) {
+        let articleIds = articles.map { $0.id }
+        preloadArticlesByIds(articleIds, currentIndex: currentIndex)
+    }
+
+    // Helper method to preload a single article by ID (Swift 6 compatible)
+    private func preloadSingleArticleById(_ articleId: UUID, index: Int) async {
+        // Use ArticleOperations to process blob generation
+        let operations = ArticleOperations()
+
+        // Generate blobs for key fields - everything related to ArticleModel must run on MainActor
+        // for Swift 6 sendability compliance
+        await Task { @MainActor in
+            // Within MainActor, get a fresh ArticleModel with context
+            if let articleWithContext = await operations.getArticleModelWithContext(byId: articleId) {
+                // These operations already run on the main actor since they involve NSAttributedString
+                _ = operations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
+                _ = operations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
+
+                AppLogger.database.debug("✅ Preloaded blobs for article \(articleId) at index \(index)")
+            } else {
+                AppLogger.database.warning("⚠️ Could not preload article \(articleId) at index \(index) - context not available")
+            }
+        }.value
+
+        // Schedule processing through the queue manager as a fallback
+        await ProcessingQueueManager.shared.scheduleProcessing(for: articleId)
     }
 }
