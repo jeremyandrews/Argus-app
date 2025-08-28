@@ -244,10 +244,8 @@ final class AutoSyncCoordinator: ObservableObject {
         // Phase 4.1: Setup network monitoring for offline queue
         setupNetworkRecoveryMonitoring()
         
-        // Start auto-sync if enabled
-        if autoSyncEnabled {
-            startPeriodicSync()
-        }
+        // Don't start periodic timer immediately - wait for initial sync to complete
+        // The periodic timer will be started after the first initial sync
     }
     
     // MARK: - Public API
@@ -267,6 +265,11 @@ final class AutoSyncCoordinator: ObservableObject {
         
         // Perform sync if conditions are met
         await performAutoSyncIfNeeded(context: .appLaunch)
+        
+        // Start the periodic timer after initial sync completes (only if auto-sync is enabled)
+        if autoSyncEnabled {
+            startPeriodicSync()
+        }
     }
     
     /// Enables or disables auto-sync functionality
@@ -345,34 +348,57 @@ final class AutoSyncCoordinator: ObservableObject {
     
     /// Starts periodic sync timer
     private func startPeriodicSync() {
-        guard self.autoSyncEnabled else { return }
+        guard self.autoSyncEnabled else { 
+            logger.debug("Auto-sync disabled - not starting timer")
+            return 
+        }
         
-        stopPeriodicSync() // Stop any existing timer
+        // Always stop existing timer first using standard iOS pattern
+        stopPeriodicSync()
         
         let interval = getCurrentSyncInterval()
         nextScheduledSync = Date().addingTimeInterval(interval)
         
-        logger.info("Auto-sync scheduled every \(Int(interval/60)) minutes")
+        logger.info("Auto-sync timer starting - interval: \(Int(interval/60)) minutes")
         
-        periodicSyncTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        // Use standard iOS Timer pattern with proper weak self handling
+        periodicSyncTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                self?.logger.debug("Timer callback - self deallocated, invalidating timer")
+                timer.invalidate()
+                return
+            }
+            
+            // Verify timer is still valid before proceeding
+            guard timer.isValid else {
+                self.logger.debug("Timer callback - timer no longer valid, skipping sync")
+                return
+            }
+            
+            self.logger.debug("Timer callback - triggering periodic sync check")
             Task { @MainActor in
-                await self?.performPeriodicSyncIfNeeded()
+                await self.performPeriodicSyncIfNeeded()
             }
         }
+        
+        logger.info("Periodic sync timer created successfully - next sync in \\(Int(interval/60)) minutes")
     }
     
     /// Stops periodic sync timer
     private func stopPeriodicSync() {
-        periodicSyncTimer?.invalidate()
+        if let timer = periodicSyncTimer {
+            logger.debug("Stopping periodic sync timer")
+            timer.invalidate()
+        }
         periodicSyncTimer = nil
         nextScheduledSync = nil
-        // Only log when user explicitly disables auto-sync
     }
     
     /// Gets the current sync interval from UserDefaults or uses default
     private func getCurrentSyncInterval() -> TimeInterval {
-        let savedInterval = UserDefaults.standard.double(forKey: "autoSyncFrequencyMinutes")
-        return savedInterval > 0 ? savedInterval : periodicSyncInterval
+        let savedMinutes = UserDefaults.standard.double(forKey: "autoSyncFrequencyMinutes")
+        let minutes = savedMinutes > 0 ? savedMinutes : Double(syncFrequencyMinutes)
+        return minutes * 60.0 // Convert minutes to seconds
     }
     
     /// Performs periodic sync if conditions are met - Phase 2.2 Enhanced
@@ -481,22 +507,35 @@ final class AutoSyncCoordinator: ObservableObject {
     
     /// Performs auto-sync if conditions allow
     private func performAutoSyncIfNeeded(context: AutoSyncContext) async {
-        guard autoSyncEnabled && !isAutoSyncing else { return }
+        guard autoSyncEnabled else { 
+            logger.debug("Auto-sync disabled - skipping sync request")
+            return 
+        }
         
-        // Generate new session ID
+        // Standard Swift concurrency: Check if sync already in progress
+        guard !isAutoSyncing else {
+            logger.debug("Sync already in progress - ignoring request from context: \(context.rawValue)")
+            return
+        }
+        
+        // Generate new session ID for this sync operation
         syncSessionId = UUID()
         let currentSessionId = syncSessionId
         
         // Phase 4.3: Start performance monitoring
         startPerformanceMonitoring()
         
+        // Set sync state using standard pattern
         isAutoSyncing = true
         defer {
-            // Only reset if this is still the current session
+            // Standard cleanup: Only reset if this is still the current session
             if syncSessionId == currentSessionId {
                 isAutoSyncing = false
+                logger.debug("Sync operation completed - context: \(context.rawValue)")
             }
         }
+        
+        logger.debug("Starting sync operation - context: \(context.rawValue)")
         
         var syncSuccess = false
         var syncError: AutoSyncError?
