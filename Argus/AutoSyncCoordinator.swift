@@ -553,6 +553,17 @@ final class AutoSyncCoordinator: ObservableObject {
             // Schedule next background sync
             backgroundTaskManager.scheduleBackgroundRefresh()
             
+            // Notify UI that new content is available if articles were added
+            if result.addedCount > 0 {
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: Notification.Name.articleProcessingCompleted,
+                        object: nil
+                    )
+                }
+                logger.info("Posted UI refresh notification - \(result.addedCount) new articles")
+            }
+            
         } catch {
             // Phase 2.2: Track consecutive failures for progressive backoff
             consecutiveFailures += 1
