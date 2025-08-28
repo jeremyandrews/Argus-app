@@ -171,6 +171,15 @@ struct SettingsView: View {
                         }
                     }
                     .foregroundColor(.primary)
+                    
+                    NavigationLink(destination: SyncStatisticsView()) {
+                        HStack {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .foregroundColor(.blue)
+                            Text("Sync Statistics")
+                        }
+                    }
+                    .foregroundColor(.primary)
 
                     Button(action: {
                         Task {
