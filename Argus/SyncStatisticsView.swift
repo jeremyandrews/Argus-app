@@ -5,7 +5,6 @@ struct SyncStatisticsView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var coordinator = AutoSyncCoordinator.shared
     @State private var performanceReport: String = ""
-    @State private var optimizationRecommendations: [String] = []
     @State private var isLoading = true
     @State private var showingClearAlert = false
     @State private var isAtTop: Bool = true
@@ -32,11 +31,6 @@ struct SyncStatisticsView: View {
                     
                         // System Resources Section
                         systemResourcesSection
-                    
-                        Divider()
-                    
-                        // Optimization Recommendations Section
-                        optimizationSection
                     
                         Divider()
                     
@@ -332,35 +326,6 @@ struct SyncStatisticsView: View {
         }
     }
     
-    // MARK: - Optimization Section
-    
-    private var optimizationSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Optimization Recommendations", systemImage: "lightbulb")
-                .font(.headline)
-                .foregroundColor(.purple)
-            
-            if optimizationRecommendations.isEmpty {
-                Text("No optimization recommendations available.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .background(Color(UIColor.systemGray6))
-                    .cornerRadius(8)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(optimizationRecommendations, id: \.self) { recommendation in
-                        Text("• \(recommendation)")
-                            .font(.system(.body, design: .monospaced))
-                    }
-                }
-                .padding()
-                .background(Color(UIColor.systemGray6))
-                .cornerRadius(8)
-            }
-        }
-    }
-    
     // MARK: - Actions Section
     
     private var actionsSection: some View {
@@ -451,7 +416,6 @@ struct SyncStatisticsView: View {
         isLoading = true
         
         performanceReport = coordinator.getPerformanceReport()
-        optimizationRecommendations = coordinator.getOptimizationRecommendations()
         
         await MainActor.run {
             isLoading = false
