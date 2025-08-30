@@ -2,6 +2,7 @@ import SwiftUI
 import UserNotifications
 
 struct SettingsView: View {
+    @Environment(TabNavigationState.self) private var tabNavigation
     @AppStorage("autoDeleteDays") private var autoDeleteDays: Int = UserDefaults.standard.object(forKey: "autoDeleteDays") == nil ? 3 : UserDefaults.standard.integer(forKey: "autoDeleteDays")
     @AppStorage("sortOrder") private var sortOrder: String = "newest"
     @AppStorage("groupingStyle") private var groupingStyle: String = "date"
@@ -17,6 +18,7 @@ struct SettingsView: View {
 
     @AppStorage("useReaderMode") private var useReaderMode: Bool = true
     @AppStorage("allowCellularSync") private var allowCellularSync: Bool = false
+    @State private var isAtTop: Bool = true
 
     private var versionInfo: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
@@ -25,38 +27,40 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationView {
-            Form {
-                Section {
-                    VStack(alignment: .leading) {
-                        Text(autoDeleteDays == 0 ? "Disabled" : "After \(autoDeleteDays) day\(autoDeleteDays == 1 ? "" : "s")")
-                            .font(.headline)
-                            .padding(.bottom, 5)
+        NavigationStack {
+            ScrollViewReader { proxy in
+                List {
+                    Section {
+                        VStack(alignment: .leading) {
+                            Text(autoDeleteDays == 0 ? "Disabled" : "After \(autoDeleteDays) day\(autoDeleteDays == 1 ? "" : "s")")
+                                .font(.headline)
+                                .padding(.bottom, 5)
 
-                        VStack(spacing: 4) {
-                            Slider(value: Binding(
-                                get: { Double(autoDeleteDays) },
-                                set: { autoDeleteDays = Int($0) }
-                            ), in: 0 ... 7, step: 1)
+                            VStack(spacing: 4) {
+                                Slider(value: Binding(
+                                    get: { Double(autoDeleteDays) },
+                                    set: { autoDeleteDays = Int($0) }
+                                ), in: 0 ... 7, step: 1)
 
-                            HStack {
-                                ForEach(0 ... 7, id: \.self) { mark in
-                                    Text("\(mark)")
-                                        .font(.caption2)
-                                        .frame(maxWidth: .infinity)
+                                HStack {
+                                    ForEach(0 ... 7, id: \.self) { mark in
+                                        Text("\(mark)")
+                                            .font(.caption2)
+                                            .frame(maxWidth: .infinity)
+                                    }
                                 }
+                                .padding(.horizontal, 4)
                             }
-                            .padding(.horizontal, 4)
-                        }
 
-                        Text("Automatically delete articles older than the selected number of days. Bookmarked or Archived articles will not be automatically deleted.")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 5)
+                            Text("Automatically delete articles older than the selected number of days. Bookmarked or Archived articles will not be automatically deleted.")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 5)
+                        }
+                    } header: {
+                        Text("Auto-delete Articles")
                     }
-                } header: {
-                    Text("Auto-delete Articles")
-                }
+                    .id("settingsListTop")
 
                 Section {
                     VStack(alignment: .leading) {
@@ -213,7 +217,30 @@ struct SettingsView: View {
                     Text("Debug")
                 }
             }
+            .listStyle(InsetGroupedListStyle())
             .navigationTitle("Settings")
+            .background(
+                // Scroll position detection using geometry reader
+                GeometryReader { geometry in
+                    Color.clear
+                        .onChange(of: geometry.frame(in: .global).minY) { _, newY in
+                            // Simple heuristic: if the form is scrolled significantly, we're not at top
+                            let newIsAtTop = newY > 50 // Form typically starts around 140-160, so 50 means we've scrolled up significantly
+                            if newIsAtTop != isAtTop {
+                                isAtTop = newIsAtTop
+                                tabNavigation.updateScrollPosition(for: 2, isAtTop: newIsAtTop, scrollOffset: newY)
+                            }
+                        }
+                }
+            )
+            .onReceive(NotificationCenter.default.publisher(for: .tabScrollToTop)) { notification in
+                if let tabIndex = notification.object as? Int, tabIndex == 2 {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo("settingsListTop", anchor: .top)
+                    }
+                }
+            }
+            }
         }
     }
 

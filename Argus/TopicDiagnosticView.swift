@@ -81,9 +81,13 @@ class TopicDiagnosticViewModel: ObservableObject {
 }
 
 struct TopicDiagnosticView: View {
+    @Environment(TabNavigationState.self) private var tabNavigation
+    @Environment(\.dismiss) private var dismiss
     @StateObject var viewModel = TopicDiagnosticViewModel()
     @State private var showingConfirmationAlert = false
     @State private var topicToMarkAsRead: String = ""
+    @State private var isAtTop: Bool = true
+    @State private var scrollPosition = ScrollPosition()
     
     // Get current quality filter for display
     private var currentQualityFilter: String {
@@ -97,9 +101,9 @@ struct TopicDiagnosticView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView([.horizontal, .vertical]) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        // Header row
-                        HStack(spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            // Header row
+                            HStack(spacing: 0) {
                             // Topic column header
                             Text("Topic")
                                 .font(.system(.body, design: .monospaced))
@@ -165,6 +169,7 @@ struct TopicDiagnosticView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(Color(UIColor.systemGray6))
+                        .id("top")
                         
                         Divider()
                         
@@ -304,14 +309,59 @@ struct TopicDiagnosticView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(Color(UIColor.systemGray5))
+                        }
+                        .background(
+                            // Scroll position detection using geometry reader
+                            GeometryReader { geometry in
+                                Color.clear
+                                    .onChange(of: geometry.frame(in: .global).minY) { _, newY in
+                                        // Detect if we're at the top of the scroll view
+                                        let newIsAtTop = newY >= -10 // Allow small tolerance for "at top"
+                                        if newIsAtTop != isAtTop {
+                                            isAtTop = newIsAtTop
+                                            tabNavigation.updateScrollPosition(for: 2, isAtTop: newIsAtTop, scrollOffset: newY)
+                                        }
+                                    }
+                            }
+                        )
+                        .onReceive(NotificationCenter.default.publisher(for: .tabScrollToTop)) { notification in
+                            if let tabIndex = notification.object as? Int, tabIndex == 2 {
+                                withAnimation(.easeInOut(duration: 0.5)) {
+                                    scrollPosition.scrollTo(edge: .top)
+                                }
+                            }
+                        }
+                    .onReceive(NotificationCenter.default.publisher(for: .tabNavigateUp)) { notification in
+                        print("TopicDiagnosticView: Received tabNavigateUp notification")
+                        if let tabIndex = notification.object as? Int {
+                            print("TopicDiagnosticView: tabNavigateUp notification for tab \(tabIndex)")
+                            if tabIndex == 2 {
+                                print("TopicDiagnosticView: Tab matches (2), calling dismiss()")
+                                dismiss()
+                            } else {
+                                print("TopicDiagnosticView: Tab doesn't match (expected 2, got \(tabIndex))")
+                            }
+                        } else {
+                            print("TopicDiagnosticView: tabNavigateUp notification has no tabIndex")
+                        }
                     }
                 }
+                .scrollPosition($scrollPosition)
             }
         }
         .onAppear {
+            // Set navigation state to indicate we're in a subview
+            tabNavigation.setNavigationState(for: 2, inSubview: true, level: 1)
+            // Initialize scroll position for this subview
+            isAtTop = true
+            tabNavigation.updateScrollPosition(for: 2, isAtTop: true)
             Task {
                 await viewModel.refreshStatistics()
             }
+        }
+        .onDisappear {
+            // Clear navigation state when leaving the view
+            tabNavigation.setNavigationState(for: 2, inSubview: false, level: 0)
         }
         .navigationTitle("Topic Statistics")
         .toolbar {

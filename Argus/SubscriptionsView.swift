@@ -26,13 +26,15 @@ struct SubscriptionsView: View {
     @State private var jwtToken: String? = nil
     @State private var errorMessage: ErrorWrapper? = nil
     @State private var isFirstLaunch: Bool = true
+    @Environment(TabNavigationState.self) private var tabNavigation
     let listOfSubscriptions: [String] = ["Alert: Direct", "Alert: Near", "Apple", "Bitcoins", "Clients", "Drupal", "E-Ink", "Entertainment, Books", "Entertainment, Movies", "Entertainment, Music", "Entertainment, Other", "EVs", "Fitness", "Global", "LLMs", "Longevity", "Politics, US", "Politics, Italy", "Politics, World", "Rust", "Space", "Tuscany", "Vulnerability", "Test"]
     let defaultAutoSubscriptions: [String] = ["Apple", "Bitcoins", "Drupal", "EVs", "Fitness", "Global", "LLMs", "Space", "Vulnerability"]
     private let defaultAlertTopics: Set<String> = ["Alert: Direct", "Clients", "Global", "Vulnerability", "Test"]
     var body: some View {
         NavigationView {
-            List {
-                ForEach(listOfSubscriptions, id: \.self) { topic in
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(listOfSubscriptions, id: \.self) { topic in
                     let subscription = subscriptions[topic] ?? Subscription(isSubscribed: false, isHighPriority: defaultAlertTopics.contains(topic))
                     HStack {
                         Button(action: {
@@ -67,6 +69,15 @@ struct SubscriptionsView: View {
                     }
                     .listRowBackground(subscription.isSubscribed ? Color.clear : Color.gray.opacity(0.2))
                 }
+                .id("subscriptionsListTop")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .tabScrollToTop)) { notification in
+                if let tabIndex = notification.userInfo?["tabIndex"] as? Int, tabIndex == 1 {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo("subscriptionsListTop", anchor: .top)
+                    }
+                }
+            }
             }
             .navigationTitle("Subscriptions")
             .onAppear {

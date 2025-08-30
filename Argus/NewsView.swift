@@ -42,6 +42,7 @@ struct NewsView: View {
     @Environment(\.editMode) private var editMode
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(TabNavigationState.self) private var tabNavigation
     
     // Enhanced layout state management
     @State private var layoutDimensions = LayoutDimensions()
@@ -129,6 +130,7 @@ struct NewsView: View {
     
     private var mainContent: some View {
         ZStack(alignment: .bottom) {
+            ScrollViewReader { proxy in
                 // Main List containing header, topic bar, and articles
                 List(selection: $viewModel.selectedArticleIds) {
                     // Header Section
@@ -141,6 +143,7 @@ struct NewsView: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets())
                     }
+                    .id("newsListTop")
 
                     // Content Section - either empty state or articles
                     if viewModel.filteredArticles.isEmpty {
@@ -182,6 +185,13 @@ struct NewsView: View {
                 }
                 .listStyle(.plain)
                 .environment(\.editMode, editMode)
+                .onReceive(NotificationCenter.default.publisher(for: .tabScrollToTop)) { notification in
+                    if let tabIndex = notification.object as? Int, tabIndex == 0 {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo("newsListTop", anchor: .top)
+                        }
+                    }
+                }
                 // Pull-to-refresh for the entire list
                 .refreshable {
                     // Phase 3: Ensure smooth sync operation
@@ -293,7 +303,8 @@ struct NewsView: View {
                 }
             }
         }
-
+    }
+    
     // Central handler for all filter changes
     private func handleFilterChange(topicChanged: Bool = false, newTopic: String? = nil, isDataChange _: Bool = false) {
         Task {
@@ -1231,6 +1242,4 @@ struct NewsView: View {
             await viewModel.toggleBookmark(for: article)
         }
     }
-    
-    
 }

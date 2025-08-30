@@ -1,11 +1,15 @@
 import SwiftUI
 
 struct SyncStatisticsView: View {
+    @Environment(TabNavigationState.self) private var tabNavigation
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var coordinator = AutoSyncCoordinator.shared
     @State private var performanceReport: String = ""
     @State private var optimizationRecommendations: [String] = []
     @State private var isLoading = true
     @State private var showingClearAlert = false
+    @State private var isAtTop: Bool = true
+    @State private var scrollPosition = ScrollPosition()
     
     var body: some View {
         VStack(spacing: 0) {
@@ -17,35 +21,83 @@ struct SyncStatisticsView: View {
                     LazyVStack(alignment: .leading, spacing: 16) {
                         // Current Status Section
                         currentStatusSection
-                        
+                            .id("syncStatsListTop")
+                    
                         Divider()
-                        
+                    
                         // Performance Metrics Section
                         performanceMetricsSection
-                        
+                    
                         Divider()
-                        
+                    
                         // System Resources Section
                         systemResourcesSection
-                        
+                    
                         Divider()
-                        
+                    
                         // Optimization Recommendations Section
                         optimizationSection
-                        
+                    
                         Divider()
-                        
+                    
                         // Actions Section
                         actionsSection
                     }
                     .padding()
                 }
+                .scrollPosition($scrollPosition)
+                .background(
+                    // Scroll position detection using geometry reader
+                    GeometryReader { geometry in
+                        Color.clear
+                            .onChange(of: geometry.frame(in: .global).minY) { _, newY in
+                                // Detect if we're at the top of the scroll view
+                                let newIsAtTop = newY >= -10 // Allow small tolerance for "at top"
+                                if newIsAtTop != isAtTop {
+                                    isAtTop = newIsAtTop
+                                    tabNavigation.updateScrollPosition(for: 2, isAtTop: newIsAtTop, scrollOffset: newY)
+                                }
+                            }
+                    }
+                )
+                .onReceive(NotificationCenter.default.publisher(for: .tabScrollToTop)) { notification in
+                    if let tabIndex = notification.object as? Int, tabIndex == 2 {
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            scrollPosition.scrollTo(edge: .top)
+                        }
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .tabNavigateUp)) { notification in
+                    print("SyncStatisticsView: Received tabNavigateUp notification")
+                    if let tabIndex = notification.object as? Int {
+                        print("SyncStatisticsView: tabNavigateUp notification for tab \(tabIndex)")
+                        if tabIndex == 2 {
+                            print("SyncStatisticsView: Tab matches (2), calling dismiss()")
+                            dismiss()
+                        } else {
+                            print("SyncStatisticsView: Tab doesn't match (expected 2, got \(tabIndex))")
+                        }
+                    } else {
+                        print("SyncStatisticsView: tabNavigateUp notification has no tabIndex")
+                    }
+                }
             }
         }
         .onAppear {
+            // Set navigation state to indicate we're in a subview
+            tabNavigation.setNavigationState(for: 2, inSubview: true, level: 1)
+            // Reset scroll state for progressive navigation to work properly
+            tabNavigation.resetScrollState(for: 2)
+            // Initialize scroll position for this subview
+            isAtTop = true
+            tabNavigation.updateScrollPosition(for: 2, isAtTop: true)
             Task {
                 await refreshData()
             }
+        }
+        .onDisappear {
+            // Clear navigation state when leaving the view
+            tabNavigation.setNavigationState(for: 2, inSubview: false, level: 0)
         }
         .navigationTitle("Sync Statistics")
         .toolbar {
@@ -482,6 +534,7 @@ struct SyncStatisticsView: View {
     private var networkStatusColor: Color {
         return .green
     }
+
 }
 
 #Preview {
