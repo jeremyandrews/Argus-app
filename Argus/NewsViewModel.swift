@@ -395,31 +395,24 @@ final class NewsViewModel: ObservableObject {
         }
     }
 
-    /// Performs a sync with the server for updated content
+    /// Performs a sync with the server for updated content using the global sync coordinator
     func syncWithServer() async {
-        // Prevent concurrent sync operations
-        guard !isSyncing else {
-            return
-        }
-        
-        // Set status to searching and loading state
-        syncStatus = .searching
-        isLoading = true
-        error = nil
-
+        // Use global sync coordinator to prevent race conditions
         do {
-            // Sync with server
-            let addedCount = try await articleOperations.syncContent(
-                topic: selectedTopic != "All" ? selectedTopic : nil,
-                progressHandler: { message in
-                    // Update progress state with phase message
-                    Task { @MainActor in
-                        self.syncStatus = .syncing(message: message)
-                    }
-                }
-            )
+            // Set initial status
+            syncStatus = .searching
+            isLoading = true
+            error = nil
 
-            // If we got new articles, refresh
+            let addedCount = try await GlobalSyncCoordinator.shared.requestManualSync(
+                topic: selectedTopic != "All" ? selectedTopic : nil
+            ) { message in
+                Task { @MainActor in
+                    self.syncStatus = .syncing(message: message)
+                }
+            }
+
+            // If we got new articles, refresh the view
             if addedCount > 0 {
                 await refreshArticles()
             }

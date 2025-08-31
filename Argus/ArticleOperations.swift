@@ -517,11 +517,9 @@ final class ArticleOperations {
         progressHandler: ((String) -> Void)? = nil
     ) async throws -> Int {
         do {
-            let articleService = ArticleService.shared
-
-            // Forward the progressHandler to the service layer
-            // This will provide real-time progress updates for both searching and downloading
-            return try await articleService.syncArticlesFromServer(
+            // Use GlobalSyncCoordinator to prevent race conditions
+            return try await GlobalSyncCoordinator.shared.requestSync(
+                type: .manual(topic: topic),
                 topic: topic,
                 limit: limit,
                 progressHandler: progressHandler
@@ -536,7 +534,26 @@ final class ArticleOperations {
     /// - Parameter progressHandler: Optional handler for progress updates (current, total)
     /// - Returns: Summary of the sync operation
     func performBackgroundSync(progressHandler: ((String) -> Void)? = nil) async throws -> SyncResultSummary {
-        return try await articleService.performBackgroundSync(progressHandler: progressHandler)
+        do {
+            // Use GlobalSyncCoordinator for background sync to prevent race conditions
+            let addedCount = try await GlobalSyncCoordinator.shared.requestSync(
+                type: .background,
+                topic: nil,
+                limit: nil,
+                progressHandler: progressHandler
+            )
+            
+            // Return a summary of the background sync operation
+            return SyncResultSummary(
+                addedCount: addedCount,
+                updatedCount: 0,
+                deletedCount: 0,
+                duration: 0.0 // Duration tracking handled by GlobalSyncCoordinator
+            )
+        } catch {
+            AppLogger.sync.error("Error performing background sync: \(error)")
+            throw error
+        }
     }
 
     // MARK: - Group & Sort Operations

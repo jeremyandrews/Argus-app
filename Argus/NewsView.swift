@@ -194,8 +194,43 @@ struct NewsView: View {
                 }
                 // Pull-to-refresh for the entire list
                 .refreshable {
-                    // Phase 3: Ensure smooth sync operation
-                    await viewModel.syncWithServer()
+                    // Use global sync coordinator to prevent race conditions
+                    do {
+                        _ = try await GlobalSyncCoordinator.shared.requestManualSync(
+                            topic: viewModel.selectedTopic != "All" ? viewModel.selectedTopic : nil
+                        ) { message in
+                            Task { @MainActor in
+                                viewModel.syncStatus = .syncing(message: message)
+                            }
+                        }
+                        
+                        // Refresh the view with new data
+                        await viewModel.refreshArticles()
+                        
+                        // Set status to complete
+                        viewModel.syncStatus = .complete
+                        
+                        // Schedule a task to reset to idle after a delay
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                            if case .complete = viewModel.syncStatus {
+                                viewModel.syncStatus = .idle
+                            }
+                        }
+                        
+                    } catch {
+                        // Set error status
+                        viewModel.syncStatus = .error(error.localizedDescription)
+                        AppLogger.sync.error("Manual sync failed: \(error)")
+                        
+                        // Schedule a task to reset to idle after a delay
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                            if case .error = viewModel.syncStatus {
+                                viewModel.syncStatus = .idle
+                            }
+                        }
+                    }
                 }
                 // Note: Removed .disabled(viewModel.isSyncing) as it was causing complete UI freeze
                 // The refreshable modifier already handles preventing multiple simultaneous refresh operations
@@ -1242,4 +1277,5 @@ struct NewsView: View {
             await viewModel.toggleBookmark(for: article)
         }
     }
+    
 }

@@ -505,17 +505,11 @@ final class AutoSyncCoordinator: ObservableObject {
         logger.debug("Recorded background time")
     }
     
-    /// Performs auto-sync if conditions allow
+    /// Performs auto-sync if conditions allow using the global sync coordinator
     private func performAutoSyncIfNeeded(context: AutoSyncContext) async {
         guard autoSyncEnabled else { 
             logger.debug("Auto-sync disabled - skipping sync request")
             return 
-        }
-        
-        // Standard Swift concurrency: Check if sync already in progress
-        guard !isAutoSyncing else {
-            logger.debug("Sync already in progress - ignoring request from context: \(context.rawValue)")
-            return
         }
         
         // Generate new session ID for this sync operation
@@ -535,7 +529,7 @@ final class AutoSyncCoordinator: ObservableObject {
             }
         }
         
-        logger.debug("Starting sync operation - context: \(context.rawValue)")
+        logger.debug("Starting sync operation via GlobalSyncCoordinator - context: \(context.rawValue)")
         
         var syncSuccess = false
         var syncError: AutoSyncError?
@@ -570,14 +564,16 @@ final class AutoSyncCoordinator: ObservableObject {
                 return
             }
             
-            // Perform the sync using existing ArticleService
-            let result = try await articleService.performBackgroundSync { _ in
+            // Use GlobalSyncCoordinator to prevent race conditions with manual syncs
+            let addedCount = try await GlobalSyncCoordinator.shared.requestAutomaticSync(
+                context: context.rawValue
+            ) { _ in
                 // Progress logging removed to avoid Swift 6 compilation issues
             }
             
             // Phase 4.3: Extract performance metrics from sync result
-            articlesProcessed = result.addedCount
-            dataVolumeBytes = estimateDataVolume(articlesCount: articlesProcessed, syncDuration: result.duration)
+            articlesProcessed = addedCount
+            dataVolumeBytes = estimateDataVolume(articlesCount: articlesProcessed, syncDuration: 0) // Duration tracked by GlobalSyncCoordinator
             syncSuccess = true
             
             // Update state after successful sync
@@ -587,20 +583,20 @@ final class AutoSyncCoordinator: ObservableObject {
             // Phase 2.2: Reset failure counter on success
             consecutiveFailures = 0
             
-            logger.info("Auto-sync completed successfully - added: \(result.addedCount), duration: \(result.duration)s")
+            logger.info("Auto-sync completed successfully via GlobalSyncCoordinator - added: \(addedCount) articles")
             
             // Schedule next background sync
             backgroundTaskManager.scheduleBackgroundRefresh()
             
             // Notify UI that new content is available if articles were added
-            if result.addedCount > 0 {
+            if addedCount > 0 {
                 await MainActor.run {
                     NotificationCenter.default.post(
                         name: Notification.Name.articleProcessingCompleted,
                         object: nil
                     )
                 }
-                logger.info("Posted UI refresh notification - \(result.addedCount) new articles")
+                logger.info("Posted UI refresh notification - \(addedCount) new articles")
             }
             
         } catch {
@@ -608,7 +604,7 @@ final class AutoSyncCoordinator: ObservableObject {
             consecutiveFailures += 1
             syncError = handleSyncError(error, context: context.rawValue)
             
-            logger.error("Auto-sync failed (failure #\(self.consecutiveFailures)): \(error)")
+            logger.error("Auto-sync failed via GlobalSyncCoordinator (failure #\(self.consecutiveFailures)): \(error)")
             
             // Phase 4.1: Enhanced retry with intelligent backoff
             scheduleRetrySync(for: error, context: context)
