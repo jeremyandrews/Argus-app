@@ -15,6 +15,14 @@ struct SyncStatisticsView: View {
     @State private var pulseIntensity: Double = 0
     @State private var dataStreamOffset: CGFloat = 0
     
+    // Cyberpunk detail view states
+    @State private var showingDetailView = false
+    @State private var detailViewType: CyberpunkDetailType = .duration
+    
+    enum CyberpunkDetailType {
+        case duration, successRate, performance, operations
+    }
+    
     var body: some View {
         ZStack {
             // Cyberpunk background
@@ -99,6 +107,15 @@ struct SyncStatisticsView: View {
             }
         } message: {
             Text("This will permanently delete all stored performance monitoring data. This action cannot be undone.")
+        }
+        .overlay {
+            if showingDetailView {
+                CyberpunkDetailOverlay(
+                    detailType: detailViewType,
+                    coordinator: coordinator,
+                    isPresented: $showingDetailView
+                )
+            }
         }
     }
     
@@ -243,28 +260,52 @@ struct SyncStatisticsView: View {
                             title: "AVG DURATION",
                             value: formatAverageDuration(),
                             icon: "clock",
-                            color: .purple
+                            color: .purple,
+                            onTap: {
+                                detailViewType = .duration
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    showingDetailView = true
+                                }
+                            }
                         )
                         
                         CyberpunkMetricCard(
                             title: "SUCCESS RATE",
                             value: "\(Int(calculateSuccessRate() * 100))%",
                             icon: "checkmark.circle",
-                            color: .green
+                            color: .green,
+                            onTap: {
+                                detailViewType = .successRate
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    showingDetailView = true
+                                }
+                            }
                         )
                         
                         CyberpunkMetricCard(
                             title: "AVG SCORE",
                             value: "\(Int(calculateAverageScore()))",
                             icon: "chart.bar",
-                            color: .orange
+                            color: .orange,
+                            onTap: {
+                                detailViewType = .performance
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    showingDetailView = true
+                                }
+                            }
                         )
                         
                         CyberpunkMetricCard(
                             title: "TOTAL OPS",
                             value: "\(coordinator.performanceMetrics.count)",
                             icon: "number",
-                            color: .blue
+                            color: .blue,
+                            onTap: {
+                                detailViewType = .operations
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    showingDetailView = true
+                                }
+                            }
                         )
                     }
                     
@@ -384,298 +425,6 @@ struct SyncStatisticsView: View {
         }
     }
     
-    // MARK: - Current Status Section
-    
-    private var currentStatusSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Current Status", systemImage: "circle.fill")
-                .font(.headline)
-                .foregroundColor(.blue)
-            
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Sync State:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(coordinator.isAutoSyncing ? "Active" : "Idle")
-                        .font(.subheadline)
-                        .foregroundColor(coordinator.isAutoSyncing ? .green : .orange)
-                }
-                
-                HStack {
-                    Text("Background Sync:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(coordinator.autoSyncEnabled ? "Enabled" : "Disabled")
-                        .font(.subheadline)
-                        .foregroundColor(coordinator.autoSyncEnabled ? .green : .red)
-                }
-                
-                HStack {
-                    Text("Network Connection:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(networkStatusText)
-                        .font(.subheadline)
-                        .foregroundColor(networkStatusColor)
-                }
-            }
-            .padding()
-            .background(Color(UIColor.systemGray6))
-            .cornerRadius(8)
-        }
-    }
-    
-    // MARK: - Performance Metrics Section
-    
-    private var performanceMetricsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Performance History", systemImage: "chart.line.uptrend.xyaxis")
-                .font(.headline)
-                .foregroundColor(.green)
-            
-            if coordinator.performanceMetrics.isEmpty {
-                Text("No performance data available yet. Performance metrics will appear after sync operations.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .background(Color(UIColor.systemGray6))
-                    .cornerRadius(8)
-            } else {
-                // Recent Metrics Table
-                VStack(alignment: .leading, spacing: 0) {
-                    // Table Header
-                    HStack(spacing: 0) {
-                        Text("Time")
-                            .font(.caption)
-                            .bold()
-                            .foregroundColor(.secondary)
-                            .frame(width: 60, alignment: .leading)
-                        
-                        Text("Duration")
-                            .font(.caption)
-                            .bold()
-                            .foregroundColor(.secondary)
-                            .frame(width: 80, alignment: .center)
-                        
-                        Text("Articles")
-                            .font(.caption)
-                            .bold()
-                            .foregroundColor(.secondary)
-                            .frame(width: 70, alignment: .center)
-                        
-                        Text("Score")
-                            .font(.caption)
-                            .bold()
-                            .foregroundColor(.secondary)
-                            .frame(width: 60, alignment: .center)
-                        
-                        Text("Network")
-                            .font(.caption)
-                            .bold()
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color(UIColor.systemGray5))
-                    
-                    // Recent performance data (last 10 entries)
-                    ForEach(coordinator.performanceMetrics.suffix(10).reversed(), id: \.timestamp) { metric in
-                        HStack(spacing: 0) {
-                            Text(formatTime(metric.timestamp))
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(width: 60, alignment: .leading)
-                            
-                            Text(formatDuration(metric.duration))
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(width: 80, alignment: .center)
-                            
-                            Text("\(metric.articlesProcessed)")
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(width: 70, alignment: .center)
-                            
-                            Text("\(Int(metric.performanceScore))")
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundColor(scoreColor(metric.performanceScore))
-                                .frame(width: 60, alignment: .center)
-                            
-                            Text(formatThroughput(metric.throughputKbps ?? 0))
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        
-                        if metric.timestamp != coordinator.performanceMetrics.suffix(10).reversed().last?.timestamp {
-                            Divider()
-                                .padding(.leading, 12)
-                        }
-                    }
-                }
-                .background(Color(UIColor.systemGray6))
-                .cornerRadius(8)
-                
-                // Summary Statistics
-                summaryStatistics
-            }
-        }
-    }
-    
-    // MARK: - System Resources Section
-    
-    private var systemResourcesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("System Resources", systemImage: "cpu")
-                .font(.headline)
-                .foregroundColor(.orange)
-            
-            if coordinator.resourceSnapshots.isEmpty {
-                Text("No system resource data available yet.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .background(Color(UIColor.systemGray6))
-                    .cornerRadius(8)
-            } else if let latestSnapshot = coordinator.resourceSnapshots.last {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Memory Usage:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(formatMemory(latestSnapshot.memoryUsageBytes))
-                            .font(.subheadline)
-                            .foregroundColor(.primary)
-                    }
-                    
-                    HStack {
-                        Text("Memory Pressure:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(latestSnapshot.memoryPressure.rawValue)
-                            .font(.subheadline)
-                            .foregroundColor(memoryPressureColor(latestSnapshot.memoryPressure))
-                    }
-                    
-                    #if os(iOS)
-                    if let batteryLevel = latestSnapshot.batteryLevel {
-                        HStack {
-                            Text("Battery Level:")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text("\(Int(batteryLevel * 100))%")
-                                .font(.subheadline)
-                                .foregroundColor(batteryColor(batteryLevel))
-                        }
-                    }
-                    
-                    HStack {
-                        Text("Thermal State:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(latestSnapshot.thermalState.rawValue)")
-                            .font(.subheadline)
-                            .foregroundColor(thermalStateColor(latestSnapshot.thermalState))
-                    }
-                    #endif
-                }
-                .padding()
-                .background(Color(UIColor.systemGray6))
-                .cornerRadius(8)
-            }
-        }
-    }
-    
-    // MARK: - Actions Section
-    
-    private var actionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Actions", systemImage: "wrench.and.screwdriver")
-                .font(.headline)
-                .foregroundColor(.red)
-            
-            VStack(spacing: 8) {
-                Button(action: {
-                    showingClearAlert = true
-                }) {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("Clear Performance History")
-                    }
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color(UIColor.systemGray6))
-                    .cornerRadius(8)
-                }
-                
-                Text("Performance history includes \(coordinator.performanceMetrics.count) sync operations and \(coordinator.resourceSnapshots.count) resource snapshots.")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-    
-    // MARK: - Summary Statistics
-    
-    private var summaryStatistics: some View {
-        let metrics = coordinator.performanceMetrics
-        let avgDuration = metrics.isEmpty ? 0 : metrics.map { $0.duration }.reduce(0, +) / Double(metrics.count)
-        let avgScore = metrics.isEmpty ? 0 : metrics.map { $0.performanceScore }.reduce(0, +) / Double(metrics.count)
-        let successfulSyncs = metrics.filter { $0.success }.count
-        let successRate = metrics.isEmpty ? 0 : Double(successfulSyncs) / Double(metrics.count) * 100
-        
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("Summary Statistics")
-                .font(.subheadline)
-                .bold()
-            
-            HStack {
-                VStack(alignment: .leading) {
-                    Text("Avg Duration")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(formatDuration(avgDuration))
-                        .font(.caption)
-                        .bold()
-                }
-                
-                Spacer()
-                
-                VStack(alignment: .center) {
-                    Text("Success Rate")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text("\(Int(successRate))%")
-                        .font(.caption)
-                        .bold()
-                        .foregroundColor(successRate >= 90 ? .green : successRate >= 70 ? .orange : .red)
-                }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing) {
-                    Text("Avg Score")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text("\(Int(avgScore))")
-                        .font(.caption)
-                        .bold()
-                        .foregroundColor(scoreColor(avgScore))
-                }
-            }
-        }
-        .padding()
-        .background(Color(UIColor.systemGray5))
-        .cornerRadius(8)
-    }
     
     // MARK: - Helper Methods
     
@@ -816,6 +565,168 @@ struct SyncStatisticsView: View {
         case .serious, .critical: return .error
         @unknown default: return .idle
         }
+    }
+    
+    // MARK: - Detail Analysis Functions
+    
+    private func getDurationAnalysisDetails() -> String {
+        guard !coordinator.performanceMetrics.isEmpty else {
+            return "NO DATA AVAILABLE\n\nInsufficient performance data to provide duration analysis."
+        }
+        
+        let durations = coordinator.performanceMetrics.map { $0.duration }
+        let avg = durations.reduce(0, +) / Double(durations.count)
+        let min = durations.min() ?? 0
+        let max = durations.max() ?? 0
+        let median = durations.sorted()[durations.count / 2]
+        
+        let recentTrend = durations.suffix(5).reduce(0, +) / Double(Swift.min(5, durations.count))
+        let trendIndicator = recentTrend > avg ? "INCREASING" : recentTrend < avg ? "DECREASING" : "STABLE"
+        
+        return """
+        DURATION PERFORMANCE ANALYSIS
+        
+        STATISTICS:
+        • Average: \(String(format: "%.2f", avg))s
+        • Minimum: \(String(format: "%.2f", min))s  
+        • Maximum: \(String(format: "%.2f", max))s
+        • Median: \(String(format: "%.2f", median))s
+        
+        RECENT TREND: \(trendIndicator)
+        
+        ANALYSIS:
+        \(avg < 2.0 ? "✓ Excellent performance" : avg < 5.0 ? "⚠ Moderate performance" : "⛔ Performance needs attention")
+        
+        TOTAL OPERATIONS: \(coordinator.performanceMetrics.count)
+        """
+    }
+    
+    private func getSuccessRateDetails() -> String {
+        guard !coordinator.performanceMetrics.isEmpty else {
+            return "NO DATA AVAILABLE\n\nInsufficient performance data to provide success rate analysis."
+        }
+        
+        let total = coordinator.performanceMetrics.count
+        let successful = coordinator.performanceMetrics.filter { $0.success }.count
+        let failed = total - successful
+        let rate = Double(successful) / Double(total) * 100
+        
+        let recentOperations = coordinator.performanceMetrics.suffix(10)
+        let recentSuccessful = recentOperations.filter { $0.success }.count
+        let recentRate = Double(recentSuccessful) / Double(recentOperations.count) * 100
+        
+        let contexts = Dictionary(grouping: coordinator.performanceMetrics, by: { $0.context })
+        let contextStats = contexts.map { context, metrics in
+            let contextSuccessful = metrics.filter { $0.success }.count
+            let contextRate = Double(contextSuccessful) / Double(metrics.count) * 100
+            return "\(context.rawValue.uppercased()): \(Int(contextRate))%"
+        }.joined(separator: "\n")
+        
+        return """
+        SUCCESS RATE BREAKDOWN
+        
+        OVERALL STATISTICS:
+        • Success Rate: \(Int(rate))%
+        • Successful Operations: \(successful)
+        • Failed Operations: \(failed)
+        • Total Operations: \(total)
+        
+        RECENT TREND (Last 10):
+        • Recent Success Rate: \(Int(recentRate))%
+        • Trend: \(recentRate > rate ? "IMPROVING" : recentRate < rate ? "DECLINING" : "STABLE")
+        
+        BY CONTEXT:
+        \(contextStats)
+        
+        STATUS: \(rate >= 95 ? "✓ Excellent" : rate >= 85 ? "⚠ Good" : rate >= 70 ? "⚠ Fair" : "⛔ Poor")
+        """
+    }
+    
+    private func getPerformanceScoreDetails() -> String {
+        guard !coordinator.performanceMetrics.isEmpty else {
+            return "NO DATA AVAILABLE\n\nInsufficient performance data to provide performance score analysis."
+        }
+        
+        let scores = coordinator.performanceMetrics.map { $0.performanceScore }
+        let avg = scores.reduce(0, +) / Double(scores.count)
+        let min = scores.min() ?? 0
+        let max = scores.max() ?? 0
+        
+        let excellent = scores.filter { $0 >= 90 }.count
+        let good = scores.filter { $0 >= 70 && $0 < 90 }.count
+        let fair = scores.filter { $0 >= 50 && $0 < 70 }.count
+        let poor = scores.filter { $0 < 50 }.count
+        
+        let recentScores = scores.suffix(5)
+        let recentAvg = recentScores.reduce(0, +) / Double(recentScores.count)
+        let trend = recentAvg > avg + 5 ? "IMPROVING" : recentAvg < avg - 5 ? "DECLINING" : "STABLE"
+        
+        return """
+        PERFORMANCE SCORE ANALYSIS
+        
+        SCORE STATISTICS:
+        • Average Score: \(Int(avg))
+        • Minimum Score: \(Int(min))
+        • Maximum Score: \(Int(max))
+        
+        DISTRIBUTION:
+        • Excellent (90+): \(excellent) operations
+        • Good (70-89): \(good) operations  
+        • Fair (50-69): \(fair) operations
+        • Poor (<50): \(poor) operations
+        
+        RECENT TREND: \(trend)
+        • Recent Average: \(Int(recentAvg))
+        
+        PERFORMANCE GRADE:
+        \(avg >= 90 ? "A+ EXCELLENT" : avg >= 80 ? "B+ GOOD" : avg >= 70 ? "C+ FAIR" : avg >= 60 ? "D POOR" : "F CRITICAL")
+        """
+    }
+    
+    private func getOperationsHistoryDetails() -> String {
+        let total = coordinator.performanceMetrics.count
+        guard total > 0 else {
+            return "NO OPERATIONS DATA\n\nNo sync operations have been recorded yet. Performance tracking begins after the first sync operation."
+        }
+        
+        let totalArticles = coordinator.performanceMetrics.map { $0.articlesProcessed }.reduce(0, +)
+        let totalDuration = coordinator.performanceMetrics.map { $0.duration }.reduce(0, +)
+        let avgArticlesPerOp = Double(totalArticles) / Double(total)
+        let throughput = Double(totalArticles) / totalDuration
+        
+        let contexts = Dictionary(grouping: coordinator.performanceMetrics, by: { $0.context })
+        let contextBreakdown = contexts.map { context, metrics in
+            "\(context.rawValue.uppercased()): \(metrics.count) ops"
+        }.joined(separator: "\n")
+        
+        let timeRange = coordinator.performanceMetrics.isEmpty ? "N/A" : 
+            self.formatTime(coordinator.performanceMetrics.first!.timestamp) + " - " + 
+            self.formatTime(coordinator.performanceMetrics.last!.timestamp)
+        
+        let recentOps = coordinator.performanceMetrics.suffix(5)
+        let recentSummary = recentOps.map { metric in
+            let status = metric.success ? "✓" : "✗"
+            return "\(status) \(self.formatTime(metric.timestamp)) - \(metric.articlesProcessed) articles"
+        }.joined(separator: "\n")
+        
+        return """
+        OPERATIONS HISTORY
+        
+        SUMMARY:
+        • Total Operations: \(total)
+        • Total Articles Processed: \(totalArticles)
+        • Total Processing Time: \(String(format: "%.1f", totalDuration))s
+        • Average Articles/Operation: \(String(format: "%.1f", avgArticlesPerOp))
+        • Throughput: \(String(format: "%.1f", throughput)) articles/sec
+        
+        TIME RANGE: \(timeRange)
+        
+        BY CONTEXT:
+        \(contextBreakdown)
+        
+        RECENT OPERATIONS:
+        \(recentSummary)
+        """
     }
 }
 
@@ -1030,42 +941,55 @@ struct CyberpunkMetricCard: View {
     let value: String
     let icon: String
     let color: Color
+    let onTap: () -> Void
     
     @State private var flicker: Double = 0
+    @State private var isPressed = false
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundColor(color)
-                    .font(.system(size: 12))
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon)
+                        .foregroundColor(color)
+                        .font(.system(size: 12))
+                    
+                    Spacer()
+                    
+                    Text(title)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.gray)
+                }
                 
-                Spacer()
-                
-                Text(title)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.gray)
+                Text(value)
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .opacity(0.9 + flicker * 0.1)
             }
-            
-            Text(value)
-                .font(.system(size: 16, weight: .bold, design: .monospaced))
-                .foregroundColor(.white)
-                .opacity(0.9 + flicker * 0.1)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.black.opacity(isPressed ? 0.8 : 0.6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(color.opacity(isPressed ? 0.6 : 0.4), lineWidth: 1)
+                    )
+            )
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.black.opacity(0.6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(color.opacity(0.4), lineWidth: 1)
-                )
-        )
+        .buttonStyle(PlainButtonStyle())
+        .scaleEffect(isPressed ? 0.98 : 1.0)
+        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
+            withAnimation(.easeInOut(duration: 0.1)) {
+                isPressed = pressing
+            }
+        }, perform: {})
         .onAppear {
             withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
                 flicker = 1
             }
         }
+        .accessibilityLabel("\(title): \(value)")
+        .accessibilityHint("Double tap for detailed analysis")
     }
 }
 
@@ -1270,6 +1194,438 @@ struct CyberpunkActionButton: View {
                 isPressed = pressing
             }
         }, perform: {})
+    }
+}
+
+// MARK: - Cyberpunk Detail Overlay
+
+struct CyberpunkDetailOverlay: View {
+    let detailType: SyncStatisticsView.CyberpunkDetailType
+    let coordinator: AutoSyncCoordinator
+    @Binding var isPresented: Bool
+    
+    @State private var scanLineOffset: CGFloat = 0
+    @State private var borderPulse: Double = 0
+    
+    var body: some View {
+        ZStack {
+            // Semi-transparent background
+            Color.black.opacity(0.8)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isPresented = false
+                    }
+                }
+            
+            // Detail panel
+            VStack(alignment: .leading, spacing: 0) {
+                // Header
+                HStack {
+                    Text(headerTitle)
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                        .foregroundColor(.cyan)
+                    
+                    Spacer()
+                    
+                    // Close button
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            isPresented = false
+                        }
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(
+                                Circle()
+                                    .fill(Color.red.opacity(0.8))
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.red, lineWidth: 1)
+                                    )
+                            )
+                    }
+                    .accessibilityLabel("Close details")
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                
+                // Content
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        detailContent
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.black.opacity(0.95))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.cyan.opacity(0.3 + borderPulse * 0.3), .blue.opacity(0.3 + borderPulse * 0.3)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 2
+                            )
+                    )
+                    .overlay(
+                        // Scanning line effect
+                        Rectangle()
+                            .fill(Color.cyan.opacity(0.1))
+                            .frame(height: 2)
+                            .offset(y: scanLineOffset)
+                            .animation(.linear(duration: 3).repeatForever(autoreverses: false), value: scanLineOffset)
+                    )
+                    .clipped()
+            )
+            .padding(.horizontal, 30)
+            .padding(.vertical, 60)
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 3).repeatForever(autoreverses: false)) {
+                scanLineOffset = 400
+            }
+            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
+                borderPulse = 1.0
+            }
+        }
+    }
+    
+    private var headerTitle: String {
+        switch detailType {
+        case .duration: return "DURATION ANALYSIS"
+        case .successRate: return "SUCCESS RATE BREAKDOWN"
+        case .performance: return "PERFORMANCE METRICS"
+        case .operations: return "OPERATIONS HISTORY"
+        }
+    }
+    
+    @ViewBuilder
+    private var detailContent: some View {
+        switch detailType {
+        case .duration:
+            CyberpunkDurationDetails(coordinator: coordinator)
+        case .successRate:
+            CyberpunkSuccessRateDetails(coordinator: coordinator)
+        case .performance:
+            CyberpunkPerformanceDetails(coordinator: coordinator)
+        case .operations:
+            CyberpunkOperationsDetails(coordinator: coordinator)
+        }
+    }
+}
+
+// MARK: - Detail Components
+
+struct CyberpunkDurationDetails: View {
+    let coordinator: AutoSyncCoordinator
+    
+    var body: some View {
+        if coordinator.performanceMetrics.isEmpty {
+            CyberpunkNoDataView(message: "NO DURATION DATA AVAILABLE")
+        } else {
+            let durations = coordinator.performanceMetrics.map { $0.duration }
+            let avg = durations.reduce(0, +) / Double(durations.count)
+            let min = durations.min() ?? 0
+            let max = durations.max() ?? 0
+            let median = durations.sorted()[durations.count / 2]
+            
+            VStack(alignment: .leading, spacing: 12) {
+                CyberpunkStatCard(label: "AVERAGE", value: String(format: "%.2fs", avg), color: .cyan)
+                CyberpunkStatCard(label: "MINIMUM", value: String(format: "%.2fs", min), color: .green)
+                CyberpunkStatCard(label: "MAXIMUM", value: String(format: "%.2fs", max), color: .red)
+                CyberpunkStatCard(label: "MEDIAN", value: String(format: "%.2fs", median), color: .purple)
+                
+                Divider().background(Color.gray.opacity(0.3))
+                
+                let recentTrend = durations.suffix(5).reduce(0, +) / Double(Swift.min(5, durations.count))
+                let trendIndicator = recentTrend > avg ? "INCREASING" : recentTrend < avg ? "DECREASING" : "STABLE"
+                let trendColor: Color = recentTrend > avg ? .red : recentTrend < avg ? .green : .gray
+                
+                CyberpunkTrendCard(
+                    title: "RECENT TREND",
+                    value: trendIndicator,
+                    color: trendColor,
+                    description: "Based on last 5 operations"
+                )
+                
+                CyberpunkAssessmentCard(
+                    assessment: avg < 2.0 ? "✓ EXCELLENT PERFORMANCE" : avg < 5.0 ? "⚠ MODERATE PERFORMANCE" : "⛔ PERFORMANCE NEEDS ATTENTION",
+                    color: avg < 2.0 ? .green : avg < 5.0 ? .orange : .red
+                )
+            }
+        }
+    }
+}
+
+struct CyberpunkSuccessRateDetails: View {
+    let coordinator: AutoSyncCoordinator
+    
+    var body: some View {
+        if coordinator.performanceMetrics.isEmpty {
+            CyberpunkNoDataView(message: "NO SUCCESS RATE DATA AVAILABLE")
+        } else {
+            let total = coordinator.performanceMetrics.count
+            let successful = coordinator.performanceMetrics.filter { $0.success }.count
+            let failed = total - successful
+            let rate = Double(successful) / Double(total) * 100
+            
+            VStack(alignment: .leading, spacing: 12) {
+                CyberpunkStatCard(label: "SUCCESS RATE", value: "\(Int(rate))%", color: rate >= 90 ? .green : rate >= 70 ? .orange : .red)
+                CyberpunkStatCard(label: "SUCCESSFUL OPS", value: "\(successful)", color: .green)
+                CyberpunkStatCard(label: "FAILED OPS", value: "\(failed)", color: .red)
+                CyberpunkStatCard(label: "TOTAL OPS", value: "\(total)", color: .cyan)
+                
+                Divider().background(Color.gray.opacity(0.3))
+                
+                let recentOperations = coordinator.performanceMetrics.suffix(10)
+                let recentSuccessful = recentOperations.filter { $0.success }.count
+                let recentRate = Double(recentSuccessful) / Double(recentOperations.count) * 100
+                
+                CyberpunkTrendCard(
+                    title: "RECENT TREND",
+                    value: recentRate > rate ? "IMPROVING" : recentRate < rate ? "DECLINING" : "STABLE",
+                    color: recentRate > rate ? .green : recentRate < rate ? .red : .gray,
+                    description: "Last 10 operations: \(Int(recentRate))%"
+                )
+                
+                CyberpunkContextBreakdown(coordinator: coordinator)
+            }
+        }
+    }
+}
+
+struct CyberpunkPerformanceDetails: View {
+    let coordinator: AutoSyncCoordinator
+    
+    var body: some View {
+        if coordinator.performanceMetrics.isEmpty {
+            CyberpunkNoDataView(message: "NO PERFORMANCE DATA AVAILABLE")
+        } else {
+            let scores = coordinator.performanceMetrics.map { $0.performanceScore }
+            let avg = scores.reduce(0, +) / Double(scores.count)
+            let min = scores.min() ?? 0
+            let max = scores.max() ?? 0
+            
+            VStack(alignment: .leading, spacing: 12) {
+                CyberpunkStatCard(label: "AVERAGE SCORE", value: "\(Int(avg))", color: .cyan)
+                CyberpunkStatCard(label: "MINIMUM SCORE", value: "\(Int(min))", color: .red)
+                CyberpunkStatCard(label: "MAXIMUM SCORE", value: "\(Int(max))", color: .green)
+                
+                Divider().background(Color.gray.opacity(0.3))
+                
+                let excellent = scores.filter { $0 >= 90 }.count
+                let good = scores.filter { $0 >= 70 && $0 < 90 }.count
+                let fair = scores.filter { $0 >= 50 && $0 < 70 }.count
+                let poor = scores.filter { $0 < 50 }.count
+                
+                Text("DISTRIBUTION")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(.gray)
+                
+                VStack(spacing: 8) {
+                    CyberpunkStatCard(label: "EXCELLENT (90+)", value: "\(excellent)", color: .green)
+                    CyberpunkStatCard(label: "GOOD (70-89)", value: "\(good)", color: .blue)
+                    CyberpunkStatCard(label: "FAIR (50-69)", value: "\(fair)", color: .orange)
+                    CyberpunkStatCard(label: "POOR (<50)", value: "\(poor)", color: .red)
+                }
+                
+                Divider().background(Color.gray.opacity(0.3))
+                
+                let grade = avg >= 90 ? "A+ EXCELLENT" : avg >= 80 ? "B+ GOOD" : avg >= 70 ? "C+ FAIR" : avg >= 60 ? "D POOR" : "F CRITICAL"
+                let gradeColor: Color = avg >= 90 ? .green : avg >= 80 ? .blue : avg >= 70 ? .orange : avg >= 60 ? .red : .red
+                
+                CyberpunkAssessmentCard(assessment: grade, color: gradeColor)
+            }
+        }
+    }
+}
+
+struct CyberpunkOperationsDetails: View {
+    let coordinator: AutoSyncCoordinator
+    
+    var body: some View {
+        let total = coordinator.performanceMetrics.count
+        
+        if total == 0 {
+            CyberpunkNoDataView(message: "NO OPERATIONS DATA AVAILABLE")
+        } else {
+            let totalArticles = coordinator.performanceMetrics.map { $0.articlesProcessed }.reduce(0, +)
+            let totalDuration = coordinator.performanceMetrics.map { $0.duration }.reduce(0, +)
+            let avgArticlesPerOp = Double(totalArticles) / Double(total)
+            let throughput = Double(totalArticles) / totalDuration
+            
+            VStack(alignment: .leading, spacing: 12) {
+                CyberpunkStatCard(label: "TOTAL OPS", value: "\(total)", color: .cyan)
+                CyberpunkStatCard(label: "TOTAL ARTICLES", value: "\(totalArticles)", color: .green)
+                CyberpunkStatCard(label: "TOTAL TIME", value: String(format: "%.1fs", totalDuration), color: .purple)
+                CyberpunkStatCard(label: "AVG ARTICLES/OP", value: String(format: "%.1f", avgArticlesPerOp), color: .orange)
+                CyberpunkStatCard(label: "THROUGHPUT", value: String(format: "%.1f/s", throughput), color: .blue)
+                
+                Divider().background(Color.gray.opacity(0.3))
+                
+                CyberpunkContextBreakdown(coordinator: coordinator)
+                
+                Divider().background(Color.gray.opacity(0.3))
+                
+                Text("RECENT OPERATIONS")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(.gray)
+                
+                LazyVStack(spacing: 6) {
+                    ForEach(Array(coordinator.performanceMetrics.suffix(8).enumerated()), id: \.offset) { index, metric in
+                        HStack {
+                            Text(formatTime(metric.timestamp))
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundColor(.gray)
+                                .frame(width: 50, alignment: .leading)
+                            
+                            Circle()
+                                .fill(metric.success ? Color.green : Color.red)
+                                .frame(width: 4, height: 4)
+                            
+                            Text(metric.context.rawValue.uppercased())
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundColor(.white)
+                                .frame(width: 60, alignment: .leading)
+                            
+                            Spacer()
+                            
+                            Text("\(metric.articlesProcessed)")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyan)
+                        }
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.3))
+                    }
+                }
+            }
+        }
+    }
+    
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Supporting Detail Components
+
+struct CyberpunkStatCard: View {
+    let label: String
+    let value: String
+    let color: Color
+    
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(.gray)
+            
+            Spacer()
+            
+            Text(value)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(color)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(Color.black.opacity(0.3))
+    }
+}
+
+struct CyberpunkTrendCard: View {
+    let title: String
+    let value: String
+    let color: Color
+    let description: String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.gray)
+                
+                Spacer()
+                
+                Text(value)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(color)
+            }
+            
+            Text(description)
+                .font(.system(size: 9, weight: .regular, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.7))
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.black.opacity(0.3))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(color.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+}
+
+struct CyberpunkAssessmentCard: View {
+    let assessment: String
+    let color: Color
+    
+    var body: some View {
+        HStack {
+            Text(assessment)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(color)
+            
+            Spacer()
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(color.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(color.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+}
+
+struct CyberpunkContextBreakdown: View {
+    let coordinator: AutoSyncCoordinator
+    
+    var body: some View {
+        let contexts = Dictionary(grouping: coordinator.performanceMetrics, by: { $0.context })
+        
+        VStack(alignment: .leading, spacing: 8) {
+            Text("BY CONTEXT")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.gray)
+            
+            ForEach(Array(contexts.keys.sorted(by: { $0.rawValue < $1.rawValue })), id: \.self) { context in
+                if let metrics = contexts[context] {
+                    let contextSuccessful = metrics.filter { $0.success }.count
+                    let contextRate = Double(contextSuccessful) / Double(metrics.count) * 100
+                    
+                    CyberpunkStatCard(
+                        label: context.rawValue.uppercased(),
+                        value: "\(metrics.count) ops (\(Int(contextRate))%)",
+                        color: contextRate >= 90 ? .green : contextRate >= 70 ? .orange : .red
+                    )
+                }
+            }
+        }
     }
 }
 
