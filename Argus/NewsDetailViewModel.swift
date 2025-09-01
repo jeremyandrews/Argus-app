@@ -422,7 +422,7 @@ final class NewsDetailViewModel: ObservableObject {
         
         guard !articleIds.isEmpty else { return }
         
-        AppLogger.database.debug("🚀 NewsDetailViewModel: Triggering enhanced preloading for Next-3 and Previous-3 articles around index \(currentIdx)")
+        AppLogger.database.debug("🚀 NewsDetailViewModel: Triggering enhanced preloading for Next-5 and Previous-5 articles around index \(currentIdx)")
         
         // Use the enhanced PreloadManager with Swift 6 compatible method using only sendable UUIDs
         PreloadManager.shared.preloadArticlesByIds(articleIds, currentIndex: currentIdx)

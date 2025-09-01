@@ -1,6 +1,52 @@
 import SwiftUI
 import UserNotifications
 
+// MARK: - PresetCardView
+
+struct PresetCardView: View {
+    let preset: TextDisplayPreset
+    let isSelected: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Live preview of the preset
+            VStack(alignment: .leading, spacing: 3) {
+                Text(preset.name)
+                    .font(preset.settings.font.weight(.medium))
+                    .foregroundColor(preset.settings.fontColor.color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                
+                Text(preset.description)
+                    .font(preset.settings.descriptionFont)
+                    .foregroundColor(preset.settings.fontColor.color.opacity(0.7))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(width: 140, height: 60)
+            .background(preset.settings.backgroundColor.color)
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.blue : Color.secondary.opacity(0.3), lineWidth: isSelected ? 2 : 1)
+            )
+            
+            // Preset name below the preview
+            Text(preset.name)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .frame(width: 140, alignment: .center)
+        }
+        .onTapGesture {
+            onTap()
+        }
+    }
+}
+
 struct SettingsView: View {
     @Environment(TabNavigationState.self) private var tabNavigation
     @AppStorage("autoDeleteDays") private var autoDeleteDays: Int = UserDefaults.standard.object(forKey: "autoDeleteDays") == nil ? 3 : UserDefaults.standard.integer(forKey: "autoDeleteDays")
@@ -19,6 +65,7 @@ struct SettingsView: View {
     @AppStorage("useReaderMode") private var useReaderMode: Bool = true
     @AppStorage("allowCellularSync") private var allowCellularSync: Bool = false
     @State private var isAtTop: Bool = true
+    @State private var textDisplaySettings: TextDisplaySettings = UserDefaults.standard.textDisplaySettings
 
     private var versionInfo: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
@@ -99,6 +146,178 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Display Preferences")
+                }
+
+                // Text Display Customization Section - Compact Design
+                Section {
+                    VStack(alignment: .leading, spacing: 15) {
+                        // Quick Presets - Visual Cards
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Quick Presets")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(TextDisplayPreset.presets, id: \.name) { preset in
+                                        PresetCardView(
+                                            preset: preset,
+                                            isSelected: isPresetSelected(preset),
+                                            onTap: {
+                                                textDisplaySettings = preset.settings
+                                                saveTextDisplaySettings()
+                                            }
+                                        )
+                                    }
+                                }
+                                .padding(.horizontal, 1)
+                            }
+                        }
+                        
+                        // Preview Section
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Preview")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Sample Article Title")
+                                    .font(textDisplaySettings.font)
+                                    .foregroundColor(textDisplaySettings.fontColor.color)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(textDisplaySettings.backgroundColor.color)
+                                    .cornerRadius(6)
+                                
+                                Text("This is sample article text to preview your font and color settings.")
+                                    .font(textDisplaySettings.descriptionFont)
+                                    .foregroundColor(textDisplaySettings.fontColor.color.opacity(0.8))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(textDisplaySettings.backgroundColor.color)
+                                    .cornerRadius(6)
+                            }
+                        }
+                        
+                        // Font Settings - Compact Layout
+                        VStack(alignment: .leading, spacing: 12) {
+                            // Font Family - Use menu picker for more options
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Font Family")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                
+                                Menu {
+                                    ForEach(FontFamily.allCases, id: \.self) { family in
+                                        Button(family.displayName) {
+                                            textDisplaySettings.fontFamily = family
+                                            saveTextDisplaySettings()
+                                        }
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(textDisplaySettings.fontFamily.displayName)
+                                        Spacer()
+                                        Image(systemName: "chevron.up.chevron.down")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color(.systemGray5))
+                                    .cornerRadius(8)
+                                }
+                            }
+                            
+                            // Font Size and Weight in HStack
+                            HStack(spacing: 16) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Size")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                    
+                                    Picker("Font Size", selection: $textDisplaySettings.fontSize) {
+                                        ForEach(FontSize.allCases, id: \.self) { size in
+                                            Text(size.displayName).tag(size)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .onChange(of: textDisplaySettings.fontSize) { _, _ in
+                                        saveTextDisplaySettings()
+                                    }
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Weight")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                    
+                                    Picker("Font Weight", selection: $textDisplaySettings.fontWeight) {
+                                        ForEach(FontWeight.allCases, id: \.self) { weight in
+                                            Text(weight.displayName).tag(weight)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .onChange(of: textDisplaySettings.fontWeight) { _, _ in
+                                        saveTextDisplaySettings()
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Color Settings - Compact Grid
+                        HStack(spacing: 16) {
+                            // Background Colors
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Background")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 4) {
+                                    ForEach(BackgroundColorOption.allCases, id: \.self) { option in
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(option.color)
+                                            .frame(height: 24)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 6)
+                                                    .stroke(textDisplaySettings.backgroundColor == option ? Color.blue : Color.secondary.opacity(0.3), lineWidth: textDisplaySettings.backgroundColor == option ? 2 : 1)
+                                            )
+                                            .onTapGesture {
+                                                textDisplaySettings.backgroundColor = option
+                                                saveTextDisplaySettings()
+                                            }
+                                    }
+                                }
+                            }
+                            
+                            // Font Colors
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Text Color")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 4) {
+                                    ForEach(FontColorOption.allCases, id: \.self) { option in
+                                        Circle()
+                                            .fill(option.color)
+                                            .frame(height: 24)
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(textDisplaySettings.fontColor == option ? Color.blue : Color.secondary.opacity(0.3), lineWidth: textDisplaySettings.fontColor == option ? 2 : 1)
+                                            )
+                                            .onTapGesture {
+                                                textDisplaySettings.fontColor = option
+                                                saveTextDisplaySettings()
+                                            }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Text Display")
                 }
 
                 // Phase 3.1: Auto-Sync Settings Interface
@@ -240,8 +459,23 @@ struct SettingsView: View {
                     }
                 }
             }
+            .onAppear {
+                textDisplaySettings = UserDefaults.standard.textDisplaySettings
+            }
             }
         }
+    }
+    
+    private func saveTextDisplaySettings() {
+        UserDefaults.standard.textDisplaySettings = textDisplaySettings
+    }
+    
+    private func isPresetSelected(_ preset: TextDisplayPreset) -> Bool {
+        return textDisplaySettings.fontFamily == preset.settings.fontFamily &&
+               textDisplaySettings.fontSize == preset.settings.fontSize &&
+               textDisplaySettings.fontWeight == preset.settings.fontWeight &&
+               textDisplaySettings.backgroundColor == preset.settings.backgroundColor &&
+               textDisplaySettings.fontColor == preset.settings.fontColor
     }
 
     private var sortOrderExplanation: String {

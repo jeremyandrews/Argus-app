@@ -11,6 +11,7 @@ struct EnhancedRelatedArticleRow: View {
     @State private var showVectorDetails = false
     @State private var showEntityDetails = false
     @State private var showFormulaDetails = false
+    @State private var textDisplaySettings = UserDefaults.standard.textDisplaySettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -22,8 +23,8 @@ struct EnhancedRelatedArticleRow: View {
             }) {
                 HStack(spacing: 4) {
                     Text(article.title)
-                        .font(.headline)
-                        .foregroundColor(.blue)
+                        .font(textDisplaySettings.font)
+                        .foregroundColor(textDisplaySettings.fontColor.color)
                         .multilineTextAlignment(.leading)
 
                     Spacer(minLength: 8)
@@ -36,15 +37,15 @@ struct EnhancedRelatedArticleRow: View {
             HStack {
                 if !article.formattedDate.isEmpty {
                     Text(article.formattedDate)
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
+                        .font(textDisplaySettings.descriptionFont)
+                        .foregroundColor(textDisplaySettings.fontColor.color.opacity(0.7))
                 }
 
                 Spacer()
 
                 if !article.category.isEmpty {
                     Text(article.category.uppercased())
-                        .font(.caption)
+                        .font(textDisplaySettings.descriptionFont)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Color.gray.opacity(0.6))
@@ -56,8 +57,8 @@ struct EnhancedRelatedArticleRow: View {
             // Summary
             if !article.tinySummary.isEmpty {
                 Text(article.tinySummary)
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
+                    .font(textDisplaySettings.descriptionFont)
+                    .foregroundColor(textDisplaySettings.fontColor.color.opacity(0.8))
                     .lineLimit(isExpanded ? nil : 2)
                     .padding(.bottom, 4)
             }
@@ -65,8 +66,8 @@ struct EnhancedRelatedArticleRow: View {
             // Quality score
             if article.qualityScore > 0 {
                 Text("Quality: \(article.qualityDescription)")
-                    .font(.caption)
-                    .foregroundColor(.primary)
+                    .font(textDisplaySettings.descriptionFont)
+                    .foregroundColor(textDisplaySettings.fontColor.color)
             }
 
             // Expand/collapse button
@@ -142,8 +143,11 @@ struct EnhancedRelatedArticleRow: View {
             }
         }
         .padding(12)
-        .background(Color(UIColor.systemGray5).opacity(0.5))
+        .background(textDisplaySettings.backgroundColor.color.opacity(0.1))
         .cornerRadius(12)
+        .onAppear {
+            textDisplaySettings = UserDefaults.standard.textDisplaySettings
+        }
     }
 }
 
@@ -457,13 +461,15 @@ struct EnhancedRelatedArticlesView: View {
 
     @State private var showError = false
     @State private var errorMessage = "Sorry, this article doesn't exist."
+    @State private var textDisplaySettings = UserDefaults.standard.textDisplaySettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Header and explanation
             HStack {
                 Text("Related Articles")
-                    .font(.headline)
+                    .font(textDisplaySettings.font)
+                    .foregroundColor(textDisplaySettings.fontColor.color)
                     .padding(.bottom, 4)
 
                 Spacer()
@@ -475,19 +481,20 @@ struct EnhancedRelatedArticlesView: View {
             if !clusterSummary.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Cluster Summary")
-                        .font(.subheadline)
+                        .font(textDisplaySettings.font)
                         .fontWeight(.semibold)
-                        .foregroundColor(.primary)
+                        .foregroundColor(textDisplaySettings.fontColor.color)
 
                     Text(clusterSummary)
-                        .font(.body)
+                        .font(textDisplaySettings.descriptionFont)
+                        .foregroundColor(textDisplaySettings.fontColor.color)
                         .lineSpacing(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
                 .padding(12)
-                .background(Color(UIColor.systemGray6).opacity(0.7))
+                .background(textDisplaySettings.backgroundColor.color.opacity(0.1))
                 .cornerRadius(8)
                 .padding(.bottom, 8)
             }
@@ -513,14 +520,15 @@ struct EnhancedRelatedArticlesView: View {
 
             // Diagnostic info
             Text("Found \(articles.count) related articles")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(textDisplaySettings.descriptionFont)
+                .foregroundColor(textDisplaySettings.fontColor.color.opacity(0.7))
                 .padding(.top, 4)
         }
         .alert(errorMessage, isPresented: $showError) {
             Button("OK", role: .cancel) {}
         }
         .onAppear {
+            textDisplaySettings = UserDefaults.standard.textDisplaySettings
             // Log the related articles for debugging
             AppLogger.database.debug("EnhancedRelatedArticlesView displaying \(articles.count) articles")
             for (index, article) in articles.enumerated() {
@@ -535,6 +543,7 @@ struct EnhancedRelatedArticlesView: View {
 /// View for displaying extracted entities as tags
 struct TagsView: View {
     let entities: [Entity]
+    @State private var textDisplaySettings = UserDefaults.standard.textDisplaySettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -543,9 +552,9 @@ struct TagsView: View {
             if !primaryEntities.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Primary Tags")
-                        .font(.subheadline)
+                        .font(textDisplaySettings.font)
                         .fontWeight(.semibold)
-                        .foregroundColor(.primary)
+                        .foregroundColor(textDisplaySettings.fontColor.color)
 
                     EntityTagsGrid(entities: primaryEntities, isPrimarySection: true)
                 }
@@ -554,18 +563,21 @@ struct TagsView: View {
             // All entities in a grid
             VStack(alignment: .leading, spacing: 8) {
                 Text("All Tags")
-                    .font(.subheadline)
+                    .font(textDisplaySettings.font)
                     .fontWeight(.semibold)
-                    .foregroundColor(.primary)
+                    .foregroundColor(textDisplaySettings.fontColor.color)
 
                 EntityTagsGrid(entities: entities, isPrimarySection: false)
             }
 
             // Summary info
             Text("\(entities.count) tags (\(entities.filter { $0.isPrimary }.count) primary)")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(textDisplaySettings.descriptionFont)
+                .foregroundColor(textDisplaySettings.fontColor.color.opacity(0.7))
                 .padding(.top, 4)
+        }
+        .onAppear {
+            textDisplaySettings = UserDefaults.standard.textDisplaySettings
         }
     }
 }

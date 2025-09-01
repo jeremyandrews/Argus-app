@@ -48,6 +48,7 @@ struct NewsView: View {
     @State private var layoutDimensions = LayoutDimensions()
     @State private var orientationChangeId = UUID()
     @State private var useIPadLayout: Bool = false
+    @State private var textDisplaySettings: TextDisplaySettings = UserDefaults.standard.textDisplaySettings
     
     // MARK: - Device Detection & Layout Logic
     
@@ -266,6 +267,9 @@ struct NewsView: View {
                 .onAppear {
                     // Set initial layout state
                     useIPadLayout = isIPad || horizontalSizeClass == .regular
+                    
+                    // Refresh text display settings
+                    textDisplaySettings = UserDefaults.standard.textDisplaySettings
                     
                     Task {
                         await viewModel.refreshArticles()
@@ -823,7 +827,14 @@ struct NewsView: View {
             }
             .padding(.vertical, 8)
             .padding(.horizontal, horizontalPadding)
-            .background(isUnread ? Color.blue.opacity(0.15) : Color.clear)
+            .background(
+                ZStack {
+                    UserDefaults.standard.textDisplaySettings.backgroundColor.color
+                    if isUnread {
+                        Color.blue.opacity(0.15)
+                    }
+                }
+            )
             .cornerRadius(10)
             .id(stableViewID) // Use stable ID to prevent unnecessary recreation
             .onLongPressGesture {
@@ -870,8 +881,9 @@ struct NewsView: View {
         
         private var titleView: some View {
             Text(article.title)
-                .font(.headline)
+                .font(UserDefaults.standard.textDisplaySettings.font)
                 .fontWeight(.semibold)
+                .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color)
                 .lineLimit(nil)  // Allow unlimited lines for title
                 .fixedSize(horizontal: false, vertical: true)  // Allow vertical expansion
                 .multilineTextAlignment(.leading)
@@ -905,15 +917,15 @@ struct NewsView: View {
                     {
                         // Extract plain text from attributed string for testing
                         Text(attributedString.string)
-                            .font(.body)  // Changed to .body to match the UIKit component font size
-                            .foregroundColor(.primary)  // Changed from .secondary to .primary for better readability
+                            .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
+                            .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.8))
                             .lineLimit(nil)  // Allow full text display
                             .multilineTextAlignment(.leading)
                             .textSelection(.disabled)
                     } else {
                         Text(article.body)
-                            .font(.body)  // Changed to .body to match the UIKit component font size
-                            .foregroundColor(.primary)  // Changed from .secondary to .primary for better readability
+                            .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
+                            .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.8))
                             .lineLimit(nil)  // Allow full text display
                             .multilineTextAlignment(.leading)
                             .textSelection(.disabled)

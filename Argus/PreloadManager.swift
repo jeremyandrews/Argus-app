@@ -29,7 +29,7 @@ class PreloadManager {
     }
 
     // Preload a batch of articles that will likely be viewed soon
-    // Enhanced to preload Next-3 and Previous-3 articles for faster navigation
+    // Enhanced to preload Next-5 and Previous-5 articles for faster navigation
     // Swift 6 compatible version using article IDs
     func preloadArticlesByIds(_ articleIds: [UUID], currentIndex: Int) {
         // Cancel any existing preload task
@@ -37,10 +37,10 @@ class PreloadManager {
 
         // Start a new preload task
         preloadTask = Task(priority: .background) {
-            // Calculate which articles to preload (3 in each direction from current)
+            // Calculate which articles to preload (5 in each direction from current)
             let nextStartIndex = currentIndex + 1
-            let nextEndIndex = min(nextStartIndex + 3, articleIds.count)
-            let prevStartIndex = max(0, currentIndex - 3)
+            let nextEndIndex = min(nextStartIndex + 5, articleIds.count)
+            let prevStartIndex = max(0, currentIndex - 5)
             let prevEndIndex = currentIndex
 
             AppLogger.database.debug("🚀 PreloadManager: Preloading articles around index \(currentIndex)")
@@ -49,7 +49,7 @@ class PreloadManager {
 
             var preloadedCount = 0
 
-            // Preload next 3 articles
+            // Preload next 5 articles
             if nextStartIndex < articleIds.count {
                 for index in nextStartIndex ..< nextEndIndex {
                     if Task.isCancelled { break }
@@ -73,7 +73,7 @@ class PreloadManager {
                 }
             }
 
-            // Preload previous 3 articles  
+            // Preload previous 5 articles  
             if prevEndIndex > prevStartIndex {
                 for index in (prevStartIndex ..< prevEndIndex).reversed() {
                     if Task.isCancelled { break }

@@ -1,3 +1,4 @@
+import Combine
 import SafariServices
 import SwiftData
 import SwiftUI
@@ -14,6 +15,13 @@ struct NewsDetailView: View {
 
     /// The view model that manages article data and operations
     @ObservedObject private var viewModel: NewsDetailViewModel
+    
+    /// Text display settings for customization - cached and observed
+    @State private var textDisplaySettings = UserDefaults.standard.textDisplaySettings
+    @State private var cachedFont: Font?
+    @State private var cachedDescriptionFont: Font?
+    @State private var cachedFontColor: Color?
+    @State private var settingsObserver: AnyCancellable?
 
     // MARK: - UI State Properties
 
@@ -261,6 +269,10 @@ struct NewsDetailView: View {
             expandedSections[section] = true
         }
 
+        // Setup settings observer and cache text display settings
+        setupSettingsObserver()
+        cacheTextDisplaySettings()
+
         // Log the article fields status for debugging
         logArticleFieldsStatus()
     }
@@ -328,6 +340,32 @@ struct NewsDetailView: View {
 
         let sizeInKB = Double(blob.count) / 1024.0
         return "✅ (\(String(format: "%.1f", sizeInKB)) KB)"
+    }
+
+    // MARK: - Text Display Settings Caching
+
+    /// Sets up observer for text display settings changes
+    private func setupSettingsObserver() {
+        settingsObserver = NotificationCenter.default
+            .publisher(for: UserDefaults.didChangeNotification)
+            .sink { _ in
+                DispatchQueue.main.async {
+                    self.cacheTextDisplaySettings()
+                }
+            }
+    }
+
+    /// Caches text display settings to avoid repeated computation
+    private func cacheTextDisplaySettings() {
+        let settings = UserDefaults.standard.textDisplaySettings
+        textDisplaySettings = settings
+        
+        // Cache the computed font values
+        cachedFont = settings.font
+        cachedDescriptionFont = settings.descriptionFont
+        cachedFontColor = settings.fontColor.color
+        
+        AppLogger.database.debug("📝 Text display settings cached - Color: \(settings.fontColor.rawValue)")
     }
 
     // MARK: - Top Bar
@@ -824,58 +862,55 @@ struct NewsDetailView: View {
                 .padding(.vertical, 32)
             } else if let n = currentNotification {
                 // Title - use rich text if available, otherwise fall back to plain text
-                Group {
-                    if let titleAttrString = viewModel.titleAttributedString {
-                        Text(titleAttrString.string)
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                            .lineLimit(nil)
-                            .multilineTextAlignment(.leading)
-                            .textSelection(.disabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        Text(n.title)
-                            .font(.headline)
-                            .fontWeight(n.isViewed ? .regular : .bold)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                if let titleAttrString = viewModel.titleAttributedString {
+                    Text(titleAttrString.string)
+                        .font(cachedFont ?? .body)
+                        .foregroundColor(cachedFontColor ?? .primary)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                        .textSelection(.disabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(n.title)
+                        .font(cachedFont ?? .body)
+                        .fontWeight(n.isViewed ? .regular : .semibold)
+                        .foregroundColor(cachedFontColor ?? .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Publication Date
                 // n.pub_date from ArticleModel's compatibility API returns Date not optional
                 Text("Published: \(n.pub_date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
+                    .font(cachedDescriptionFont ?? .caption)
+                    .foregroundColor((cachedFontColor ?? .primary).opacity(0.7))
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Body - use rich text if available, otherwise fall back to plain text
-                Group {
-                    if let bodyAttrString = viewModel.bodyAttributedString {
-                        Text(bodyAttrString.string)
-                            .font(.body)
-                            .foregroundColor(.primary)
-                            .lineLimit(nil)
-                            .multilineTextAlignment(.leading)
-                            .textSelection(.disabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        Text(n.body)
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                if let bodyAttrString = viewModel.bodyAttributedString {
+                    Text(bodyAttrString.string)
+                        .font(cachedDescriptionFont ?? .caption)
+                        .foregroundColor(cachedFontColor ?? .primary)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                        .textSelection(.disabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(n.body)
+                        .font(cachedDescriptionFont ?? .caption)
+                        .foregroundColor((cachedFontColor ?? .primary).opacity(0.8))
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Affected
                 if !n.affected.isEmpty {
                     Text(n.affected)
-                        .font(.headline)
-                        .foregroundColor(.secondary)
+                        .font(cachedDescriptionFont ?? .caption)
+                        .foregroundColor((cachedFontColor ?? .primary).opacity(0.7))
                 }
 
                 // Domain with Source Type (source type first)
