@@ -120,8 +120,11 @@ class PreloadManager {
                 // These operations already run on the main actor since they involve NSAttributedString
                 _ = operations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
                 _ = operations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
+                
+                // Also preload summary since it's expanded by default in NewsDetailView
+                _ = operations.getAttributedContent(for: .summary, from: articleWithContext, createIfMissing: true)
 
-                AppLogger.database.debug("✅ Preloaded blobs for article \(articleId) at index \(index)")
+                AppLogger.database.debug("✅ Preloaded title, body, and summary blobs for article \(articleId) at index \(index)")
             } else {
                 AppLogger.database.warning("⚠️ Could not preload article \(articleId) at index \(index) - context not available")
             }
