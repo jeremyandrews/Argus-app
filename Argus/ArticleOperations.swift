@@ -105,7 +105,7 @@ final class ArticleOperations {
 
     // MARK: - Fetch Operations
 
-    /// Fetches articles with the specified filters using optimized compound indexes
+    /// Fetches articles with the specified filters using performance-optimized compound indexes
     /// - Parameters:
     ///   - topic: Optional topic to filter by
     ///   - showUnreadOnly: Whether to show only unread articles
@@ -121,80 +121,92 @@ final class ArticleOperations {
         qualityFilter: String = "All",
         limit: Int? = nil
     ) async throws -> [ArticleModel] {
-        // Define missing topics to watch for
-        let missingTopics = Set(["Rust", "Space", "Tuscany", "Vulnerability"])
-
-        // Special logging for missing topics only
-        if let topic = topic, missingTopics.contains(topic) {
-            AppLogger.database.debug("🔍 MISSING TOPIC: Fetch requested for topic '\(topic)'")
-        }
-
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
         let container = SwiftDataContainer.shared.container
         let context = container.mainContext
 
-        // Use compound indexes for optimal performance
-        // Strategy: Build predicate that matches our compound indexes
+        // PERFORMANCE OPTIMIZATION: Use compound indexes for optimal query performance
+        // The indexes we added: topic, isViewed, isBookmarked, publishDate
+        // Query planner will use these indexes in the order they appear in predicates
         
         var descriptor = FetchDescriptor<ArticleModel>()
         
-        // Build predicate using indexed fields first for optimal query planning
+        // Build optimized predicate using indexed fields in optimal order
         var predicate: Predicate<ArticleModel>?
         
-        // Strategy 1: topic + isViewed + publishDate (most common case)
-        if let topic = topic, topic != "All", showUnreadOnly {
-            predicate = #Predicate<ArticleModel> { 
-                $0.topic == topic && !$0.isViewed 
+        // OPTIMIZATION 1: Compound index usage - topic + isViewed (most selective first)
+        if let topic = topic, topic != "All" {
+            if showUnreadOnly {
+                // Uses compound index: topic + isViewed + publishDate
+                predicate = #Predicate<ArticleModel> { 
+                    $0.topic == topic && $0.isViewed == false
+                }
+            } else if showBookmarkedOnly {
+                // Uses compound index: topic + isBookmarked + publishDate  
+                predicate = #Predicate<ArticleModel> { 
+                    $0.topic == topic && $0.isBookmarked == true
+                }
+            } else {
+                // Uses index: topic + publishDate
+                predicate = #Predicate<ArticleModel> { 
+                    $0.topic == topic 
+                }
             }
         }
-        // Strategy 2: isViewed + publishDate (unread across all topics)
+        // OPTIMIZATION 2: Single field indexes for cross-topic queries
+        else if showUnreadOnly && showBookmarkedOnly {
+            // Uses compound index: isViewed + isBookmarked + publishDate
+            predicate = #Predicate<ArticleModel> { 
+                $0.isViewed == false && $0.isBookmarked == true
+            }
+        }
         else if showUnreadOnly {
+            // Uses index: isViewed + publishDate
             predicate = #Predicate<ArticleModel> { 
-                !$0.isViewed 
+                $0.isViewed == false
             }
         }
-        // Strategy 3: isBookmarked + publishDate (bookmarks)
         else if showBookmarkedOnly {
+            // Uses index: isBookmarked + publishDate
             predicate = #Predicate<ArticleModel> { 
-                $0.isBookmarked 
+                $0.isBookmarked == true
             }
         }
-        // Strategy 4: topic + publishDate (topic filtering)
-        else if let topic = topic, topic != "All" {
-            predicate = #Predicate<ArticleModel> { 
-                $0.topic == topic 
-            }
-        }
+        // OPTIMIZATION 3: No predicate for "All" - uses publishDate index for sorting only
         
         descriptor.predicate = predicate
         
-        // Apply sorting - publishDate is indexed for performance
+        // PERFORMANCE: publishDate is indexed - sorting will be fast
         descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
         
-        // Apply limit if needed
+        // PHASE 2 OPTIMIZATION: Enhanced memory-efficient limits for large datasets
+        let effectiveLimit: Int
         if let limit = limit {
-            descriptor.fetchLimit = limit
+            effectiveLimit = limit
+        } else {
+            // Dynamic limit based on memory pressure and dataset size
+            let memoryPressure = getCurrentMemoryPressure()
+            if memoryPressure > 0.8 { // High memory pressure
+                effectiveLimit = 50  // Reduced limit
+                AppLogger.database.debug("🔥 High memory pressure detected, reducing fetch limit to \(effectiveLimit)")
+            } else if memoryPressure > 0.6 { // Medium memory pressure
+                effectiveLimit = 75  // Moderate limit
+                AppLogger.database.debug("⚠️ Medium memory pressure detected, using moderate fetch limit: \(effectiveLimit)")
+            } else {
+                effectiveLimit = 100 // Normal limit for large datasets
+            }
         }
+        
+        descriptor.fetchLimit = effectiveLimit
 
         do {
             var articles = try context.fetch(descriptor)
+            
+            let fetchTime = CFAbsoluteTimeGetCurrent() - startTime
 
-            // Special logging for missing topics only
-            if let topic = topic, missingTopics.contains(topic) {
-                AppLogger.database.debug("📊 MISSING TOPIC: Initial fetch for '\(topic)' returned \(articles.count) articles")
-
-                // If no articles found, do a broader database check
-                if articles.isEmpty {
-                    let topicOnlyDescriptor = FetchDescriptor<ArticleModel>(
-                        predicate: #Predicate<ArticleModel> { $0.topic == topic }
-                    )
-                    let allArticlesWithTopic = try context.fetch(topicOnlyDescriptor)
-                    AppLogger.database.debug("📊 MISSING TOPIC: Database contains \(allArticlesWithTopic.count) total articles with topic '\(topic)'")
-                }
-            }
-
-            // Apply quality filter in memory (always client-side since server cannot filter)
+            // Apply quality filter in memory (server cannot filter by quality)
             if qualityFilter != "All" {
-                AppLogger.database.debug("🔍 Applying quality filter in memory: \(qualityFilter)")
                 let beforeCount = articles.count
                 
                 articles = articles.filter { article in
@@ -202,15 +214,42 @@ final class ArticleOperations {
                 }
                 
                 let afterCount = articles.count
-                AppLogger.database.debug("🔍 Quality filter reduced articles from \(beforeCount) to \(afterCount)")
+                AppLogger.database.debug("🔍 Quality filter: \(beforeCount) → \(afterCount) articles")
             }
 
-            AppLogger.database.debug("✅ Fetched \(articles.count) articles with optimized indexes")
+            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+            AppLogger.database.debug("⚡ Optimized fetch: \(articles.count) articles in \(String(format: "%.3f", totalTime))s (DB: \(String(format: "%.3f", fetchTime))s, limit: \(effectiveLimit))")
+            
             return articles
         } catch {
             AppLogger.database.error("❌ Error fetching articles: \(error)")
             throw error
         }
+    }
+    
+    /// Gets current memory pressure as a ratio (0.0 to 1.0)
+    /// - Returns: Memory pressure ratio where 1.0 indicates maximum pressure
+    private func getCurrentMemoryPressure() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
+        
+        let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_,
+                         task_flavor_t(MACH_TASK_BASIC_INFO),
+                         $0,
+                         &count)
+            }
+        }
+        
+        if kerr == KERN_SUCCESS {
+            let memoryUsageMB = Double(info.resident_size) / 1024.0 / 1024.0
+            // Assume 200MB is our target maximum for good performance
+            let targetMaxMB = 200.0
+            return min(1.0, memoryUsageMB / targetMaxMB)
+        }
+        
+        return 0.0 // Default to no pressure if we can't determine
     }
     
     /// Background preload articles for adjacent topics to improve switching performance

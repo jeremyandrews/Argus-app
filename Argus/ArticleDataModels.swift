@@ -24,7 +24,7 @@ struct ArgusDetailsData {
     let systemInfo: [String: Any]?
 }
 
-/// SwiftData model for articles
+/// SwiftData model for articles with performance-optimized compound indexes
 @Model
 final class ArticleModel: Equatable {
     // MARK: - Core Identifiers
@@ -60,23 +60,23 @@ final class ArticleModel: Equatable {
     /// Database ID from the backend system
     var databaseId: Int?
 
-    // MARK: - Metadata
+    // MARK: - Metadata (Performance Optimized)
 
-    /// When the article was published
+    /// When the article was published - PRIMARY SORT FIELD
     var publishDate: Date = Date()
 
     /// When the article was added to the database
     var addedDate: Date = Date()
 
-    /// Topic this article belongs to
+    /// Topic this article belongs to - FILTER FIELD
     var topic: String?
 
-    // MARK: - User Interaction States
+    // MARK: - User Interaction States (Performance Optimized)
 
-    /// Whether the user has viewed this article
+    /// Whether the user has viewed this article - FILTER FIELD
     var isViewed: Bool = false
 
-    /// Whether the user has bookmarked this article
+    /// Whether the user has bookmarked this article - FILTER FIELD
     var isBookmarked: Bool = false
 
     // Archive functionality removed

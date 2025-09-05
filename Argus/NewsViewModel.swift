@@ -70,8 +70,8 @@ final class NewsViewModel: ObservableObject {
 
     // MARK: - Pagination State
 
-    /// The page size for pagination
-    var pageSize: Int = 30
+    /// The page size for pagination - optimized for large datasets with 1,000+ articles
+    var pageSize: Int = 100
 
     /// The last loaded date for pagination
     var lastLoadedDate: Date?

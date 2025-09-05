@@ -851,9 +851,8 @@ struct NewsView: View {
             }
             .onAppear {
                 loadMoreArticlesIfNeeded(article)
-                Task {
-                    await viewModel.generateEssentialBlobsIfNeeded(articleID: article.id)
-                }
+                // PERFORMANCE CRITICAL: Rich text should already be pre-converted during article import
+                // No on-demand generation needed - use pre-converted blobs directly
             }
         }
         
