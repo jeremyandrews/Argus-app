@@ -687,7 +687,8 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             articles: [article],
             allArticles: [article],
             currentIndex: 0,
-            initiallyExpandedSection: "Summary"
+            initiallyExpandedSection: "Summary",
+            needsFullDataset: true
         )
 
         // Use the new initializer with the viewModel

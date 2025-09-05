@@ -105,6 +105,13 @@ final class ArticleOperations {
 
     // MARK: - Fetch Operations
 
+    /// Context for article fetching to determine appropriate performance optimizations
+    enum FetchContext {
+        case listView       // For NewsView - apply memory-aware limits for performance
+        case detailView     // For NewsDetailView - allow full dataset access for navigation
+        case background     // For background operations - use conservative limits
+    }
+
     /// Fetches articles with the specified filters using performance-optimized compound indexes
     /// - Parameters:
     ///   - topic: Optional topic to filter by
@@ -112,6 +119,7 @@ final class ArticleOperations {
     ///   - showBookmarkedOnly: Whether to show only bookmarked articles
     ///   - qualityFilter: Quality filter to apply ("All", "Fair+", "Good+")
     ///   - limit: Maximum number of articles to return
+    ///   - context: The context for fetching (listView, detailView, background)
     /// - Returns: Array of articles matching the criteria
     @MainActor
     func fetchArticles(
@@ -119,12 +127,13 @@ final class ArticleOperations {
         showUnreadOnly: Bool,
         showBookmarkedOnly: Bool,
         qualityFilter: String = "All",
-        limit: Int? = nil
+        limit: Int? = nil,
+        context: FetchContext = .listView
     ) async throws -> [ArticleModel] {
         let startTime = CFAbsoluteTimeGetCurrent()
         
         let container = SwiftDataContainer.shared.container
-        let context = container.mainContext
+        let modelContext = container.mainContext
 
         // PERFORMANCE OPTIMIZATION: Use compound indexes for optimal query performance
         // The indexes we added: topic, isViewed, isBookmarked, publishDate
@@ -180,28 +189,47 @@ final class ArticleOperations {
         // PERFORMANCE: publishDate is indexed - sorting will be fast
         descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
         
-        // PHASE 2 OPTIMIZATION: Enhanced memory-efficient limits for large datasets
+        // CONTEXT-AWARE OPTIMIZATION: Apply memory limits based on usage context
         let effectiveLimit: Int
         if let limit = limit {
             effectiveLimit = limit
         } else {
-            // Dynamic limit based on memory pressure and dataset size
-            let memoryPressure = getCurrentMemoryPressure()
-            if memoryPressure > 0.8 { // High memory pressure
-                effectiveLimit = 50  // Reduced limit
-                AppLogger.database.debug("🔥 High memory pressure detected, reducing fetch limit to \(effectiveLimit)")
-            } else if memoryPressure > 0.6 { // Medium memory pressure
-                effectiveLimit = 75  // Moderate limit
-                AppLogger.database.debug("⚠️ Medium memory pressure detected, using moderate fetch limit: \(effectiveLimit)")
-            } else {
-                effectiveLimit = 100 // Normal limit for large datasets
+            switch context {
+            case .detailView:
+                // For detail view, allow access to full dataset for complete navigation
+                // No artificial limits - let the user navigate through all articles
+                effectiveLimit = 0 // 0 means no limit in SwiftData
+                AppLogger.database.debug("🔍 Detail view context: No fetch limit applied for full dataset access")
+                
+            case .background:
+                // For background operations, use conservative limits
+                effectiveLimit = 50
+                AppLogger.database.debug("🔄 Background context: Conservative limit of \(effectiveLimit)")
+                
+            case .listView:
+                // For list view, apply memory-aware limits for performance
+                let memoryPressure = getCurrentMemoryPressure()
+                if memoryPressure > 0.8 { // High memory pressure
+                    effectiveLimit = 50  // Reduced limit
+                    AppLogger.database.debug("🔥 List view + High memory pressure: limit \(effectiveLimit)")
+                } else if memoryPressure > 0.6 { // Medium memory pressure
+                    effectiveLimit = 75  // Moderate limit
+                    AppLogger.database.debug("⚠️ List view + Medium memory pressure: limit \(effectiveLimit)")
+                } else {
+                    effectiveLimit = 100 // Normal limit for large datasets
+                    AppLogger.database.debug("✅ List view + Normal memory: limit \(effectiveLimit)")
+                }
             }
         }
         
-        descriptor.fetchLimit = effectiveLimit
+        // Apply the limit only if it's greater than 0
+        if effectiveLimit > 0 {
+            descriptor.fetchLimit = effectiveLimit
+        }
+        // If effectiveLimit is 0, no limit is applied (full dataset access)
 
         do {
-            var articles = try context.fetch(descriptor)
+            var articles = try modelContext.fetch(descriptor)
             
             let fetchTime = CFAbsoluteTimeGetCurrent() - startTime
 

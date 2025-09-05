@@ -247,7 +247,8 @@ final class NewsViewModel: ObservableObject {
                 topic: "All", // This fetches articles for all topics
                 showUnreadOnly: showUnreadOnly,
                 showBookmarkedOnly: showBookmarkedOnly,
-                qualityFilter: qualityFilter
+                qualityFilter: qualityFilter,
+                context: .listView // Use listView context for NewsView performance
             )
 
             // Update allArticles for topic bar generation
@@ -260,7 +261,8 @@ final class NewsViewModel: ObservableObject {
                     topic: selectedTopic,
                     showUnreadOnly: showUnreadOnly,
                     showBookmarkedOnly: showBookmarkedOnly,
-                    qualityFilter: qualityFilter
+                    qualityFilter: qualityFilter,
+                    context: .listView // Use listView context for NewsView performance
                 )
 
                 // Update filteredArticles with the topic-filtered articles
@@ -1385,6 +1387,30 @@ final class NewsViewModel: ObservableObject {
             for: field,
             from: article,
             createIfMissing: createIfMissing
+        )
+    }
+
+    // MARK: - Detail View Support
+
+    /// Fetches articles for detail view with full dataset access (no memory limits)
+    /// - Parameters:
+    ///   - topic: Optional topic to filter by
+    ///   - showUnreadOnly: Whether to show only unread articles
+    ///   - showBookmarkedOnly: Whether to show only bookmarked articles
+    ///   - qualityFilter: Quality filter to apply
+    /// - Returns: Array of all articles matching the criteria (no artificial limits)
+    func fetchArticlesForDetailView(
+        topic: String? = nil,
+        showUnreadOnly: Bool = false,
+        showBookmarkedOnly: Bool = false,
+        qualityFilter: String = "All"
+    ) async throws -> [ArticleModel] {
+        return try await articleOperations.fetchArticles(
+            topic: topic,
+            showUnreadOnly: showUnreadOnly,
+            showBookmarkedOnly: showBookmarkedOnly,
+            qualityFilter: qualityFilter,
+            context: .detailView // Use detailView context for full dataset access
         )
     }
 }

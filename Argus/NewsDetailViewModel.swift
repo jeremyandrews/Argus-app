@@ -155,6 +155,7 @@ final class NewsDetailViewModel: ObservableObject {
     ///   - preloadedBody: Optional preloaded body attributed string
     ///   - articleOperations: The article operations service to use
     ///   - newsViewModel: NewsViewModel instance for rich text cache access
+    ///   - needsFullDataset: Whether to fetch the complete dataset for comprehensive navigation
     init(
         articles: [ArticleModel],
         allArticles: [ArticleModel],
@@ -165,7 +166,8 @@ final class NewsDetailViewModel: ObservableObject {
         preloadedBody: NSAttributedString? = nil,
         preloadedSummary: NSAttributedString? = nil,
         articleOperations: ArticleOperations = ArticleOperations(),
-        newsViewModel: NewsViewModel? = nil
+        newsViewModel: NewsViewModel? = nil,
+        needsFullDataset: Bool = false
     ) {
         // Apply uniqueness to prevent duplicate IDs in collections
         let uniqueArticles = articles.uniqued()
@@ -243,6 +245,13 @@ final class NewsDetailViewModel: ObservableObject {
 
         // Setup observers for settings changes
         setupUserDefaultsObservers()
+        
+        // Fetch full dataset if needed for comprehensive navigation
+        if needsFullDataset {
+            Task(priority: .userInitiated) {
+                await self.fetchFullDatasetForNavigation()
+            }
+        }
         
         // Phase 2.3: Start initial preloading of adjacent articles after initialization
         Task.detached(priority: .background) {
@@ -440,6 +449,44 @@ final class NewsDetailViewModel: ObservableObject {
             } else {
                 currentIndex = max(0, articles.count - 1)
             }
+        }
+    }
+
+    // MARK: - Full Dataset Access for Navigation
+    
+    /// Fetches the complete dataset for comprehensive navigation when needed
+    /// This method bypasses memory-aware limits to ensure NewsDetailView can access all articles
+    private func fetchFullDatasetForNavigation() async {
+        guard let newsViewModel = newsViewModel else {
+            AppLogger.database.debug("⚠️ No NewsViewModel reference available for full dataset fetch")
+            return
+        }
+        
+        AppLogger.database.debug("🔄 Fetching full dataset for comprehensive navigation...")
+        
+        do {
+            // Use ArticleOperations with .detailView context to bypass memory limits
+            let fullArticles = try await articleOperations.fetchArticles(
+                topic: newsViewModel.selectedTopic == "All Topics" ? nil : newsViewModel.selectedTopic,
+                showUnreadOnly: newsViewModel.showUnreadOnly,
+                showBookmarkedOnly: newsViewModel.showBookmarkedOnly,
+                qualityFilter: newsViewModel.qualityFilter,
+                limit: nil, // No limit for full dataset
+                context: .detailView // Use detail view context to bypass memory limits
+            )
+            
+            await MainActor.run {
+                // Update articles array with full dataset
+                self.articles = fullArticles.uniqued()
+                
+                // Validate and adjust current index if needed
+                self.validateAndAdjustIndex()
+                
+                AppLogger.database.debug("✅ Full dataset loaded: \(fullArticles.count) articles available for navigation")
+            }
+            
+        } catch {
+            AppLogger.database.error("❌ Failed to fetch full dataset: \(error)")
         }
     }
 

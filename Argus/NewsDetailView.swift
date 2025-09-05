@@ -1617,7 +1617,8 @@ struct NewsDetailView: View {
                             articles: [foundArticle],
                             allArticles: [foundArticle],
                             currentIndex: 0,
-                            initiallyExpandedSection: "Summary"
+                            initiallyExpandedSection: "Summary",
+                            needsFullDataset: true
                         )
 
                         // Present the detail view
@@ -2124,7 +2125,8 @@ struct SimilarArticleRow: View {
                     articles: [article],
                     allArticles: [article],
                     currentIndex: 0,
-                    initiallyExpandedSection: "Summary"
+                    initiallyExpandedSection: "Summary",
+                    needsFullDataset: true
                 )
                 // Use the new initializer with the view model
                 NewsDetailView(viewModel: articleViewModel)

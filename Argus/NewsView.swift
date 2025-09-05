@@ -519,6 +519,7 @@ struct NewsView: View {
         let modelContext: ModelContext
         let filteredArticles: [ArticleModel]
         let totalArticles: [ArticleModel]
+        let newsViewModel: NewsViewModel
         @State private var titleAttributedString: NSAttributedString?
         @State private var bodyAttributedString: NSAttributedString?
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -581,7 +582,8 @@ struct NewsView: View {
                         article: article,
                         modelContext: modelContext,
                         filteredArticles: filteredArticles,
-                        totalArticles: totalArticles
+                        totalArticles: totalArticles,
+                        newsViewModel: newsViewModel
                     )
                 }
             }
@@ -612,6 +614,7 @@ struct NewsView: View {
         let modelContext: ModelContext
         let filteredArticles: [ArticleModel]
         let totalArticles: [ArticleModel]
+        let newsViewModel: NewsViewModel
         @State private var isLoading = false
         @State private var loadError: Error? = nil
         @State private var hasFetchedMetadata = false
@@ -732,26 +735,18 @@ struct NewsView: View {
                 return
             }
 
-            // Create a view model with the appropriate parameters
-            let viewModel = NewsDetailViewModel(
+            // Create a view model with the current filtered articles
+            let detailViewModel = NewsDetailViewModel(
                 articles: filteredArticles,
                 allArticles: totalArticles,
                 currentIndex: index,
-                initiallyExpandedSection: section
+                initiallyExpandedSection: section,
+                newsViewModel: newsViewModel,
+                needsFullDataset: true
             )
 
-            // We need to make a host view to properly pass the modelContext
-            struct DetailViewWrapper: View {
-                let viewModel: NewsDetailViewModel
-                @Environment(\.modelContext) var modelContext
-
-                var body: some View {
-                    NewsDetailView(viewModel: viewModel)
-                }
-            }
-
-            let detailView = DetailViewWrapper(viewModel: viewModel)
-
+            // Present the detail view
+            let detailView = DetailViewWrapper(viewModel: detailViewModel)
             let hostingController = UIHostingController(rootView: detailView)
             hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
 
@@ -1276,6 +1271,7 @@ struct NewsView: View {
     }
 
     // MARK: - Article Operations
+    // Note: Article operation functions are implemented in NewsView+Extensions.swift
 
     private func toggleReadStatus(_ article: ArticleModel) {
         Task {
@@ -1288,5 +1284,16 @@ struct NewsView: View {
             await viewModel.toggleBookmark(for: article)
         }
     }
-    
+
+    // MARK: - Helper Views
+
+    /// We need to make a host view to properly pass the modelContext
+    struct DetailViewWrapper: View {
+        let viewModel: NewsDetailViewModel
+        @Environment(\.modelContext) var modelContext
+
+        var body: some View {
+            NewsDetailView(viewModel: viewModel)
+        }
+    }
 }

@@ -53,7 +53,8 @@ extension NewsView {
             allArticles: viewModel.allArticles,
             currentIndex: index,
             initiallyExpandedSection: "Summary",
-            newsViewModel: viewModel
+            newsViewModel: viewModel,
+            needsFullDataset: true
         )
 
         // Create the detail view wrapper
