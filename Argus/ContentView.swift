@@ -12,19 +12,23 @@ struct ContentView: View {
             // iPad Layout
             NavigationSplitView {
                 List {
-                    NavigationLink(destination: NewsView(tabBarHeight: $tabBarHeight)) {
+                    NavigationLink(destination: NewsView(tabBarHeight: $tabBarHeight)
+                        .environment(tabNavigation)) {
                         Label("News", systemImage: "newspaper")
                     }
-                    NavigationLink(destination: SubscriptionsView()) {
+                    NavigationLink(destination: SubscriptionsView()
+                        .environment(tabNavigation)) {
                         Label("Subscriptions", systemImage: "mail")
                     }
-                    NavigationLink(destination: SettingsView()) {
+                    NavigationLink(destination: SettingsView()
+                        .environment(tabNavigation)) {
                         Label("Settings", systemImage: "gearshape")
                     }
                 }
                 .navigationTitle("Argus")
             } detail: {
                 NewsView(tabBarHeight: $tabBarHeight)
+                    .environment(tabNavigation)
             }
             .onAppear {
                 // Phase 2.1: App Launch Sync - Schedule initial sync after app launch
