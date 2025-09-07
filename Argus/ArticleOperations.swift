@@ -113,6 +113,32 @@ final class ArticleOperations {
         case topicBar       // For topic bar generation - ensure all topics are represented
     }
 
+    /// UNIFIED QUERY METHOD - Uses the same logic as working "x of y" statistics
+    /// Fetches articles with full dataset access (no artificial limits)
+    /// This is the unified query method that should be used for all topic-related operations
+    /// - Parameters:
+    ///   - topic: Optional topic to filter by
+    ///   - showUnreadOnly: Whether to show only unread articles
+    ///   - showBookmarkedOnly: Whether to show only bookmarked articles
+    ///   - qualityFilter: Quality filter to apply ("All", "Fair+", "Good+")
+    /// - Returns: Array of articles matching the criteria (no artificial limits)
+    @MainActor
+    func fetchArticlesUnified(
+        topic: String?,
+        showUnreadOnly: Bool,
+        showBookmarkedOnly: Bool,
+        qualityFilter: String = "All"
+    ) async throws -> [ArticleModel] {
+        return try await fetchArticles(
+            topic: topic,
+            showUnreadOnly: showUnreadOnly,
+            showBookmarkedOnly: showBookmarkedOnly,
+            qualityFilter: qualityFilter,
+            limit: nil, // No limit for unified queries
+            context: .detailView // Use detail view context to bypass memory limits
+        )
+    }
+
     /// Fetches articles with the specified filters using performance-optimized compound indexes
     /// - Parameters:
     ///   - topic: Optional topic to filter by

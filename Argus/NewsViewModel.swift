@@ -235,7 +235,7 @@ final class NewsViewModel: ObservableObject {
 
     // MARK: - Public Methods - Data Loading
 
-    /// Refreshes articles based on current filters
+    /// Refreshes articles based on current filters using unified query system
     func refreshArticles() async {
         // Cancel any pending debounced update
         filterChangeDebouncer?.cancel()
@@ -245,58 +245,54 @@ final class NewsViewModel: ObservableObject {
         error = nil
 
         do {
-            // CORRECT FIX: Fetch topic bar data WITH user filters but using higher limits
-            // This ensures topics only appear if there are articles to display with current filters
-            let topicBarData = try await articleOperations.fetchArticles(
-                topic: nil, // Fetch ALL topics - never filter by topic for topic bar
-                showUnreadOnly: showUnreadOnly, // Apply user filters to topic bar
-                showBookmarkedOnly: showBookmarkedOnly, // Apply user filters to topic bar
-                qualityFilter: qualityFilter, // Apply user filters to topic bar
-                context: .topicBar // Use dedicated topicBar context for higher limits to ensure topic diversity
+            // UNIFIED QUERY SYSTEM: Use the same logic as working "x of y" statistics
+            // This ensures topics never disappear and article counts are always consistent
+            
+            // Fetch ALL articles with current filters (no artificial limits)
+            let allFilteredArticles = try await articleOperations.fetchArticlesUnified(
+                topic: nil, // Fetch ALL topics for topic bar generation
+                showUnreadOnly: showUnreadOnly,
+                showBookmarkedOnly: showBookmarkedOnly,
+                qualityFilter: qualityFilter
             )
             
-            // Update topicBarArticles - this contains articles that match current filters
-            topicBarArticles = topicBarData
+            // Update topicBarArticles with the complete dataset
+            // This ensures all available topics are always shown
+            topicBarArticles = allFilteredArticles
             
             // For backward compatibility, also update allArticles
-            // This maintains existing functionality for other operations
-            allArticles = topicBarData
+            allArticles = allFilteredArticles
 
-            // Now fetch articles for display based on selected topic AND user filters
+            // Filter articles for display based on selected topic
             if selectedTopic != "All" {
-                // Fetch articles with the selected topic filter AND user filters
-                let topicFilteredArticles = try await articleOperations.fetchArticles(
-                    topic: selectedTopic,
-                    showUnreadOnly: showUnreadOnly,
-                    showBookmarkedOnly: showBookmarkedOnly,
-                    qualityFilter: qualityFilter,
-                    context: .listView
-                )
-
-                // Update filteredArticles with the topic-filtered articles
-                filteredArticles = topicFilteredArticles
+                // Filter the unified dataset by selected topic
+                filteredArticles = allFilteredArticles.filter { article in
+                    article.topic == selectedTopic
+                }
             } else {
-                // If "All" is selected, use the same articles for display
-                filteredArticles = topicBarData
+                // If "All" is selected, show all articles
+                filteredArticles = allFilteredArticles
             }
 
             // Update grouping using filtered articles
             await updateGroupedArticles()
 
-            // Update cache
-            updateArticleCache(filteredArticles)
+            // Update cache with the complete dataset for better performance
+            updateArticleCache(allFilteredArticles)
 
-            // Reset pagination state
+            // Reset pagination state (not needed with unified system, but kept for compatibility)
             lastLoadedDate = filteredArticles.last?.publishDate
-            hasMoreContent = filteredArticles.count >= pageSize
+            hasMoreContent = false // No pagination needed with unified system
 
             // Clear loading state
             isLoading = false
+            
+            AppLogger.database.debug("✅ Unified refresh: \(allFilteredArticles.count) total articles, \(self.filteredArticles.count) displayed")
 
         } catch {
             self.error = error
             isLoading = false
-            AppLogger.database.error("Error refreshing articles: \(error)")
+            AppLogger.database.error("Error refreshing articles with unified system: \(error)")
         }
     }
 
@@ -1386,7 +1382,7 @@ final class NewsViewModel: ObservableObject {
 
     // MARK: - Detail View Support
 
-    /// Fetches articles for detail view with full dataset access (no memory limits)
+    /// Fetches articles for detail view using unified query system
     /// - Parameters:
     ///   - topic: Optional topic to filter by
     ///   - showUnreadOnly: Whether to show only unread articles
@@ -1399,12 +1395,12 @@ final class NewsViewModel: ObservableObject {
         showBookmarkedOnly: Bool = false,
         qualityFilter: String = "All"
     ) async throws -> [ArticleModel] {
-        return try await articleOperations.fetchArticles(
+        // Use the unified query system for consistent results
+        return try await articleOperations.fetchArticlesUnified(
             topic: topic,
             showUnreadOnly: showUnreadOnly,
             showBookmarkedOnly: showBookmarkedOnly,
-            qualityFilter: qualityFilter,
-            context: .detailView // Use detailView context for full dataset access
+            qualityFilter: qualityFilter
         )
     }
 }
