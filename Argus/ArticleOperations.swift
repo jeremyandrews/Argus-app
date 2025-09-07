@@ -110,6 +110,7 @@ final class ArticleOperations {
         case listView       // For NewsView - apply memory-aware limits for performance
         case detailView     // For NewsDetailView - allow full dataset access for navigation
         case background     // For background operations - use conservative limits
+        case topicBar       // For topic bar generation - ensure all topics are represented
     }
 
     /// Fetches articles with the specified filters using performance-optimized compound indexes
@@ -205,6 +206,12 @@ final class ArticleOperations {
                 // For background operations, use conservative limits
                 effectiveLimit = 50
                 AppLogger.database.debug("🔄 Background context: Conservative limit of \(effectiveLimit)")
+                
+            case .topicBar:
+                // For topic bar generation, ensure all topics are represented
+                // Use a higher limit to capture topic diversity, but not unlimited to maintain performance
+                effectiveLimit = 200 // Higher limit to ensure topic diversity
+                AppLogger.database.debug("🏷️ Topic bar context: Higher limit of \(effectiveLimit) for topic diversity")
                 
             case .listView:
                 // For list view, apply memory-aware limits for performance

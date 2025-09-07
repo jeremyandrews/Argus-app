@@ -252,7 +252,7 @@ final class NewsViewModel: ObservableObject {
                 showUnreadOnly: showUnreadOnly,
                 showBookmarkedOnly: showBookmarkedOnly,
                 qualityFilter: qualityFilter,
-                context: .listView
+                context: .topicBar // Use dedicated topicBar context for higher limits and topic diversity
             )
             
             // Update topicBarArticles - this should NEVER be topic-filtered
