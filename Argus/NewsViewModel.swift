@@ -18,6 +18,9 @@ final class NewsViewModel: ObservableObject {
 
     /// All articles loaded from the database (may be more than what's displayed)
     @Published var allArticles: [ArticleModel] = []
+    
+    /// Articles used specifically for topic bar generation (always contains all topics)
+    @Published var topicBarArticles: [ArticleModel] = []
 
     /// Grouped articles for display in sections
     @Published var groupedArticles: [(key: String, articles: [ArticleModel])] = []
@@ -242,34 +245,39 @@ final class NewsViewModel: ObservableObject {
         error = nil
 
         do {
-            // First, fetch articles with non-topic filters only (for all visible topics)
-            let allArticlesWithoutTopicFilter = try await articleOperations.fetchArticles(
-                topic: "All", // This fetches articles for all topics
+            // CRITICAL FIX: Always fetch ALL articles for topic bar generation
+            // This ensures the topic bar always shows all available topics
+            let topicBarData = try await articleOperations.fetchArticles(
+                topic: nil, // Fetch ALL topics - never filter by topic for topic bar
                 showUnreadOnly: showUnreadOnly,
                 showBookmarkedOnly: showBookmarkedOnly,
                 qualityFilter: qualityFilter,
-                context: .listView // Use listView context for NewsView performance
+                context: .listView
             )
+            
+            // Update topicBarArticles - this should NEVER be topic-filtered
+            topicBarArticles = topicBarData
+            
+            // For backward compatibility, also update allArticles
+            // This maintains existing functionality for other operations
+            allArticles = topicBarData
 
-            // Update allArticles for topic bar generation
-            allArticles = allArticlesWithoutTopicFilter
-
-            // If a specific topic is selected, fetch articles with that topic filter
+            // Now fetch articles for display based on selected topic
             if selectedTopic != "All" {
-                // Fetch articles with the selected topic AND quality filter
+                // Fetch articles with the selected topic filter
                 let topicFilteredArticles = try await articleOperations.fetchArticles(
                     topic: selectedTopic,
                     showUnreadOnly: showUnreadOnly,
                     showBookmarkedOnly: showBookmarkedOnly,
                     qualityFilter: qualityFilter,
-                    context: .listView // Use listView context for NewsView performance
+                    context: .listView
                 )
 
                 // Update filteredArticles with the topic-filtered articles
                 filteredArticles = topicFilteredArticles
             } else {
-                // If "All" is selected, use the same articles for both
-                filteredArticles = allArticlesWithoutTopicFilter
+                // If "All" is selected, use the same articles for display
+                filteredArticles = topicBarData
             }
 
             // Update grouping using filtered articles
@@ -328,12 +336,16 @@ final class NewsViewModel: ObservableObject {
         // Check for new topics that might have appeared
         // and update the topic bar
         do {
-            allArticles = try await articleOperations.fetchArticles(
-                topic: "All",
+            let freshTopicBarData = try await articleOperations.fetchArticles(
+                topic: nil, // Always fetch ALL topics for topic bar
                 showUnreadOnly: showUnreadOnly,
                 showBookmarkedOnly: showBookmarkedOnly,
                 qualityFilter: qualityFilter
             )
+            
+            // Update both topic bar and allArticles
+            topicBarArticles = freshTopicBarData
+            allArticles = freshTopicBarData
         } catch {
             AppLogger.database.error("Error loading articles: \(error)")
             // Keep existing articles if fetch fails
