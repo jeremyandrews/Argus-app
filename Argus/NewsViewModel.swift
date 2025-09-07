@@ -245,26 +245,26 @@ final class NewsViewModel: ObservableObject {
         error = nil
 
         do {
-            // CRITICAL FIX: Always fetch ALL articles for topic bar generation
-            // This ensures the topic bar always shows all available topics
+            // CORRECT FIX: Fetch topic bar data WITH user filters but using higher limits
+            // This ensures topics only appear if there are articles to display with current filters
             let topicBarData = try await articleOperations.fetchArticles(
                 topic: nil, // Fetch ALL topics - never filter by topic for topic bar
-                showUnreadOnly: showUnreadOnly,
-                showBookmarkedOnly: showBookmarkedOnly,
-                qualityFilter: qualityFilter,
-                context: .topicBar // Use dedicated topicBar context for higher limits and topic diversity
+                showUnreadOnly: showUnreadOnly, // Apply user filters to topic bar
+                showBookmarkedOnly: showBookmarkedOnly, // Apply user filters to topic bar
+                qualityFilter: qualityFilter, // Apply user filters to topic bar
+                context: .topicBar // Use dedicated topicBar context for higher limits to ensure topic diversity
             )
             
-            // Update topicBarArticles - this should NEVER be topic-filtered
+            // Update topicBarArticles - this contains articles that match current filters
             topicBarArticles = topicBarData
             
             // For backward compatibility, also update allArticles
             // This maintains existing functionality for other operations
             allArticles = topicBarData
 
-            // Now fetch articles for display based on selected topic
+            // Now fetch articles for display based on selected topic AND user filters
             if selectedTopic != "All" {
-                // Fetch articles with the selected topic filter
+                // Fetch articles with the selected topic filter AND user filters
                 let topicFilteredArticles = try await articleOperations.fetchArticles(
                     topic: selectedTopic,
                     showUnreadOnly: showUnreadOnly,
@@ -323,7 +323,7 @@ final class NewsViewModel: ObservableObject {
     /// Refreshes the view after background sync completes
     @MainActor
     func refreshAfterBackgroundSync() async {
-        // Refresh with current filters
+        // Refresh with current filters - this will properly update both topic bar and display articles
         await refreshArticles()
 
         // Check for empty topic and auto-redirect if needed
@@ -331,24 +331,6 @@ final class NewsViewModel: ObservableObject {
             selectedTopic = "All"
             saveUserPreferences()
             await refreshArticles()
-        }
-
-        // Check for new topics that might have appeared
-        // and update the topic bar
-        do {
-            let freshTopicBarData = try await articleOperations.fetchArticles(
-                topic: nil, // Always fetch ALL topics for topic bar
-                showUnreadOnly: showUnreadOnly,
-                showBookmarkedOnly: showBookmarkedOnly,
-                qualityFilter: qualityFilter
-            )
-            
-            // Update both topic bar and allArticles
-            topicBarArticles = freshTopicBarData
-            allArticles = freshTopicBarData
-        } catch {
-            AppLogger.database.error("Error loading articles: \(error)")
-            // Keep existing articles if fetch fails
         }
     }
 
