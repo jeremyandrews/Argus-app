@@ -77,282 +77,118 @@ struct SettingsView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
-                    Section {
-                        VStack(alignment: .leading) {
-                            Text(autoDeleteDays == 0 ? "Disabled" : "After \(autoDeleteDays) day\(autoDeleteDays == 1 ? "" : "s")")
-                                .font(.headline)
-                                .padding(.bottom, 5)
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(autoDeleteDays == 0 ? "Disabled" : "After \(autoDeleteDays) day\(autoDeleteDays == 1 ? "" : "s")")
+                            .font(.headline)
+                            .foregroundColor(.primary)
 
-                            VStack(spacing: 4) {
-                                Slider(value: Binding(
-                                    get: { Double(autoDeleteDays) },
-                                    set: { autoDeleteDays = Int($0) }
-                                ), in: 0 ... 7, step: 1)
+                        VStack(spacing: 8) {
+                            Slider(value: Binding(
+                                get: { Double(autoDeleteDays) },
+                                set: { autoDeleteDays = Int($0) }
+                            ), in: 0 ... 7, step: 1)
+                            .accentColor(.blue)
 
-                                HStack {
-                                    ForEach(0 ... 7, id: \.self) { mark in
-                                        Text("\(mark)")
-                                            .font(.caption2)
-                                            .frame(maxWidth: .infinity)
-                                    }
+                            HStack {
+                                ForEach(0 ... 7, id: \.self) { mark in
+                                    Text("\(mark)")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .frame(maxWidth: .infinity)
                                 }
-                                .padding(.horizontal, 4)
                             }
-
-                            Text("Automatically delete articles older than the selected number of days. Bookmarked or Archived articles will not be automatically deleted.")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 5)
+                            .padding(.horizontal, 4)
                         }
-                    } header: {
-                        Text("Auto-delete Articles")
                     }
+                } header: {
+                    Text("Storage Management")
+                } footer: {
+                    Text("Articles are automatically deleted after the selected timeframe. Bookmarked articles are never deleted.")
+                }
                     .id("settingsListTop")
 
                 Section {
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Picker("Sort Articles By", selection: $sortOrder) {
                             Text("Newest First").tag("newest")
                             Text("Oldest First").tag("oldest")
                             Text("Bookmarked First").tag("bookmarked")
                         }
+                        .pickerStyle(.menu)
 
                         Text(sortOrderExplanation)
                             .font(.footnote)
                             .foregroundColor(.secondary)
-                            .padding(.top, 5)
                     }
 
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Picker("Group Articles By", selection: $groupingStyle) {
-                            Text("By Date").tag("date") // Moved to first position
+                            Text("By Date").tag("date")
                             Text("By Topic").tag("topic")
                             Text("No Grouping").tag("none")
                         }
+                        .pickerStyle(.menu)
 
                         Text(groupingExplanation)
                             .font(.footnote)
                             .foregroundColor(.secondary)
-                            .padding(.top, 5)
                     }
 
-                    VStack(alignment: .leading) {
-                        Toggle("Show Unread Count on App Icon", isOn: $showBadge)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Show Badge on App Icon", isOn: $showBadge)
 
-                        Text("When enabled, a red badge showing the number of unread articles appears on the Argus app icon. This count excludes archived articles.")
+                        Text("Display unread article count as a red badge on the app icon.")
                             .font(.footnote)
                             .foregroundColor(.secondary)
-                            .padding(.top, 5)
                     }
                 } header: {
-                    Text("Display Preferences")
+                    Text("Article Organization")
                 }
 
-                // Text Display Customization Section - Compact Design
+                // Reading Experience Section - iOS18+ Design with Progressive Disclosure
                 Section {
-                    VStack(alignment: .leading, spacing: 15) {
-                        // Quick Presets - Visual Cards
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Quick Presets")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 12) {
-                                    ForEach(TextDisplayPreset.presets, id: \.name) { preset in
-                                        PresetCardView(
-                                            preset: preset,
-                                            isSelected: isPresetSelected(preset),
-                                            onTap: {
-                                                textDisplaySettings = preset.settings
-                                                saveTextDisplaySettings()
-                                            }
-                                        )
-                                    }
-                                }
-                                .padding(.horizontal, 1)
-                            }
-                        }
-                        
-                        // Preview Section
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Preview")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Sample Article Title")
-                                    .font(textDisplaySettings.font)
-                                    .foregroundColor(textDisplaySettings.fontColor.color)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(textDisplaySettings.backgroundColor.color)
-                                    .cornerRadius(6)
-                                
-                                Text("This is sample article text to preview your font and color settings.")
-                                    .font(textDisplaySettings.descriptionFont)
-                                    .foregroundColor(textDisplaySettings.fontColor.color.opacity(0.8))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(textDisplaySettings.backgroundColor.color)
-                                    .cornerRadius(6)
-                            }
-                        }
-                        
-                        // Font Settings - Compact Layout
-                        VStack(alignment: .leading, spacing: 12) {
-                            // Font Family - Use menu picker for more options
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Font Family")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                
-                                Menu {
-                                    ForEach(FontFamily.allCases, id: \.self) { family in
-                                        Button(family.displayName) {
-                                            textDisplaySettings.fontFamily = family
-                                            saveTextDisplaySettings()
-                                        }
-                                    }
-                                } label: {
-                                    HStack {
-                                        Text(textDisplaySettings.fontFamily.displayName)
-                                        Spacer()
-                                        Image(systemName: "chevron.up.chevron.down")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(Color(.systemGray5))
-                                    .cornerRadius(8)
-                                }
-                            }
-                            
-                            // Font Size and Weight in HStack
-                            HStack(spacing: 16) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Size")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                    
-                                    Picker("Font Size", selection: $textDisplaySettings.fontSize) {
-                                        ForEach(FontSize.allCases, id: \.self) { size in
-                                            Text(size.displayName).tag(size)
-                                        }
-                                    }
-                                    .pickerStyle(.menu)
-                                    .onChange(of: textDisplaySettings.fontSize) { _, _ in
-                                        saveTextDisplaySettings()
-                                    }
-                                }
-                                
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Weight")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                    
-                                    Picker("Font Weight", selection: $textDisplaySettings.fontWeight) {
-                                        ForEach(FontWeight.allCases, id: \.self) { weight in
-                                            Text(weight.displayName).tag(weight)
-                                        }
-                                    }
-                                    .pickerStyle(.segmented)
-                                    .onChange(of: textDisplaySettings.fontWeight) { _, _ in
-                                        saveTextDisplaySettings()
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Color Settings - Compact Grid
-                        HStack(spacing: 16) {
-                            // Background Colors
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Background")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                
-                                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 4) {
-                                    ForEach(BackgroundColorOption.allCases, id: \.self) { option in
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .fill(option.color)
-                                            .frame(height: 24)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 6)
-                                                    .stroke(textDisplaySettings.backgroundColor == option ? Color.blue : Color.secondary.opacity(0.3), lineWidth: textDisplaySettings.backgroundColor == option ? 2 : 1)
-                                            )
-                                            .onTapGesture {
-                                                textDisplaySettings.backgroundColor = option
-                                                saveTextDisplaySettings()
-                                            }
-                                    }
-                                }
-                            }
-                            
-                            // Font Colors
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Text Color")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                
-                                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 4) {
-                                    ForEach(FontColorOption.allCases, id: \.self) { option in
-                                        Circle()
-                                            .fill(option.color)
-                                            .frame(height: 24)
-                                            .overlay(
-                                                Circle()
-                                                    .stroke(textDisplaySettings.fontColor == option ? Color.blue : Color.secondary.opacity(0.3), lineWidth: textDisplaySettings.fontColor == option ? 2 : 1)
-                                            )
-                                            .onTapGesture {
-                                                textDisplaySettings.fontColor = option
-                                                saveTextDisplaySettings()
-                                            }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    ReadingExperienceView(textDisplaySettings: $textDisplaySettings, onSettingsChanged: saveTextDisplaySettings)
                 } header: {
-                    Text("Text Display")
+                    Text("Reading Experience")
                 }
 
-                // Phase 3.1: Auto-Sync Settings Interface
+                // Synchronization Section - iOS18+ Design
                 Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        // Basic cellular sync toggle
-                        VStack(alignment: .leading) {
-                            Toggle("Allow Sync on Cellular Data", isOn: $allowCellularSync)
-
-                            Text("When disabled, articles will only be synchronized when connected to WiFi to save data. High-priority notifications will still be delivered immediately.")
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Cellular Data Settings
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Allow Cellular Data", isOn: $allowCellularSync)
+                            
+                            Text("When disabled, articles sync only on WiFi to save data usage. Push notifications are always delivered.")
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
-                                .padding(.top, 2)
                         }
                         
                         Divider()
+                            .padding(.vertical, 4)
                         
-                        // Phase 3.1: Streamlined Auto-Sync Controls
+                        // Auto-Sync Controls
                         AutoSyncControlsView()
                     }
                 } header: {
                     Text("Synchronization")
+                } footer: {
+                    Text("Control when and how articles are downloaded to your device.")
                 }
 
                 Section {
-                    VStack(alignment: .leading) {
-                        Toggle("Use Reader Mode When Available", isOn: $useReaderMode)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Use Reader Mode", isOn: $useReaderMode)
 
-                        Text("Reader mode removes ads and other distractions when viewing articles. Some websites may not support this feature.")
+                        Text("Remove ads and distractions when viewing articles in Safari.")
                             .font(.footnote)
                             .foregroundColor(.secondary)
-                            .padding(.top, 5)
                     }
                 } header: {
-                    Text("Preview")
+                    Text("Web Browsing")
+                } footer: {
+                    Text("Reader mode may not be available for all websites.")
                 }
 
                 Section {
