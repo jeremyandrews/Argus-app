@@ -235,6 +235,139 @@ final class TopicCacheManager: ObservableObject {
         return await getAvailableTopics()
     }
     
+    /// Gets available topics filtered by current view state (respects unread/bookmarked filters)
+    /// Uses database-level filtering for optimal performance
+    /// - Parameters:
+    ///   - showUnreadOnly: Whether to only show topics that have unread articles
+    ///   - showBookmarkedOnly: Whether to only show topics that have bookmarked articles
+    ///   - qualityFilter: Quality filter to apply
+    /// - Returns: Array of topic names that have articles matching the filters
+    func getFilteredTopicNames(
+        showUnreadOnly: Bool = false,
+        showBookmarkedOnly: Bool = false,
+        qualityFilter: String = "All"
+    ) async -> [String] {
+        let container = SwiftDataContainer.shared.container
+        let modelContext = container.mainContext
+        
+        AppLogger.database.debug("🔍 Getting filtered topics - unread: \(showUnreadOnly), bookmarked: \(showBookmarkedOnly), quality: \(qualityFilter)")
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        do {
+            // Use database-level filtering for optimal performance
+            let filteredArticles = try await fetchFilteredArticlesForTopics(
+                modelContext: modelContext,
+                showUnreadOnly: showUnreadOnly,
+                showBookmarkedOnly: showBookmarkedOnly,
+                qualityFilter: qualityFilter
+            )
+            
+            // Extract unique topics efficiently
+            var uniqueTopics = Set<String>()
+            for article in filteredArticles {
+                if let topic = article.topic {
+                    uniqueTopics.insert(topic)
+                } else {
+                    uniqueTopics.insert("Uncategorized")
+                }
+            }
+            
+            let sortedTopics = Array(uniqueTopics).sorted()
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            AppLogger.database.debug("✅ Found \(sortedTopics.count) filtered topics in \(String(format: "%.3f", duration))s")
+            
+            return sortedTopics
+            
+        } catch {
+            AppLogger.database.error("❌ Failed to get filtered topics: \(error)")
+            return []
+        }
+    }
+    
+    /// Fetches articles with database-level filtering for topic discovery
+    /// Uses separate methods to avoid complex predicate compilation issues
+    private func fetchFilteredArticlesForTopics(
+        modelContext: ModelContext,
+        showUnreadOnly: Bool,
+        showBookmarkedOnly: Bool,
+        qualityFilter: String
+    ) async throws -> [ArticleModel] {
+        
+        // Use separate methods based on filter combination for optimal performance
+        if showUnreadOnly && showBookmarkedOnly {
+            return try await fetchUnreadBookmarkedArticles(modelContext: modelContext, qualityFilter: qualityFilter)
+        } else if showUnreadOnly {
+            return try await fetchUnreadArticles(modelContext: modelContext, qualityFilter: qualityFilter)
+        } else if showBookmarkedOnly {
+            return try await fetchBookmarkedArticles(modelContext: modelContext, qualityFilter: qualityFilter)
+        } else {
+            return try await fetchAllArticlesForTopics(modelContext: modelContext, qualityFilter: qualityFilter)
+        }
+    }
+    
+    /// Fetches unread articles with database-level filtering
+    private func fetchUnreadArticles(modelContext: ModelContext, qualityFilter: String) async throws -> [ArticleModel] {
+        var descriptor = FetchDescriptor<ArticleModel>()
+        descriptor.predicate = #Predicate<ArticleModel> { !$0.isViewed }
+        descriptor.sortBy = [SortDescriptor(\.topic)]
+        
+        let articles = try modelContext.fetch(descriptor)
+        
+        // Apply quality filter in memory only if needed (quality predicates are complex)
+        if qualityFilter == "All" {
+            return articles
+        } else {
+            return articles.filter { $0.meetsQualityThreshold(qualityFilter) }
+        }
+    }
+    
+    /// Fetches bookmarked articles with database-level filtering
+    private func fetchBookmarkedArticles(modelContext: ModelContext, qualityFilter: String) async throws -> [ArticleModel] {
+        var descriptor = FetchDescriptor<ArticleModel>()
+        descriptor.predicate = #Predicate<ArticleModel> { $0.isBookmarked }
+        descriptor.sortBy = [SortDescriptor(\.topic)]
+        
+        let articles = try modelContext.fetch(descriptor)
+        
+        // Apply quality filter in memory only if needed
+        if qualityFilter == "All" {
+            return articles
+        } else {
+            return articles.filter { $0.meetsQualityThreshold(qualityFilter) }
+        }
+    }
+    
+    /// Fetches unread AND bookmarked articles with database-level filtering
+    private func fetchUnreadBookmarkedArticles(modelContext: ModelContext, qualityFilter: String) async throws -> [ArticleModel] {
+        var descriptor = FetchDescriptor<ArticleModel>()
+        descriptor.predicate = #Predicate<ArticleModel> { !$0.isViewed && $0.isBookmarked }
+        descriptor.sortBy = [SortDescriptor(\.topic)]
+        
+        let articles = try modelContext.fetch(descriptor)
+        
+        // Apply quality filter in memory only if needed
+        if qualityFilter == "All" {
+            return articles
+        } else {
+            return articles.filter { $0.meetsQualityThreshold(qualityFilter) }
+        }
+    }
+    
+    /// Fetches all articles for topic discovery (no read/bookmark filters)
+    private func fetchAllArticlesForTopics(modelContext: ModelContext, qualityFilter: String) async throws -> [ArticleModel] {
+        var descriptor = FetchDescriptor<ArticleModel>()
+        descriptor.sortBy = [SortDescriptor(\.topic)]
+        
+        let articles = try modelContext.fetch(descriptor)
+        
+        // Apply quality filter in memory only if needed
+        if qualityFilter == "All" {
+            return articles
+        } else {
+            return articles.filter { $0.meetsQualityThreshold(qualityFilter) }
+        }
+    }
+    
     // MARK: - Cache Statistics
     
     /// Gets cache performance statistics

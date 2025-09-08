@@ -1397,9 +1397,13 @@ final class NewsViewModel: ObservableObject {
     // MARK: - Topic Management
 
     /// Gets available topics using the ultra-lightweight TopicCacheManager
-    /// - Returns: Array of available topic names
+    /// - Returns: Array of available topic names filtered by current view state
     func getAvailableTopics() async -> [String] {
-        return await topicCacheManager.getTopicNames()
+        return await topicCacheManager.getFilteredTopicNames(
+            showUnreadOnly: showUnreadOnly,
+            showBookmarkedOnly: showBookmarkedOnly,
+            qualityFilter: qualityFilter
+        )
     }
     
     /// Gets article count for a specific topic on-demand (only when needed for "x of y" display)
