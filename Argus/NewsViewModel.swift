@@ -187,6 +187,9 @@ final class NewsViewModel: ObservableObject {
 
     /// Operations service for article business logic
     private let articleOperations: ArticleOperations
+    
+    /// Topic cache manager for performance-optimized topic discovery
+    private let topicCacheManager = TopicCacheManager.shared
 
     /// Subscription dictionary for topic filtering
     private var _subscriptions: [String: Subscription] = [:]
@@ -235,7 +238,7 @@ final class NewsViewModel: ObservableObject {
 
     // MARK: - Public Methods - Data Loading
 
-    /// Refreshes articles based on current filters using unified query system
+    /// Refreshes articles based on current filters using performance-optimized approach
     func refreshArticles() async {
         // Cancel any pending debounced update
         filterChangeDebouncer?.cancel()
@@ -245,54 +248,65 @@ final class NewsViewModel: ObservableObject {
         error = nil
 
         do {
-            // UNIFIED QUERY SYSTEM: Use the same logic as working "x of y" statistics
-            // This ensures topics never disappear and article counts are always consistent
+            // PERFORMANCE OPTIMIZATION: Use ultra-lightweight topic caching
+            // This separates topic discovery from article display for better performance
             
-            // Fetch ALL articles with current filters (no artificial limits)
-            let allFilteredArticles = try await articleOperations.fetchArticlesUnified(
-                topic: nil, // Fetch ALL topics for topic bar generation
-                showUnreadOnly: showUnreadOnly,
-                showBookmarkedOnly: showBookmarkedOnly,
-                qualityFilter: qualityFilter
-            )
+            // Step 1: Update topic cache in background (ultra-lightweight operation)
+            topicCacheManager.warmCache()
             
-            // Update topicBarArticles with the complete dataset
-            // This ensures all available topics are always shown
-            topicBarArticles = allFilteredArticles
-            
-            // For backward compatibility, also update allArticles
-            allArticles = allFilteredArticles
-
-            // Filter articles for display based on selected topic
-            if selectedTopic != "All" {
-                // Filter the unified dataset by selected topic
-                filteredArticles = allFilteredArticles.filter { article in
-                    article.topic == selectedTopic
-                }
+            // Step 2: Fetch articles for display using performance-aware context
+            if selectedTopic == "All" {
+                // For "All" topics, use listView context with memory-aware limits
+                let displayArticles = try await articleOperations.fetchArticles(
+                    topic: nil,
+                    showUnreadOnly: showUnreadOnly,
+                    showBookmarkedOnly: showBookmarkedOnly,
+                    qualityFilter: qualityFilter,
+                    limit: nil,
+                    context: .listView // Memory-aware limits for performance
+                )
+                
+                filteredArticles = displayArticles
+                allArticles = displayArticles
+                
+                // For topic bar, we'll use the cached topic information instead of full articles
+                topicBarArticles = [] // No longer needed - using TopicCacheManager
+                
             } else {
-                // If "All" is selected, show all articles
-                filteredArticles = allFilteredArticles
+                // For specific topics, use optimized single-topic query
+                let topicArticles = try await articleOperations.fetchArticles(
+                    topic: selectedTopic,
+                    showUnreadOnly: showUnreadOnly,
+                    showBookmarkedOnly: showBookmarkedOnly,
+                    qualityFilter: qualityFilter,
+                    limit: nil,
+                    context: .listView // Memory-aware limits for performance
+                )
+                
+                filteredArticles = topicArticles
+                allArticles = topicArticles
+                topicBarArticles = [] // No longer needed - using TopicCacheManager
             }
 
             // Update grouping using filtered articles
             await updateGroupedArticles()
 
-            // Update cache with the complete dataset for better performance
-            updateArticleCache(allFilteredArticles)
+            // Update cache with the display articles for better performance
+            updateArticleCache(filteredArticles)
 
-            // Reset pagination state (not needed with unified system, but kept for compatibility)
+            // Reset pagination state
             lastLoadedDate = filteredArticles.last?.publishDate
-            hasMoreContent = false // No pagination needed with unified system
+            hasMoreContent = filteredArticles.count >= pageSize
 
             // Clear loading state
             isLoading = false
             
-            AppLogger.database.debug("✅ Unified refresh: \(allFilteredArticles.count) total articles, \(self.filteredArticles.count) displayed")
+            AppLogger.database.debug("✅ Performance-optimized refresh: \(self.filteredArticles.count) articles displayed")
 
         } catch {
             self.error = error
             isLoading = false
-            AppLogger.database.error("Error refreshing articles with unified system: \(error)")
+            AppLogger.database.error("Error refreshing articles with optimized system: \(error)")
         }
     }
 
@@ -1378,6 +1392,37 @@ final class NewsViewModel: ObservableObject {
             from: article,
             createIfMissing: createIfMissing
         )
+    }
+
+    // MARK: - Topic Management
+
+    /// Gets available topics using the ultra-lightweight TopicCacheManager
+    /// - Returns: Array of available topic names
+    func getAvailableTopics() async -> [String] {
+        return await topicCacheManager.getTopicNames()
+    }
+    
+    /// Gets article count for a specific topic on-demand (only when needed for "x of y" display)
+    /// - Parameters:
+    ///   - topic: The topic to count articles for
+    /// - Returns: Article count for the topic
+    func getTopicArticleCount(for topic: String) async -> Int {
+        do {
+            return try await topicCacheManager.getTopicArticleCount(
+                topic: topic,
+                showUnreadOnly: showUnreadOnly,
+                showBookmarkedOnly: showBookmarkedOnly,
+                qualityFilter: qualityFilter
+            )
+        } catch {
+            AppLogger.database.error("Error getting topic article count: \(error)")
+            return 0
+        }
+    }
+    
+    /// Invalidates the topic cache when new articles are added
+    func invalidateTopicCache() {
+        topicCacheManager.invalidateCache()
     }
 
     // MARK: - Detail View Support

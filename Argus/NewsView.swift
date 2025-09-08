@@ -97,11 +97,10 @@ struct NewsView: View {
     }
 
     /// List of topics to show in topic bar
+    @State private var availableTopics: [String] = ["All"]
+    
     private var visibleTopics: [String] {
-        // CRITICAL FIX: Use topicBarArticles which always contains ALL topics
-        // This ensures topics never disappear from the topic bar
-        let topics = Set(viewModel.topicBarArticles.compactMap { $0.topic })
-        return ["All"] + topics.sorted()
+        return availableTopics
     }
 
     // MARK: - Body
@@ -250,16 +249,19 @@ struct NewsView: View {
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleViewed"))) { _ in
                     Task {
                         await viewModel.refreshWithAutoRedirectIfNeeded()
+                        await loadAvailableTopics()
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DetailViewClosed"))) { _ in
                     Task {
                         await viewModel.refreshWithAutoRedirectIfNeeded()
+                        await loadAvailableTopics()
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleReadStatusChanged"))) { _ in
                     Task {
                         await viewModel.refreshWithAutoRedirectIfNeeded()
+                        await loadAvailableTopics()
                     }
                 }
                 // Initial setup
@@ -272,6 +274,8 @@ struct NewsView: View {
                     
                     Task {
                         await viewModel.refreshArticles()
+                        // Load available topics from TopicCacheManager
+                        await loadAvailableTopics()
                     }
                 }
                 // Force view refresh when size class changes (orientation changes)
@@ -1281,6 +1285,16 @@ struct NewsView: View {
     private func toggleBookmark(_ article: ArticleModel) {
         Task {
             await viewModel.toggleBookmark(for: article)
+        }
+    }
+
+    // MARK: - Topic Loading
+    
+    /// Loads available topics from TopicCacheManager
+    private func loadAvailableTopics() async {
+        let topics = await viewModel.getAvailableTopics()
+        await MainActor.run {
+            availableTopics = ["All"] + topics
         }
     }
 

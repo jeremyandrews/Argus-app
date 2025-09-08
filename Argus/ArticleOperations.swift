@@ -111,6 +111,7 @@ final class ArticleOperations {
         case detailView     // For NewsDetailView - allow full dataset access for navigation
         case background     // For background operations - use conservative limits
         case topicBar       // For topic bar generation - ensure all topics are represented
+        case topicDiscovery // For lightweight topic discovery - minimal data fetching
     }
 
     /// UNIFIED QUERY METHOD - Uses the same logic as working "x of y" statistics
@@ -238,6 +239,12 @@ final class ArticleOperations {
                 // Use a higher limit to capture topic diversity, but not unlimited to maintain performance
                 effectiveLimit = 200 // Higher limit to ensure topic diversity
                 AppLogger.database.debug("🏷️ Topic bar context: Higher limit of \(effectiveLimit) for topic diversity")
+                
+            case .topicDiscovery:
+                // For lightweight topic discovery, use statistical sampling
+                // This provides excellent topic coverage with minimal performance impact
+                effectiveLimit = 500 // Sample size for topic discovery
+                AppLogger.database.debug("🔍 Topic discovery context: Sample limit of \(effectiveLimit) for lightweight discovery")
                 
             case .listView:
                 // For list view, apply memory-aware limits for performance
