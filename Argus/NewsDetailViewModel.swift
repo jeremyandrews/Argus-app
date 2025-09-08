@@ -308,23 +308,33 @@ final class NewsDetailViewModel: ObservableObject {
         let targetArticle = articles[nextIndex]
         let nextArticleId = targetArticle.id
 
-        // IMPORTANT: Instead of immediately updating UI with unformatted content,
-        // we'll extract formatted blobs first and only then update the UI
+        // PERFORMANCE OPTIMIZATION: Immediate UI update with cached content
         Task(priority: .userInitiated) {
-            // Start timing for diagnostics
             let startTime = Date()
 
-            // Create a loading timer that will show loading indicator immediately if content takes time
-            let loadingTimerTask = Task {
-                // No artificial delay - show loading indicator immediately if needed
-                if !Task.isCancelled {
-                    await MainActor.run {
-                        isLoadingNextArticle = true
-                    }
-                }
+            // 1. IMMEDIATE UI UPDATE: Update UI state first for instant responsiveness
+            await MainActor.run {
+                // Update index immediately
+                currentIndex = nextIndex
+                
+                // Clear previous content
+                clearRichTextContent()
+                
+                // Set article immediately (even if we don't have formatted content yet)
+                currentArticle = targetArticle
+                
+                // Reset expanded sections
+                expandedSections = Self.getDefaultExpandedSections()
+                
+                // Force UI refresh immediately for instant navigation feel
+                contentTransitionID = UUID()
+                scrollToTopTrigger = UUID()
+                
+                // Show loading state only if we need to fetch content
+                isLoadingNextArticle = true
             }
 
-            // 1. Phase 1.2: Try cache first
+            // 2. FAST CONTENT LOADING: Try cache first, then extract blobs
             var model: ArticleModel? = getCachedModel(for: nextArticleId)
             
             if model == nil {
@@ -332,89 +342,83 @@ final class NewsDetailViewModel: ObservableObject {
                 if let fetchedModel = model {
                     cacheModel(fetchedModel)
                 }
-            } else {
             }
 
-            // 2. Phase 2.2: Extract formatted content from blobs using background processing
+            // 3. OPTIMIZED BLOB EXTRACTION: Only extract if blobs exist
             var extractedTitle: NSAttributedString? = nil
             var extractedBody: NSAttributedString? = nil
             var extractedSummary: NSAttributedString? = nil
 
             if let model = model {
-                // Log model details for diagnostics
-
-                // Phase 2.2: Use background blob processing for parallel extraction
-                let (title, body, summary) = await extractBlobsInBackground(from: model)
+                // Quick check if blobs exist before extraction
+                let hasBlobs = model.titleBlob != nil || model.bodyBlob != nil || model.summaryBlob != nil
                 
-                extractedTitle = title
-                extractedBody = body
-                extractedSummary = summary
-                
+                if hasBlobs {
+                    let (title, body, summary) = await extractBlobsInBackground(from: model)
+                    extractedTitle = title
+                    extractedBody = body
+                    extractedSummary = summary
+                }
             }
 
-            // 3. Phase 1.3: Batch all state updates to minimize SwiftUI refresh cycles
+            // 4. BATCH CONTENT UPDATE: Update all content at once
             await MainActor.run {
-                // Batch ALL state updates together to trigger only one SwiftUI refresh cycle
-                
-                // Update the index
-                currentIndex = nextIndex
-
-                // Clear previous content
-                clearRichTextContent()
-
-                // Update model references
+                // Update model reference
                 if let model = model {
                     currentArticleModel = model
                     currentArticle = model
-                } else {
-                    // Fallback if model retrieval failed
-                    currentArticle = targetArticle
                 }
 
-                // CRITICAL: Set formatted content BEFORE triggering UI refresh
-                titleAttributedString = extractedTitle
-                bodyAttributedString = extractedBody
-                summaryAttributedString = extractedSummary
-
-                // Reset expanded sections
-                expandedSections = Self.getDefaultExpandedSections()
-
-                // Force UI refresh AFTER all content is ready - batched at the end
-                contentTransitionID = UUID()
-                scrollToTopTrigger = UUID()
+                // Set formatted content if available
+                if let title = extractedTitle {
+                    titleAttributedString = title
+                }
+                if let body = extractedBody {
+                    bodyAttributedString = body
+                }
+                if let summary = extractedSummary {
+                    summaryAttributedString = summary
+                }
                 
-                // Single explicit UI update notification for all changes
+                // Clear loading state immediately
+                isLoadingNextArticle = false
+                
+                // Single UI update for all changes
                 objectWillChange.send()
             }
 
-            // After UI is updated, mark as viewed
-            try? await markAsViewed()
+            // 5. BACKGROUND OPERATIONS: Do heavy lifting after UI is responsive
+            
+            // Mark as viewed (non-blocking)
+            Task.detached(priority: .background) {
+                try? await self.markAsViewed()
+            }
 
-            // Only generate missing content if extraction failed
+            // Generate missing content only if needed (non-blocking)
             if titleAttributedString == nil || bodyAttributedString == nil {
-                await loadMinimalContent()
-                AppLogger.database.debug("⚙️ Generated missing title/body content for article \(nextArticleId)")
+                Task.detached(priority: .background) {
+                    await self.loadMinimalContent()
+                    AppLogger.database.debug("⚙️ Generated missing title/body content for article \(nextArticleId)")
+                }
             }
 
-            // Generate summary content if needed and expanded
+            // Load summary content if expanded and missing (non-blocking)
             if expandedSections["Summary"] == true, summaryAttributedString == nil {
-                loadContentForSection("Summary")
-                AppLogger.database.debug("⚙️ Generated missing summary content for article \(nextArticleId)")
+                Task.detached(priority: .background) {
+                    await MainActor.run {
+                        self.loadContentForSection("Summary")
+                    }
+                    AppLogger.database.debug("⚙️ Generated missing summary content for article \(nextArticleId)")
+                }
             }
 
-            // Cancel the loading timer task and clear loading state
-            loadingTimerTask.cancel()
-            await MainActor.run {
-                isLoadingNextArticle = false
+            // Preload adjacent articles (lowest priority)
+            Task.detached(priority: .utility) {
+                await self.preloadAdjacentArticles()
             }
 
             let loadTime = Date().timeIntervalSince(startTime)
-            AppLogger.database.debug("✅ Article \(nextArticleId) loaded in \(String(format: "%.3f", loadTime)) seconds")
-            
-            // Phase 2.3: Smart Content Preloading - preload adjacent articles after navigation
-            Task.detached(priority: .background) {
-                await self.preloadAdjacentArticles()
-            }
+            AppLogger.database.debug("✅ Article \(nextArticleId) navigation completed in \(String(format: "%.3f", loadTime)) seconds")
         }
     }
     
