@@ -890,6 +890,85 @@ This file captures important patterns, preferences, and project intelligence tha
   private func provideTempContent(_ section: String, _ field: RichTextField, _ message: String) {
       // Create a temporary attributed string to show status
 
+## Common Warning Prevention Patterns
+
+### Loop Variable Usage
+When using loops, only declare iteration variables if they will be used:
+```swift
+// WRONG: Declares 'i' but never uses it
+for i in 0..<articleCount {
+    articles.append(createArticle())
+}
+
+// CORRECT: Use underscore for unused iteration variables
+for _ in 0..<articleCount {
+    articles.append(createArticle())
+}
+
+// CORRECT: Use 'i' only when needed
+for i in 0..<articleCount {
+    let article = createArticle()
+    article.index = i  // Actually using 'i'
+    articles.append(article)
+}
+```
+
+### Async/Await Usage
+Never use 'await' on non-async functions:
+```swift
+// WRONG: Using await on non-async function
+await viewModel.performDeferredInitialization()
+
+// CORRECT: Call non-async functions directly
+viewModel.performDeferredInitialization()
+
+// CORRECT: Only use await for actual async functions
+await viewModel.loadArticles()
+```
+
+### Variable Assignments and Error Handling
+Avoid creating variables that are never used and ensure all code paths are reachable:
+```swift
+// WRONG: Creating variable that's never read
+let bridgedModels = articles.compactMap { article in
+    return convertToListItem(article)
+}
+// Never use bridgedModels afterwards
+
+// CORRECT: Either use the variable or don't create it
+articles.compactMap { article in
+    return convertToListItem(article)
+}
+
+// WRONG: Unreachable catch block after fallback assignment
+do {
+    allArticles = try await fetchArticles()
+} catch {
+    // This catch is unreachable if we use try? with ?? fallback
+    allArticles = []
+}
+
+// CORRECT: Proper error handling
+do {
+    allArticles = try await fetchArticles()
+} catch {
+    AppLogger.database.error("Failed to fetch articles: \(error)")
+    allArticles = []  // Fallback value
+}
+```
+
+### Swift 6 Compilation Flags
+When building with xcodebuild, always use Swift 6 mode to catch potential issues early:
+```bash
+# Build with Swift 6 mode enabled
+xcodebuild build \
+    -scheme Argus \
+    -destination "platform=iOS Simulator,name=iPhone 16 Pro" \
+    -skipPackagePluginValidation \
+    -skipMacroValidation \
+    SWIFT_VERSION=6
+```
+
 ## Critical Architecture Decisions (DO NOT CHANGE)
 
 ### Rich Text Processing Strategy

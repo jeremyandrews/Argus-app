@@ -5,7 +5,7 @@ import SwiftUI
 extension NewsView {
     // MARK: - Pagination
 
-    func loadMoreArticlesIfNeeded(currentItem: ArticleModel) {
+    func loadMoreArticlesIfNeeded(currentItem: ArticleListItem) {
         guard let lastItem = viewModel.filteredArticles.last else {
             return
         }
@@ -20,7 +20,7 @@ extension NewsView {
 
     // MARK: - Selection Actions
 
-    func performActionOnSelection(_ action: @escaping (ArticleModel) -> Void) {
+    func performActionOnSelection(_ action: @escaping (ArticleListItem) -> Void) {
         let selectedArticles = viewModel.selectedArticleIds
 
         // Create an array of the selected articles
@@ -34,7 +34,7 @@ extension NewsView {
 
     // MARK: - Article Opening
 
-    func openArticle(_ article: ArticleModel) {
+    func openArticle(_ article: ArticleListItem) {
         // STEP 1: Take a snapshot of the current filtered articles immediately
         // This prevents issues if filters are applied during async operations
         let articlesSnapshot = viewModel.filteredArticles
@@ -47,14 +47,69 @@ extension NewsView {
 
         AppLogger.database.debug("Opening article with ID: \(article.id) at index \(index) of \(articlesSnapshot.count) articles")
 
-        // STEP 3: Create view model with our snapshot and pass NewsViewModel for rich text cache access
+        // STEP 3: Present detail view IMMEDIATELY with placeholder models
+        // IMPORTANT: Include summary text in placeholder to ensure content is visible
+        let placeholderArticles = articlesSnapshot.map { item in
+            ArticleModel(
+                id: item.id,
+                jsonURL: "",
+                url: "",
+                title: item.title,
+                body: item.body,
+                domain: item.domain ?? "",
+                articleTitle: item.title,
+                affected: item.affected,
+                publishDate: item.publishDate,
+                addedDate: Date(),
+                topic: item.topic,
+                isViewed: item.isViewed,
+                isBookmarked: item.isBookmarked,
+                sourcesQuality: nil,
+                argumentQuality: nil,
+                sourceType: item.sourceType,
+                sourceAnalysis: nil,
+                quality: Int(item.qualityScore),
+                // CRITICAL: Use body as initial summary so content is visible immediately
+                summary: item.body, // Show body content as summary initially
+                criticalAnalysis: "Loading full analysis...",
+                logicalFallacies: nil,
+                relationToTopic: nil,
+                additionalInsights: nil,
+                actionRecommendations: nil,
+                talkingPoints: nil,
+                eli5: nil,
+                engineStats: nil,
+                engineModel: nil,
+                engineElapsedTime: nil,
+                engineRawStats: nil,
+                engineSystemInfo: nil,
+                databaseId: nil,
+                relatedArticles: nil,
+                titleBlob: nil,
+                bodyBlob: nil,
+                summaryBlob: nil,
+                criticalAnalysisBlob: nil,
+                logicalFallaciesBlob: nil,
+                sourceAnalysisBlob: nil,
+                relationToTopicBlob: nil,
+                additionalInsightsBlob: nil,
+                actionRecommendationsBlob: nil,
+                talkingPointsBlob: nil,
+                eli5Blob: nil,
+                clusterSummary: nil,
+                clusterSummaryBlob: nil,
+                entities: []
+            )
+        }
+        
+        // Create view model with placeholder models (instant!)
         let detailViewModel = NewsDetailViewModel(
-            articles: articlesSnapshot,
-            allArticles: viewModel.allArticles,
+            articles: placeholderArticles,
+            allArticles: placeholderArticles,
             currentIndex: index,
             initiallyExpandedSection: "Summary",
             newsViewModel: viewModel,
-            needsFullDataset: true
+            needsFullDataset: false
         )
 
         // Create the detail view wrapper
@@ -69,7 +124,7 @@ extension NewsView {
 
         let detailView = DetailViewWrapper(viewModel: detailViewModel)
 
-        // STEP 4: Present immediately before doing any async work
+        // Present immediately - UI should appear instantly
         let hostingController = UIHostingController(rootView: detailView)
         hostingController.modalPresentationStyle = .fullScreen
 
@@ -80,19 +135,49 @@ extension NewsView {
             AppLogger.database.debug("Presenting NewsDetailView for article: \(article.id)")
             rootViewController.present(hostingController, animated: true)
 
-            // STEP 5: After presentation, do the article update and blob generation in the background
+            // Mark as read in background (non-blocking)
+            Task.detached(priority: .background) {
+                await self.viewModel.openArticle(article)
+            }
+            
+            // Load full article data after presenting (fetch only current article!)
             Task {
-                // Get article with context
-                let articleOperations = ArticleOperations()
-                if let articleWithContext = await articleOperations.getArticleModelWithContext(byId: article.id) {
-                    // Mark as read
-                    await viewModel.openArticle(articleWithContext)
-
-                    // Generate blobs in the background after view is already shown
+                // Fetch the full model for the current article
+                if let fullModel = await viewModel.fetchSwiftDataModel(for: article.id) {
                     await MainActor.run {
-                        _ = articleOperations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
-                        _ = articleOperations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
-                        AppLogger.database.debug("Title and body blobs generated for article: \(article.id)")
+                        // Update the current article with full data
+                        detailViewModel.currentArticle = fullModel
+                        
+                        // Also update it in the articles array to ensure consistency
+                        if index < detailViewModel.articles.count {
+                            detailViewModel.articles[index] = fullModel
+                        }
+                        
+                        // Initialize deferred content loading
+                        detailViewModel.performDeferredInitialization()
+                    }
+                } else {
+                    AppLogger.database.error("Failed to fetch full model for article: \(article.id)")
+                }
+                
+                // Fetch full models for navigation in background (low priority)
+                Task.detached(priority: .background) {
+                    await MainActor.run {
+                        Task {
+                            // Fetch models within MainActor context to avoid Sendable issues
+                            let fullModels = await viewModel.getFilteredArticlesAsModels()
+                            
+                            // Update all articles with full models, preserving current article
+                            let currentId = detailViewModel.currentArticle?.id
+                            detailViewModel.articles = fullModels
+                            detailViewModel.allArticles = fullModels
+                            
+                            // Ensure current article index is still correct
+                            if let currentId = currentId,
+                               let newIndex = fullModels.firstIndex(where: { $0.id == currentId }) {
+                                detailViewModel.currentIndex = newIndex
+                            }
+                        }
                     }
                 }
             }

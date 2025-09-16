@@ -38,9 +38,25 @@ struct ArgusApp: App {
                         // Register background tasks
                         registerBackgroundTasks()
                         
+                        // PHASE 4: Initialize GlobalFontCache at startup to eliminate font loading overhead on article open
+                        // This ensures fonts are cached once per app session instead of per article
+                        Task(priority: .userInitiated) {
+                            await MainActor.run {
+                                _ = GlobalFontCache.shared
+                                AppLogger.database.debug("🎨 GlobalFontCache initialized at app startup")
+                            }
+                        }
+                        
                         // Initialize auto-sync coordinator
                         Task {
                             await AutoSyncCoordinator.shared.scheduleInitialSync()
+                        }
+                        
+                        // Check for performance test mode
+                        if ProcessInfo.processInfo.arguments.contains("--performance-test") {
+                            Task { @MainActor in
+                                await generatePerformanceTestData()
+                            }
                         }
                     }
                     .onChange(of: scenePhase) { _, newPhase in
@@ -63,6 +79,148 @@ struct ArgusApp: App {
                         Text(cloudKitAlertMessage)
                     }
             }
+        }
+    }
+    
+    /// Generates test data for performance testing
+    @MainActor
+    private func generatePerformanceTestData() async {
+        AppLogger.database.info("🧪 Generating performance test data...")
+        
+        let context = ModelContext(ArgusApp.sharedModelContainer)
+        
+        // Clear existing data first
+        do {
+            try context.delete(model: ArticleModel.self)
+            try context.save()
+        } catch {
+            AppLogger.database.error("Failed to clear existing data: \(error)")
+        }
+        
+        let topics = [
+            "Technology", "Science", "Politics", 
+            "Business", "Health", "Sports", "Culture"
+        ]
+        let articleCounts = [5, 8, 3, 12, 7, 4, 9]
+        let qualityLevels = ["Exceptional", "Good", "Fair", "Mediocre", "Poor"]
+        
+        var articleIndex = 0
+        for (topicIndex, topic) in topics.enumerated() {
+            let articleCount = articleCounts[topicIndex]
+            
+            for _ in 0..<articleCount {
+                articleIndex += 1
+                
+                // Every 3rd article is read
+                let isRead = (articleIndex % 3 == 0)
+                
+                // Every 4th article is bookmarked
+                let isBookmarked = (articleIndex % 4 == 0)
+                
+                // Cycle through quality levels
+                let qualityString = qualityLevels[articleIndex % qualityLevels.count]
+                
+                // Map quality string to numeric values
+                let qualityMap = ["Poor": 1, "Mediocre": 2, "Fair": 3, "Good": 4, "Exceptional": 5]
+                let qualityScore = qualityMap[qualityString] ?? 3
+                
+                // Create test article with proper initializer
+                let article = ArticleModel(
+                    id: UUID(),
+                    jsonURL: "https://example.com/article\(articleIndex).json",
+                    url: "https://source.com/article\(articleIndex)",
+                    title: "Test Article \(articleIndex) - \(topic)",  // tiny_title
+                    body: "Brief summary of article \(articleIndex) in \(topic)",  // tiny_summary
+                    domain: "source.com",
+                    articleTitle: "Full Article Title \(articleIndex) - \(topic)",
+                    affected: "General Public",
+                    publishDate: Date().addingTimeInterval(TimeInterval(-articleIndex * 3600)),
+                    addedDate: Date(),
+                    topic: topic,
+                    isViewed: isRead,
+                    isBookmarked: isBookmarked,
+                    sourcesQuality: qualityScore,
+                    argumentQuality: qualityScore,
+                    sourceType: "news",
+                    sourceAnalysis: "Source analysis for test article \(articleIndex)",
+                    quality: qualityScore
+                )
+                
+                // Add content for detail view testing
+                article.tinyTitle = "Tiny: Test Article \(articleIndex) - \(topic)"
+                article.tinySummary = "Summary for article \(articleIndex). This is a test summary that should appear quickly."
+                article.summary = """
+                # Full Summary for \(articleIndex)
+                
+                This is a comprehensive summary that includes multiple paragraphs of content.
+                
+                ## Key Points
+                - Point 1: Important detail about the article
+                - Point 2: Another crucial aspect to consider
+                - Point 3: Final key takeaway from the content
+                
+                ## Conclusion
+                The article provides valuable insights into the topic and demonstrates the importance
+                of thorough analysis and careful consideration of all aspects.
+                """
+                
+                article.criticalAnalysis = """
+                # Critical Analysis for \(articleIndex)
+                
+                This section provides detailed analysis with multiple components:
+                
+                1. **First Component**: Detailed explanation of the first aspect
+                2. **Second Component**: In-depth look at the second element
+                3. **Third Component**: Comprehensive review of the third factor
+                
+                The content continues with additional paragraphs that provide context
+                and supporting information for better understanding.
+                """
+                
+                article.relationToTopic = "This article directly relates to \(topic) by discussing key developments and trends."
+                
+                article.additionalInsights = """
+                # Context & Perspective for \(articleIndex)
+                
+                This section provides detailed analysis with multiple components:
+                
+                1. **First Component**: Detailed explanation of the first aspect
+                2. **Second Component**: In-depth look at the second element
+                3. **Third Component**: Comprehensive review of the third factor
+                
+                The content continues with additional paragraphs that provide context
+                and supporting information for better understanding.
+                """
+                
+                article.eli5 = """
+                # Simple Breakdown for \(articleIndex)
+                
+                This section provides detailed analysis with multiple components:
+                
+                1. **First Component**: Detailed explanation of the first aspect
+                2. **Second Component**: In-depth look at the second element
+                3. **Third Component**: Comprehensive review of the third factor
+                
+                The content continues with additional paragraphs that provide context
+                and supporting information for better understanding.
+                """
+                
+                // Add to context
+                context.insert(article)
+            }
+        }
+        
+        // Save all test articles
+        do {
+            try context.save()
+            AppLogger.database.info("🧪 Successfully generated \(articleIndex) test articles")
+            
+            // Set default filters for testing: unread only, not bookmarked, Fair+ quality
+            UserDefaults.standard.set(true, forKey: "filterUnread")
+            UserDefaults.standard.set(false, forKey: "filterBookmarked")
+            UserDefaults.standard.set("Fair+", forKey: "qualityFilter")
+        } catch {
+            AppLogger.database.error("Failed to save test data: \(error)")
         }
     }
 

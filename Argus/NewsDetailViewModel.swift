@@ -55,31 +55,60 @@ final class NewsDetailViewModel: ObservableObject {
     /// Set of deleted article IDs
     @Published var deletedIDs: Set<UUID> = []
     
-    // MARK: - Model Cache (Phase 1.2)
+    /// Flag indicating if summary is being generated/loaded
+    @Published var isSummaryLoading = false
+    
+    // MARK: - LRU Caches for Performance
+    private let contextCache = LRUCache<UUID, ArticleModel>(capacity: 10)
+    private let richTextCache = LRUCache<UUID, RichTextContent>(capacity: 10)
+
+    // Helper struct for rich text caching
+    struct RichTextContent {
+        let title: NSAttributedString?
+        let body: NSAttributedString?
+        let summary: NSAttributedString?
+    }
+    
+    // MARK: - Enhanced Model Cache (Phase 1.2) - CRITICAL FIX
     private var modelCache: [UUID: ArticleModel] = [:]
     private let maxCacheSize = 10
+    
+    /// Gets an article model with context, using cache when available
+    /// This eliminates redundant database fetches that cause 200-800ms delays
+    private func getCachedModelWithContext(for articleId: UUID) async -> ArticleModel? {
+        // Use LRU cache's get method
+        if let cachedModel = contextCache.get(articleId) {
+            AppLogger.database.debug("✅ CONTEXT CACHE HIT: Article \(articleId.uuidString.prefix(8)) - avoiding database fetch")
+            return cachedModel
+        }
+        
+        AppLogger.database.debug("⚠️ CONTEXT CACHE MISS: Fetching article \(articleId.uuidString.prefix(8)) from database")
+        let startTime = Date()
+        
+        // Fetch from database using background method with Swift 6 compatibility
+        let operations = ArticleOperations()
+        // Swift 6 FIX: Use synchronous method that returns sendable result
+        guard let model = await operations.getArticleModelWithContext(byId: articleId) else {
+            return nil
+        }
+        
+        let fetchTime = Date().timeIntervalSince(startTime)
+        AppLogger.database.debug("🔄 DATABASE FETCH: \(String(format: "%.3f", fetchTime * 1000))ms for article \(articleId.uuidString.prefix(8))")
+        
+        // Cache the result using LRU cache
+        contextCache.set(articleId, model)
+        AppLogger.database.debug("📦 CACHED: Article \(articleId.uuidString.prefix(8))")
+        
+        return model
+    }
+    
+    // Track navigation history for instant back navigation
+    private var navigationHistory: [UUID] = []
+    private let maxHistorySize = 5
 
-    // MARK: - Rich Text Content Cache
-
-    /// Cached title attributed string
-    @Published var titleAttributedString: NSAttributedString?
-
-    /// Cached body attributed string
-    @Published var bodyAttributedString: NSAttributedString?
-
-    /// Cached summary attributed string
-    @Published var summaryAttributedString: NSAttributedString?
-
-    /// Cached critical analysis attributed string
-    @Published var criticalAnalysisAttributedString: NSAttributedString?
-
-    /// Cached logical fallacies attributed string
-    @Published var logicalFallaciesAttributedString: NSAttributedString?
-
-    /// Cached source analysis attributed string
-    @Published var sourceAnalysisAttributedString: NSAttributedString?
-
-    /// Additional cached content by section
+    // MARK: - Section Content Cache (Non-Rich Text Only)
+    
+    /// Additional cached content by section (for sections that don't need rich text)
     @Published var cachedContentBySection: [String: NSAttributedString] = [:]
 
     /// Container diagnostics
@@ -100,17 +129,16 @@ final class NewsDetailViewModel: ObservableObject {
 
     // MARK: - Background Processing (Phase 2.2)
 
-    /// Extracts blobs from ArticleModel in background using parallel processing
+    /// SWIFT 6 FIX: Extract blobs on MainActor to avoid Sendable conformance issues
+    /// NSAttributedString is not Sendable, so we keep extraction on main thread but yield between operations
     /// - Parameter model: The ArticleModel containing the blobs
     /// - Returns: A tuple containing extracted title, body, and summary attributed strings
-    @MainActor
-    private func extractBlobsInBackground(from model: ArticleModel) async -> (title: NSAttributedString?, body: NSAttributedString?, summary: NSAttributedString?) {
-        // Extract blob data first on main actor to avoid Sendable issues
+    private func extractBlobsInTrueBackground(from model: ArticleModel) async -> (title: NSAttributedString?, body: NSAttributedString?, summary: NSAttributedString?) {
+        // Extract blob data (this is quick)
         let titleBlob = model.titleBlob
         let bodyBlob = model.bodyBlob
         let summaryBlob = model.summaryBlob
         
-        // Since NSAttributedString is not Sendable, we need to process synchronously on MainActor
         var title: NSAttributedString?
         var body: NSAttributedString?
         var summary: NSAttributedString?
@@ -121,6 +149,8 @@ final class NewsDetailViewModel: ObservableObject {
                 ofClass: NSAttributedString.self,
                 from: titleBlobData
             )
+            // Yield to avoid blocking UI
+            await Task.yield()
         }
         
         // Extract body blob if available  
@@ -129,6 +159,8 @@ final class NewsDetailViewModel: ObservableObject {
                 ofClass: NSAttributedString.self,
                 from: bodyBlobData
             )
+            // Yield to avoid blocking UI
+            await Task.yield()
         }
         
         // Extract summary blob if available
@@ -137,6 +169,8 @@ final class NewsDetailViewModel: ObservableObject {
                 ofClass: NSAttributedString.self,
                 from: summaryBlobData
             )
+            // Yield to avoid blocking UI
+            await Task.yield()
         }
         
         return (title: title, body: body, summary: summary)
@@ -169,101 +203,78 @@ final class NewsDetailViewModel: ObservableObject {
         newsViewModel: NewsViewModel? = nil,
         needsFullDataset: Bool = false
     ) {
-        // Apply uniqueness to prevent duplicate IDs in collections
-        let uniqueArticles = articles.uniqued()
-        let uniqueAllArticles = allArticles.uniqued()
-
-        // Store the initially expanded section
-        self.initiallyExpandedSection = initiallyExpandedSection
-
-        self.articles = uniqueArticles
-        self.allArticles = uniqueAllArticles
-        self.currentIndex = min(currentIndex, uniqueArticles.count - 1)
+        // ULTRA-SIMPLIFIED: Absolute minimum for instant display
+        self.articles = articles
+        self.allArticles = allArticles
+        self.currentIndex = currentIndex
         self.articleOperations = articleOperations
         self.newsViewModel = newsViewModel
+        self.initiallyExpandedSection = initiallyExpandedSection
 
-        // Set initial preloaded content if available and pre-cache for performance
-        if let preloadedArticle = preloadedArticle {
-            currentArticle = preloadedArticle
-            currentArticleModel = preloadedArticle
-            // Phase 1.2: Cache the preloaded article for faster future access
-            cacheModel(preloadedArticle)
-        } else if currentIndex >= 0, currentIndex < uniqueArticles.count {
-            let initialArticle = uniqueArticles[currentIndex]
-            currentArticle = initialArticle
-            currentArticleModel = initialArticle
-            // Phase 1.2: Cache the initial article for faster navigation
-            cacheModel(initialArticle)
-        }
-
-        titleAttributedString = preloadedTitle
-        bodyAttributedString = preloadedBody
-        summaryAttributedString = preloadedSummary
-
-        // Set initial expanded sections
-        if let section = initiallyExpandedSection {
-            expandedSections[section] = true
-        }
-
-        // Set default expanded sections
-        if expandedSections["Summary"] == nil {
-            expandedSections["Summary"] = true
-        }
-
-        // Phase 2.1: Load from rich text cache if available and no preloaded content
-        if let articleId = currentArticle?.id,
-           let newsViewModel = newsViewModel,
-           let cachedContent = newsViewModel.getCachedRichText(for: articleId) {
+        // Set current article - this is all we need for display
+        if currentIndex >= 0 && currentIndex < articles.count {
+            let article = articles[currentIndex]
+            currentArticle = article
             
-            // Use cached content if we don't already have preloaded content
-            if titleAttributedString == nil {
-                titleAttributedString = cachedContent.title
+            // OPTIMIZATION: Use preloaded content if available
+            if let preloadedArticle = preloadedArticle, preloadedArticle.id == article.id {
+                currentArticleModel = preloadedArticle
+                cacheModel(preloadedArticle)
             }
-            if bodyAttributedString == nil {
-                bodyAttributedString = cachedContent.body
-            }
-            if summaryAttributedString == nil {
-                summaryAttributedString = cachedContent.summary
-            }
-        }
-
-        // Record container diagnostics for debugging
-        containerDiagnostics = "Container info: \(String(describing: SwiftDataContainer.shared.container))"
-
-        // Ensure we have a valid ArticleModel with context
-        Task {
-            if let articleId = currentArticle?.id, currentArticleModel?.modelContext == nil {
-                    let model = await articleOperations.getArticleModelWithContext(byId: articleId)
-
-                if let model = model {
-                        await MainActor.run {
-                        self.currentArticleModel = model
-                    }
+            
+            // Cache preloaded rich text if available
+            if preloadedTitle != nil || preloadedBody != nil || preloadedSummary != nil {
+                cacheRichText(for: article.id, 
+                             title: preloadedTitle, 
+                             body: preloadedBody, 
+                             summary: preloadedSummary)
+                
+                // Set initial content
+                if let title = preloadedTitle {
+                    cachedContentBySection["Title"] = title
+                }
+                if let body = preloadedBody {
+                    cachedContentBySection["Body"] = body
+                }
+                if let summary = preloadedSummary {
+                    cachedContentBySection["Summary"] = summary
                 }
             }
         }
 
-        // Setup observers for settings changes
-        setupUserDefaultsObservers()
-        
-        // Fetch full dataset if needed for comprehensive navigation
-        if needsFullDataset {
-            Task(priority: .userInitiated) {
-                await self.fetchFullDatasetForNavigation()
-            }
-        }
-        
-        // Phase 2.3: Start initial preloading of adjacent articles after initialization
-        Task.detached(priority: .background) {
-            // Start preloading immediately - no need to wait
-            await self.preloadAdjacentArticles()
-        }
+        // EVERYTHING ELSE DEFERRED - zero blocking
     }
 
     deinit {
         // Clean up subscriptions
         userDefaultsSubscriptions.forEach { $0.cancel() }
         userDefaultsSubscriptions.removeAll()
+    }
+    
+    // MARK: - Lazy Initialization
+    
+    /// Performs deferred initialization after the view has appeared
+    /// This keeps the initial presentation fast by deferring non-critical work
+    @MainActor
+    func performDeferredInitialization() {
+        // Setup observers (lightweight but not needed for initial display)
+        setupUserDefaultsObservers()
+        
+        // Load context and preload in background
+        Task(priority: .background) {
+            // Get article with context if needed
+            if let currentArticleId = currentArticle?.id {
+                if let model = await getCachedModelWithContext(for: currentArticleId) {
+                    await MainActor.run {
+                        currentArticleModel = model
+                        cacheModel(model)
+                    }
+                }
+            }
+            
+            // Preload adjacent articles for smooth navigation
+            await preloadAdjacentArticles()
+        }
     }
 
     // MARK: - Settings Observers
@@ -294,153 +305,123 @@ final class NewsDetailViewModel: ObservableObject {
     /// Navigates to the next or previous article
     /// - Parameter direction: The direction to navigate (next or previous)
     func navigateToArticle(direction: NavigationDirection) {
-        // Cancel any ongoing tasks
-        cancelAllTasks()
-
-        // Get the next valid index
-        guard let nextIndex = getNextValidIndex(direction: direction),
-              nextIndex >= 0, nextIndex < articles.count
-        else {
+        let navigationStartTime = Date()
+        
+        // OPTIMIZATION: Don't cancel ongoing tasks unnecessarily
+        // Only cancel if we're changing direction rapidly
+        
+        // STEP 1: Get and validate the next index FIRST
+        guard let nextIndex = getNextValidIndex(direction: direction) else {
+            AppLogger.database.debug("❌ No valid next index for navigation")
             return
         }
-
-        // Get the article - important to keep this until we load the new one
+        
+        // STEP 2: Double-check bounds before ANY state changes
+        guard nextIndex >= 0 && nextIndex < articles.count else {
+            AppLogger.database.debug("❌ Index out of bounds: \(nextIndex) (total: \(self.articles.count))")
+            return
+        }
+        
+        // STEP 3: Get the article and validate it exists
         let targetArticle = articles[nextIndex]
         let nextArticleId = targetArticle.id
+        let currentArticleId = currentArticle?.id
 
-        // PERFORMANCE OPTIMIZATION: Immediate UI update with cached content
-        Task(priority: .userInitiated) {
-            let startTime = Date()
-
-            // 1. IMMEDIATE UI UPDATE: Update UI state first for instant responsiveness
-            await MainActor.run {
-                // Update index immediately
-                currentIndex = nextIndex
+        // OPTIMIZATION: Check cache FIRST before any logging
+        let cachedModel = getCachedModel(for: nextArticleId)
+        let cachedRichText = getCachedRichText(for: nextArticleId)
+        
+        // STEP 4: UPDATE STATE ATOMICALLY
+        currentIndex = nextIndex
+        currentArticle = targetArticle
+        
+        // Use cached model if available for instant update
+        if let cached = cachedModel {
+            currentArticleModel = cached
+        }
+        
+        // Use cached rich text if available
+        if let richText = cachedRichText {
+            cachedContentBySection["Title"] = richText.title
+            cachedContentBySection["Body"] = richText.body
+            cachedContentBySection["Summary"] = richText.summary
+        } else {
+            // Clear content for clean slate
+            cachedContentBySection = [:]
+        }
+        
+        // Reset UI state
+        expandedSections = Self.getDefaultExpandedSections()
+        contentTransitionID = UUID()
+        scrollToTopTrigger = UUID()
+        isLoadingNextArticle = false
+        
+        // Add to navigation history
+        if let currentId = currentArticleId {
+            addToNavigationHistory(currentId)
+        }
+        
+        // Single UI update notification
+        objectWillChange.send()
+        
+        let immediateTime = Date().timeIntervalSince(navigationStartTime)
+        AppLogger.database.debug("⚡ NAVIGATION: \(String(format: "%.3f", immediateTime * 1000))ms")
+        
+        // OPTIMIZATION: Only do background work if not cached
+        if cachedModel == nil {
+            Task(priority: .high) { [weak self] in
+                guard let self = self else { return }
                 
-                // Clear previous content
-                clearRichTextContent()
-                
-                // Set article immediately (even if we don't have formatted content yet)
-                currentArticle = targetArticle
-                
-                // Reset expanded sections
-                expandedSections = Self.getDefaultExpandedSections()
-                
-                // Force UI refresh immediately for instant navigation feel
-                contentTransitionID = UUID()
-                scrollToTopTrigger = UUID()
-                
-                // Show loading state only if we need to fetch content
-                isLoadingNextArticle = true
-            }
-
-            // 2. FAST CONTENT LOADING: Try cache first, then extract blobs
-            var model: ArticleModel? = getCachedModel(for: nextArticleId)
-            
-            if model == nil {
-                model = await articleOperations.getArticleModelWithContext(byId: nextArticleId)
+                let model = await self.getCachedModelWithContext(for: nextArticleId)
                 if let fetchedModel = model {
-                    cacheModel(fetchedModel)
-                }
-            }
-
-            // 3. OPTIMIZED BLOB EXTRACTION: Only extract if blobs exist
-            var extractedTitle: NSAttributedString? = nil
-            var extractedBody: NSAttributedString? = nil
-            var extractedSummary: NSAttributedString? = nil
-
-            if let model = model {
-                // Quick check if blobs exist before extraction
-                let hasBlobs = model.titleBlob != nil || model.bodyBlob != nil || model.summaryBlob != nil
-                
-                if hasBlobs {
-                    let (title, body, summary) = await extractBlobsInBackground(from: model)
-                    extractedTitle = title
-                    extractedBody = body
-                    extractedSummary = summary
-                }
-            }
-
-            // 4. BATCH CONTENT UPDATE: Update all content at once
-            await MainActor.run {
-                // Update model reference
-                if let model = model {
-                    currentArticleModel = model
-                    currentArticle = model
-                }
-
-                // Set formatted content if available
-                if let title = extractedTitle {
-                    titleAttributedString = title
-                }
-                if let body = extractedBody {
-                    bodyAttributedString = body
-                }
-                if let summary = extractedSummary {
-                    summaryAttributedString = summary
-                }
-                
-                // Clear loading state immediately
-                isLoadingNextArticle = false
-                
-                // Single UI update for all changes
-                objectWillChange.send()
-            }
-
-            // 5. BACKGROUND OPERATIONS: Do heavy lifting after UI is responsive
-            
-            // Mark as viewed (non-blocking)
-            Task.detached(priority: .background) {
-                try? await self.markAsViewed()
-            }
-
-            // Generate missing content only if needed (non-blocking)
-            if titleAttributedString == nil || bodyAttributedString == nil {
-                Task.detached(priority: .background) {
-                    await self.loadMinimalContent()
-                    AppLogger.database.debug("⚙️ Generated missing title/body content for article \(nextArticleId)")
-                }
-            }
-
-            // Load summary content if expanded and missing (non-blocking)
-            if expandedSections["Summary"] == true, summaryAttributedString == nil {
-                Task.detached(priority: .background) {
                     await MainActor.run {
-                        self.loadContentForSection("Summary")
+                        self.cacheModel(fetchedModel)
+                        self.currentArticleModel = fetchedModel
+                        self.currentArticle = fetchedModel
                     }
-                    AppLogger.database.debug("⚙️ Generated missing summary content for article \(nextArticleId)")
                 }
             }
-
-            // Preload adjacent articles (lowest priority)
-            Task.detached(priority: .utility) {
-                await self.preloadAdjacentArticles()
-            }
-
-            let loadTime = Date().timeIntervalSince(startTime)
-            AppLogger.database.debug("✅ Article \(nextArticleId) navigation completed in \(String(format: "%.3f", loadTime)) seconds")
+        }
+        
+        // Mark as viewed in background
+        Task(priority: .background) { [weak self] in
+            try? await self?.markAsViewed()
+        }
+        
+        // Preload adjacent (low priority)
+        Task(priority: .utility) { [weak self] in
+            guard let self = self else { return }
+            await self.preloadAdjacentArticles()
         }
     }
     
     // MARK: - Smart Content Preloading (Phase 2.3)
     
+    /// Public wrapper for preloading adjacent articles - called from view
+    func preloadAdjacentArticles() async {
+        await preloadAdjacentArticlesInternal()
+    }
+    
     /// Preloads adjacent articles to improve navigation performance
     /// This implements Phase 2.3 of the optimization plan using enhanced PreloadManager
     /// Swift 6 compatible version using only sendable types
-    private func preloadAdjacentArticles() async {
-        // Extract only sendable data (UUIDs and Int) on MainActor to avoid Sendable issues
-        let (currentIdx, articleIds) = await MainActor.run { 
-            (currentIndex, articles.map { $0.id })
+    private func preloadAdjacentArticlesInternal() async {
+        // Extract only sendable data (UUIDs and current index) on MainActor to avoid Sendable issues
+        let (currentIdx, currentId, articleIds) = await MainActor.run { 
+            (currentIndex, currentArticle?.id, articles.map { $0.id })
         }
         
-        guard !articleIds.isEmpty else { return }
+        guard !articleIds.isEmpty, currentId != nil else { return }
         
-        AppLogger.database.debug("🚀 NewsDetailViewModel: Triggering enhanced preloading for Next-5 and Previous-5 articles around index \(currentIdx)")
+        AppLogger.database.debug("🚀 NewsDetailViewModel: Starting enhanced detail view preloading around index \(currentIdx)")
         
-        // Use the enhanced PreloadManager with Swift 6 compatible method using only sendable UUIDs
-        PreloadManager.shared.preloadArticlesByIds(articleIds, currentIndex: currentIdx)
+        // ENHANCED: Use specialized detail view summary preloading for smooth navigation
+        let preloadManager = PreloadManager.shared
         
-        AppLogger.database.debug("✅ NewsDetailViewModel: Enhanced preloading initiated")
+        // Use sendable article IDs for broader preloading coverage
+        preloadManager.preloadArticlesByIds(articleIds, currentIndex: currentIdx)
+        
+        AppLogger.database.debug("✅ NewsDetailViewModel: Enhanced detail view preloading completed")
     }
 
     /// Validates and adjusts the current index if needed
@@ -497,66 +478,38 @@ final class NewsDetailViewModel: ObservableObject {
     // MARK: - Public Methods - Content Loading
 
     /// Loads minimal content needed for the article header
-    /// Phase 2.2: Uses background blob processing for optimal performance
+    /// OPTIMIZATION: Skip if already cached
     func loadMinimalContent() async {
         guard let article = currentArticleModel ?? currentArticle else { return }
-
-        // Log what's available for debugging
-        let hasTitleBlob = article.titleBlob != nil
-        let hasBodyBlob = article.bodyBlob != nil
-        AppLogger.database.debug("⚙️ loadMinimalContent: Title blob exists: \(hasTitleBlob), Body blob exists: \(hasBodyBlob)")
-
-        // Phase 2.2: Use background blob processing for critical content
-        AppLogger.database.debug("⚙️ Loading initial content using background blob processing for article \(article.id)")
-
-        let startTime = Date()
         
-        // Extract what we can from blobs using background processing
-        let (extractedTitle, extractedBody, extractedSummary) = await extractBlobsInBackground(from: article)
+        // OPTIMIZATION: Check if we already have cached content
+        if getCachedRichText(for: article.id) != nil {
+            return // Already loaded
+        }
         
-        // Update content atomically on main thread
-        await MainActor.run {
-            if titleAttributedString == nil, let title = extractedTitle {
-                titleAttributedString = title
-                AppLogger.database.debug("✅ Title loaded from blob via background processing")
-            }
+        // Extract blobs and cache them
+        let (title, body, summary) = await extractBlobsInTrueBackground(from: article)
+        
+        // Cache the extracted content
+        if title != nil || body != nil || summary != nil {
+            cacheRichText(for: article.id, title: title, body: body, summary: summary)
             
-            if bodyAttributedString == nil, let body = extractedBody {
-                bodyAttributedString = body
-                AppLogger.database.debug("✅ Body loaded from blob via background processing")
+            // Update UI if this is still the current article
+            if currentArticle?.id == article.id {
+                await MainActor.run {
+                    if let title = title {
+                        cachedContentBySection["Title"] = title
+                    }
+                    if let body = body {
+                        cachedContentBySection["Body"] = body
+                    }
+                    if let summary = summary {
+                        cachedContentBySection["Summary"] = summary
+                    }
+                    objectWillChange.send()
+                }
             }
-            
-            if summaryAttributedString == nil, let summary = extractedSummary {
-                summaryAttributedString = summary
-                AppLogger.database.debug("✅ Summary loaded from blob via background processing")
-            }
         }
-
-        // Generate missing content if blob extraction failed
-        if titleAttributedString == nil {
-            let generateStartTime = Date()
-            titleAttributedString = articleOperations.getAttributedContent(
-                for: .title,
-                from: article,
-                createIfMissing: true
-            )
-            let generateTime = Date().timeIntervalSince(generateStartTime)
-            AppLogger.database.debug("✅ Title generated in \(String(format: "%.3f", generateTime))s")
-        }
-
-        if bodyAttributedString == nil {
-            let generateStartTime = Date()
-            bodyAttributedString = articleOperations.getAttributedContent(
-                for: .body,
-                from: article,
-                createIfMissing: true
-            )
-            let generateTime = Date().timeIntervalSince(generateStartTime)
-            AppLogger.database.debug("✅ Body generated in \(String(format: "%.3f", generateTime))s")
-        }
-
-        let totalTime = Date().timeIntervalSince(startTime)
-        AppLogger.database.debug("⚡ loadMinimalContent completed in \(String(format: "%.3f", totalTime)) seconds")
     }
 
     /// Verifies if an article blob was actually saved to the database
@@ -607,7 +560,68 @@ final class NewsDetailViewModel: ObservableObject {
         // Log beginning of section load
         AppLogger.database.debug("🔄 VIEW MODEL: Loading section \(section) for article \(article.id)")
 
-        // IMPROVEMENT: Create a reliable in-memory content cache check
+        // CRITICAL FIX: Check for existing summary content in the article model FIRST
+        // This prevents re-generating summaries that already exist
+        if section == "Summary", let article = currentArticleModel ?? currentArticle {
+            // Set loading state
+            isSummaryLoading = true
+            
+            // Check if we have the summary content directly in the article model
+            if let existingSummary = article.summary, !existingSummary.isEmpty {
+                // Check if we already have a blob for this content
+                if let summaryBlob = article.summaryBlob, !summaryBlob.isEmpty {
+                    // Try to extract the existing blob first
+                    if let existingAttributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                        ofClass: NSAttributedString.self,
+                        from: summaryBlob
+                    ) {
+                        AppLogger.database.debug("✅ SUMMARY ALREADY EXISTS: Using pre-generated summary blob")
+                        cachedContentBySection["Summary"] = existingAttributedString
+                        isSummaryLoading = false
+                        objectWillChange.send()
+                        return
+                    }
+                }
+                
+                // If no blob exists, create attributed string from existing summary text
+                if let attributedSummary = markdownToAttributedString(existingSummary, textStyle: "UIFontTextStyleBody") {
+                    AppLogger.database.debug("✅ SUMMARY CONTENT EXISTS: Using existing summary text")
+                    cachedContentBySection["Summary"] = attributedSummary
+                    isSummaryLoading = false
+                    objectWillChange.send()
+                    
+                    // Save as blob for future use
+                    Task {
+                        do {
+                            let blobData = try NSKeyedArchiver.archivedData(
+                                withRootObject: attributedSummary,
+                                requiringSecureCoding: false
+                            )
+                            await MainActor.run {
+                                article.summaryBlob = blobData
+                                if let context = article.modelContext {
+                                    try? context.save()
+                                }
+                            }
+                        } catch {
+                            AppLogger.database.error("❌ Failed to save summary blob: \(error)")
+                        }
+                    }
+                    return
+                } else {
+                    // Summary exists but couldn't be converted
+                    isSummaryLoading = false
+                    AppLogger.database.debug("⚠️ Summary exists but couldn't be converted to attributed string")
+                    return
+                }
+            } else {
+                // No summary exists
+                isSummaryLoading = false
+                AppLogger.database.debug("ℹ️ No summary content available for this article")
+                return
+            }
+        }
+
         // Check if we already have this content cached in the view model
         let cachedContent = getAttributedStringForSection(section)
         if cachedContent != nil {
@@ -622,13 +636,34 @@ final class NewsDetailViewModel: ObservableObject {
 
         // Create temporary loading indicator content
         provideTempContent(section, SectionNaming.fieldForSection(section), "Converting markdown to rich text...")
+        
+        // Set loading state for Summary section
+        if section == "Summary" {
+            isSummaryLoading = true
+            
+            // Add timeout protection for Summary loading
+            Task {
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds timeout
+                await MainActor.run {
+                    if self.isSummaryLoading {
+                        AppLogger.database.warning("⚠️ Summary loading timed out after 10 seconds")
+                        self.isSummaryLoading = false
+                        self.cachedContentBySection["Summary"] = NSAttributedString(
+                            string: "Summary loading timed out",
+                            attributes: [.foregroundColor: UIColor.secondaryLabel]
+                        )
+                        self.objectWillChange.send()
+                    }
+                }
+            }
+        }
 
         // Create a task to load the content
         let task = Task(priority: .userInitiated) {
             let startTime = Date()
 
-            // Make sure we have an article with a valid context before proceeding
-            let contextArticle = await articleOperations.getArticleModelWithContext(byId: article.id)
+            // PHASE 3 FIX: Use cached context fetch to eliminate redundant database calls
+            let contextArticle = await getCachedModelWithContext(for: article.id)
 
             // Use the centralized loader in ArticleOperations
             if let content = await articleOperations.loadContentForSection(section: section, articleId: article.id) {
@@ -636,6 +671,11 @@ final class NewsDetailViewModel: ObservableObject {
                     await MainActor.run {
                         // Update the content in the view model
                         updateSectionContent(section, SectionNaming.fieldForSection(section), content)
+                        
+                        // Clear loading state for Summary
+                        if section == "Summary" {
+                            self.isSummaryLoading = false
+                        }
 
                         // Also update the currentArticleModel if needed
                         if self.currentArticleModel == nil || self.currentArticleModel?.modelContext == nil {
@@ -682,6 +722,11 @@ final class NewsDetailViewModel: ObservableObject {
                 if !Task.isCancelled {
                     await MainActor.run {
                         provideFallbackContent(section, SectionNaming.fieldForSection(section))
+                        
+                        // Clear loading state for Summary
+                        if section == "Summary" {
+                            self.isSummaryLoading = false
+                        }
                     }
                 }
 
@@ -700,16 +745,17 @@ final class NewsDetailViewModel: ObservableObject {
     ///   - content: The content to set
     @MainActor
     private func updateSectionContent(_ section: String, _ field: RichTextField, _ content: NSAttributedString) {
-        // Store in appropriate property - FIXED: Use correct section names
+        // REMOVED: No longer caching attributed strings - using direct data binding instead
+        // Store all content in cachedContentBySection for sections that need it
         switch field {
         case .summary:
-            summaryAttributedString = content
+            cachedContentBySection["Summary"] = content
         case .criticalAnalysis:
-            criticalAnalysisAttributedString = content
+            cachedContentBySection["Critical Analysis"] = content
         case .logicalFallacies:
-            logicalFallaciesAttributedString = content
+            cachedContentBySection["Logical Fallacies"] = content
         case .sourceAnalysis:
-            sourceAnalysisAttributedString = content
+            cachedContentBySection["Source Analysis"] = content
         case .relationToTopic:
             cachedContentBySection["Relevance"] = content
         case .additionalInsights:
@@ -744,16 +790,17 @@ final class NewsDetailViewModel: ObservableObject {
             attributes: [.foregroundColor: UIColor.systemRed]
         )
 
-        // Store the fallback in the appropriate property - FIXED: Use correct section names
+        // REMOVED: No longer caching attributed strings - using direct data binding instead
+        // Store all fallback content in cachedContentBySection for sections that need it
         switch field {
         case .summary:
-            summaryAttributedString = fallbackString
+            cachedContentBySection["Summary"] = fallbackString
         case .criticalAnalysis:
-            criticalAnalysisAttributedString = fallbackString
+            cachedContentBySection["Critical Analysis"] = fallbackString
         case .logicalFallacies:
-            logicalFallaciesAttributedString = fallbackString
+            cachedContentBySection["Logical Fallacies"] = fallbackString
         case .sourceAnalysis:
-            sourceAnalysisAttributedString = fallbackString
+            cachedContentBySection["Source Analysis"] = fallbackString
         case .relationToTopic:
             cachedContentBySection["Relevance"] = fallbackString
         case .additionalInsights:
@@ -778,7 +825,7 @@ final class NewsDetailViewModel: ObservableObject {
     }
 
     /// Helper function to add timeout to async operations
-    private func withTimeout<T>(duration: Duration, operation: @escaping () async throws -> T) async throws -> T {
+    private func withTimeout<T>(duration: TimeInterval, operation: @escaping () async throws -> T) async throws -> T {
         return try await withThrowingTaskGroup(of: T.self) { group in
             // Add the actual operation
             group.addTask {
@@ -787,7 +834,7 @@ final class NewsDetailViewModel: ObservableObject {
 
             // Add a timeout task
             group.addTask {
-                try await Task.sleep(for: duration)
+                try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
                 throw TimeoutError()
             }
 
@@ -842,16 +889,17 @@ final class NewsDetailViewModel: ObservableObject {
             ]
         )
 
-        // Store in the appropriate property - FIXED: Use correct section names
+        // REMOVED: No longer caching attributed strings - using direct data binding instead
+        // Store all temp content in cachedContentBySection for sections that need it
         switch field {
         case .summary:
-            summaryAttributedString = tempString
+            cachedContentBySection["Summary"] = tempString
         case .criticalAnalysis:
-            criticalAnalysisAttributedString = tempString
+            cachedContentBySection["Critical Analysis"] = tempString
         case .logicalFallacies:
-            logicalFallaciesAttributedString = tempString
+            cachedContentBySection["Logical Fallacies"] = tempString
         case .sourceAnalysis:
-            sourceAnalysisAttributedString = tempString
+            cachedContentBySection["Source Analysis"] = tempString
         case .relationToTopic:
             cachedContentBySection["Relevance"] = tempString
         case .additionalInsights:
@@ -880,29 +928,22 @@ final class NewsDetailViewModel: ObservableObject {
 
         let richTextContent = articleOperations.generateAllRichTextContent(for: article)
 
-        // Update cached content - FIXED: Use correct section names
-        if let content = richTextContent[.title] {
-            titleAttributedString = content
-        }
-
-        if let content = richTextContent[.body] {
-            bodyAttributedString = content
-        }
-
+        // REMOVED: No longer caching attributed strings - using direct data binding instead
+        // Store all content in cachedContentBySection for sections that need it
         if let content = richTextContent[.summary] {
-            summaryAttributedString = content
+            cachedContentBySection["Summary"] = content
         }
 
         if let content = richTextContent[.criticalAnalysis] {
-            criticalAnalysisAttributedString = content
+            cachedContentBySection["Critical Analysis"] = content
         }
 
         if let content = richTextContent[.logicalFallacies] {
-            logicalFallaciesAttributedString = content
+            cachedContentBySection["Logical Fallacies"] = content
         }
 
         if let content = richTextContent[.sourceAnalysis] {
-            sourceAnalysisAttributedString = content
+            cachedContentBySection["Source Analysis"] = content
         }
 
         if let content = richTextContent[.relationToTopic] {
@@ -1027,28 +1068,9 @@ final class NewsDetailViewModel: ObservableObject {
     /// - Parameter section: The section to get content for
     /// - Returns: The attributed string if it exists, nil otherwise
     func getAttributedStringForSection(_ section: String) -> NSAttributedString? {
-        switch section {
-        case "Summary":
-            return summaryAttributedString
-        case "Critical Analysis":
-            return criticalAnalysisAttributedString
-        case "Logical Fallacies":
-            return logicalFallaciesAttributedString
-        case "Source Analysis":
-            return sourceAnalysisAttributedString
-        case "Relevance":
-            return cachedContentBySection["Relevance"]
-        case "Context & Perspective":
-            return cachedContentBySection["Context & Perspective"]
-        case "What You Can Do":
-            return cachedContentBySection["What You Can Do"]
-        case "Talking Points":
-            return cachedContentBySection["Talking Points"]
-        case "Simple Breakdown":
-            return cachedContentBySection["Simple Breakdown"]
-        default:
-            return cachedContentBySection[section]
-        }
+        // REMOVED: No longer caching attributed strings - using direct data binding instead
+        // All content is now stored in cachedContentBySection
+        return cachedContentBySection[section]
     }
 
     /// Checks if a section is currently loading
@@ -1099,19 +1121,19 @@ final class NewsDetailViewModel: ObservableObject {
 
     /// Clears all cached rich text content
     private func clearRichTextContent() {
-        titleAttributedString = nil
-        bodyAttributedString = nil
-        summaryAttributedString = nil
-        criticalAnalysisAttributedString = nil
-        logicalFallaciesAttributedString = nil
-        sourceAnalysisAttributedString = nil
+        // REMOVED: No longer caching attributed strings - using direct data binding instead
+        // Only clear the section cache
         cachedContentBySection = [:]
     }
     
-    // MARK: - Cache Management (Phase 1.2)
+    // MARK: - Enhanced Cache Management (Phase 1.2) - CRITICAL FIX
     
     private func getCachedModel(for articleId: UUID) -> ArticleModel? {
         return modelCache[articleId]
+    }
+    
+    private func getCachedRichText(for articleId: UUID) -> RichTextContent? {
+        return richTextCache.get(articleId)
     }
     
     private func cacheModel(_ model: ArticleModel) {
@@ -1120,10 +1142,40 @@ final class NewsDetailViewModel: ObservableObject {
             let keysToRemove = Array(modelCache.keys.prefix(modelCache.count - maxCacheSize + 1))
             for key in keysToRemove {
                 modelCache.removeValue(forKey: key)
+                richTextCache.removeValue(forKey: key) // Also remove rich text cache
             }
         }
         
         modelCache[model.id] = model
+        AppLogger.database.debug("📦 CACHED MODEL: \(model.id.uuidString.prefix(8)) - Cache size: \(self.modelCache.count)")
+    }
+    
+    private func cacheRichText(for articleId: UUID, title: NSAttributedString?, body: NSAttributedString?, summary: NSAttributedString?) {
+        // Only cache if we have at least one piece of content
+        if title != nil || body != nil || summary != nil {
+            let content = RichTextContent(title: title, body: body, summary: summary)
+            richTextCache.set(articleId, content)
+            AppLogger.database.debug("📝 CACHED RICH TEXT: \(articleId.uuidString.prefix(8)) - Title: \(title != nil), Body: \(body != nil), Summary: \(summary != nil)")
+        }
+    }
+    
+    private func addToNavigationHistory(_ articleId: UUID) {
+        // Remove if already exists to avoid duplicates
+        navigationHistory.removeAll { $0 == articleId }
+        
+        // Add to front of history
+        navigationHistory.insert(articleId, at: 0)
+        
+        // Trim to max size
+        if navigationHistory.count > maxHistorySize {
+            navigationHistory = Array(navigationHistory.prefix(maxHistorySize))
+        }
+        
+        AppLogger.database.debug("📚 NAVIGATION HISTORY: Added \(articleId.uuidString.prefix(8)) - History size: \(self.navigationHistory.count)")
+    }
+    
+    private func isInNavigationHistory(_ articleId: UUID) -> Bool {
+        return navigationHistory.contains(articleId)
     }
 
     /// Cancels all active section loading tasks

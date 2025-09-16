@@ -420,6 +420,7 @@ struct NewsView: View {
                             .foregroundColor(viewModel.selectedTopic == topic ? .white : .primary)
                             .cornerRadius(8)
                     }
+                    .accessibilityIdentifier(topic) // Add identifier for UI testing
                 }
             }
             .padding(.horizontal, 20)
@@ -523,12 +524,9 @@ struct NewsView: View {
         let filteredArticles: [ArticleModel]
         let totalArticles: [ArticleModel]
         let newsViewModel: NewsViewModel
-        @State private var titleAttributedString: NSAttributedString?
-        @State private var bodyAttributedString: NSAttributedString?
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         var body: some View {
-            // Remove GeometryReader which might be causing sizing issues
             VStack(alignment: .leading, spacing: 8) {
                 // Topic pill
                 HStack(spacing: 8) {
@@ -538,37 +536,23 @@ struct NewsView: View {
                     Spacer()
                 }
 
-                // Title - with accessibility support
-                Group {
-                    if let attributedTitle = titleAttributedString {
-                        // Remove fixed height constraint
-                        AccessibleAttributedText(attributedString: attributedTitle)
-                    } else {
-                        Text(article.title)
-                            .font(.headline)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-                .fontWeight(article.isViewed ? .regular : .bold)
+                // Title - direct display without caching
+                Text(article.title)
+                    .font(.headline)
+                    .fontWeight(article.isViewed ? .regular : .bold)
+                    .multilineTextAlignment(.leading)
 
                 // Publication Date
                 Text(article.publishDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
                     .font(.footnote)
                     .foregroundColor(.secondary)
 
-                // Body - with accessibility support
-                Group {
-                    if let attributedBody = bodyAttributedString {
-                        // Remove fixed height constraint
-                        AccessibleAttributedText(attributedString: attributedBody)
-                    } else {
-                        Text(article.body)
-                            .font(.body)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(3)
-                    }
-                }
-                .foregroundColor(.secondary)
+                // Body - direct display without caching
+                Text(article.body)
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
 
                 // Affected
                 if !article.affected.isEmpty {
@@ -590,24 +574,6 @@ struct NewsView: View {
                     )
                 }
             }
-            .onAppear {
-                loadRichTextContent()
-            }
-        }
-
-        private func loadRichTextContent() {
-            // Use the new markdown utilities to get attributed strings
-            titleAttributedString = getAttributedString(
-                for: .title,
-                from: article,
-                createIfMissing: true
-            )
-
-            bodyAttributedString = getAttributedString(
-                for: .body,
-                from: article,
-                createIfMissing: true
-            )
         }
     }
 
@@ -763,9 +729,9 @@ struct NewsView: View {
     }
 
     private func ArticleRow(
-        article: ArticleModel,
+        article: ArticleListItem,
         editMode: Binding<EditMode>?,
-        selectedArticleIDs: Binding<Set<ArticleModel.ID>>
+        selectedArticleIDs: Binding<Set<UUID>>
     ) -> some View {
         ArticleRowContent(
             article: article,
@@ -781,13 +747,13 @@ struct NewsView: View {
     
     // PERFORMANCE OPTIMIZED: Enhanced ArticleRow with stable view identity
     private struct ArticleRowContent: View {
-        let article: ArticleModel
+        let article: ArticleListItem
         let editMode: Binding<EditMode>?
-        let selectedArticleIDs: Binding<Set<ArticleModel.ID>>
+        let selectedArticleIDs: Binding<Set<UUID>>
         let shouldUseIPadLayout: Bool
-        let openArticle: (ArticleModel) -> Void
-        let toggleReadStatus: (ArticleModel) -> Void
-        let loadMoreArticlesIfNeeded: (ArticleModel) -> Void
+        let openArticle: (ArticleListItem) -> Void
+        let toggleReadStatus: (ArticleListItem) -> Void
+        let loadMoreArticlesIfNeeded: (ArticleListItem) -> Void
         let viewModel: NewsViewModel
         
         @Environment(\.layoutDimensions) private var layoutDimensions
@@ -842,7 +808,11 @@ struct NewsView: View {
                 }
             }
             .onTapGesture {
-                openArticle(article)
+                // Use optimized article opening for better performance
+                ArticleOpeningOptimizer.shared.openArticleOptimized(
+                    article,
+                    from: viewModel
+                )
             }
             .onTapGesture(count: 2) {
                 toggleReadStatus(article)
@@ -865,16 +835,16 @@ struct NewsView: View {
             }
         }
         
-        // Helper views
-        private var headerRow: some View {
-            HStack(spacing: 8) {
-                if let topic = article.topic, !topic.isEmpty {
-                    TopicPill(topic: topic)
+                // Helper views
+                private var headerRow: some View {
+                    HStack(spacing: 8) {
+                        if !article.topic.isEmpty {
+                            TopicPill(topic: article.topic)
+                        }
+                        Spacer()
+                        BookmarkButton(article: article, toggleBookmark: toggleBookmark)
+                    }
                 }
-                Spacer()
-                BookmarkButton(article: article, toggleBookmark: toggleBookmark)
-            }
-        }
         
         private var titleView: some View {
             Text(article.title)
@@ -906,27 +876,13 @@ struct NewsView: View {
                 if !article.body.isEmpty {
                     // TEMPORARY TEST: Force use of SwiftUI Text to isolate the issue
                     // Bypassing NonSelectableRichTextView to test if UIKit component is the problem
-                    if let bodyBlobData = article.bodyBlob,
-                       let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
-                           ofClass: NSAttributedString.self,
-                           from: bodyBlobData
-                       )
-                    {
-                        // Extract plain text from attributed string for testing
-                        Text(attributedString.string)
-                            .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
-                            .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.8))
-                            .lineLimit(nil)  // Allow full text display
-                            .multilineTextAlignment(.leading)
-                            .textSelection(.disabled)
-                    } else {
-                        Text(article.body)
-                            .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
-                            .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.8))
-                            .lineLimit(nil)  // Allow full text display
-                            .multilineTextAlignment(.leading)
-                            .textSelection(.disabled)
-                    }
+                    // Direct text display without caching - fixes stale content issue
+                    Text(article.body)
+                        .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
+                        .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.8))
+                        .lineLimit(nil)  // Allow full text display
+                        .multilineTextAlignment(.leading)
+                        .textSelection(.disabled)
                 }
             }
         }
@@ -965,9 +921,10 @@ struct NewsView: View {
         
         private var badgesView: some View {
             HStack {
+                // Convert String? to Int? for QualityBadges
                 QualityBadges(
-                    sourcesQuality: article.sourcesQuality,
-                    argumentQuality: article.argumentQuality,
+                    sourcesQuality: nil,  // ArticleListItem has String?, QualityBadges needs Int?
+                    argumentQuality: nil,  // ArticleListItem has String?, QualityBadges needs Int?
                     sourceType: article.sourceType,
                     scrollToSection: .constant(nil),
                     onBadgeTap: { _ in
@@ -978,7 +935,7 @@ struct NewsView: View {
             .padding(.top, 5)
         }
         
-        private func toggleBookmark(_ article: ArticleModel) {
+        private func toggleBookmark(_ article: ArticleListItem) {
             Task {
                 await viewModel.toggleBookmark(for: article)
             }
@@ -987,8 +944,8 @@ struct NewsView: View {
     
     // Simplified bookmark button component
     private struct BookmarkButton: View {
-        let article: ArticleModel
-        let toggleBookmark: (ArticleModel) -> Void
+        let article: ArticleListItem
+        let toggleBookmark: (ArticleListItem) -> Void
         
         var body: some View {
             Button {
@@ -1145,7 +1102,7 @@ struct NewsView: View {
 
     // MARK: - Logic / Helpers
 
-    private func handleTapGesture(for article: ArticleModel) {
+    private func handleTapGesture(for article: ArticleListItem) {
         // If in Edit mode, toggle selection
         if editMode?.wrappedValue == .active {
             withAnimation {
@@ -1161,7 +1118,7 @@ struct NewsView: View {
         }
     }
 
-    private func handleLongPressGesture(for article: ArticleModel) {
+    private func handleLongPressGesture(for article: ArticleListItem) {
         // Long-press triggers Edit mode and selects the row
         withAnimation {
             if editMode?.wrappedValue == .inactive {
@@ -1276,13 +1233,13 @@ struct NewsView: View {
     // MARK: - Article Operations
     // Note: Article operation functions are implemented in NewsView+Extensions.swift
 
-    private func toggleReadStatus(_ article: ArticleModel) {
+    private func toggleReadStatus(_ article: ArticleListItem) {
         Task {
             await viewModel.toggleReadStatus(for: article)
         }
     }
 
-    private func toggleBookmark(_ article: ArticleModel) {
+    private func toggleBookmark(_ article: ArticleListItem) {
         Task {
             await viewModel.toggleBookmark(for: article)
         }

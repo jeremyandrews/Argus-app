@@ -73,8 +73,12 @@ class APIClient {
     private init() {
         // Configure timeouts at initialization
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 15.0 // 15 seconds for initial connection (increased from 10)
-        configuration.timeoutIntervalForResource = 60.0 // 60 seconds for the entire resource (increased from 30)
+        configuration.timeoutIntervalForRequest = 30.0 // 30 seconds for initial connection
+        configuration.timeoutIntervalForResource = 120.0 // 120 seconds for the entire resource
+        configuration.waitsForConnectivity = true // Wait for network connectivity
+        configuration.allowsCellularAccess = true
+        configuration.allowsExpensiveNetworkAccess = true
+        configuration.allowsConstrainedNetworkAccess = true
         session = URLSession(configuration: configuration)
 
         // Start monitoring network status
@@ -85,13 +89,18 @@ class APIClient {
 
     /// Set up network path monitoring
     private func setupNetworkMonitoring() {
+        let queue = DispatchQueue.global(qos: .background)
+        
         networkMonitor.pathUpdateHandler = { [weak self] path in
-            self?.currentPath = path
+            guard let self = self else { return }
+            
+            // Safely update current path
+            DispatchQueue.main.async {
+                self.currentPath = path
+            }
 
             let statusDescription = path.status == .satisfied ? "connected" : "disconnected"
             let interfaceTypes = path.availableInterfaces.map { interface -> String in
-                // Need to capture self strongly here for the mapping function
-                guard let self = self else { return "Unknown" }
                 return self.interfaceTypeToString(interface.type)
             }.joined(separator: ", ")
 
@@ -105,7 +114,7 @@ class APIClient {
         }
 
         // Start monitoring on a background queue
-        networkMonitor.start(queue: DispatchQueue.global(qos: .background))
+        networkMonitor.start(queue: queue)
     }
 
     /// Check if the device has network connectivity

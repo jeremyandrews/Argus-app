@@ -1206,24 +1206,51 @@ final class AutoSyncCoordinator: ObservableObject {
     
     /// Checks if network conditions allow syncing - Phase 4.1 Network Intelligence
     private func shouldAllowSync() async -> Bool {
+        // Use an actor to protect the hasResumed flag for thread safety in Swift 6
+        actor ContinuationHandler {
+            private var hasResumed = false
+            
+            func tryResume(continuation: CheckedContinuation<Bool, Never>, with value: Bool) {
+                guard !hasResumed else { return }
+                hasResumed = true
+                continuation.resume(returning: value)
+            }
+            
+            func isResumed() -> Bool {
+                return hasResumed
+            }
+        }
+        
         return await withCheckedContinuation { continuation in
             let networkMonitor = NWPathMonitor()
+            let handler = ContinuationHandler()
             
-        networkMonitor.pathUpdateHandler = { [weak self] path in
-            defer {
-                networkMonitor.cancel()
+            networkMonitor.pathUpdateHandler = { [weak self] path in
+                Task {
+                    defer {
+                        networkMonitor.cancel()
+                    }
+                    
+                    guard let self = self else {
+                        await handler.tryResume(continuation: continuation, with: false)
+                        return
+                    }
+                    
+                    let result = self.evaluateNetworkConditions(path: path)
+                    await handler.tryResume(continuation: continuation, with: result)
+                }
             }
-            
-            guard let self = self else {
-                continuation.resume(returning: false)
-                return
-            }
-            
-            let result = self.evaluateNetworkConditions(path: path)
-            continuation.resume(returning: result)
-        }
             
             networkMonitor.start(queue: DispatchQueue.global(qos: .utility))
+            
+            // Add timeout to prevent indefinite waiting
+            Task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds timeout
+                if await !handler.isResumed() {
+                    networkMonitor.cancel()
+                    await handler.tryResume(continuation: continuation, with: true) // Default to allow sync on timeout
+                }
+            }
         }
     }
     
@@ -1364,7 +1391,8 @@ final class AutoSyncCoordinator: ObservableObject {
         networkStateMonitor = NWPathMonitor()
         
         networkStateMonitor?.pathUpdateHandler = { [weak self] path in
-            Task { @MainActor in
+            guard let self = self else { return }
+            Task { @MainActor [weak self] in
                 await self?.handleNetworkStateChange(path: path)
             }
         }

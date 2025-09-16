@@ -7,9 +7,13 @@ let package = Package(
     products: [
         .library(name: "Argus", targets: ["Argus"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/SimonFairbairn/SwiftyMarkdown.git", from: "1.2.4")
+    ],
     targets: [
         .target(
             name: "Argus",
+            dependencies: ["SwiftyMarkdown"],
             path: "Argus"
         ),
     ]

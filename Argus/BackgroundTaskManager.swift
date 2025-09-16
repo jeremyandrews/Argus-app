@@ -2,7 +2,6 @@ import BackgroundTasks
 import Foundation
 import Network
 import SwiftData
-import UIKit
 
 /// Manages background tasks registration, scheduling, and execution using modern Swift concurrency
 final class BackgroundTaskManager {

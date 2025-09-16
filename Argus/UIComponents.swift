@@ -454,6 +454,110 @@ struct ArticlePositionCounter: View {
     }
 }
 
+// MARK: - Optimized Article Position Counter
+
+/// Performance-optimized version of ArticlePositionCounter that caches calculations
+/// and reduces UI blocking during navigation
+struct ArticlePositionCounterOptimized: View {
+    let currentPosition: Int
+    let totalCount: Int
+    var isCompact: Bool = false
+    var onBulkAction: ((ArticlePositionCounter.BulkMarkingAction) -> Void)? = nil
+    
+    @State private var isLongPressing = false
+    @State private var showActionDialog = false
+    @State private var selectedAction: ArticlePositionCounter.BulkMarkingAction?
+    
+    // PERFORMANCE: Cache formatted strings to avoid recalculation
+    private var cachedCurrentText: String {
+        return "\(currentPosition)"
+    }
+    
+    private var cachedTotalText: String {
+        return "\(totalCount)"
+    }
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(cachedCurrentText)
+                .font(isCompact ? .caption : .subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.primary)
+            
+            Text("of")
+                .font(isCompact ? .caption2 : .caption)
+                .foregroundColor(.secondary)
+            
+            Text(cachedTotalText)
+                .font(isCompact ? .caption : .subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            (isLongPressing ? Color.blue.opacity(0.3) : Color(UIColor.secondarySystemBackground))
+        )
+        .cornerRadius(8)
+        .opacity(0.9)
+        .scaleEffect(isLongPressing ? 1.05 : 1.0)
+        // PERFORMANCE: Remove animations during navigation to prevent blocking
+        .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 10, perform: {
+            // Long press completed - show action selection
+            performHapticFeedback(.heavy)
+            showActionDialog = true
+        }, onPressingChanged: { isPressing in
+            // PERFORMANCE: Simplified state updates without heavy animations
+            isLongPressing = isPressing
+            
+            if isPressing {
+                // Haptic feedback when long press begins
+                performHapticFeedback(.light)
+            }
+        })
+        .confirmationDialog("Bulk Actions", isPresented: $showActionDialog, titleVisibility: .visible) {
+            Button(ArticlePositionCounter.BulkMarkingAction.markAllRead.title) {
+                selectedAction = .markAllRead
+            }
+            
+            Button(ArticlePositionCounter.BulkMarkingAction.markAllUnread.title) {
+                selectedAction = .markAllUnread
+            }
+            
+            Button("Cancel", role: .cancel) {
+                selectedAction = nil
+            }
+        } message: {
+            Text("Choose an action for all \(totalCount) articles in the current filtered set.")
+        }
+        .alert(
+            selectedAction?.confirmationTitle ?? "",
+            isPresented: Binding<Bool>(
+                get: { selectedAction != nil },
+                set: { if !$0 { selectedAction = nil } }
+            ),
+            presenting: selectedAction
+        ) { action in
+            Button("Cancel", role: .cancel) {
+                selectedAction = nil
+            }
+            
+            Button(action.title.replacingOccurrences(of: "Mark All as ", with: "Mark "), role: .destructive) {
+                onBulkAction?(action)
+                selectedAction = nil
+            }
+        } message: { action in
+            Text(action.confirmationMessage)
+        }
+    }
+    
+    /// Performs haptic feedback using iOS standard patterns
+    private func performHapticFeedback(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        let impactFeedback = UIImpactFeedbackGenerator(style: style)
+        impactFeedback.impactOccurred()
+    }
+}
+
 // MARK: - Domain Source Component
 
 struct DomainSourceView: View {

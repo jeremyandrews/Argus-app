@@ -48,6 +48,12 @@ final class ArticleModel: Equatable {
     /// Body text of the article (from tiny_summary in API)
     var body: String = ""
 
+    /// PHASE 6: Pre-calculated tiny title for list view display (optimized during sync)
+    var tinyTitle: String?
+
+    /// PHASE 6: Pre-calculated tiny summary for list view display (optimized during sync)
+    var tinySummary: String?
+
     /// Source domain for the article
     var domain: String?
 
