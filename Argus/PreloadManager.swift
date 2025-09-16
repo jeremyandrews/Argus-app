@@ -43,57 +43,102 @@ class PreloadManager {
         return preloadedIDs.contains(id)
     }
 
-    // Preload a batch of articles that will likely be viewed soon
-    // ENHANCED: Preload Next-8 and Previous-8 articles with prioritization for faster navigation
-    // Swift 6 compatible version using article IDs
+    // ENHANCED: Smart preloading with performance monitoring and adaptive strategies
     func preloadArticlesByIds(_ articleIds: [UUID], currentIndex: Int) {
         // Cancel any existing preload task
         preloadTask?.cancel()
 
-        // Start a new preload task with utility priority to avoid competing with UI
-        preloadTask = Task(priority: .utility) {
-            // PHASE 5: Optimize preloading - reduce from 6 to 2 articles (immediate neighbors only)
-            // This eliminates excessive database operations that compete with UI responsiveness
-            let nextIndex = currentIndex + 1
-            let prevIndex = currentIndex - 1
+        // Start a new preload task with background priority to never block UI
+        preloadTask = Task(priority: .background) {
+            let startTime = Date()
+            
+            // ADAPTIVE PRELOADING: Start with immediate neighbors, expand based on performance
+            let immediateNeighbors = getImmediateNeighbors(currentIndex: currentIndex, articleIds: articleIds)
+            let extendedRange = getExtendedRange(currentIndex: currentIndex, articleIds: articleIds)
 
-            AppLogger.database.debug("🚀 PreloadManager: Phase 5 optimized preloading - 2 articles only around index \(currentIndex)")
-            AppLogger.database.debug("   Next: \(nextIndex) (1 article)")
-            AppLogger.database.debug("   Prev: \(prevIndex) (1 article)")
+            AppLogger.database.debug("🚀 Smart preloading: \(immediateNeighbors.count) immediate + \(extendedRange.count) extended around index \(currentIndex)")
 
             var preloadedCount = 0
 
-            // Preload next article (immediate neighbor)
-            if nextIndex < articleIds.count {
-                let articleId = articleIds[nextIndex]
-
-                // Skip if already preloaded
+            // Phase 1: Preload immediate neighbors with high priority (critical for navigation)
+            for (index, articleId) in immediateNeighbors {
                 if await isPreloaded(articleId) {
-                    AppLogger.database.debug("⚡ Next article at index \(nextIndex) already preloaded, skipping")
-                } else {
-                    await markAsPreloaded(articleId)
-                    await preloadSingleArticleById(articleId, index: nextIndex, priority: .high, type: .summaryOnly)
-                    preloadedCount += 1
-                    AppLogger.database.debug("✅ Preloaded next article at index \(nextIndex)")
+                    AppLogger.database.debug("⚡ Article at index \(index) already preloaded, skipping")
+                    continue
                 }
+
+                await markAsPreloaded(articleId)
+                await preloadSingleArticleById(articleId, index: index, priority: .high, type: .summaryOnly)
+                preloadedCount += 1
+                
+                // Yield to prevent blocking other tasks
+                await Task.yield()
             }
 
-            // Preload previous article (immediate neighbor)
-            if prevIndex >= 0 {
-                let articleId = articleIds[prevIndex]
+            // Phase 2: Preload extended range with lower priority (background optimization)
+            let phase1Time = Date().timeIntervalSince(startTime)
+            if phase1Time < 0.1 { // Only continue if phase 1 was fast
+                for (index, articleId) in extendedRange {
+                    // Check if task was cancelled
+                    if Task.isCancelled { break }
+                    
+                    if await isPreloaded(articleId) {
+                        continue
+                    }
 
-                if await isPreloaded(articleId) {
-                    AppLogger.database.debug("⚡ Previous article at index \(prevIndex) already preloaded, skipping")
-                } else {
                     await markAsPreloaded(articleId)
-                    await preloadSingleArticleById(articleId, index: prevIndex, priority: .high, type: .summaryOnly)
+                    await preloadSingleArticleById(articleId, index: index, priority: .low, type: .summaryOnly)
                     preloadedCount += 1
-                    AppLogger.database.debug("✅ Preloaded previous article at index \(prevIndex)")
+                    
+                    // Yield between each item to maintain responsiveness
+                    await Task.yield()
                 }
+            } else {
+                AppLogger.database.debug("⚠️ Phase 1 took \(String(format: "%.3f", phase1Time * 1000))ms, skipping extended range")
             }
 
-            AppLogger.database.debug("✅ PreloadManager: Enhanced preloading completed - \(preloadedCount) articles processed")
+            let totalTime = Date().timeIntervalSince(startTime)
+            AppLogger.database.debug("✅ Smart preloading completed: \(preloadedCount) articles in \(String(format: "%.3f", totalTime * 1000))ms")
         }
+    }
+    
+    // MARK: - Helper Methods for Smart Preloading
+    
+    private func getImmediateNeighbors(currentIndex: Int, articleIds: [UUID]) -> [(Int, UUID)] {
+        var neighbors: [(Int, UUID)] = []
+        
+        // Next article (higher priority for forward navigation)
+        if currentIndex + 1 < articleIds.count {
+            neighbors.append((currentIndex + 1, articleIds[currentIndex + 1]))
+        }
+        
+        // Previous article
+        if currentIndex - 1 >= 0 {
+            neighbors.append((currentIndex - 1, articleIds[currentIndex - 1]))
+        }
+        
+        return neighbors
+    }
+    
+    private func getExtendedRange(currentIndex: Int, articleIds: [UUID]) -> [(Int, UUID)] {
+        var extended: [(Int, UUID)] = []
+        let rangeSize = 2 // Reduced from previous implementation
+        
+        // Forward range (prioritize forward navigation)
+        for i in (currentIndex + 2)...(currentIndex + 1 + rangeSize) {
+            if i < articleIds.count {
+                extended.append((i, articleIds[i]))
+            }
+        }
+        
+        // Backward range
+        for i in (currentIndex - 1 - rangeSize)...(currentIndex - 2) {
+            if i >= 0 {
+                extended.append((i, articleIds[i]))
+            }
+        }
+        
+        return extended
     }
     
     // Legacy method maintained for backward compatibility

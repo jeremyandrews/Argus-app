@@ -86,20 +86,36 @@ final class ProgressiveLoadingManager: ObservableObject {
         }
     }
     
-    /// Load the actual content for an article
+    /// Load the actual content for an article with performance optimization
     private func loadArticleContent(_ article: ArticleModel) async {
+        let startTime = Date()
+        
         // Load only essential content first (title and summary)
         guard let articleModel = await articleOperations.getArticleModelWithContext(byId: article.id) else {
             return
         }
         
-        // Generate rich text for title and summary only (not body yet)
-        _ = articleOperations.getAttributedContent(for: .title, from: articleModel, createIfMissing: true)
-        _ = articleOperations.getAttributedContent(for: .summary, from: articleModel, createIfMissing: true)
+        // OPTIMIZATION: Check if content already exists before generating
+        let titleExists = articleModel.titleBlob != nil && !articleModel.titleBlob!.isEmpty
+        let summaryExists = articleModel.summaryBlob != nil && !articleModel.summaryBlob!.isEmpty
         
-        // Quality metadata is already in the model, no need to fetch separately
+        // Generate rich text for title only if missing
+        if !titleExists {
+            _ = articleOperations.getAttributedContent(for: .title, from: articleModel, createIfMissing: true)
+        }
         
-        AppLogger.database.debug("Progressive load: Article \(article.id) essential content loaded")
+        // Generate rich text for summary only if missing
+        if !summaryExists {
+            _ = articleOperations.getAttributedContent(for: .summary, from: articleModel, createIfMissing: true)
+        }
+        
+        let loadTime = Date().timeIntervalSince(startTime)
+        
+        if titleExists && summaryExists {
+            AppLogger.database.debug("⚡ Progressive load: Article \(article.id.uuidString.prefix(8)) used cached content (\(String(format: "%.3f", loadTime * 1000))ms)")
+        } else {
+            AppLogger.database.debug("📄 Progressive load: Article \(article.id.uuidString.prefix(8)) generated content (\(String(format: "%.3f", loadTime * 1000))ms)")
+        }
     }
     
     /// Preload articles adjacent to the given article
