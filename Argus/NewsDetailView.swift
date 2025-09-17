@@ -375,8 +375,9 @@ struct NewsDetailView: View {
             Spacer()
             
         // Article position counter with bulk actions - cached for performance
+        // FIX: Ensure we don't show position beyond available articles
         ArticlePositionCounterOptimized(
-            currentPosition: viewModel.currentIndex + 1,
+            currentPosition: min(viewModel.currentIndex + 1, viewModel.articles.count),
             totalCount: viewModel.articles.count,
             isCompact: true,
             onBulkAction: { action in

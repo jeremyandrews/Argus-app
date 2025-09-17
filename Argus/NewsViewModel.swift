@@ -471,15 +471,24 @@ final class NewsViewModel: ObservableObject {
     
     func getFilteredArticlesAsModels() async -> [ArticleModel] {
         let ids = filteredArticles.map { $0.id }
-        var models: [ArticleModel] = []
         
-        for id in ids {
-            if let model = await fetchSwiftDataModel(for: id) {
-                models.append(model)
-            }
-        }
+        // PERFORMANCE FIX: Batch fetch instead of individual queries
+        return await fetchSwiftDataModelsBatch(for: ids)
+    }
+    
+    /// Efficiently fetches multiple ArticleModels in a single query
+    private func fetchSwiftDataModelsBatch(for ids: [UUID]) async -> [ArticleModel] {
+        guard !ids.isEmpty else { return [] }
         
-        return models
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        // Use a single query with IN predicate for much better performance
+        let result = await articleOperations.fetchArticleModelsBatch(for: ids)
+        
+        let duration = CFAbsoluteTimeGetCurrent() - startTime
+        AppLogger.database.debug("✅ Batch fetch: \(result.count) articles in \(String(format: "%.3f", duration))s")
+        
+        return result
     }
     
     // MARK: - Detail View Support (Still uses SwiftData)

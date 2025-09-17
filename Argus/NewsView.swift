@@ -923,8 +923,8 @@ struct NewsView: View {
             HStack {
                 // Convert String? to Int? for QualityBadges
                 QualityBadges(
-                    sourcesQuality: nil,  // ArticleListItem has String?, QualityBadges needs Int?
-                    argumentQuality: nil,  // ArticleListItem has String?, QualityBadges needs Int?
+                    sourcesQuality: stringToInt(article.sourcesQuality),
+                    argumentQuality: stringToInt(article.argumentQuality),
                     sourceType: article.sourceType,
                     scrollToSection: .constant(nil),
                     onBadgeTap: { _ in
@@ -933,6 +933,12 @@ struct NewsView: View {
                 )
             }
             .padding(.top, 5)
+        }
+        
+        // Helper function to convert String? to Int?
+        private func stringToInt(_ stringValue: String?) -> Int? {
+            guard let stringValue = stringValue else { return nil }
+            return Int(stringValue)
         }
         
         private func toggleBookmark(_ article: ArticleListItem) {

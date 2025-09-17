@@ -337,8 +337,46 @@ final class ArticleNavigationPerformanceTests: XCTestCase {
         }
     }
     
-    // MARK: - Performance Metrics Summary
+    // MARK: - Single Article Performance Test
     
+    func testSingleArticleTopicPerformance() throws {
+        print("\n" + String(repeating: "=", count: 60))
+        print("📊 SINGLE ARTICLE TOPIC PERFORMANCE TEST")
+        print(String(repeating: "=", count: 60))
+        
+        let table = app.tables.firstMatch
+        XCTAssertTrue(table.waitForExistence(timeout: 5.0), "Table should exist")
+        
+        let cells = app.tables.cells
+        guard cells.count >= 1 else {
+            throw XCTSkip("Need at least 1 article for single article performance test")
+        }
+        
+        let measureOptions = XCTMeasureOptions()
+        measureOptions.iterationCount = 5
+        
+        measure(metrics: [XCTClockMetric()], options: measureOptions) {
+            // Test opening the first (and potentially only) article in a topic
+            print("📄 Testing single article opening performance...")
+            let firstArticle = cells.element(boundBy: 0)
+            firstArticle.tap()
+            
+            // Verify article content loads (this is where the hang would occur)
+            let contentLoaded = verifyArticleContentLoaded(articleIndex: 1, timeout: 5.0)
+            XCTAssertTrue(contentLoaded, "Single article content should load quickly")
+            
+            // Close and verify
+            closeDetailView()
+            let backInList = table.waitForExistence(timeout: 2.0)
+            XCTAssertTrue(backInList, "Should return to article list")
+        }
+        
+        print("✅ Single Article Topic Performance Test Complete")
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+
+    // MARK: - Performance Metrics Summary
+
     func testPerformanceMetricsSummary() throws {
         print("\n" + String(repeating: "=", count: 60))
         print("📊 PERFORMANCE METRICS SUMMARY")

@@ -397,6 +397,41 @@ final class ArticleOperations {
             return nil
         }
     }
+    
+    /// PERFORMANCE OPTIMIZATION: Batch fetch multiple ArticleModels efficiently
+    /// - Parameter ids: Array of UUIDs to fetch
+    /// - Returns: Array of ArticleModels found (preserves order where possible)
+    @MainActor
+    func fetchArticleModelsBatch(for ids: [UUID]) async -> [ArticleModel] {
+        guard !ids.isEmpty else { return [] }
+        
+        AppLogger.database.debug("🔍 Batch fetching \(ids.count) ArticleModels")
+        
+        let container = SwiftDataContainer.shared.container
+        let mainContext = container.mainContext
+        
+        // Use IN predicate for efficient batch fetch
+        let descriptor = FetchDescriptor<ArticleModel>(
+            predicate: #Predicate<ArticleModel> { article in
+                ids.contains(article.id)
+            }
+        )
+        
+        do {
+            let results = try mainContext.fetch(descriptor)
+            AppLogger.database.debug("✅ Batch retrieved \(results.count) ArticleModels from \(ids.count) requested")
+            
+            // Sort results to match the input order where possible
+            let sortedResults = ids.compactMap { targetId in
+                results.first { $0.id == targetId }
+            }
+            
+            return sortedResults
+        } catch {
+            AppLogger.database.error("❌ Error batch fetching ArticleModels: \(error)")
+            return []
+        }
+    }
 
     /// Gets the ArticleModel with context, previously handled by ArticleModelAdapter
     /// - Parameter id: The article ID to fetch
