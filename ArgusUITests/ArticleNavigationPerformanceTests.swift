@@ -375,6 +375,589 @@ final class ArticleNavigationPerformanceTests: XCTestCase {
         print(String(repeating: "=", count: 60) + "\n")
     }
 
+    // MARK: - Position Counter Validation Tests
+    
+    func testTopArticlePositionCounter() throws {
+        print("\n" + String(repeating: "=", count: 60))
+        print("📊 TOP ARTICLE POSITION COUNTER TEST")
+        print(String(repeating: "=", count: 60))
+        
+        let table = app.tables.firstMatch
+        XCTAssertTrue(table.waitForExistence(timeout: 5.0), "Table should exist")
+        
+        let cells = app.tables.cells
+        guard cells.count >= 3 else {
+            throw XCTSkip("Need at least 3 articles for position counter test")
+        }
+        
+        let totalArticles = cells.count
+        print("📄 Total articles available: \(totalArticles)")
+        
+        // Test clicking on the TOP article (first in list)
+        print("🎯 Testing top article position counter...")
+        let topArticle = cells.element(boundBy: 0)
+        topArticle.tap()
+        
+        // Wait for detail view to load
+        let detailViewExists = app.scrollViews.firstMatch.waitForExistence(timeout: 3.0)
+        XCTAssertTrue(detailViewExists, "Detail view should appear")
+        
+        // Look for position counter - should show "1 of X"
+        let positionCounterFound = verifyPositionCounter(expectedPosition: 1, expectedTotal: totalArticles)
+        XCTAssertTrue(positionCounterFound, "Top article should show position '1 of \(totalArticles)'")
+        
+        closeDetailView()
+        print("✅ Top Article Position Counter Test Complete")
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    func testPositionCounterNavigation() throws {
+        print("\n" + String(repeating: "=", count: 60))
+        print("📊 POSITION COUNTER NAVIGATION TEST")
+        print(String(repeating: "=", count: 60))
+        
+        let table = app.tables.firstMatch
+        XCTAssertTrue(table.waitForExistence(timeout: 5.0), "Table should exist")
+        
+        let cells = app.tables.cells
+        guard cells.count >= 5 else {
+            throw XCTSkip("Need at least 5 articles for position counter navigation test")
+        }
+        
+        let totalArticles = cells.count
+        print("📄 Total articles available: \(totalArticles)")
+        
+        // Open first article
+        print("🎯 Opening first article...")
+        let firstArticle = cells.element(boundBy: 0)
+        firstArticle.tap()
+        
+        // Wait for detail view to load
+        let detailViewExists = app.scrollViews.firstMatch.waitForExistence(timeout: 3.0)
+        XCTAssertTrue(detailViewExists, "Detail view should appear")
+        
+        // Test navigation through first 5 articles and verify position counters
+        for expectedPosition in 1...min(5, totalArticles) {
+            print("📍 Verifying position \(expectedPosition) of \(totalArticles)")
+            
+            let positionCorrect = verifyPositionCounter(expectedPosition: expectedPosition, expectedTotal: totalArticles)
+            XCTAssertTrue(positionCorrect, "Article should show position '\(expectedPosition) of \(totalArticles)'")
+            
+            // Navigate to next article (except on last iteration)
+            if expectedPosition < min(5, totalArticles) {
+                print("➡️ Navigating to next article...")
+                navigateToNextArticle()
+                Thread.sleep(forTimeInterval: 0.5) // Give time for position counter to update
+            }
+        }
+        
+        // Navigate back and verify position counters update correctly
+        print("⬅️ Testing backward navigation...")
+        for expectedPosition in (1..<min(5, totalArticles)).reversed() {
+            navigateToPreviousArticle()
+            Thread.sleep(forTimeInterval: 0.5)
+            
+            print("📍 Verifying backward position \(expectedPosition) of \(totalArticles)")
+            let positionCorrect = verifyPositionCounter(expectedPosition: expectedPosition, expectedTotal: totalArticles)
+            XCTAssertTrue(positionCorrect, "Article should show position '\(expectedPosition) of \(totalArticles)' when navigating backward")
+        }
+        
+        closeDetailView()
+        print("✅ Position Counter Navigation Test Complete")
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    func testPositionCounterConsistency() throws {
+        print("\n" + String(repeating: "=", count: 60))
+        print("📊 POSITION COUNTER CONSISTENCY TEST")
+        print(String(repeating: "=", count: 60))
+        
+        let table = app.tables.firstMatch
+        XCTAssertTrue(table.waitForExistence(timeout: 5.0), "Table should exist")
+        
+        let cells = app.tables.cells
+        guard cells.count >= 3 else {
+            throw XCTSkip("Need at least 3 articles for consistency test")
+        }
+        
+        let totalArticles = cells.count
+        print("📄 Total articles available: \(totalArticles)")
+        
+        // Test multiple articles from different positions in the list
+        let testPositions = [0, min(1, totalArticles - 1), min(2, totalArticles - 1)]
+        
+        for (index, cellIndex) in testPositions.enumerated() {
+            let expectedPosition = cellIndex + 1
+            print("🎯 Testing article at list position \(expectedPosition)...")
+            
+            // Open article at specific position
+            let article = cells.element(boundBy: cellIndex)
+            article.tap()
+            
+            // Wait for detail view
+            let detailViewExists = app.scrollViews.firstMatch.waitForExistence(timeout: 3.0)
+            XCTAssertTrue(detailViewExists, "Detail view should appear")
+            
+            // Verify position counter matches the list position
+            let positionCorrect = verifyPositionCounter(expectedPosition: expectedPosition, expectedTotal: totalArticles)
+            XCTAssertTrue(positionCorrect, "Article at list position \(expectedPosition) should show '\(expectedPosition) of \(totalArticles)'")
+            
+            // Close and return to list
+            closeDetailView()
+            let backInList = table.waitForExistence(timeout: 2.0)
+            XCTAssertTrue(backInList, "Should return to article list")
+            
+            Thread.sleep(forTimeInterval: 0.3) // Brief pause between tests
+        }
+        
+        print("✅ Position Counter Consistency Test Complete")
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    private func verifyPositionCounter(expectedPosition: Int, expectedTotal: Int, timeout: TimeInterval = 3.0) -> Bool {
+        let expectedText = "\(expectedPosition) of \(expectedTotal)"
+        print("🔍 Looking for position counter: '\(expectedText)'")
+        
+        let endTime = Date().addingTimeInterval(timeout)
+        
+        while Date() < endTime {
+            // FIRST: Try to find the position counter using the new accessibility identifier
+            let positionCounter = app.otherElements["ArticlePositionCounter"]
+            if positionCounter.exists {
+                let label = positionCounter.label
+                if label.contains(expectedText) {
+                    print("✅ Found position counter via accessibility identifier: '\(label)'")
+                    return true
+                }
+                
+                // Also check for partial matches
+                if label.contains("of \(expectedTotal)") && label.contains("\(expectedPosition)") {
+                    print("✅ Found position counter via accessibility identifier (partial match): '\(label)'")
+                    return true
+                }
+                
+                print("🔍 Position counter found but text doesn't match. Expected: '\(expectedText)', Found: '\(label)'")
+            }
+            
+            // FALLBACK: Look for position counter in various possible formats
+            let staticTexts = app.staticTexts
+            let buttons = app.buttons
+            
+            // Check static texts for position counter
+            for element in staticTexts.allElementsBoundByIndex {
+                if element.exists {
+                    let label = element.label
+                    if label.contains(expectedText) {
+                        print("✅ Found position counter in static text: '\(label)'")
+                        return true
+                    }
+                    
+                    // Also check for partial matches that might indicate the counter
+                    if label.contains("of \(expectedTotal)") && label.contains("\(expectedPosition)") {
+                        print("✅ Found position counter (partial match): '\(label)'")
+                        return true
+                    }
+                }
+            }
+            
+            // Check buttons for position counter
+            for element in buttons.allElementsBoundByIndex {
+                if element.exists {
+                    let label = element.label
+                    if label.contains(expectedText) {
+                        print("✅ Found position counter in button: '\(label)'")
+                        return true
+                    }
+                    
+                    if label.contains("of \(expectedTotal)") && label.contains("\(expectedPosition)") {
+                        print("✅ Found position counter in button (partial match): '\(label)'")
+                        return true
+                    }
+                }
+            }
+            
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        
+        // Enhanced Debug: Log what we actually found
+        print("❌ Position counter '\(expectedText)' not found.")
+        
+        // Check if the accessibility element exists but with wrong text
+        let positionCounter = app.otherElements["ArticlePositionCounter"]
+        if positionCounter.exists {
+            print("🔍 Position counter element exists with label: '\(positionCounter.label)'")
+            print("🔍 Position counter value: '\(positionCounter.value ?? "nil")'")
+        } else {
+            print("❌ Position counter accessibility element not found")
+        }
+        
+        print("Available text elements:")
+        let staticTexts = app.staticTexts
+        let availableTexts = staticTexts.allElementsBoundByIndex.prefix(15).compactMap { element in
+            element.exists ? element.label : nil
+        }.filter { !$0.isEmpty }
+        
+        for (index, text) in availableTexts.enumerated() {
+            print("   \(index + 1). '\(text)'")
+        }
+        
+        // Also check buttons
+        print("Available button elements:")
+        let buttons = app.buttons
+        let availableButtons = buttons.allElementsBoundByIndex.prefix(10).compactMap { element in
+            element.exists ? element.label : nil
+        }.filter { !$0.isEmpty }
+        
+        for (index, text) in availableButtons.enumerated() {
+            print("   \(index + 1). '\(text)'")
+        }
+        
+        return false
+    }
+
+    // MARK: - Missing Article Bug Tests (n-1 issue)
+    
+    func testArticleCountConsistency() throws {
+        print("\n" + String(repeating: "=", count: 60))
+        print("🐛 ARTICLE COUNT CONSISTENCY TEST (n-1 Bug Detection)")
+        print(String(repeating: "=", count: 60))
+        
+        let table = app.tables.firstMatch
+        XCTAssertTrue(table.waitForExistence(timeout: 5.0), "Table should exist")
+        
+        let cells = app.tables.cells
+        guard cells.count >= 3 else {
+            throw XCTSkip("Need at least 3 articles for count consistency test")
+        }
+        
+        let listArticleCount = cells.count
+        print("📄 Articles visible in list: \(listArticleCount)")
+        
+        // Open first article and check if navigation total matches list count
+        print("🎯 Opening first article to check navigation total...")
+        let firstArticle = cells.element(boundBy: 0)
+        firstArticle.tap()
+        
+        // Wait for detail view to load
+        let detailViewExists = app.scrollViews.firstMatch.waitForExistence(timeout: 3.0)
+        XCTAssertTrue(detailViewExists, "Detail view should appear")
+        
+        // Extract the total count from position counter
+        let navigationTotal = extractNavigationTotal()
+        print("📊 Navigation shows total: \(navigationTotal)")
+        print("📊 List shows total: \(listArticleCount)")
+        
+        // BUG CHECK: Navigation total should equal list count
+        XCTAssertEqual(navigationTotal, listArticleCount, 
+                      "🐛 BUG DETECTED: Navigation total (\(navigationTotal)) doesn't match list count (\(listArticleCount)). This is the n-1 bug!")
+        
+        if navigationTotal != listArticleCount {
+            print("❌ CONFIRMED: n-1 bug exists - missing \(listArticleCount - navigationTotal) article(s) in navigation")
+        } else {
+            print("✅ Article counts match - no n-1 bug detected")
+        }
+        
+        closeDetailView()
+        print("✅ Article Count Consistency Test Complete")
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    func testNavigateToAllArticles() throws {
+        print("\n" + String(repeating: "=", count: 60))
+        print("🐛 NAVIGATE TO ALL ARTICLES TEST (n-1 Bug Detection)")
+        print(String(repeating: "=", count: 60))
+        
+        let table = app.tables.firstMatch
+        XCTAssertTrue(table.waitForExistence(timeout: 5.0), "Table should exist")
+        
+        let cells = app.tables.cells
+        guard cells.count >= 3 else {
+            throw XCTSkip("Need at least 3 articles for navigation test")
+        }
+        
+        let listArticleCount = cells.count
+        print("📄 Articles visible in list: \(listArticleCount)")
+        
+        // Open first article
+        print("🎯 Opening first article...")
+        let firstArticle = cells.element(boundBy: 0)
+        firstArticle.tap()
+        
+        // Wait for detail view to load
+        let detailViewExists = app.scrollViews.firstMatch.waitForExistence(timeout: 3.0)
+        XCTAssertTrue(detailViewExists, "Detail view should appear")
+        
+        // Try to navigate through ALL articles that should exist
+        var maxReachablePosition = 1
+        var currentPosition = 1
+        
+        // Navigate forward as far as possible
+        print("➡️ Navigating forward through all articles...")
+        while currentPosition < listArticleCount {
+            // Try to navigate to next article
+            navigateToNextArticle()
+            Thread.sleep(forTimeInterval: 0.5)
+            
+            // Check if we actually moved to a new article
+            let newPosition = extractCurrentPosition()
+            if newPosition > currentPosition {
+                currentPosition = newPosition
+                maxReachablePosition = currentPosition
+                print("📍 Successfully reached position \(currentPosition)")
+            } else {
+                print("🛑 Cannot navigate beyond position \(currentPosition)")
+                break
+            }
+        }
+        
+        print("📊 Maximum reachable position: \(maxReachablePosition)")
+        print("📊 Expected maximum position: \(listArticleCount)")
+        
+        // BUG CHECK: We should be able to reach ALL articles
+        XCTAssertEqual(maxReachablePosition, listArticleCount,
+                      "🐛 BUG DETECTED: Can only reach \(maxReachablePosition) of \(listArticleCount) articles. Missing \(listArticleCount - maxReachablePosition) article(s)!")
+        
+        if maxReachablePosition < listArticleCount {
+            print("❌ CONFIRMED: n-1 bug exists - cannot navigate to \(listArticleCount - maxReachablePosition) article(s)")
+        } else {
+            print("✅ Can navigate to all articles - no n-1 bug detected")
+        }
+        
+        closeDetailView()
+        print("✅ Navigate To All Articles Test Complete")
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    func testFinalArticleScenario() throws {
+        print("\n" + String(repeating: "=", count: 60))
+        print("🐛 FINAL ARTICLE SCENARIO TEST ('1 of 0' Bug Detection)")
+        print(String(repeating: "=", count: 60))
+        
+        let table = app.tables.firstMatch
+        XCTAssertTrue(table.waitForExistence(timeout: 5.0), "Table should exist")
+        
+        let cells = app.tables.cells
+        guard cells.count >= 2 else {
+            throw XCTSkip("Need at least 2 articles for final article test")
+        }
+        
+        let listArticleCount = cells.count
+        print("📄 Articles visible in list: \(listArticleCount)")
+        
+        // Simulate the scenario: navigate through articles, then return to list
+        // and try to open the "final remaining article"
+        
+        // Step 1: Open first article and navigate through some articles
+        print("🎯 Opening first article and navigating through articles...")
+        let firstArticle = cells.element(boundBy: 0)
+        firstArticle.tap()
+        
+        let detailViewExists = app.scrollViews.firstMatch.waitForExistence(timeout: 3.0)
+        XCTAssertTrue(detailViewExists, "Detail view should appear")
+        
+        // Navigate through a few articles to potentially trigger the filtering issue
+        let articlesToNavigate = min(3, listArticleCount - 1)
+        for i in 1...articlesToNavigate {
+            print("➡️ Navigating to article \(i + 1)...")
+            navigateToNextArticle()
+            Thread.sleep(forTimeInterval: 0.5)
+            
+            let position = extractCurrentPosition()
+            let total = extractNavigationTotal()
+            print("📍 Current position: \(position) of \(total)")
+        }
+        
+        // Step 2: Return to list
+        print("🔙 Returning to article list...")
+        closeDetailView()
+        let backInList = table.waitForExistence(timeout: 2.0)
+        XCTAssertTrue(backInList, "Should return to article list")
+        
+        // Step 3: Check if there are still articles in the list
+        let remainingCells = app.tables.cells
+        let remainingCount = remainingCells.count
+        print("📄 Articles remaining in list: \(remainingCount)")
+        
+        if remainingCount > 0 {
+            print("🎯 Opening what should be the 'final' article...")
+            let finalArticle = remainingCells.element(boundBy: remainingCount - 1)
+            finalArticle.tap()
+            
+            let finalDetailExists = app.scrollViews.firstMatch.waitForExistence(timeout: 3.0)
+            XCTAssertTrue(finalDetailExists, "Final article detail view should appear")
+            
+            // Check for the "1 of 0" bug
+            let finalPosition = extractCurrentPosition()
+            let finalTotal = extractNavigationTotal()
+            
+            print("📍 Final article position: \(finalPosition) of \(finalTotal)")
+            
+            // BUG CHECK: Should never see "X of 0"
+            XCTAssertGreaterThan(finalTotal, 0, 
+                               "🐛 BUG DETECTED: Final article shows '\(finalPosition) of 0' - this is the '1 of 0' bug!")
+            
+            // BUG CHECK: Position should be reasonable
+            XCTAssertGreaterThan(finalPosition, 0,
+                               "🐛 BUG DETECTED: Final article shows invalid position '\(finalPosition)'")
+            
+            if finalTotal == 0 {
+                print("❌ CONFIRMED: '1 of 0' bug exists - final article shows no total count")
+            } else if finalPosition > finalTotal {
+                print("❌ CONFIRMED: Position bug exists - position (\(finalPosition)) exceeds total (\(finalTotal))")
+            } else {
+                print("✅ Final article position looks correct: \(finalPosition) of \(finalTotal)")
+            }
+            
+            closeDetailView()
+        } else {
+            print("⚠️ No articles remaining in list - cannot test final article scenario")
+        }
+        
+        print("✅ Final Article Scenario Test Complete")
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    func testArticleFilteringConsistency() throws {
+        print("\n" + String(repeating: "=", count: 60))
+        print("🐛 ARTICLE FILTERING CONSISTENCY TEST (n-1 Root Cause Detection)")
+        print(String(repeating: "=", count: 60))
+        
+        let table = app.tables.firstMatch
+        XCTAssertTrue(table.waitForExistence(timeout: 5.0), "Table should exist")
+        
+        let cells = app.tables.cells
+        guard cells.count >= 3 else {
+            throw XCTSkip("Need at least 3 articles for filtering consistency test")
+        }
+        
+        let initialListCount = cells.count
+        print("📄 Initial articles in list: \(initialListCount)")
+        
+        // Test multiple open/close cycles to see if articles disappear from the list
+        for cycle in 1...3 {
+            print("\n🔄 Cycle \(cycle): Testing article list consistency...")
+            
+            // Open an article
+            let availableCells = app.tables.cells
+            let currentListCount = availableCells.count
+            print("📄 Articles available in cycle \(cycle): \(currentListCount)")
+            
+            if currentListCount == 0 {
+                print("❌ CRITICAL: No articles left in list after \(cycle - 1) cycles!")
+                XCTFail("Articles are disappearing from the list - this confirms the filtering bug")
+                break
+            }
+            
+            // Open first available article
+            let article = availableCells.element(boundBy: 0)
+            article.tap()
+            
+            let detailExists = app.scrollViews.firstMatch.waitForExistence(timeout: 3.0)
+            XCTAssertTrue(detailExists, "Detail view should appear in cycle \(cycle)")
+            
+            // Check navigation totals
+            let navTotal = extractNavigationTotal()
+            print("📊 Navigation total in cycle \(cycle): \(navTotal)")
+            
+            // Navigate through a couple articles if possible
+            if navTotal > 1 {
+                navigateToNextArticle()
+                Thread.sleep(forTimeInterval: 0.5)
+                
+                let newPosition = extractCurrentPosition()
+                let newTotal = extractNavigationTotal()
+                print("📍 After navigation: \(newPosition) of \(newTotal)")
+            }
+            
+            // Return to list
+            closeDetailView()
+            let backInList = table.waitForExistence(timeout: 2.0)
+            XCTAssertTrue(backInList, "Should return to list in cycle \(cycle)")
+            
+            Thread.sleep(forTimeInterval: 0.5) // Let list refresh
+            
+            // Check if article count changed
+            let postCycleCells = app.tables.cells
+            let postCycleCount = postCycleCells.count
+            
+            if postCycleCount < currentListCount {
+                print("❌ BUG DETECTED: Article count decreased from \(currentListCount) to \(postCycleCount) after cycle \(cycle)")
+                print("🐛 This suggests articles are being filtered out incorrectly")
+            } else {
+                print("✅ Article count stable: \(postCycleCount)")
+            }
+        }
+        
+        // Final comparison
+        let finalCells = app.tables.cells
+        let finalCount = finalCells.count
+        
+        print("\n📊 FILTERING CONSISTENCY SUMMARY:")
+        print("   Initial articles: \(initialListCount)")
+        print("   Final articles: \(finalCount)")
+        print("   Articles lost: \(initialListCount - finalCount)")
+        
+        if finalCount < initialListCount {
+            print("❌ CONFIRMED: Articles are disappearing from the list - filtering bug exists")
+            XCTFail("Filtering consistency bug: Lost \(initialListCount - finalCount) articles during navigation cycles")
+        } else {
+            print("✅ Article list remains consistent - no filtering bug detected")
+        }
+        
+        print("✅ Article Filtering Consistency Test Complete")
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    // MARK: - Helper Methods for Bug Detection
+    
+    private func extractCurrentPosition() -> Int {
+        // Look for position counter and extract current position
+        let staticTexts = app.staticTexts
+        let buttons = app.buttons
+        
+        // Look for patterns like "3 of 5", "1 of 10", etc.
+        let allElements = staticTexts.allElementsBoundByIndex + buttons.allElementsBoundByIndex
+        
+        for element in allElements {
+            if element.exists {
+                let label = element.label
+                if let match = label.range(of: #"(\d+) of (\d+)"#, options: .regularExpression) {
+                    let matchString = String(label[match])
+                    let components = matchString.components(separatedBy: " of ")
+                    if components.count == 2, let position = Int(components[0]) {
+                        return position
+                    }
+                }
+            }
+        }
+        
+        return 0 // Not found
+    }
+    
+    private func extractNavigationTotal() -> Int {
+        // Look for position counter and extract total count
+        let staticTexts = app.staticTexts
+        let buttons = app.buttons
+        
+        // Look for patterns like "3 of 5", "1 of 10", etc.
+        let allElements = staticTexts.allElementsBoundByIndex + buttons.allElementsBoundByIndex
+        
+        for element in allElements {
+            if element.exists {
+                let label = element.label
+                if let match = label.range(of: #"(\d+) of (\d+)"#, options: .regularExpression) {
+                    let matchString = String(label[match])
+                    let components = matchString.components(separatedBy: " of ")
+                    if components.count == 2, let total = Int(components[1]) {
+                        return total
+                    }
+                }
+            }
+        }
+        
+        return 0 // Not found
+    }
+
     // MARK: - Performance Metrics Summary
 
     func testPerformanceMetricsSummary() throws {
@@ -430,5 +1013,120 @@ final class ArticleNavigationPerformanceTests: XCTestCase {
         }
         
         print(String(repeating: "=", count: 60) + "\n")
+    }
+    
+    // MARK: - N-1 Bug Detection Test
+    
+    /// Tests the specific n-1 bug: "1 of 4" when there are actually 5 articles
+    /// This reproduces the exact user scenario: topic with 5 articles shows "1 of 4", 
+    /// can navigate through 4 articles, but 1 is left behind in the list
+    /// ENHANCED: Wait 5+ seconds as the user noted the bug appears after a delay
+    func testNMinusOneBugDetection() {
+        let app = XCUIApplication()
+        app.launch()
+        
+        // Wait for app to load
+        waitForAppToLoad(app)
+        
+        print("🔍 N-1 BUG TEST: Looking for topics with 2+ articles...")
+        
+        // Try to find a topic with multiple articles (lowered threshold for more reliable testing)
+        let table = app.tables.firstMatch
+        XCTAssertTrue(table.waitForExistence(timeout: 5.0), "Table should exist")
+        
+        let cells = app.tables.cells
+        guard cells.count >= 2 else {
+            XCTFail("Need at least 2 articles for n-1 bug detection test")
+            return
+        }
+        
+        let listArticleCount = cells.count
+        print("📊 Found \(listArticleCount) articles in current view")
+        
+        // STEP 1: Open first article
+        print("🎯 N-1 BUG TEST: Opening first article...")
+        let firstArticle = cells.element(boundBy: 0)
+        firstArticle.tap()
+        
+        // Wait for detail view to load
+        let detailViewExists = app.scrollViews.firstMatch.waitForExistence(timeout: 3.0)
+        XCTAssertTrue(detailViewExists, "Detail view should appear")
+        
+        // STEP 2: Check INITIAL navigation total (before background processing)
+        let initialNavigationTotal = extractNavigationTotal()
+        print("📊 INITIAL navigation total: \(initialNavigationTotal)")
+        print("📊 List view shows: \(listArticleCount) articles")
+        
+        // STEP 3: CRITICAL - Wait 5+ seconds as user suggested
+        // This allows background processes (marking as read, filtering, etc.) to complete
+        print("⏳ WAITING 5 seconds for background processes to complete...")
+        sleep(5)
+        
+        // STEP 4: Check DELAYED navigation total (after background processing)
+        let delayedNavigationTotal = extractNavigationTotal()
+        print("📊 DELAYED navigation total (after 5s): \(delayedNavigationTotal)")
+        
+        // STEP 5: Check for the n-1 bug patterns
+        if delayedNavigationTotal != initialNavigationTotal {
+            print("🐛 TIMING BUG DETECTED: Navigation total changed from \(initialNavigationTotal) to \(delayedNavigationTotal) after delay!")
+        }
+        
+        if delayedNavigationTotal == listArticleCount - 1 {
+            print("🐛 N-1 BUG DETECTED: List shows \(listArticleCount) but navigation shows \(delayedNavigationTotal)")
+            XCTFail("N-1 BUG CONFIRMED: After 5 second delay, navigation shows \(delayedNavigationTotal) of \(listArticleCount) articles")
+        }
+        
+        if delayedNavigationTotal < listArticleCount {
+            print("🐛 ARTICLE LOSS BUG DETECTED: Missing \(listArticleCount - delayedNavigationTotal) articles from navigation after delay")
+        }
+        
+        // STEP 6: Test actual navigation capability
+        print("📍 Testing actual navigation capability...")
+        var reachableArticles = 1 // Already on the first
+        
+        // Navigate through all reachable articles
+        for attempt in 1..<listArticleCount {
+            print("➡️ Attempting to navigate to article \(attempt + 1)...")
+            navigateToNextArticle()
+            sleep(1) // Give time for navigation to complete
+            
+            let currentPosition = extractCurrentPosition()
+            if currentPosition > attempt {
+                reachableArticles = currentPosition
+                print("✅ Successfully reached article \(currentPosition)")
+            } else {
+                print("🛑 Cannot navigate beyond article \(reachableArticles)")
+                break
+            }
+        }
+        
+        print("📊 FINAL RESULTS:")
+        print("   Articles in list: \(listArticleCount)")
+        print("   Initial navigation total: \(initialNavigationTotal)")
+        print("   Delayed navigation total: \(delayedNavigationTotal)")
+        print("   Actually reachable articles: \(reachableArticles)")
+        
+        // STEP 7: Final bug detection
+        if reachableArticles < listArticleCount {
+            print("🐛 CONFIRMED: N-1 Bug - Can only reach \(reachableArticles) of \(listArticleCount) articles")
+            XCTFail("N-1 BUG DETECTED: Can only navigate to \(reachableArticles) of \(listArticleCount) articles after background processing")
+        } else {
+            print("✅ No n-1 bug detected - can reach all \(listArticleCount) articles")
+        }
+        
+        closeDetailView()
+    }
+    
+    // MARK: - Helper Methods for N-1 Bug Test
+    
+    private func waitForAppToLoad(_ app: XCUIApplication) {
+        let table = app.tables.firstMatch
+        _ = table.waitForExistence(timeout: 10.0)
+        sleep(1) // Additional settling time
+    }
+    
+    private func countArticlesInList(_ app: XCUIApplication) -> Int {
+        let articleRows = app.buttons.matching(identifier: "ArticleRow")
+        return articleRows.count
     }
 }

@@ -244,6 +244,10 @@ struct NewsDetailView: View {
         DragGesture()
             .onEnded { value in
                 if value.translation.width > 100 {
+                    // End detail view session to re-enable auto-redirect behavior
+                    if let newsViewModel = viewModel.newsViewModel {
+                        newsViewModel.endDetailViewSession()
+                    }
                     dismiss()
                 }
             }
@@ -362,6 +366,11 @@ struct NewsDetailView: View {
     private var topBar: some View {
         HStack {
             Button(action: {
+                // End detail view session to re-enable auto-redirect behavior
+                if let newsViewModel = viewModel.newsViewModel {
+                    newsViewModel.endDetailViewSession()
+                }
+                
                 // Only post a notification so the list will refresh, but don't change the read status
                 NotificationCenter.default.post(name: Notification.Name("DetailViewClosed"), object: nil)
                 dismiss()
@@ -375,10 +384,10 @@ struct NewsDetailView: View {
             Spacer()
             
         // Article position counter with bulk actions - cached for performance
-        // FIX: Ensure we don't show position beyond available articles
+        // FIXED: Use display properties to show correct position from original filtered list
         ArticlePositionCounterOptimized(
-            currentPosition: min(viewModel.currentIndex + 1, viewModel.articles.count),
-            totalCount: viewModel.articles.count,
+            currentPosition: viewModel.displayPosition,
+            totalCount: viewModel.displayTotal,
             isCompact: true,
             onBulkAction: { action in
                 handleBulkAction(action)

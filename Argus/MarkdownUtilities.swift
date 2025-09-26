@@ -182,8 +182,8 @@ func markdownToAttributedString(
     // Create SwiftyMarkdown instance
     let swiftyMarkdown = SwiftyMarkdown(string: markdown)
 
-    // Get the preferred font for the text style (supports Dynamic Type)
-    let bodyFont = UIFont.preferredFont(forTextStyle: UIFont.TextStyle(rawValue: textStyle))
+    // Get the system font for iOS
+    let bodyFont = UIFont.systemFont(ofSize: UIFont.systemFontSize)
     swiftyMarkdown.body.fontName = bodyFont.fontName
 
     // Use custom font size if provided, otherwise use default with a slight boost
@@ -194,16 +194,16 @@ func markdownToAttributedString(
         swiftyMarkdown.body.fontSize = bodyFont.pointSize * 1.1
     }
 
-    // Style headings with appropriate Dynamic Type text styles
-    let h1Font = UIFont.preferredFont(forTextStyle: .title1)
+    // Style headings with appropriate font sizes
+    let h1Font = UIFont.systemFont(ofSize: UIFont.systemFontSize * 1.5)
     swiftyMarkdown.h1.fontName = h1Font.fontName
     swiftyMarkdown.h1.fontSize = customFontSize ?? (h1Font.pointSize * 1.1)
 
-    let h2Font = UIFont.preferredFont(forTextStyle: .title2)
+    let h2Font = UIFont.systemFont(ofSize: UIFont.systemFontSize * 1.3)
     swiftyMarkdown.h2.fontName = h2Font.fontName
     swiftyMarkdown.h2.fontSize = customFontSize ?? (h2Font.pointSize * 1.1)
 
-    let h3Font = UIFont.preferredFont(forTextStyle: .title3)
+    let h3Font = UIFont.systemFont(ofSize: UIFont.systemFontSize * 1.1)
     swiftyMarkdown.h3.fontName = h3Font.fontName
     swiftyMarkdown.h3.fontSize = customFontSize ?? (h3Font.pointSize * 1.1)
 
@@ -216,7 +216,8 @@ func markdownToAttributedString(
         swiftyMarkdown.bold.fontName = boldFont.fontName
         swiftyMarkdown.bold.fontSize = customFontSize ?? (bodyFont.pointSize * 1.1)
     } else {
-        swiftyMarkdown.bold.fontName = ".SFUI-Bold"
+        let boldFont = UIFont.boldSystemFont(ofSize: bodyFont.pointSize)
+        swiftyMarkdown.bold.fontName = boldFont.fontName
         swiftyMarkdown.bold.fontSize = customFontSize ?? (bodyFont.pointSize * 1.1)
     }
 
@@ -225,7 +226,8 @@ func markdownToAttributedString(
         swiftyMarkdown.italic.fontName = italicFont.fontName
         swiftyMarkdown.italic.fontSize = customFontSize ?? (bodyFont.pointSize * 1.1)
     } else {
-        swiftyMarkdown.italic.fontName = ".SFUI-Italic"
+        let italicFont = UIFont.systemFont(ofSize: bodyFont.pointSize)
+        swiftyMarkdown.italic.fontName = italicFont.fontName
         swiftyMarkdown.italic.fontSize = customFontSize ?? (bodyFont.pointSize * 1.1)
     }
 
@@ -308,7 +310,7 @@ private func getAttributedStringInternal<T>(
             let mutable = NSMutableAttributedString(attributedString: attributedString)
             mutable.enumerateAttribute(.font, in: NSRange(location: 0, length: mutable.length)) { font, range, _ in
                 if let originalFont = font as? UIFont {
-                    let newFont = originalFont.withSize(fontSize)
+                    let newFont = UIFont(name: originalFont.fontName, size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
                     mutable.addAttribute(.font, value: newFont, range: range)
                 }
             }

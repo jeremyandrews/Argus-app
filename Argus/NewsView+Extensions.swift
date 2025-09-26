@@ -35,21 +35,29 @@ extension NewsView {
     // MARK: - Article Opening
 
     func openArticle(_ article: ArticleListItem) {
-        // STEP 1: Take a snapshot of the current filtered articles immediately
-        // This prevents issues if filters are applied during async operations
-        let articlesSnapshot = viewModel.filteredArticles
-
-        // STEP 2: Find the index in our snapshot (which won't change during async operations)
-        guard let index = articlesSnapshot.firstIndex(where: { $0.id == article.id }) else {
-            AppLogger.database.error("Article not found in filtered articles: \(article.id)")
-            return
-        }
-
-        AppLogger.database.debug("Opening article with ID: \(article.id) at index \(index) of \(articlesSnapshot.count) articles")
-
-        // STEP 3: Present detail view IMMEDIATELY with placeholder models
-        // IMPORTANT: Include summary text in placeholder to ensure content is visible
-        let placeholderArticles = articlesSnapshot.map { item in
+        // CRITICAL N-1 BUG FIX: Use complete dataset instead of filtered articles
+        // The n-1 bug occurs when we only pass filtered articles to the detail view
+        // but the user expects to navigate through ALL articles in the topic
+        
+        // STEP 1: Get the complete dataset for the current topic to prevent n-1 bug
+        Task {
+            // Verify the article exists in the filtered view
+            guard viewModel.filteredArticles.contains(where: { $0.id == article.id }) else {
+                AppLogger.database.error("Article not found in filtered articles: \(article.id)")
+                return
+            }
+            
+            AppLogger.database.debug("Opening article with ID: \(article.id) from filtered view")
+            
+            // Find the article's index in current filtered view for placeholder
+            guard let currentIndex = viewModel.filteredArticles.firstIndex(where: { $0.id == article.id }) else {
+                AppLogger.database.error("Article not found in filtered articles: \(article.id)")
+                return
+            }
+            
+            await MainActor.run {
+                // Create placeholder models from filtered articles initially
+                let placeholderArticles = viewModel.filteredArticles.map { item in
             ArticleModel(
                 id: item.id,
                 jsonURL: "",
@@ -106,7 +114,7 @@ extension NewsView {
         let detailViewModel = NewsDetailViewModel(
             articles: placeholderArticles,
             allArticles: placeholderArticles,
-            currentIndex: index,
+            currentIndex: currentIndex,
             initiallyExpandedSection: "Summary",
             newsViewModel: viewModel,
             needsFullDataset: false
@@ -140,49 +148,41 @@ extension NewsView {
                 await self.viewModel.openArticle(article)
             }
             
-            // Load full article data after presenting (fetch only current article!)
+            // SIMPLE APPROACH: Load full article and update count with proper handling
             Task {
-                // Fetch the full model for the current article
+                // 1. Fetch the full model for the current article
                 if let fullModel = await viewModel.fetchSwiftDataModel(for: article.id) {
                     await MainActor.run {
-                        // Update the current article with full data
                         detailViewModel.currentArticle = fullModel
-                        
-                        // Also update it in the articles array to ensure consistency
-                        if index < detailViewModel.articles.count {
-                            detailViewModel.articles[index] = fullModel
+                        if currentIndex < detailViewModel.articles.count {
+                            detailViewModel.articles[currentIndex] = fullModel
                         }
-                        
-                        // Initialize deferred content loading
                         detailViewModel.performDeferredInitialization()
                     }
-                } else {
-                    AppLogger.database.error("Failed to fetch full model for article: \(article.id)")
                 }
                 
-                // Fetch full models for navigation in background (low priority)
-                Task.detached(priority: .background) {
+                // 2. PERFORMANCE FIX: Query complete dataset in background to avoid UI lockup
+                Task(priority: .background) {
+                    let completeDataset = await viewModel.getCompleteDatasetForNavigation(currentArticleId: article.id)
+                    
+                    // 3. Check if current article is visible in complete dataset
+                    let currentArticleVisible = completeDataset.contains { $0.id == article.id }
+                    
+                    // 4. Calculate correct total: if current article filtered out, add +1
+                    let actualTotal = currentArticleVisible ? completeDataset.count : completeDataset.count + 1
+                    
                     await MainActor.run {
-                        Task {
-                            // Fetch models within MainActor context to avoid Sendable issues
-                            let fullModels = await viewModel.getFilteredArticlesAsModels()
-                            
-                            // Update all articles with full models, preserving current article
-                            let currentId = detailViewModel.currentArticle?.id
-                            detailViewModel.articles = fullModels
-                            detailViewModel.allArticles = fullModels
-                            
-                            // Ensure current article index is still correct
-                            if let currentId = currentId,
-                               let newIndex = fullModels.firstIndex(where: { $0.id == currentId }) {
-                                detailViewModel.currentIndex = newIndex
-                            }
-                        }
+                        // Update the view model with correct count via a simple method
+                        detailViewModel.updateNavigationCount(actualTotal)
                     }
+                    
+                    AppLogger.database.debug("✅ PERFORMANCE FIX: Updated count to \(actualTotal) in background (current visible: \(currentArticleVisible))")
                 }
             }
         } else {
             AppLogger.database.error("Could not get root view controller to present article: \(article.id)")
+        }
+            }
         }
     }
 

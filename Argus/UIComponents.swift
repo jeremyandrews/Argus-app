@@ -477,6 +477,11 @@ struct ArticlePositionCounterOptimized: View {
         return "\(totalCount)"
     }
     
+    // ACCESSIBILITY: Full position counter text for UI tests
+    private var fullPositionText: String {
+        return "\(currentPosition) of \(totalCount)"
+    }
+    
     var body: some View {
         HStack(spacing: 4) {
             Text(cachedCurrentText)
@@ -501,6 +506,10 @@ struct ArticlePositionCounterOptimized: View {
         .cornerRadius(8)
         .opacity(0.9)
         .scaleEffect(isLongPressing ? 1.05 : 1.0)
+        // ACCESSIBILITY: Add identifiers for UI testing
+        .accessibilityIdentifier("ArticlePositionCounter")
+        .accessibilityLabel(fullPositionText)
+        .accessibilityValue(fullPositionText)
         // PERFORMANCE: Remove animations during navigation to prevent blocking
         .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 10, perform: {
             // Long press completed - show action selection

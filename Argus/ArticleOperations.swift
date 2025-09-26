@@ -140,6 +140,140 @@ final class ArticleOperations {
         )
     }
 
+    /// SORT ORDER CONSISTENCY FIX - Fetches articles with explicit sort order
+    /// This ensures the detail view uses the same sort order as the list view
+    /// - Parameters:
+    ///   - topic: Optional topic to filter by
+    ///   - showUnreadOnly: Whether to show only unread articles
+    ///   - showBookmarkedOnly: Whether to show only bookmarked articles
+    ///   - qualityFilter: Quality filter to apply ("All", "Fair+", "Good+")
+    ///   - sortOrder: Sort order to apply ("newest", "oldest", "bookmarked")
+    ///   - limit: Maximum number of articles to return
+    ///   - context: The context for fetching (listView, detailView, background)
+    /// - Returns: Array of articles matching the criteria with consistent sort order
+    @MainActor
+    func fetchArticlesWithSortOrder(
+        topic: String?,
+        showUnreadOnly: Bool,
+        showBookmarkedOnly: Bool,
+        qualityFilter: String = "All",
+        sortOrder: String = "newest",
+        limit: Int? = nil,
+        context: FetchContext = .detailView
+    ) async throws -> [ArticleModel] {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        let container = SwiftDataContainer.shared.container
+        let modelContext = container.mainContext
+        
+        // Build predicate based on filters
+        var predicates: [Predicate<ArticleModel>] = []
+        
+        // Topic filter
+        if let topic = topic, topic != "All" {
+            predicates.append(#Predicate<ArticleModel> { $0.topic == topic })
+        }
+        
+        // Unread filter
+        if showUnreadOnly {
+            predicates.append(#Predicate<ArticleModel> { !$0.isViewed })
+        }
+        
+        // Bookmark filter
+        if showBookmarkedOnly {
+            predicates.append(#Predicate<ArticleModel> { $0.isBookmarked })
+        }
+        
+        // Combine predicates
+        let combinedPredicate = predicates.isEmpty ? nil : predicates.reduce(predicates[0]) { result, predicate in
+            #Predicate<ArticleModel> { article in
+                result.evaluate(article) && predicate.evaluate(article)
+            }
+        }
+        
+        // Create fetch descriptor with sort order
+        var descriptor = FetchDescriptor<ArticleModel>()
+        descriptor.predicate = combinedPredicate
+        
+        // CRITICAL FIX: Apply the same sort order as the list view
+        // For "bookmarked" sort, we'll sort in memory after fetching to avoid SwiftData boolean sorting issues
+        switch sortOrder {
+        case "oldest":
+            descriptor.sortBy = [SortDescriptor(\.publishDate, order: .forward)]
+        case "bookmarked":
+            // For bookmarked sort, we'll sort in memory after fetching
+            // Just use publish date for now, we'll sort by bookmark status in memory
+            descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
+        default: // "newest"
+            descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
+        }
+        
+        // Apply context-aware limits
+        let effectiveLimit: Int
+        if let limit = limit {
+            effectiveLimit = limit
+        } else {
+            switch context {
+            case .detailView:
+                effectiveLimit = 0 // No limit for detail view
+            case .background:
+                effectiveLimit = 50
+            case .topicBar:
+                effectiveLimit = 200
+            case .topicDiscovery:
+                effectiveLimit = 500
+            case .listView:
+                let memoryPressure = getCurrentMemoryPressure()
+                if memoryPressure > 0.8 {
+                    effectiveLimit = 50
+                } else if memoryPressure > 0.6 {
+                    effectiveLimit = 75
+                } else {
+                    effectiveLimit = 100
+                }
+            }
+        }
+        
+        if effectiveLimit > 0 {
+            descriptor.fetchLimit = effectiveLimit
+        }
+        
+        do {
+            var articles = try modelContext.fetch(descriptor)
+            
+            _ = CFAbsoluteTimeGetCurrent() - startTime
+            
+            // Apply quality filter in memory
+            if qualityFilter != "All" {
+                let beforeCount = articles.count
+                articles = articles.filter { article in
+                    meetsQualityThreshold(article, filter: qualityFilter)
+                }
+                let afterCount = articles.count
+                AppLogger.database.debug("🔍 Quality filter: \(beforeCount) → \(afterCount) articles")
+            }
+            
+            // CRITICAL FIX: Apply in-memory sorting for "bookmarked" to match NewsViewModel behavior
+            if sortOrder == "bookmarked" {
+                articles = articles.sorted { a, b in
+                    if a.isBookmarked != b.isBookmarked {
+                        return a.isBookmarked // Bookmarked articles first
+                    }
+                    return a.publishDate > b.publishDate // Then by newest first
+                }
+            }
+            
+            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+            
+            AppLogger.database.debug("⚡ Sort-aware fetch (\(sortOrder)): \(articles.count) articles in \(String(format: "%.3f", totalTime))s")
+            
+            return articles
+        } catch {
+            AppLogger.database.error("❌ Error fetching articles with sort order: \(error)")
+            throw error
+        }
+    }
+
     /// Fetches articles with the specified filters using performance-optimized compound indexes
     /// - Parameters:
     ///   - topic: Optional topic to filter by

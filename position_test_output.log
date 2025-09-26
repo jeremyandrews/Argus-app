@@ -1,0 +1,90 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test -scheme Argus -destination "platform=iOS Simulator,id=DD439625-C73D-4D1A-9E8F-E99ADEE93CA0" "-only-testing:ArgusUITests/ArticleNavigationPerformanceTests/testTopArticlePositionCounter" "-only-testing:ArgusUITests/ArticleNavigationPerformanceTests/testPositionCounterNavigation" "-only-testing:ArgusUITests/ArticleNavigationPerformanceTests/testPositionCounterConsistency"
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  SwiftyMarkdown: https://github.com/SimonFairbairn/SwiftyMarkdown.git @ 1.2.4
+
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:iOS Simulator, arch:arm64, id:DD439625-C73D-4D1A-9E8F-E99ADEE93CA0, OS:18.2, name:iPhone 16 Pro }
+{ platform:iOS Simulator, arch:x86_64, id:DD439625-C73D-4D1A-9E8F-E99ADEE93CA0, OS:18.2, name:iPhone 16 Pro }
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (5 targets)
+    Target 'ArgusUITests' in project 'Argus'
+        ➜ Explicit dependency on target 'Argus' in project 'Argus'
+    Target 'ArgusTests' in project 'Argus'
+        ➜ Explicit dependency on target 'Argus' in project 'Argus'
+    Target 'Argus' in project 'Argus'
+        ➜ Explicit dependency on target 'SwiftyMarkdown' in project 'SwiftyMarkdown'
+    Target 'SwiftyMarkdown' in project 'SwiftyMarkdown'
+        ➜ Explicit dependency on target 'SwiftyMarkdown' in project 'SwiftyMarkdown'
+    Target 'SwiftyMarkdown' in project 'SwiftyMarkdown' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/jandrews/devel/swift/Argus-app/Argus/Preview Content/Preview Assets.xcassets /Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: 4cbec68568fe6610e29355685e35457c
+Build description path: /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/XCBuildData/4cbec68568fe6610e29355685e35457c.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk /Users/jandrews/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.0-23A339-26257891a6c027eb51374368541b8346.sdkstatcache
+    cd /Users/jandrews/devel/swift/Argus-app/Argus.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk -o /Users/jandrews/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.0-23A339-26257891a6c027eb51374368541b8346.sdkstatcache
+
+note: Disabling hardened runtime with ad-hoc codesigning. (in target 'Argus' from project 'Argus')
+ProcessInfoPlistFile /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/Info.plist /Users/jandrews/devel/swift/Argus-app/Argus/Info.plist (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-infoPlistUtility /Users/jandrews/devel/swift/Argus-app/Argus/Info.plist -producttype com.apple.product-type.application -genpkginfo /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_generated_info.plist -o /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/Info.plist
+
+CopySwiftLibs /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/Argus.debug.dylib --scan-folder /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/Frameworks --scan-folder /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns --scan-folder /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/SystemExtensions --scan-folder /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+
+ProcessInfoPlistFile /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns/ArgusTests.xctest/Info.plist /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/ArgusTests.build/empty-ArgusTests.plist (in target 'ArgusTests' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-infoPlistUtility /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/ArgusTests.build/empty-ArgusTests.plist -producttype com.apple.product-type.bundle.unit-test -expandbuildsettings -format binary -platform iphonesimulator -o /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns/ArgusTests.xctest/Info.plist
+
+CopySwiftLibs /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns/ArgusTests.xctest (in target 'ArgusTests' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns/ArgusTests.xctest/ArgusTests --scan-folder /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns/ArgusTests.xctest/Frameworks --scan-folder /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns/ArgusTests.xctest/PlugIns --scan-folder /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns/ArgusTests.xctest/SystemExtensions --scan-folder /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns/ArgusTests.xctest/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PlugIns/ArgusTests.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/ArgusTests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+
+ProcessInfoPlistFile /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/ArgusUITests-Runner.app/PlugIns/ArgusUITests.xctest/Info.plist /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/ArgusUITests.build/empty-ArgusUITests.plist (in target 'ArgusUITests' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-infoPlistUtility /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/ArgusUITests.build/empty-ArgusUITests.plist -producttype com.apple.product-type.bundle.ui-testing -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/ArgusUITests.build/ProductTypeInfoPlistAdditions.plist -o /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/ArgusUITests-Runner.app/PlugIns/ArgusUITests.xctest/Info.plist
+
+2025-09-17 12:59:02.142 xcodebuild[46950:58083637] [MT] IDETestOperationsObserverDebug: 86.763 elapsed -- Testing started completed.
+2025-09-17 12:59:02.142 xcodebuild[46950:58083637] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2025-09-17 12:59:02.142 xcodebuild[46950:58083637] [MT] IDETestOperationsObserverDebug: 86.763 sec, +86.763 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Logs/Test/Test-Argus-2025.09.17_12-57-33-+0200.xcresult
+
+** TEST FAILED **
+
+Testing started
+Test suite 'ArticleNavigationPerformanceTests' started on 'Clone 1 of iPhone 16 Pro - ArgusUITests-Runner (47346)'
+Test case 'ArticleNavigationPerformanceTests.testPositionCounterConsistency()' failed on 'Clone 1 of iPhone 16 Pro - ArgusUITests-Runner (47346)' (19.777 seconds)
+Test case 'ArticleNavigationPerformanceTests.testPositionCounterNavigation()' failed on 'Clone 1 of iPhone 16 Pro - ArgusUITests-Runner (47346)' (18.710 seconds)
+Test case 'ArticleNavigationPerformanceTests.testTopArticlePositionCounter()' failed on 'Clone 1 of iPhone 16 Pro - ArgusUITests-Runner (47346)' (18.657 seconds)

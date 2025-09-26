@@ -77,6 +77,10 @@ final class NewsViewModel: ObservableObject {
     var lastLoadedDate: Date?
     var pendingUpdateNeeded = false
     
+    /// Flag to track if we're currently in a detail view session
+    /// This prevents auto-redirect to "All" when marking articles as read in detail view
+    @Published var isInDetailViewSession = false
+    
     // MARK: - Initialization
     
     init(articleOperations: ArticleOperations = ArticleOperations()) {
@@ -167,7 +171,9 @@ final class NewsViewModel: ObservableObject {
     func refreshWithAutoRedirectIfNeeded() async {
         await refreshArticles()
         
-        if filteredArticles.isEmpty, selectedTopic != "All" {
+        // Only auto-redirect if we're not currently in a detail view session
+        // This prevents the redirect when marking articles as read in detail view
+        if filteredArticles.isEmpty, selectedTopic != "All", !isInDetailViewSession {
             selectedTopic = "All"
             saveUserPreferences()
             await refreshArticles()
@@ -178,7 +184,9 @@ final class NewsViewModel: ObservableObject {
     func refreshAfterBackgroundSync() async {
         await refreshArticles()
         
-        if filteredArticles.isEmpty, selectedTopic != "All" {
+        // Only auto-redirect if we're not currently in a detail view session
+        // This prevents the redirect when marking articles as read in detail view
+        if filteredArticles.isEmpty, selectedTopic != "All", !isInDetailViewSession {
             selectedTopic = "All"
             saveUserPreferences()
             await refreshArticles()
@@ -341,6 +349,9 @@ final class NewsViewModel: ObservableObject {
     // MARK: - Opening Articles
     
     func openArticle(_ article: ArticleModel) async {
+        // Set detail view session flag to prevent auto-redirect
+        isInDetailViewSession = true
+        
         if !article.isViewed {
             _ = await articleOperations.markArticles(ids: [article.id], asRead: true)
         }
@@ -348,6 +359,9 @@ final class NewsViewModel: ObservableObject {
     }
     
     func openArticle(_ item: ArticleListItem) async {
+        // Set detail view session flag to prevent auto-redirect
+        isInDetailViewSession = true
+        
         if !item.isViewed {
             _ = await articleOperations.markArticles(ids: [item.id], asRead: true)
             
@@ -359,6 +373,19 @@ final class NewsViewModel: ObservableObject {
         }
         
         NotificationCenter.default.post(name: Notification.Name("ArticleViewed"), object: nil)
+    }
+    
+    /// Resets the detail view session flag when returning to list view
+    /// This allows normal auto-redirect behavior to resume
+    func endDetailViewSession() {
+        isInDetailViewSession = false
+        AppLogger.database.debug("🔄 Detail view session ended - auto-redirect re-enabled")
+    }
+    
+    /// Forces a refresh while maintaining current topic selection
+    /// Used when returning from detail view to ensure UI is current
+    func refreshCurrentView() async {
+        await refreshArticles()
     }
     
     // MARK: - Private Helpers
@@ -474,6 +501,98 @@ final class NewsViewModel: ObservableObject {
         
         // PERFORMANCE FIX: Batch fetch instead of individual queries
         return await fetchSwiftDataModelsBatch(for: ids)
+    }
+    
+    /// Public method to fetch models by specific IDs (for n-1 bug fix)
+    func fetchModelsByIds(_ ids: [UUID]) async -> [ArticleModel] {
+        return await fetchSwiftDataModelsBatch(for: ids)
+    }
+    
+    /// Gets the complete dataset for navigation to prevent n-1 bug
+    /// This fetches ALL articles for the current topic without any read/bookmark/quality filters
+    /// CRITICAL: Always includes the currently viewed article regardless of filter state
+    func getCompleteDatasetForNavigation(currentArticleId: UUID? = nil) async -> [ArticleListItem] {
+        do {
+            // CRITICAL N-1 BUG FIX: Fetch ALL articles for the topic without any filtering
+            // This ensures navigation includes all articles that should be accessible
+            let completeArticles = try await articleOperations.fetchArticlesWithSortOrder(
+                topic: selectedTopic == "All" ? nil : selectedTopic,
+                showUnreadOnly: false, // CRITICAL: Always false - no read/unread filtering
+                showBookmarkedOnly: false, // CRITICAL: Always false - no bookmark filtering  
+                qualityFilter: "All", // CRITICAL: Always "All" - no quality filtering
+                sortOrder: sortOrder, // Use same sort order as list view for consistency
+                limit: nil, // No limit for complete dataset
+                context: .detailView // Use detail view context to bypass memory limits
+            )
+            
+            // Convert ArticleModel to ArticleListItem for consistency
+            var lightweightArticles = completeArticles.map { article in
+                ArticleListItem(
+                    id: article.id,
+                    title: article.title,
+                    body: article.body,
+                    topic: article.topic ?? "Unknown",
+                    publishDate: article.publishDate,
+                    isViewed: article.isViewed,
+                    isBookmarked: article.isBookmarked,
+                    quality: String(article.quality ?? 0),
+                    qualityScore: article.quality ?? 0,
+                    affected: article.affected,
+                    domain: article.domain,
+                    sourceType: article.sourceType,
+                    sourcesQuality: article.sourcesQuality != nil ? String(article.sourcesQuality!) : nil,
+                    argumentQuality: article.argumentQuality != nil ? String(article.argumentQuality!) : nil
+                )
+            }
+            
+            // CRITICAL N-1 BUG FIX: Ensure the currently viewed article is ALWAYS included
+            // This prevents the article from disappearing when it gets marked as read
+            if let currentArticleId = currentArticleId,
+               !lightweightArticles.contains(where: { $0.id == currentArticleId }) {
+                
+                // Fetch the current article specifically, even if it's filtered out
+                if let currentArticle = await articleOperations.getArticleModelWithContext(byId: currentArticleId) {
+                    let currentItem = ArticleListItem(
+                        id: currentArticle.id,
+                        title: currentArticle.title,
+                        body: currentArticle.body,
+                        topic: currentArticle.topic ?? "Unknown",
+                        publishDate: currentArticle.publishDate,
+                        isViewed: currentArticle.isViewed,
+                        isBookmarked: currentArticle.isBookmarked,
+                        quality: String(currentArticle.quality ?? 0),
+                        qualityScore: currentArticle.quality ?? 0,
+                        affected: currentArticle.affected,
+                        domain: currentArticle.domain,
+                        sourceType: currentArticle.sourceType,
+                        sourcesQuality: currentArticle.sourcesQuality != nil ? String(currentArticle.sourcesQuality!) : nil,
+                        argumentQuality: currentArticle.argumentQuality != nil ? String(currentArticle.argumentQuality!) : nil
+                    )
+                    
+                    // Insert the current article in the correct position based on sort order
+                    let insertIndex = lightweightArticles.firstIndex { article in
+                        switch sortOrder {
+                        case "oldest":
+                            return currentItem.publishDate < article.publishDate
+                        default:
+                            return currentItem.publishDate > article.publishDate
+                        }
+                    } ?? lightweightArticles.count
+                    
+                    lightweightArticles.insert(currentItem, at: insertIndex)
+                    
+                    AppLogger.database.debug("🔥 N-1 BUG FIX: Added missing current article \(currentArticleId) to navigation dataset")
+                }
+            }
+            
+            AppLogger.database.debug("✅ N-1 BUG FIX: Complete dataset fetched with \(lightweightArticles.count) articles for topic '\(self.selectedTopic)' (current article: \(currentArticleId?.uuidString ?? "none"))")
+            return lightweightArticles
+            
+        } catch {
+            AppLogger.database.error("❌ Failed to fetch complete dataset for navigation: \(error)")
+            // Fallback: return current filtered articles to prevent crashes
+            return filteredArticles
+        }
     }
     
     /// Efficiently fetches multiple ArticleModels in a single query

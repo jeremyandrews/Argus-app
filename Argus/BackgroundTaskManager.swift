@@ -57,52 +57,63 @@ final class BackgroundTaskManager {
 
     // MARK: - Scheduling
 
-    /// Schedules a background app refresh task (shorter, more frequent)
+    /// Schedules a battery-optimized background app refresh task
     func scheduleBackgroundRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: backgroundRefreshIdentifier)
 
-        // Keep the same scheduling logic as SyncManager for consistency
+        // Battery optimization: much longer delays, respect Low Power Mode
+        if ProcessInfo.processInfo.isLowPowerModeEnabled {
+            AppLogger.sync.debug("Background refresh skipped - Low Power Mode enabled")
+            return
+        }
+
+        // Battery optimized scheduling - minimum 2 hours instead of 5-15 minutes
+        let minDelayHours = 2.0
+        let maxDelayHours = 6.0
+        
         let lastActiveTime = UserDefaults.standard.double(forKey: "lastAppActiveTimestamp")
         let currentTime = Date().timeIntervalSince1970
-        let minutesSinceActive = (currentTime - lastActiveTime) / 60
+        let hoursSinceActive = (currentTime - lastActiveTime) / 3600
 
-        let delayMinutes = minutesSinceActive < 30 ? 15 : 5
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 60 * Double(delayMinutes))
+        // Longer delays based on inactivity
+        let delayHours = hoursSinceActive < 2 ? maxDelayHours : minDelayHours
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 3600 * delayHours)
 
         do {
             try BGTaskScheduler.shared.submit(request)
-            AppLogger.sync.debug("Background refresh scheduled in ~\(delayMinutes) minutes")
+            AppLogger.sync.debug("Battery-optimized background refresh scheduled in ~\(Int(delayHours)) hours")
         } catch {
             AppLogger.sync.error("Could not schedule background refresh: \(error)")
         }
     }
 
-    /// Schedules a background processing task (longer, less frequent)
+    /// Schedules a battery-optimized background processing task
     func scheduleBackgroundProcessing() {
         let request = BGProcessingTaskRequest(identifier: backgroundProcessingIdentifier)
         request.requiresNetworkConnectivity = true
 
-        // Maintain the same power requirement logic as SyncManager
-        let pendingCount = UserDefaults.standard.integer(forKey: "articleMaintenanceMetric")
-        let lastMetricUpdate = UserDefaults.standard.double(forKey: "metricLastUpdate")
-        let currentTime = Date().timeIntervalSince1970
-
-        if currentTime - lastMetricUpdate < 6 * 60 * 60 {
-            request.requiresExternalPower = pendingCount > 10
-        } else {
-            request.requiresExternalPower = false
-        }
-
+        // Battery optimization: require external power by default for heavy processing
+        request.requiresExternalPower = true
+        
+        // Only waive power requirement for urgent maintenance (once a day max)
         let lastMaintenanceTime = UserDefaults.standard.double(forKey: "lastMaintenanceTime")
+        let currentTime = Date().timeIntervalSince1970
+        
         if currentTime - lastMaintenanceTime > 24 * 60 * 60 {
             request.requiresExternalPower = false
+            AppLogger.sync.debug("Waiving power requirement for daily maintenance")
         }
 
-        request.earliestBeginDate = Date(timeIntervalSinceNow: pendingCount > 10 ? 900 : 1800)
+        // Battery optimization: minimum 6-12 hours delay instead of 15-30 minutes
+        let minDelayHours = 6.0
+        let maxDelayHours = 12.0
+        let delayHours = request.requiresExternalPower ? maxDelayHours : minDelayHours
+        
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 3600 * delayHours)
 
         do {
             try BGTaskScheduler.shared.submit(request)
-            AppLogger.sync.debug("Background processing scheduled with power requirement: \(request.requiresExternalPower)")
+            AppLogger.sync.debug("Battery-optimized background processing scheduled in ~\(Int(delayHours)) hours (power required: \(request.requiresExternalPower))")
         } catch {
             AppLogger.sync.error("Could not schedule background processing: \(error)")
         }

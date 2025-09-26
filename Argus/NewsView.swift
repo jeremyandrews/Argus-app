@@ -426,7 +426,7 @@ struct NewsView: View {
             .padding(.horizontal, 20)
         }
         .padding(.vertical, 8)
-        .background(Color(UIColor.systemGray6))
+        .background(Color(UIColor.systemGroupedBackground))
     }
 
     /// Empty state view shown when no articles are available
@@ -704,14 +704,41 @@ struct NewsView: View {
                 return
             }
 
-            // Create a view model with the current filtered articles
+            // CRITICAL N-1 BUG FIX: Use totalArticles (complete dataset) instead of filteredArticles
+            // The n-1 bug occurs because filteredArticles may exclude some articles that should be navigable
+            // Find the article's index in the complete dataset
+            guard let totalIndex = totalArticles.firstIndex(where: { $0.id == article.id }) else {
+                // Fallback: if article not found in total, use filtered as before
+                let detailViewModel = NewsDetailViewModel(
+                    articles: filteredArticles,
+                    allArticles: totalArticles,
+                    currentIndex: index,
+                    initiallyExpandedSection: section,
+                    newsViewModel: newsViewModel,
+                    needsFullDataset: true
+                )
+                
+                let detailView = DetailViewWrapper(viewModel: detailViewModel)
+                let hostingController = UIHostingController(rootView: detailView)
+                hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
+
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let window = windowScene.windows.first,
+                   let rootViewController = window.rootViewController
+                {
+                    rootViewController.present(hostingController, animated: true)
+                }
+                return
+            }
+
+            // Create a view model with the COMPLETE dataset to prevent n-1 bug
             let detailViewModel = NewsDetailViewModel(
-                articles: filteredArticles,
+                articles: totalArticles, // ← CRITICAL FIX: Use complete dataset
                 allArticles: totalArticles,
-                currentIndex: index,
+                currentIndex: totalIndex, // ← Use index from complete dataset
                 initiallyExpandedSection: section,
                 newsViewModel: newsViewModel,
-                needsFullDataset: true
+                needsFullDataset: false // ← Not needed since we already have complete dataset
             )
 
             // Present the detail view

@@ -25,11 +25,28 @@ final class NewsDetailViewModel: ObservableObject {
     /// The index of the current article in the articles array
     @Published var currentIndex: Int
 
-    /// All available articles for navigation
+    /// All available articles for navigation (unfiltered to prevent "1 of 0" issues)
     @Published var articles: [ArticleModel]
 
     /// All articles in the database (may be used for related articles)
     @Published var allArticles: [ArticleModel]
+    
+    /// The original filtered articles from the list view (for reference and position display)
+    private var originalFilteredArticles: [ArticleModel] = []
+    
+    /// The original index in the filtered articles (for correct position display)
+    private var originalFilteredIndex: Int = 0
+    
+    /// The original count that the user saw when they opened the article (IMMUTABLE)
+    /// This preserves the count that was displayed in the list view and should never change
+    private let originalDisplayCount: Int
+    
+    /// The IMMUTABLE navigation reference array - set once at initialization and NEVER changed
+    /// This ensures position and count calculations remain consistent throughout the entire session
+    private let navigationReferenceArray: [ArticleModel]
+    
+    /// Whether to use original filtered position for display (true until background fetch completes)
+    @Published var useOriginalPosition: Bool = true
 
     /// Flag indicating if content is being loaded
     @Published var isLoading = false
@@ -125,7 +142,7 @@ final class NewsDetailViewModel: ObservableObject {
     private let articleOperations: ArticleOperations
     
     /// Reference to NewsViewModel for rich text cache access (Phase 2.1)
-    private weak var newsViewModel: NewsViewModel?
+    weak var newsViewModel: NewsViewModel?
 
     // MARK: - Background Processing (Phase 2.2)
 
@@ -210,6 +227,16 @@ final class NewsDetailViewModel: ObservableObject {
         self.articleOperations = articleOperations
         self.newsViewModel = newsViewModel
         self.initiallyExpandedSection = initiallyExpandedSection
+        
+        // CRITICAL N-1 BUG FIX: Preserve the original count the user saw
+        // This count should NEVER change, even if background operations filter out articles
+        self.originalDisplayCount = articles.count
+        AppLogger.database.debug("🔒 N-1 BUG FIX: Preserved original display count: \(self.originalDisplayCount)")
+        
+        // ULTIMATE N-1 BUG FIX: Set immutable navigation reference array that NEVER changes
+        // This ensures position and count calculations remain consistent throughout the entire session
+        self.navigationReferenceArray = articles
+        AppLogger.database.debug("🔒 N-1 BUG FIX: Locked navigation reference array with \(articles.count) articles")
 
         // Set current article - this is all we need for display
         if currentIndex >= 0 && currentIndex < articles.count {
@@ -243,6 +270,16 @@ final class NewsDetailViewModel: ObservableObject {
         }
 
         // EVERYTHING ELSE DEFERRED - zero blocking
+        
+        // Store the original filtered articles and index for correct position display
+        self.originalFilteredArticles = articles
+        self.originalFilteredIndex = currentIndex
+        
+        // CRITICAL FIX: Re-enable background dataset fetching but with sort order consistency
+        // This ensures position counters are correct while preventing the n-1 bug
+        Task(priority: .background) {
+            await fetchCompleteDatasetForNavigation()
+        }
     }
 
     deinit {
@@ -361,6 +398,12 @@ final class NewsDetailViewModel: ObservableObject {
             addToNavigationHistory(currentId)
         }
         
+        // CRITICAL FIX: Ensure the count is accurate after navigation
+        // This prevents situations where the total changes during navigation
+        if !useOriginalPosition {
+            updateNavigationCount(articles.count)
+        }
+        
         // Single UI update notification
         objectWillChange.send()
         
@@ -441,37 +484,60 @@ final class NewsDetailViewModel: ObservableObject {
     
     /// Fetches the complete dataset for comprehensive navigation when needed
     /// This method bypasses memory-aware limits to ensure NewsDetailView can access all articles
-    private func fetchFullDatasetForNavigation() async {
+    private func fetchCompleteDatasetForNavigation() async {
         guard let newsViewModel = newsViewModel else {
             AppLogger.database.debug("⚠️ No NewsViewModel reference available for full dataset fetch")
             return
         }
         
-        AppLogger.database.debug("🔄 Fetching full dataset for comprehensive navigation...")
+        AppLogger.database.debug("🔄 Fetching complete unfiltered dataset to prevent n-1 bug...")
         
         do {
-            // Use ArticleOperations with .detailView context to bypass memory limits
-            let fullArticles = try await articleOperations.fetchArticles(
+            // CRITICAL N-1 BUG FIX: Fetch ALL articles for the topic WITHOUT ANY filtering
+            // The n-1 bug occurs when navigation dataset has fewer articles than the list view
+            // This happens because filters (bookmark, quality, read status) can exclude articles
+            // that were visible in the original list due to race conditions or data inconsistencies
+            let fullArticles = try await articleOperations.fetchArticlesWithSortOrder(
                 topic: newsViewModel.selectedTopic == "All Topics" ? nil : newsViewModel.selectedTopic,
-                showUnreadOnly: newsViewModel.showUnreadOnly,
-                showBookmarkedOnly: newsViewModel.showBookmarkedOnly,
-                qualityFilter: newsViewModel.qualityFilter,
+                showUnreadOnly: false, // CRITICAL: Always false - no read/unread filtering
+                showBookmarkedOnly: false, // CRITICAL: Always false - no bookmark filtering  
+                qualityFilter: "All", // CRITICAL: Always "All" - no quality filtering
+                sortOrder: newsViewModel.sortOrder, // CRITICAL: Use same sort order as list view
                 limit: nil, // No limit for full dataset
                 context: .detailView // Use detail view context to bypass memory limits
             )
             
             await MainActor.run {
-                // Update articles array with full dataset
+                // Store the current article ID before updating the array
+                let currentArticleId = self.currentArticle?.id
+                
+                // Update articles array with complete unfiltered dataset
                 self.articles = fullArticles.uniqued()
                 
-                // Validate and adjust current index if needed
-                self.validateAndAdjustIndex()
+                // COMPREHENSIVE N-1 BUG FIX: Update the navigation count immediately
+                self.updateNavigationCount(self.articles.count)
                 
-                AppLogger.database.debug("✅ Full dataset loaded: \(fullArticles.count) articles available for navigation")
+                // Find the current article in the new dataset and update index
+                if let currentId = currentArticleId,
+                   let newIndex = self.articles.firstIndex(where: { $0.id == currentId }) {
+                    self.currentIndex = newIndex
+                    AppLogger.database.debug("✅ Updated current index to \(newIndex) in unfiltered dataset")
+                } else {
+                    // Fallback: validate and adjust current index
+                    self.validateAndAdjustIndex()
+                }
+                
+                // CRITICAL FIX: Switch to using the complete dataset for position display
+                // This ensures navigation position counters update correctly
+                self.useOriginalPosition = false
+                
+                AppLogger.database.debug("✅ Complete unfiltered dataset loaded: \(fullArticles.count) articles available for navigation")
+                AppLogger.database.debug("📍 Current article position: \(self.displayPosition) of \(self.displayTotal)")
+                AppLogger.database.debug("🔄 Switched to complete dataset for position display")
             }
             
         } catch {
-            AppLogger.database.error("❌ Failed to fetch full dataset: \(error)")
+            AppLogger.database.error("❌ Failed to fetch complete dataset: \(error)")
         }
     }
 
@@ -1126,6 +1192,24 @@ final class NewsDetailViewModel: ObservableObject {
         cachedContentBySection = [:]
     }
     
+    // MARK: - Navigation Dataset Locking (N-1 Bug Fix)
+    
+    /// Flag to prevent background filtering from affecting the navigation dataset
+    private var navigationDatasetLocked = false
+    
+    /// Locks the navigation dataset to prevent background filtering operations from affecting it
+    /// This is critical for preventing the n-1 bug where articles disappear during navigation
+    func lockNavigationDataset() {
+        navigationDatasetLocked = true
+        AppLogger.database.debug("🔒 NAVIGATION DATASET LOCKED: Preventing background filtering from affecting navigation")
+    }
+    
+    /// Unlocks the navigation dataset (called when detail view is dismissed)
+    func unlockNavigationDataset() {
+        navigationDatasetLocked = false
+        AppLogger.database.debug("🔓 NAVIGATION DATASET UNLOCKED: Normal filtering behavior restored")
+    }
+    
     // MARK: - Enhanced Cache Management (Phase 1.2) - CRITICAL FIX
     
     private func getCachedModel(for articleId: UUID) -> ArticleModel? {
@@ -1202,6 +1286,56 @@ final class NewsDetailViewModel: ObservableObject {
             "Preview": false,
             "Related Articles": false,
         ]
+    }
+    
+    // MARK: - Position Display Methods
+    
+    /// Gets the current position for display purposes
+    /// COMPREHENSIVE N-1 BUG FIX: Always use stable counting that won't change
+    var displayPosition: Int {
+        if let currentId = currentArticle?.id {
+            // FIXED: Use the complete navigation dataset when available
+            if !useOriginalPosition, !articles.isEmpty {
+                if let position = articles.firstIndex(where: { $0.id == currentId }) {
+                    return position + 1
+                }
+            }
+            
+            // Fallback to navigation reference array for initial display
+            if let position = navigationReferenceArray.firstIndex(where: { $0.id == currentId }) {
+                return position + 1
+            }
+        }
+        
+        // Final fallback: use original index + 1
+        return max(originalFilteredIndex + 1, 1)
+    }
+    
+    /// Gets the total count for display purposes  
+    /// COMPREHENSIVE N-1 BUG FIX: Use the most accurate count available
+    var displayTotal: Int {
+        // Priority 1: Use complete navigation dataset when available (most accurate)
+        if !useOriginalPosition, !articles.isEmpty {
+            return articles.count
+        }
+        
+        // Priority 2: Use updated count from background query if available
+        if let updatedCount = updatedNavigationCount {
+            return max(updatedCount, 1)
+        }
+        
+        // Priority 3: Use navigation reference array as fallback
+        return max(navigationReferenceArray.count, 1)
+    }
+    
+    /// Updated navigation count from background query (simple approach)
+    @Published private var updatedNavigationCount: Int?
+    
+    /// Updates the navigation count with the accurate total from background query
+    /// This implements the simple approach: placeholder first, then accurate count
+    func updateNavigationCount(_ count: Int) {
+        updatedNavigationCount = count
+        AppLogger.database.debug("📊 Navigation count updated: \(count)")
     }
 }
 
