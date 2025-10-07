@@ -247,12 +247,13 @@ final class NewsViewModel: ObservableObject {
         do {
             // CRITICAL FIX: Always fetch ALL articles for topic bar generation
             // This ensures the topic bar always shows all available topics
+            // Do NOT apply user filters here - we want ALL topics visible
             let topicBarData = try await articleOperations.fetchArticles(
                 topic: nil, // Fetch ALL topics - never filter by topic for topic bar
-                showUnreadOnly: showUnreadOnly,
-                showBookmarkedOnly: showBookmarkedOnly,
-                qualityFilter: qualityFilter,
-                context: .listView
+                showUnreadOnly: false,  // Don't filter - show all topics even if all articles are read
+                showBookmarkedOnly: false,  // Don't filter - show all topics even if not bookmarked
+                qualityFilter: "All",  // Don't filter - show all topics regardless of quality
+                context: .detailView  // Use detailView context for full dataset (no limits)
             )
             
             // Update topicBarArticles - this should NEVER be topic-filtered
@@ -338,9 +339,10 @@ final class NewsViewModel: ObservableObject {
         do {
             let freshTopicBarData = try await articleOperations.fetchArticles(
                 topic: nil, // Always fetch ALL topics for topic bar
-                showUnreadOnly: showUnreadOnly,
-                showBookmarkedOnly: showBookmarkedOnly,
-                qualityFilter: qualityFilter
+                showUnreadOnly: false,  // Don't filter - show all topics
+                showBookmarkedOnly: false,  // Don't filter - show all topics
+                qualityFilter: "All",  // Don't filter - show all topics
+                context: .detailView  // Use detailView context for full dataset (no limits)
             )
             
             // Update both topic bar and allArticles

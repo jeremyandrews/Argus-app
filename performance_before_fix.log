@@ -1,3 +1,45 @@
+========================================
+Argus Performance Test Runner with Bug Detection
+========================================
+
+🚀 Starting performance tests with enhanced bug detection...
+
+NOTE: The tests will measure the following operations:
+
+[0;34m1. Topic Switching Performance[0m
+   - Switching between 7 different topics
+   - Target: < 500ms per switch
+
+[0;34m2. Article Detail View Performance[0m
+   - Opening article detail view
+   - Loading tiny title and summary
+   - Loading full content
+   - Target: < 300ms to open, < 1s for full content
+
+[0;34m3. Section Expansion Performance[0m
+   - Expanding Simple Breakdown
+   - Expanding Context & Perspective
+   - Expanding Critical Analysis
+   - Target: < 200ms per expansion
+
+[0;34m4. Article Navigation[0m
+   - Moving to next/previous article
+   - Target: < 300ms
+
+[0;35m5. Bug Detection Tests (NEW)[0m
+   - Off-by-one position counter detection
+   - Article count consistency validation
+   - Navigation boundary testing
+   - '1 of 1' vs '1 of 2' discrepancy detection
+
+========================================
+Running Tests...
+========================================
+
+🔍 Running enhanced regression detection tests...
+📋 Step 1: Verifying build integrity...
+[0;32m✅ Build completed[0m (7s)
+📋 Step 2: Running performance tests with enhanced monitoring...
 Command line invocation:
     /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test -scheme Argus -destination "platform=iOS Simulator,id=DD439625-C73D-4D1A-9E8F-E99ADEE93CA0" "-only-testing:ArgusUITests/PerformanceTestSuite" "-only-testing:ArgusUITests/ArticleNavigationPerformanceTests"
 
@@ -791,6 +833,7 @@ User Info: {
     "sdk_variant" = iphonesimulator;
     "sdk_version_monotonic" = 2300033900;
 }
+🔍 Monitoring test progress... (6 * 5s elapsed)
 2025-10-07 18:24:35.654 xcodebuild[88692:141570039]  iOSSimulator: FC180818-EAED-4D0B-98D3-7DDB574AEC01: Failed to launch app with identifier: com.andrews.Argus.Argus and options: {
     "activate_suspended" = 0;
     arguments =     (
@@ -922,3 +965,6 @@ User Info: {
     "sdk_variant" = iphonesimulator;
     "sdk_version_monotonic" = 2300033900;
 }
+🔍 Monitoring test progress... (12 * 5s elapsed)
+🔍 Monitoring test progress... (18 * 5s elapsed)
+🔍 Monitoring test progress... (24 * 5s elapsed)
