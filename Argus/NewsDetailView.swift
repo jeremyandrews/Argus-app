@@ -15,6 +15,13 @@ struct NewsDetailView: View {
 
     /// The view model that manages article data and operations
     @ObservedObject private var viewModel: NewsDetailViewModel
+    
+    /// Text display settings for customization - cached and observed
+    @State private var textDisplaySettings = UserDefaults.standard.textDisplaySettings
+    @State private var cachedFont: Font?
+    @State private var cachedDescriptionFont: Font?
+    @State private var cachedFontColor: Color?
+    @State private var settingsObserver: AnyCancellable?
 
     // MARK: - UI State Properties
 
@@ -88,7 +95,12 @@ struct NewsDetailView: View {
     /// Gets the text content for a specific rich text field
     // Removed legacy NotificationData getTextContentForField method - using ArticleModel version instead
 
-    // REMOVED: No longer caching attributed strings in view - using direct data binding instead
+    @State private var titleAttributedString: NSAttributedString? = nil
+    @State private var bodyAttributedString: NSAttributedString? = nil
+    @State private var summaryAttributedString: NSAttributedString? = nil
+    @State private var criticalAnalysisAttributedString: NSAttributedString? = nil
+    @State private var logicalFallaciesAttributedString: NSAttributedString? = nil
+    @State private var sourceAnalysisAttributedString: NSAttributedString? = nil
     @State private var cachedContentBySection: [String: NSAttributedString] = [:]
     @State private var expandedSections: [String: Bool] = Self.getDefaultExpandedSections()
     @State private var contentTransitionID = UUID()
@@ -244,40 +256,25 @@ struct NewsDetailView: View {
         DragGesture()
             .onEnded { value in
                 if value.translation.width > 100 {
-                    // End detail view session to re-enable auto-redirect behavior
-                    if let newsViewModel = viewModel.newsViewModel {
-                        newsViewModel.endDetailViewSession()
-                    }
                     dismiss()
                 }
             }
     }
 
     private func handleOnAppear() {
-        // ULTRA-SIMPLIFIED: Zero blocking, instant display
-        // Don't even set expanded sections here - they're already set in init
-        
-        // Setup deletion handling immediately (it's just a notification observer, very lightweight)
         setupDeletionHandling()
-        
-        // Everything else happens lazily after UI is visible
-        Task(priority: .background) {
-            // Longer delay to ensure UI is fully rendered and responsive
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-            
-            // DON'T call performDeferredInitialization() - it does database fetches!
-            // The article is already in memory from the articles array
-            
-            // Only mark as viewed in background (this is necessary for tracking)
-            try? await self.viewModel.markAsViewed()
-            
-            // Preload adjacent articles only after an even longer delay
-            Task(priority: .utility) {
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-                // Note: preloadAdjacentArticlesLazy doesn't exist yet, using existing method
-                await self.viewModel.preloadAdjacentArticles()
-            }
+        markAsViewed()
+        loadInitialMinimalContent()
+        if let section = initiallyExpandedSection {
+            expandedSections[section] = true
         }
+
+        // Setup settings observer and cache text display settings
+        setupSettingsObserver()
+        cacheTextDisplaySettings()
+
+        // Log the article fields status for debugging
+        logArticleFieldsStatus()
     }
 
     /// Logs a comprehensive summary of all content fields and their blob status
@@ -345,20 +342,30 @@ struct NewsDetailView: View {
         return "✅ (\(String(format: "%.1f", sizeInKB)) KB)"
     }
 
-    // MARK: - Text Display Settings Caching (REPLACED WITH GLOBAL CACHE)
+    // MARK: - Text Display Settings Caching
 
-    /// Sets up observer for text display settings changes - now uses global cache
+    /// Sets up observer for text display settings changes
     private func setupSettingsObserver() {
-        // Global font cache handles all UserDefaults observation automatically
-        // No need for local observers - this eliminates 10-50ms font computation overhead
-        AppLogger.database.debug("🎨 Using GlobalFontCache - no local font computation needed")
+        settingsObserver = NotificationCenter.default
+            .publisher(for: UserDefaults.didChangeNotification)
+            .sink { _ in
+                DispatchQueue.main.async {
+                    self.cacheTextDisplaySettings()
+                }
+            }
     }
 
-    /// Caches text display settings - now delegated to global cache
+    /// Caches text display settings to avoid repeated computation
     private func cacheTextDisplaySettings() {
-        // Global font cache handles all caching automatically
-        // This method is now a no-op but kept for compatibility
-        AppLogger.database.debug("🎨 Font caching delegated to GlobalFontCache")
+        let settings = UserDefaults.standard.textDisplaySettings
+        textDisplaySettings = settings
+        
+        // Cache the computed font values
+        cachedFont = settings.font
+        cachedDescriptionFont = settings.descriptionFont
+        cachedFontColor = settings.fontColor.color
+        
+        AppLogger.database.debug("📝 Text display settings cached - Color: \(settings.fontColor.rawValue)")
     }
 
     // MARK: - Top Bar
@@ -366,11 +373,6 @@ struct NewsDetailView: View {
     private var topBar: some View {
         HStack {
             Button(action: {
-                // End detail view session to re-enable auto-redirect behavior
-                if let newsViewModel = viewModel.newsViewModel {
-                    newsViewModel.endDetailViewSession()
-                }
-                
                 // Only post a notification so the list will refresh, but don't change the read status
                 NotificationCenter.default.post(name: Notification.Name("DetailViewClosed"), object: nil)
                 dismiss()
@@ -383,11 +385,10 @@ struct NewsDetailView: View {
 
             Spacer()
             
-        // Article position counter with bulk actions - cached for performance
-        // FIXED: Use display properties to show correct position from original filtered list
-        ArticlePositionCounterOptimized(
-            currentPosition: viewModel.displayPosition,
-            totalCount: viewModel.displayTotal,
+        // Article position counter with bulk actions
+        ArticlePositionCounter(
+            currentPosition: viewModel.currentIndex + 1,
+            totalCount: viewModel.articles.count,
             isCompact: true,
             onBulkAction: { action in
                 handleBulkAction(action)
@@ -665,14 +666,6 @@ struct NewsDetailView: View {
 
     // Make sure we clean up properly when navigating between articles
     private func navigateToArticle(direction: NavigationDirection) {
-        // PHASE 7: Performance monitoring - Start navigation timing
-        let navigationStartTime = Date()
-        let directionString = direction == .next ? "next" : "previous"
-        
-        AppLogger.database.debug("🏁 NAVIGATION START: \(directionString) article at \(navigationStartTime)")
-        
-        // CRITICAL PERFORMANCE FIX: Make navigation completely non-blocking by removing all synchronous operations
-        
         // Cancel any local ongoing tasks
         tabChangeTask?.cancel()
         for (_, task) in sectionLoadingTasks {
@@ -680,69 +673,64 @@ struct NewsDetailView: View {
         }
         sectionLoadingTasks = [:]
 
-        // Log navigation action for debugging in background to avoid blocking
-        let currentArticleId = currentNotification?.id
-        Task(priority: .utility) {
-            if let articleId = currentArticleId {
-                AppLogger.database.debug("NewsDetailView - Navigating from article ID: \(articleId), direction: \(directionString)")
-            }
+        // Log navigation action for debugging
+        if let currentArticle = currentNotification {
+            AppLogger.database.debug("NewsDetailView - Navigating from article ID: \(currentArticle.id), direction: \(direction == .next ? "next" : "previous")")
         }
 
-        // IMMEDIATE UI UPDATE: Update UI instantly without any blocking operations
-        expandedSections = Self.getDefaultExpandedSections()
-        scrollToTopTrigger = UUID()
-
-        // CRITICAL FIX: Delegate to view model IMMEDIATELY without any delays or blocking operations
+        // Delegate to view model for navigation using shared NavigationDirection
         viewModel.navigateToArticle(direction: direction)
 
-        // PHASE 7: Performance monitoring - Check navigation completion time
-        let navigationEndTime = Date()
-        let navigationTime = navigationEndTime.timeIntervalSince(navigationStartTime) * 1000 // Convert to milliseconds
-        
-        AppLogger.database.debug("⚡ NAVIGATION COMPLETE: \(directionString) article in \(String(format: "%.2f", navigationTime))ms")
-        
-        // Log performance status - target is < 100ms
-        if navigationTime < 100 {
-            AppLogger.database.debug("✅ PERFORMANCE TARGET MET: Navigation completed in \(String(format: "%.2f", navigationTime))ms (< 100ms)")
-        } else if navigationTime < 200 {
-            AppLogger.database.debug("⚠️ PERFORMANCE ACCEPTABLE: Navigation completed in \(String(format: "%.2f", navigationTime))ms (< 200ms)")
-        } else {
-            AppLogger.database.debug("🚨 PERFORMANCE ISSUE: Navigation took \(String(format: "%.2f", navigationTime))ms (> 200ms)")
+        // No need to synchronize anymore since we're using viewModel values directly
+
+        // Reset expanded sections - Summary stays expanded by default
+        expandedSections = Self.getDefaultExpandedSections()
+
+        // Force refresh UI
+        contentTransitionID = viewModel.contentTransitionID
+        scrollToTopTrigger = UUID()
+
+        // Log the article fields for the new article once it's loaded
+        Task<Void, Never> {
+            // Add a small delay to ensure the article has been fully loaded
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            await MainActor.run {
+                logArticleFieldsStatus()
+            }
         }
 
-        // ALL OTHER OPERATIONS: Move everything to background with minimal priority to avoid blocking navigation
-        Task(priority: .utility) {
-            // Very small delay to ensure navigation UI is complete
-            try? await Task.sleep(nanoseconds: 50_000_000) // 0.05 seconds
-            
-            await MainActor.run {
-                // Update transition ID after navigation is complete
-                contentTransitionID = viewModel.contentTransitionID
-            }
-            
-            // Background operations that don't affect immediate navigation
-            Task(priority: .background) {
-                // Mark as viewed in background (doesn't block UI)
-                await MainActor.run {
-                    markAsViewed()
-                }
-                
-                // Small delay before content loading to prioritize UI responsiveness
-                try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
-                
-                await MainActor.run {
-                    // Only load Summary if still expanded after navigation
-                    if self.expandedSections["Summary"] == true {
-                        self.loadContentForSection("Summary")
-                    }
-                }
-                
-                // Log article status with even lower priority
-                try? await Task.sleep(nanoseconds: 300_000_000) // Additional 0.3s delay
-                await MainActor.run {
-                    self.logArticleFieldsStatus()
+        // Now update with the new article if available
+        if let newArticle = viewModel.currentArticle {
+            // No need to set the article - currentNotification is computed from viewModel.currentArticle
+            // But we do make sure our UI state is updated
+
+            // Explicitly mark as viewed
+            markAsViewed()
+
+            // Log the new article state
+            let hasEngineStats = newArticle.engine_stats != nil
+            let hasSimilarArticles = newArticle.relatedArticles != nil
+            let hasTitleBlob = newArticle.titleBlob != nil
+            let hasBodyBlob = newArticle.bodyBlob != nil
+
+            AppLogger.database.debug("""
+            NewsDetailView - After navigation to article ID: \(newArticle.id)
+            - Has title blob: \(hasTitleBlob)
+            - Has body blob: \(hasBodyBlob)
+            - Has engine stats: \(hasEngineStats)
+            - Has similar articles: \(hasSimilarArticles)
+            """)
+
+            // Load the Summary if it's expanded - with slight delay to allow UI to refresh
+            if expandedSections["Summary"] == true {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.loadContentForSection("Summary")
                 }
             }
+        } else {
+            // If we somehow don't have an article after navigation, log error
+            // This is just a safety check that should never happen in normal operation
+            AppLogger.database.error("NewsDetailView - No article after navigation")
         }
     }
 
@@ -752,40 +740,76 @@ struct NewsDetailView: View {
     // Function removed - using SectionNaming.normalizedKey directly at call sites
 
     private func loadContentForSection(_ section: String) {
-        // CRITICAL FIX: Make section loading completely non-blocking and async
-        
+        // Simply delegate section loading to the ViewModel
+        // The ViewModel now has improved logging and sequential loading
+
         // Get normalized key for better diagnostics
         let normalizedKey = SectionNaming.normalizedKey(section)
-        AppLogger.database.debug("⚡ ASYNC SECTION: Loading \(section) (key: \(normalizedKey)) without blocking UI")
+
+        // Log that we're requesting content for this section
+        AppLogger.database.debug("NewsDetailView requesting content for section: \(section) (key: \(normalizedKey))")
 
         // Cancel any existing task
         sectionLoadingTasks[section]?.cancel()
 
-        // Create a completely async, non-blocking loading task
-        let loadingTask = Task(priority: .userInitiated) {
-            // PHASE 1: Immediate UI feedback - Show loading state instantly
+        // Create a task that will handle loading and state management
+        let loadingTask = Task {
+            // First mark this section as loading in our local state
             await MainActor.run {
-                // Mark as loading immediately for instant UI feedback
-                self.sectionLoadingTasks[section] = Task {} // Placeholder for loading state
+                sectionLoadingTasks[section] = Task {} // Just a placeholder task to indicate loading
             }
 
-            // PHASE 2: Background content loading - Completely non-blocking
+            // Delegate to ViewModel which handles the actual loading and persistence
             viewModel.loadContentForSection(section)
-            
-            // PHASE 3: Check completion and update UI
-            await MainActor.run {
-                // Clear loading state
-                self.sectionLoadingTasks[section] = nil
-                AppLogger.database.debug("✅ ASYNC SECTION: \(section) loading completed")
+
+            // Check if content is available after a short delay (give time for loading)
+            try? await Task.sleep(for: .seconds(0.5))
+
+            // Monitor loading until either content is available or timeout occurs
+            let startTime = Date()
+            let timeout = 10.0 // seconds
+
+            while !Task.isCancelled {
+                if Date().timeIntervalSince(startTime) > timeout {
+                    // Timeout occurred, stop monitoring
+                    break
+                }
+
+                // Check if content is now available
+                let hasContent = await MainActor.run {
+                    viewModel.getAttributedStringForSection(section) != nil
+                }
+
+                if hasContent {
+                    // Content loaded successfully
+                    break
+                }
+
+                // Wait before checking again
+                try? await Task.sleep(for: .seconds(0.5))
+            }
+
+            // Update loading state only if this task wasn't cancelled
+            if !Task.isCancelled {
+                await MainActor.run {
+                    // Clear loading state
+                    sectionLoadingTasks[section] = nil
+                }
             }
         }
 
-        // Store the loading task for cancellation if needed
+        // Store the loading task
         sectionLoadingTasks[section] = loadingTask
     }
 
     private func clearSectionContent() {
-        // REMOVED: No longer caching attributed strings in view - using direct data binding instead
+        // Clear all cached attributed strings except title and body
+        // which we'll immediately replace
+        summaryAttributedString = nil
+        criticalAnalysisAttributedString = nil
+        logicalFallaciesAttributedString = nil
+        sourceAnalysisAttributedString = nil
+
         // Clear any other cached section content
         cachedContentBySection = [:]
     }
@@ -795,7 +819,12 @@ struct NewsDetailView: View {
     // This function is now handled by the ViewModel and no longer needed
 
     private func clearCurrentContent() {
-        // REMOVED: No longer caching attributed strings in view - using direct data binding instead
+        titleAttributedString = nil
+        bodyAttributedString = nil
+        summaryAttributedString = nil
+        criticalAnalysisAttributedString = nil
+        logicalFallaciesAttributedString = nil
+        sourceAnalysisAttributedString = nil
 
         // Reset sections to false except summary = true
         for key in expandedSections.keys {
@@ -832,33 +861,56 @@ struct NewsDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 32)
             } else if let n = currentNotification {
-                // Title - Use exact same approach as article listing for instant display
-                Text(n.title)
-                    .font(UserDefaults.standard.textDisplaySettings.font)
-                    .fontWeight(n.isViewed ? .regular : .semibold)
-                    .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Title - use rich text if available, otherwise fall back to plain text
+                if let titleAttrString = viewModel.titleAttributedString {
+                    Text(titleAttrString.string)
+                        .font(cachedFont ?? .body)
+                        .foregroundColor(cachedFontColor ?? .primary)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                        .textSelection(.disabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(n.title)
+                        .font(cachedFont ?? .body)
+                        .fontWeight(n.isViewed ? .regular : .semibold)
+                        .foregroundColor(cachedFontColor ?? .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 // Publication Date
+                // n.pub_date from ArticleModel's compatibility API returns Date not optional
                 Text("Published: \(n.pub_date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))")
-                    .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
-                    .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.7))
+                    .font(cachedDescriptionFont ?? .caption)
+                    .foregroundColor((cachedFontColor ?? .primary).opacity(0.7))
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                // Body - Use exact same approach as article listing for instant display
-                Text(n.body)
-                    .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
-                    .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.8))
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Body - use rich text if available, otherwise fall back to plain text
+                if let bodyAttrString = viewModel.bodyAttributedString {
+                    Text(bodyAttrString.string)
+                        .font(cachedDescriptionFont ?? .caption)
+                        .foregroundColor(cachedFontColor ?? .primary)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                        .textSelection(.disabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(n.body)
+                        .font(cachedDescriptionFont ?? .caption)
+                        .foregroundColor((cachedFontColor ?? .primary).opacity(0.8))
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 // Affected
                 if !n.affected.isEmpty {
                     Text(n.affected)
-                        .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
-                        .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.7))
+                        .font(cachedDescriptionFont ?? .caption)
+                        .foregroundColor((cachedFontColor ?? .primary).opacity(0.7))
                 }
 
                 // Domain with Source Type (source type first)
@@ -969,9 +1021,26 @@ struct NewsDetailView: View {
                         .buttonStyle(PlainButtonStyle())
 
                         if expandedSections[section.header] ?? false {
-                            // CRITICAL FIX: Always show content, never the generic spinner
-                            // The Summary section has its own loading state in sectionContent
-                            sectionContent(for: section)
+                            // Remove ANY animation wrapper
+                            if needsConversion(section.header) && getAttributedStringForSection(section.header) == nil {
+                                // Only show spinner for sections that need rich text conversion
+                                HStack {
+                                    Spacer()
+                                    VStack(spacing: 8) {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle())
+                                        Text("Converting text...")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                                .padding()
+                            } else {
+                                // Use existing content display for everything else
+                                // Remove any animations that might cause fuzzy appearance
+                                sectionContent(for: section)
+                            }
                         }
                     }
                     .id(section.header)
@@ -1080,36 +1149,32 @@ struct NewsDetailView: View {
         
         // Use Task without complex type annotations - Swift 6 compatible
         Task {
-            // Move operations to detached task to avoid MainActor conflict
-            _ = await Task.detached {
-                let articleOperations = ArticleOperations()
-                
-                // Perform background operations
-                switch action {
-                case .markAllRead:
-                    AppLogger.database.debug("Bulk marking \(articleIds.count) articles as read")
-                    return await articleOperations.markArticles(ids: articleIds, asRead: true)
-                    
-                case .markAllUnread:
-                    AppLogger.database.debug("Bulk marking \(articleIds.count) articles as unread")
-                    return await articleOperations.markArticles(ids: articleIds, asRead: false)
-                }
-            }.value
+            // Already on MainActor due to function annotation
+            let articleOperations = ArticleOperations()
             
-            // UI updates on MainActor
-            await MainActor.run {
-                self.contentTransitionID = UUID()
+            // Perform background operations
+            switch action {
+            case .markAllRead:
+                AppLogger.database.debug("Bulk marking \(articleIds.count) articles as read")
+                _ = await articleOperations.markArticles(ids: articleIds, asRead: true)
                 
-                // Post notification for other parts of the app
-                NotificationCenter.default.post(
-                    name: Notification.Name("BulkArticleStatusChanged"),
-                    object: nil,
-                    userInfo: [
-                        "action": action,
-                        "articleCount": articleIds.count
-                    ]
-                )
+            case .markAllUnread:
+                AppLogger.database.debug("Bulk marking \(articleIds.count) articles as unread")
+                _ = await articleOperations.markArticles(ids: articleIds, asRead: false)
             }
+            
+            // UI updates are already on MainActor
+            self.contentTransitionID = UUID()
+            
+            // Post notification for other parts of the app
+            NotificationCenter.default.post(
+                name: Notification.Name("BulkArticleStatusChanged"),
+                object: nil,
+                userInfo: [
+                    "action": action,
+                    "articleCount": articleIds.count
+                ]
+            )
         }
     }
 
@@ -1118,24 +1183,60 @@ struct NewsDetailView: View {
         // Only proceed if we have a notification
         guard let article = currentNotification else { return }
 
-        AppLogger.database.debug("⚡ INSTANT LOADING: Using preloaded content for article ID: \(article.id)")
+        // Log the loading attempt
+        AppLogger.database.debug("Loading initial content for article ID: \(article.id)")
 
-        // CRITICAL FIX: INSTANT display using preloaded plain text - Zero blocking
-        // Show preloaded title and body text IMMEDIATELY without any processing
-        
-        // PHASE 1: INSTANT plain text display (< 10ms)
-        // The preloaded data is already available in the ArticleModel
-        // No blob extraction needed - plain text shows instantly
-        AppLogger.database.debug("✅ INSTANT: Plain text title and body available immediately")
-        
-        // PHASE 2: Background enhancement only - No UI blocking
-        Task(priority: .background) {
-            // REMOVED: No longer checking attributed string properties - using direct data binding instead
-            
-            // Generate missing rich text in background if needed
+        // Set loading state to true
+        isLoadingNextArticle = true
+
+        // Ensure the Summary section is expanded
+        expandedSections["Summary"] = true
+
+        // Immediately check if formatted content (blobs) already exists and show only formatted content
+        if let titleBlob = article.titleBlob,
+           let bodyBlob = article.bodyBlob
+        {
+            do {
+                // Try to extract the formatted content directly
+                if let titleAttrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: titleBlob),
+                   let bodyAttrString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: bodyBlob)
+                {
+                    // Set the formatted content directly (avoid showing unformatted content first)
+                    viewModel.titleAttributedString = titleAttrString
+                    viewModel.bodyAttributedString = bodyAttrString
+
+                    // We have formatted content, clear loading state
+                    isLoadingNextArticle = false
+
+                    // Then continue loading the rest in the background
+                    Task {
+                        // After the initial content is displayed, load the Summary section
+                        loadContentForSection("Summary")
+                        AppLogger.database.debug("✅ Summary section load triggered for initial view")
+                    }
+
+                    return
+                }
+            } catch {
+                AppLogger.database.error("❌ Error extracting existing blobs: \(error)")
+            }
+        }
+
+        // If we don't have blobs or extraction failed, use async loading with loading indicator
+        Task {
+            // Load the title and body
             await viewModel.loadMinimalContent()
-            
-            AppLogger.database.debug("✅ BACKGROUND: All content enhancement completed for article ID: \(article.id)")
+
+            // Only clear loading state after content is ready
+            await MainActor.run {
+                isLoadingNextArticle = false
+            }
+
+            AppLogger.database.debug("✅ Minimal content loaded for article ID: \(article.id)")
+
+            // After minimal content is loaded, force load the Summary section
+            loadContentForSection("Summary")
+            AppLogger.database.debug("✅ Summary section load triggered for initial view")
         }
     }
 
@@ -1146,40 +1247,11 @@ struct NewsDetailView: View {
         // MARK: - Summary
 
         case "Summary":
-            // CRITICAL FIX: Check ViewModel's loading state instead of generic needsConversion
-            if viewModel.isSummaryLoading {
-                // Show loading indicator while Summary is being loaded
-                VStack(spacing: 8) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle())
-                    Text("Loading summary...")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-            } else if let article = currentNotification, let summaryText = article.summary, !summaryText.isEmpty {
-                // Display summary content directly - no need for conversion
-                Text(summaryText)
-                    .font(.body)
-                    .foregroundColor(.primary)
-                    .lineLimit(nil)
-                    .multilineTextAlignment(.leading)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 6)
-                    .padding(.bottom, 2)
-            } else {
-                // Fallback for when no summary exists
-                Text("No summary available for this article.")
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 12)
-            }
+            SectionContentView(
+                section: section,
+                attributedString: getAttributedStringForSection(section.header),
+                isLoading: isSectionLoading(section.header)
+            )
 
         // MARK: - Source Analysis
 
@@ -1528,48 +1600,50 @@ struct NewsDetailView: View {
         AppLogger.database.debug("Loading related article with jsonURL: \(jsonURL)")
 
         Task {
-            // Perform the fetch and UI operations on the MainActor since we need UI updates
-            do {
-                // Use modelContext to find the article
-                let foundArticles = try modelContext.fetch(FetchDescriptor<ArticleModel>(
-                    predicate: #Predicate<ArticleModel> { article in
-                        article.jsonURL == jsonURL
-                    }
-                ))
-
-                // Process results
-                if let foundArticle = foundArticles.first {
-                    // Create a dedicated view model for this article
-                    let articleViewModel = NewsDetailViewModel(
-                        articles: [foundArticle],
-                        allArticles: [foundArticle],
-                        currentIndex: 0,
-                        initiallyExpandedSection: "Summary",
-                        needsFullDataset: true
-                    )
-
-                    // Present the detail view
-                    let detailView = NewsDetailView(viewModel: articleViewModel)
-                    let hostingController = UIHostingController(rootView: detailView)
-
-                    // Get the top view controller to present from
-                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let window = windowScene.windows.first,
-                       let rootVC = window.rootViewController
-                    {
-                        var topVC = rootVC
-                        while let presentedVC = topVC.presentedViewController {
-                            topVC = presentedVC
+            // Perform the fetch directly on the MainActor
+            await MainActor.run {
+                do {
+                    // Use modelContext to find the article
+                    let foundArticles = try modelContext.fetch(FetchDescriptor<ArticleModel>(
+                        predicate: #Predicate<ArticleModel> { article in
+                            article.jsonURL == jsonURL
                         }
+                    ))
 
-                        // Present the view controller
-                        topVC.present(hostingController, animated: true)
+                    // Process results
+                    if let foundArticle = foundArticles.first {
+                        // Create a dedicated view model for this article
+                        let articleViewModel = NewsDetailViewModel(
+                            articles: [foundArticle],
+                            allArticles: [foundArticle],
+                            currentIndex: 0,
+                            initiallyExpandedSection: "Summary",
+                            needsFullDataset: true
+                        )
+
+                        // Present the detail view
+                        let detailView = NewsDetailView(viewModel: articleViewModel)
+                        let hostingController = UIHostingController(rootView: detailView)
+
+                        // Get the top view controller to present from
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let window = windowScene.windows.first,
+                           let rootVC = window.rootViewController
+                        {
+                            var topVC = rootVC
+                            while let presentedVC = topVC.presentedViewController {
+                                topVC = presentedVC
+                            }
+
+                            // Present the view controller
+                            topVC.present(hostingController, animated: true)
+                        }
+                    } else {
+                        AppLogger.database.error("Related article not found with jsonURL: \(jsonURL)")
                     }
-                } else {
-                    AppLogger.database.error("Related article not found with jsonURL: \(jsonURL)")
+                } catch {
+                    AppLogger.database.error("Failed to fetch related article: \(error)")
                 }
-            } catch {
-                AppLogger.database.error("Failed to fetch related article: \(error)")
             }
         }
     }
@@ -2108,25 +2182,27 @@ struct SimilarArticleRow: View {
         let urlToFetch = jsonURL
 
         Task {
-            // Perform the fetch and UI operations on the MainActor since we need UI updates
-            do {
-                // Use modelContext directly on the MainActor
-                let foundArticles = try modelContext.fetch(FetchDescriptor<ArticleModel>(
-                    predicate: #Predicate<ArticleModel> { article in
-                        article.jsonURL == urlToFetch
-                    }
-                ))
+            // Perform the fetch directly on the MainActor (MainActor.run doesn't throw errors)
+            await MainActor.run {
+                do {
+                    // Use modelContext directly on the MainActor
+                    let foundArticles = try modelContext.fetch(FetchDescriptor<ArticleModel>(
+                        predicate: #Predicate<ArticleModel> { article in
+                            article.jsonURL == urlToFetch
+                        }
+                    ))
 
-                // Process results immediately within the MainActor context
-                if let foundArticle = foundArticles.first {
-                    selectedArticle = foundArticle
-                    showDetailView = true
-                } else {
+                    // Process results immediately within the MainActor context
+                    if let foundArticle = foundArticles.first {
+                        selectedArticle = foundArticle
+                        showDetailView = true
+                    } else {
+                        showError = true
+                    }
+                } catch {
+                    AppLogger.sync.error("Failed to fetch similar article: \(error)")
                     showError = true
                 }
-            } catch {
-                AppLogger.sync.error("Failed to fetch similar article: \(error)")
-                showError = true
             }
         }
     }

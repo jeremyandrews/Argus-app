@@ -97,10 +97,11 @@ struct NewsView: View {
     }
 
     /// List of topics to show in topic bar
-    @State private var availableTopics: [String] = ["All"]
-    
     private var visibleTopics: [String] {
-        return availableTopics
+        // CRITICAL FIX: Use topicBarArticles which always contains ALL topics
+        // This ensures topics never disappear from the topic bar
+        let topics = Set(viewModel.topicBarArticles.compactMap { $0.topic })
+        return ["All"] + topics.sorted()
     }
 
     // MARK: - Body
@@ -249,19 +250,16 @@ struct NewsView: View {
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleViewed"))) { _ in
                     Task {
                         await viewModel.refreshWithAutoRedirectIfNeeded()
-                        await loadAvailableTopics()
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DetailViewClosed"))) { _ in
                     Task {
                         await viewModel.refreshWithAutoRedirectIfNeeded()
-                        await loadAvailableTopics()
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticleReadStatusChanged"))) { _ in
                     Task {
                         await viewModel.refreshWithAutoRedirectIfNeeded()
-                        await loadAvailableTopics()
                     }
                 }
                 // Initial setup
@@ -274,8 +272,6 @@ struct NewsView: View {
                     
                     Task {
                         await viewModel.refreshArticles()
-                        // Load available topics from TopicCacheManager
-                        await loadAvailableTopics()
                     }
                 }
                 // Force view refresh when size class changes (orientation changes)
@@ -420,13 +416,12 @@ struct NewsView: View {
                             .foregroundColor(viewModel.selectedTopic == topic ? .white : .primary)
                             .cornerRadius(8)
                     }
-                    .accessibilityIdentifier(topic) // Add identifier for UI testing
                 }
             }
             .padding(.horizontal, 20)
         }
         .padding(.vertical, 8)
-        .background(Color(UIColor.systemGroupedBackground))
+        .background(Color(UIColor.systemGray6))
     }
 
     /// Empty state view shown when no articles are available
@@ -524,9 +519,12 @@ struct NewsView: View {
         let filteredArticles: [ArticleModel]
         let totalArticles: [ArticleModel]
         let newsViewModel: NewsViewModel
+        @State private var titleAttributedString: NSAttributedString?
+        @State private var bodyAttributedString: NSAttributedString?
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         var body: some View {
+            // Remove GeometryReader which might be causing sizing issues
             VStack(alignment: .leading, spacing: 8) {
                 // Topic pill
                 HStack(spacing: 8) {
@@ -536,23 +534,37 @@ struct NewsView: View {
                     Spacer()
                 }
 
-                // Title - direct display without caching
-                Text(article.title)
-                    .font(.headline)
-                    .fontWeight(article.isViewed ? .regular : .bold)
-                    .multilineTextAlignment(.leading)
+                // Title - with accessibility support
+                Group {
+                    if let attributedTitle = titleAttributedString {
+                        // Remove fixed height constraint
+                        AccessibleAttributedText(attributedString: attributedTitle)
+                    } else {
+                        Text(article.title)
+                            .font(.headline)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                .fontWeight(article.isViewed ? .regular : .bold)
 
                 // Publication Date
                 Text(article.publishDate.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
                     .font(.footnote)
                     .foregroundColor(.secondary)
 
-                // Body - direct display without caching
-                Text(article.body)
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(3)
+                // Body - with accessibility support
+                Group {
+                    if let attributedBody = bodyAttributedString {
+                        // Remove fixed height constraint
+                        AccessibleAttributedText(attributedString: attributedBody)
+                    } else {
+                        Text(article.body)
+                            .font(.body)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(3)
+                    }
+                }
+                .foregroundColor(.secondary)
 
                 // Affected
                 if !article.affected.isEmpty {
@@ -574,6 +586,24 @@ struct NewsView: View {
                     )
                 }
             }
+            .onAppear {
+                loadRichTextContent()
+            }
+        }
+
+        private func loadRichTextContent() {
+            // Use the new markdown utilities to get attributed strings
+            titleAttributedString = getAttributedString(
+                for: .title,
+                from: article,
+                createIfMissing: true
+            )
+
+            bodyAttributedString = getAttributedString(
+                for: .body,
+                from: article,
+                createIfMissing: true
+            )
         }
     }
 
@@ -704,41 +734,14 @@ struct NewsView: View {
                 return
             }
 
-            // CRITICAL N-1 BUG FIX: Use totalArticles (complete dataset) instead of filteredArticles
-            // The n-1 bug occurs because filteredArticles may exclude some articles that should be navigable
-            // Find the article's index in the complete dataset
-            guard let totalIndex = totalArticles.firstIndex(where: { $0.id == article.id }) else {
-                // Fallback: if article not found in total, use filtered as before
-                let detailViewModel = NewsDetailViewModel(
-                    articles: filteredArticles,
-                    allArticles: totalArticles,
-                    currentIndex: index,
-                    initiallyExpandedSection: section,
-                    newsViewModel: newsViewModel,
-                    needsFullDataset: true
-                )
-                
-                let detailView = DetailViewWrapper(viewModel: detailViewModel)
-                let hostingController = UIHostingController(rootView: detailView)
-                hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
-
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let window = windowScene.windows.first,
-                   let rootViewController = window.rootViewController
-                {
-                    rootViewController.present(hostingController, animated: true)
-                }
-                return
-            }
-
-            // Create a view model with the COMPLETE dataset to prevent n-1 bug
+            // Create a view model with the current filtered articles
             let detailViewModel = NewsDetailViewModel(
-                articles: totalArticles, // ← CRITICAL FIX: Use complete dataset
+                articles: filteredArticles,
                 allArticles: totalArticles,
-                currentIndex: totalIndex, // ← Use index from complete dataset
+                currentIndex: index,
                 initiallyExpandedSection: section,
                 newsViewModel: newsViewModel,
-                needsFullDataset: false // ← Not needed since we already have complete dataset
+                needsFullDataset: true
             )
 
             // Present the detail view
@@ -756,9 +759,9 @@ struct NewsView: View {
     }
 
     private func ArticleRow(
-        article: ArticleListItem,
+        article: ArticleModel,
         editMode: Binding<EditMode>?,
-        selectedArticleIDs: Binding<Set<UUID>>
+        selectedArticleIDs: Binding<Set<ArticleModel.ID>>
     ) -> some View {
         ArticleRowContent(
             article: article,
@@ -774,13 +777,13 @@ struct NewsView: View {
     
     // PERFORMANCE OPTIMIZED: Enhanced ArticleRow with stable view identity
     private struct ArticleRowContent: View {
-        let article: ArticleListItem
+        let article: ArticleModel
         let editMode: Binding<EditMode>?
-        let selectedArticleIDs: Binding<Set<UUID>>
+        let selectedArticleIDs: Binding<Set<ArticleModel.ID>>
         let shouldUseIPadLayout: Bool
-        let openArticle: (ArticleListItem) -> Void
-        let toggleReadStatus: (ArticleListItem) -> Void
-        let loadMoreArticlesIfNeeded: (ArticleListItem) -> Void
+        let openArticle: (ArticleModel) -> Void
+        let toggleReadStatus: (ArticleModel) -> Void
+        let loadMoreArticlesIfNeeded: (ArticleModel) -> Void
         let viewModel: NewsViewModel
         
         @Environment(\.layoutDimensions) private var layoutDimensions
@@ -835,11 +838,7 @@ struct NewsView: View {
                 }
             }
             .onTapGesture {
-                // Use optimized article opening for better performance
-                ArticleOpeningOptimizer.shared.openArticleOptimized(
-                    article,
-                    from: viewModel
-                )
+                openArticle(article)
             }
             .onTapGesture(count: 2) {
                 toggleReadStatus(article)
@@ -862,16 +861,16 @@ struct NewsView: View {
             }
         }
         
-                // Helper views
-                private var headerRow: some View {
-                    HStack(spacing: 8) {
-                        if !article.topic.isEmpty {
-                            TopicPill(topic: article.topic)
-                        }
-                        Spacer()
-                        BookmarkButton(article: article, toggleBookmark: toggleBookmark)
-                    }
+        // Helper views
+        private var headerRow: some View {
+            HStack(spacing: 8) {
+                if let topic = article.topic, !topic.isEmpty {
+                    TopicPill(topic: topic)
                 }
+                Spacer()
+                BookmarkButton(article: article, toggleBookmark: toggleBookmark)
+            }
+        }
         
         private var titleView: some View {
             Text(article.title)
@@ -903,13 +902,27 @@ struct NewsView: View {
                 if !article.body.isEmpty {
                     // TEMPORARY TEST: Force use of SwiftUI Text to isolate the issue
                     // Bypassing NonSelectableRichTextView to test if UIKit component is the problem
-                    // Direct text display without caching - fixes stale content issue
-                    Text(article.body)
-                        .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
-                        .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.8))
-                        .lineLimit(nil)  // Allow full text display
-                        .multilineTextAlignment(.leading)
-                        .textSelection(.disabled)
+                    if let bodyBlobData = article.bodyBlob,
+                       let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+                           ofClass: NSAttributedString.self,
+                           from: bodyBlobData
+                       )
+                    {
+                        // Extract plain text from attributed string for testing
+                        Text(attributedString.string)
+                            .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
+                            .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.8))
+                            .lineLimit(nil)  // Allow full text display
+                            .multilineTextAlignment(.leading)
+                            .textSelection(.disabled)
+                    } else {
+                        Text(article.body)
+                            .font(UserDefaults.standard.textDisplaySettings.descriptionFont)
+                            .foregroundColor(UserDefaults.standard.textDisplaySettings.fontColor.color.opacity(0.8))
+                            .lineLimit(nil)  // Allow full text display
+                            .multilineTextAlignment(.leading)
+                            .textSelection(.disabled)
+                    }
                 }
             }
         }
@@ -948,10 +961,9 @@ struct NewsView: View {
         
         private var badgesView: some View {
             HStack {
-                // Convert String? to Int? for QualityBadges
                 QualityBadges(
-                    sourcesQuality: stringToInt(article.sourcesQuality),
-                    argumentQuality: stringToInt(article.argumentQuality),
+                    sourcesQuality: article.sourcesQuality,
+                    argumentQuality: article.argumentQuality,
                     sourceType: article.sourceType,
                     scrollToSection: .constant(nil),
                     onBadgeTap: { _ in
@@ -962,13 +974,7 @@ struct NewsView: View {
             .padding(.top, 5)
         }
         
-        // Helper function to convert String? to Int?
-        private func stringToInt(_ stringValue: String?) -> Int? {
-            guard let stringValue = stringValue else { return nil }
-            return Int(stringValue)
-        }
-        
-        private func toggleBookmark(_ article: ArticleListItem) {
+        private func toggleBookmark(_ article: ArticleModel) {
             Task {
                 await viewModel.toggleBookmark(for: article)
             }
@@ -977,8 +983,8 @@ struct NewsView: View {
     
     // Simplified bookmark button component
     private struct BookmarkButton: View {
-        let article: ArticleListItem
-        let toggleBookmark: (ArticleListItem) -> Void
+        let article: ArticleModel
+        let toggleBookmark: (ArticleModel) -> Void
         
         var body: some View {
             Button {
@@ -1135,7 +1141,7 @@ struct NewsView: View {
 
     // MARK: - Logic / Helpers
 
-    private func handleTapGesture(for article: ArticleListItem) {
+    private func handleTapGesture(for article: ArticleModel) {
         // If in Edit mode, toggle selection
         if editMode?.wrappedValue == .active {
             withAnimation {
@@ -1151,7 +1157,7 @@ struct NewsView: View {
         }
     }
 
-    private func handleLongPressGesture(for article: ArticleListItem) {
+    private func handleLongPressGesture(for article: ArticleModel) {
         // Long-press triggers Edit mode and selects the row
         withAnimation {
             if editMode?.wrappedValue == .inactive {
@@ -1266,25 +1272,15 @@ struct NewsView: View {
     // MARK: - Article Operations
     // Note: Article operation functions are implemented in NewsView+Extensions.swift
 
-    private func toggleReadStatus(_ article: ArticleListItem) {
+    private func toggleReadStatus(_ article: ArticleModel) {
         Task {
             await viewModel.toggleReadStatus(for: article)
         }
     }
 
-    private func toggleBookmark(_ article: ArticleListItem) {
+    private func toggleBookmark(_ article: ArticleModel) {
         Task {
             await viewModel.toggleBookmark(for: article)
-        }
-    }
-
-    // MARK: - Topic Loading
-    
-    /// Loads available topics from TopicCacheManager
-    private func loadAvailableTopics() async {
-        let topics = await viewModel.getAvailableTopics()
-        await MainActor.run {
-            availableTopics = ["All"] + topics
         }
     }
 

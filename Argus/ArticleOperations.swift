@@ -110,168 +110,6 @@ final class ArticleOperations {
         case listView       // For NewsView - apply memory-aware limits for performance
         case detailView     // For NewsDetailView - allow full dataset access for navigation
         case background     // For background operations - use conservative limits
-        case topicBar       // For topic bar generation - ensure all topics are represented
-        case topicDiscovery // For lightweight topic discovery - minimal data fetching
-    }
-
-    /// UNIFIED QUERY METHOD - Uses the same logic as working "x of y" statistics
-    /// Fetches articles with full dataset access (no artificial limits)
-    /// This is the unified query method that should be used for all topic-related operations
-    /// - Parameters:
-    ///   - topic: Optional topic to filter by
-    ///   - showUnreadOnly: Whether to show only unread articles
-    ///   - showBookmarkedOnly: Whether to show only bookmarked articles
-    ///   - qualityFilter: Quality filter to apply ("All", "Fair+", "Good+")
-    /// - Returns: Array of articles matching the criteria (no artificial limits)
-    @MainActor
-    func fetchArticlesUnified(
-        topic: String?,
-        showUnreadOnly: Bool,
-        showBookmarkedOnly: Bool,
-        qualityFilter: String = "All"
-    ) async throws -> [ArticleModel] {
-        return try await fetchArticles(
-            topic: topic,
-            showUnreadOnly: showUnreadOnly,
-            showBookmarkedOnly: showBookmarkedOnly,
-            qualityFilter: qualityFilter,
-            limit: nil, // No limit for unified queries
-            context: .detailView // Use detail view context to bypass memory limits
-        )
-    }
-
-    /// SORT ORDER CONSISTENCY FIX - Fetches articles with explicit sort order
-    /// This ensures the detail view uses the same sort order as the list view
-    /// - Parameters:
-    ///   - topic: Optional topic to filter by
-    ///   - showUnreadOnly: Whether to show only unread articles
-    ///   - showBookmarkedOnly: Whether to show only bookmarked articles
-    ///   - qualityFilter: Quality filter to apply ("All", "Fair+", "Good+")
-    ///   - sortOrder: Sort order to apply ("newest", "oldest", "bookmarked")
-    ///   - limit: Maximum number of articles to return
-    ///   - context: The context for fetching (listView, detailView, background)
-    /// - Returns: Array of articles matching the criteria with consistent sort order
-    @MainActor
-    func fetchArticlesWithSortOrder(
-        topic: String?,
-        showUnreadOnly: Bool,
-        showBookmarkedOnly: Bool,
-        qualityFilter: String = "All",
-        sortOrder: String = "newest",
-        limit: Int? = nil,
-        context: FetchContext = .detailView
-    ) async throws -> [ArticleModel] {
-        let startTime = CFAbsoluteTimeGetCurrent()
-        
-        let container = SwiftDataContainer.shared.container
-        let modelContext = container.mainContext
-        
-        // Build predicate based on filters
-        var predicates: [Predicate<ArticleModel>] = []
-        
-        // Topic filter
-        if let topic = topic, topic != "All" {
-            predicates.append(#Predicate<ArticleModel> { $0.topic == topic })
-        }
-        
-        // Unread filter
-        if showUnreadOnly {
-            predicates.append(#Predicate<ArticleModel> { !$0.isViewed })
-        }
-        
-        // Bookmark filter
-        if showBookmarkedOnly {
-            predicates.append(#Predicate<ArticleModel> { $0.isBookmarked })
-        }
-        
-        // Combine predicates
-        let combinedPredicate = predicates.isEmpty ? nil : predicates.reduce(predicates[0]) { result, predicate in
-            #Predicate<ArticleModel> { article in
-                result.evaluate(article) && predicate.evaluate(article)
-            }
-        }
-        
-        // Create fetch descriptor with sort order
-        var descriptor = FetchDescriptor<ArticleModel>()
-        descriptor.predicate = combinedPredicate
-        
-        // CRITICAL FIX: Apply the same sort order as the list view
-        // For "bookmarked" sort, we'll sort in memory after fetching to avoid SwiftData boolean sorting issues
-        switch sortOrder {
-        case "oldest":
-            descriptor.sortBy = [SortDescriptor(\.publishDate, order: .forward)]
-        case "bookmarked":
-            // For bookmarked sort, we'll sort in memory after fetching
-            // Just use publish date for now, we'll sort by bookmark status in memory
-            descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
-        default: // "newest"
-            descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
-        }
-        
-        // Apply context-aware limits
-        let effectiveLimit: Int
-        if let limit = limit {
-            effectiveLimit = limit
-        } else {
-            switch context {
-            case .detailView:
-                effectiveLimit = 0 // No limit for detail view
-            case .background:
-                effectiveLimit = 50
-            case .topicBar:
-                effectiveLimit = 200
-            case .topicDiscovery:
-                effectiveLimit = 500
-            case .listView:
-                let memoryPressure = getCurrentMemoryPressure()
-                if memoryPressure > 0.8 {
-                    effectiveLimit = 50
-                } else if memoryPressure > 0.6 {
-                    effectiveLimit = 75
-                } else {
-                    effectiveLimit = 100
-                }
-            }
-        }
-        
-        if effectiveLimit > 0 {
-            descriptor.fetchLimit = effectiveLimit
-        }
-        
-        do {
-            var articles = try modelContext.fetch(descriptor)
-            
-            _ = CFAbsoluteTimeGetCurrent() - startTime
-            
-            // Apply quality filter in memory
-            if qualityFilter != "All" {
-                let beforeCount = articles.count
-                articles = articles.filter { article in
-                    meetsQualityThreshold(article, filter: qualityFilter)
-                }
-                let afterCount = articles.count
-                AppLogger.database.debug("🔍 Quality filter: \(beforeCount) → \(afterCount) articles")
-            }
-            
-            // CRITICAL FIX: Apply in-memory sorting for "bookmarked" to match NewsViewModel behavior
-            if sortOrder == "bookmarked" {
-                articles = articles.sorted { a, b in
-                    if a.isBookmarked != b.isBookmarked {
-                        return a.isBookmarked // Bookmarked articles first
-                    }
-                    return a.publishDate > b.publishDate // Then by newest first
-                }
-            }
-            
-            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
-            
-            AppLogger.database.debug("⚡ Sort-aware fetch (\(sortOrder)): \(articles.count) articles in \(String(format: "%.3f", totalTime))s")
-            
-            return articles
-        } catch {
-            AppLogger.database.error("❌ Error fetching articles with sort order: \(error)")
-            throw error
-        }
     }
 
     /// Fetches articles with the specified filters using performance-optimized compound indexes
@@ -294,25 +132,62 @@ final class ArticleOperations {
     ) async throws -> [ArticleModel] {
         let startTime = CFAbsoluteTimeGetCurrent()
         
-        // Check cache first for list view context
-        if context == .listView {
-            let cacheKey = "\(topic ?? "All")-\(showUnreadOnly)-\(showBookmarkedOnly)-\(qualityFilter)"
-            if let cached = FetchResultCache.shared.getCachedResults(for: cacheKey) {
-                AppLogger.database.debug("✅ Cache hit for key: \(cacheKey)")
-                return cached
-            }
-        }
-        
         let container = SwiftDataContainer.shared.container
         let modelContext = container.mainContext
+
+        // PERFORMANCE OPTIMIZATION: Use compound indexes for optimal query performance
+        // The indexes we added: topic, isViewed, isBookmarked, publishDate
+        // Query planner will use these indexes in the order they appear in predicates
         
-        // Use optimized fetch descriptor from DatabaseOptimizations
-        var descriptor = DatabaseOptimizations.optimizedTopicFetchDescriptor(
-            topic: topic,
-            showUnreadOnly: showUnreadOnly,
-            showBookmarkedOnly: showBookmarkedOnly,
-            limit: limit
-        )
+        var descriptor = FetchDescriptor<ArticleModel>()
+        
+        // Build optimized predicate using indexed fields in optimal order
+        var predicate: Predicate<ArticleModel>?
+        
+        // OPTIMIZATION 1: Compound index usage - topic + isViewed (most selective first)
+        if let topic = topic, topic != "All" {
+            if showUnreadOnly {
+                // Uses compound index: topic + isViewed + publishDate
+                predicate = #Predicate<ArticleModel> { 
+                    $0.topic == topic && $0.isViewed == false
+                }
+            } else if showBookmarkedOnly {
+                // Uses compound index: topic + isBookmarked + publishDate  
+                predicate = #Predicate<ArticleModel> { 
+                    $0.topic == topic && $0.isBookmarked == true
+                }
+            } else {
+                // Uses index: topic + publishDate
+                predicate = #Predicate<ArticleModel> { 
+                    $0.topic == topic 
+                }
+            }
+        }
+        // OPTIMIZATION 2: Single field indexes for cross-topic queries
+        else if showUnreadOnly && showBookmarkedOnly {
+            // Uses compound index: isViewed + isBookmarked + publishDate
+            predicate = #Predicate<ArticleModel> { 
+                $0.isViewed == false && $0.isBookmarked == true
+            }
+        }
+        else if showUnreadOnly {
+            // Uses index: isViewed + publishDate
+            predicate = #Predicate<ArticleModel> { 
+                $0.isViewed == false
+            }
+        }
+        else if showBookmarkedOnly {
+            // Uses index: isBookmarked + publishDate
+            predicate = #Predicate<ArticleModel> { 
+                $0.isBookmarked == true
+            }
+        }
+        // OPTIMIZATION 3: No predicate for "All" - uses publishDate index for sorting only
+        
+        descriptor.predicate = predicate
+        
+        // PERFORMANCE: publishDate is indexed - sorting will be fast
+        descriptor.sortBy = [SortDescriptor(\.publishDate, order: .reverse)]
         
         // CONTEXT-AWARE OPTIMIZATION: Apply memory limits based on usage context
         let effectiveLimit: Int
@@ -330,18 +205,6 @@ final class ArticleOperations {
                 // For background operations, use conservative limits
                 effectiveLimit = 50
                 AppLogger.database.debug("🔄 Background context: Conservative limit of \(effectiveLimit)")
-                
-            case .topicBar:
-                // For topic bar generation, ensure all topics are represented
-                // Use a higher limit to capture topic diversity, but not unlimited to maintain performance
-                effectiveLimit = 200 // Higher limit to ensure topic diversity
-                AppLogger.database.debug("🏷️ Topic bar context: Higher limit of \(effectiveLimit) for topic diversity")
-                
-            case .topicDiscovery:
-                // For lightweight topic discovery, use statistical sampling
-                // This provides excellent topic coverage with minimal performance impact
-                effectiveLimit = 500 // Sample size for topic discovery
-                AppLogger.database.debug("🔍 Topic discovery context: Sample limit of \(effectiveLimit) for lightweight discovery")
                 
             case .listView:
                 // For list view, apply memory-aware limits for performance
@@ -383,20 +246,6 @@ final class ArticleOperations {
             }
 
             let totalTime = CFAbsoluteTimeGetCurrent() - startTime
-            
-            // Record query metrics
-            QueryPerformanceMonitor.shared.recordQuery(
-                name: "fetchArticles",
-                executionTime: totalTime
-            )
-            
-            // Cache results for list view context
-            if context == .listView && articles.count > 0 {
-                let cacheKey = "\(topic ?? "All")-\(showUnreadOnly)-\(showBookmarkedOnly)-\(qualityFilter)"
-                FetchResultCache.shared.cacheResults(articles, for: cacheKey)
-                AppLogger.database.debug("💾 Cached \(articles.count) results for key: \(cacheKey)")
-            }
-            
             AppLogger.database.debug("⚡ Optimized fetch: \(articles.count) articles in \(String(format: "%.3f", totalTime))s (DB: \(String(format: "%.3f", fetchTime))s, limit: \(effectiveLimit))")
             
             return articles
@@ -491,80 +340,50 @@ final class ArticleOperations {
         return await getArticleModelWithContext(byId: id)
     }
 
-    /// Fetches an article model using a background context to avoid blocking the main thread
-    /// This is the PRIMARY method to use for article fetching in performance-critical paths
-    /// - Parameter id: The unique identifier of the article
-    /// - Returns: The ArticleModel if found, nil otherwise
-    /// Note: In Swift 6, PersistentModels are not Sendable, so we need MainActor isolation
-    @MainActor
-    func getArticleModelInBackground(byId id: UUID) async -> ArticleModel? {
-        // Swift 6 compliant approach: Both methods are now MainActor isolated
-        // This avoids the sendable issue when returning PersistentModel
-        return await getArticleModelWithContext(byId: id)
-    }
-
     /// Gets the original ArticleModel with SwiftData context for direct persistence operations
     /// - Parameter id: The unique identifier of the article
     /// - Returns: The ArticleModel with a valid context if found, nil otherwise
     @MainActor
     func getArticleModelWithContext(byId id: UUID) async -> ArticleModel? {
-        AppLogger.database.debug("🔍 Getting ArticleModel with context for ID: \(id)")
-        
-        // Directly fetch from main context to avoid sendable issues
+        // Access the container directly since it's already a non-optional
         let container = SwiftDataContainer.shared.container
-        let mainContext = container.mainContext
-        let descriptor = FetchDescriptor<ArticleModel>(
-            predicate: #Predicate<ArticleModel> { $0.id == id }
-        )
-        
+
+        AppLogger.database.debug("🔍 Getting ArticleModel with context for ID: \(id)")
+        AppLogger.database.debug("🔍 Container: \(String(describing: container))")
+
         do {
-            let results = try mainContext.fetch(descriptor)
+            // First try with main context
+            let descriptor = FetchDescriptor<ArticleModel>(
+                predicate: #Predicate<ArticleModel> { $0.id == id }
+            )
+
+            // Get article from main context
+            let context = container.mainContext
+            let results = try context.fetch(descriptor)
+
             if let model = results.first {
-                AppLogger.database.debug("✅ Retrieved ArticleModel with context for ID: \(id)")
-                return model
-            } else {
-                AppLogger.database.debug("⚠️ Article not found for ID: \(id)")
-                return nil
+                if model.modelContext != nil {
+                    AppLogger.database.debug("✅ Found ArticleModel with context for ID: \(id)")
+                    return model
+                } else {
+                    AppLogger.database.warning("⚠️ Found ArticleModel but it has no context")
+                }
+            }
+
+            // If not found or no context, try with a fresh context
+            let newContext = ModelContext(container)
+            let newResults = try newContext.fetch(descriptor)
+
+            if let newModel = newResults.first {
+                AppLogger.database.debug("✅ Found ArticleModel with fresh context for ID: \(id)")
+                return newModel
             }
         } catch {
             AppLogger.database.error("❌ Error fetching ArticleModel: \(error)")
-            return nil
         }
-    }
-    
-    /// PERFORMANCE OPTIMIZATION: Batch fetch multiple ArticleModels efficiently
-    /// - Parameter ids: Array of UUIDs to fetch
-    /// - Returns: Array of ArticleModels found (preserves order where possible)
-    @MainActor
-    func fetchArticleModelsBatch(for ids: [UUID]) async -> [ArticleModel] {
-        guard !ids.isEmpty else { return [] }
-        
-        AppLogger.database.debug("🔍 Batch fetching \(ids.count) ArticleModels")
-        
-        let container = SwiftDataContainer.shared.container
-        let mainContext = container.mainContext
-        
-        // Use IN predicate for efficient batch fetch
-        let descriptor = FetchDescriptor<ArticleModel>(
-            predicate: #Predicate<ArticleModel> { article in
-                ids.contains(article.id)
-            }
-        )
-        
-        do {
-            let results = try mainContext.fetch(descriptor)
-            AppLogger.database.debug("✅ Batch retrieved \(results.count) ArticleModels from \(ids.count) requested")
-            
-            // Sort results to match the input order where possible
-            let sortedResults = ids.compactMap { targetId in
-                results.first { $0.id == targetId }
-            }
-            
-            return sortedResults
-        } catch {
-            AppLogger.database.error("❌ Error batch fetching ArticleModels: \(error)")
-            return []
-        }
+
+        AppLogger.database.error("❌ Could not find ArticleModel with context for ID: \(id)")
+        return nil
     }
 
     /// Gets the ArticleModel with context, previously handled by ArticleModelAdapter
@@ -818,7 +637,7 @@ final class ArticleOperations {
         _ articles: [ArticleModel],
         by groupingStyle: String,
         sortOrder: String
-    ) -> [(key: String, articles: [ArticleModel])] {
+    ) async -> [(key: String, articles: [ArticleModel])] {
         // First, sort the articles according to the sort order
         let sortedArticles = sortArticles(articles, by: sortOrder)
 
@@ -1091,8 +910,9 @@ final class ArticleOperations {
                 }
 
                 // Always verify the blob was stored properly
-                // Use MainActor.run to avoid sendable issues with Task
-                await verifyBlobStorage(field: field, articleId: articleId)
+                Task {
+                    await verifyBlobStorage(field: field, articleId: articleId)
+                }
             } catch {
                 AppLogger.database.error("❌ BLOB CREATION ERROR: \(section) - \(error.localizedDescription)")
             }
@@ -1110,47 +930,46 @@ final class ArticleOperations {
     /// Adds comprehensive verification for blob storage
     /// - Parameters:
     ///   - field: The field to verify
-    ///   - articleId: The article ID to verify for (using UUID instead of ArticleModel for Swift 6 sendable compliance)
-    @MainActor 
+    ///   - articleId: The article ID to verify for
+    @MainActor // Entire function must be MainActor-isolated for Swift 6 sendability rules
     func verifyBlobStorage(field: RichTextField, articleId: UUID) async {
-        let fieldName = SectionNaming.nameForField(field)
-        
-        // Perform verification using only the article ID to avoid PersistentModel sendable issues
-        do {
-            // Get container directly
-            let container = SwiftDataContainer.shared.container
-            AppLogger.database.debug("🔍 VERIFICATION: Using container: \(String(describing: container))")
-            
-            // Create fetch descriptor for the specific article
-            let descriptor = FetchDescriptor<ArticleModel>(
-                predicate: #Predicate<ArticleModel> { $0.id == articleId }
-            )
-            
-            let results = try container.mainContext.fetch(descriptor)
-            guard let article = results.first else {
+        // Already MainActor-isolated so no need for nested @MainActor annotation
+        func verifyWithArticle(_ article: ArticleModel?) {
+            guard let article = article else {
                 AppLogger.database.error("⚠️ VERIFICATION FAILED: Could not retrieve article model for ID: \(articleId)")
                 return
             }
-            
+
+            let fieldName = SectionNaming.nameForField(field)
+
+            // Check container and context
+            AppLogger.database.debug("🔍 VERIFICATION: Using container: \(String(describing: SwiftDataContainer.shared.container))")
             AppLogger.database.debug("🔍 VERIFICATION: Article has context: \(article.modelContext != nil)")
 
-            // Extract blob data to work with sendable types only
-            guard let blob = field.getBlob(from: article), !blob.isEmpty else {
-                AppLogger.database.warning("⚠️ VERIFICATION: \(fieldName) blob does not exist in ArticleModel")
-                return
-            }
-            
-            AppLogger.database.debug("✅ VERIFICATION: \(fieldName) blob exists in ArticleModel with size: \(blob.count) bytes")
+            // Check if blob exists in ArticleModel
+            let blob = field.getBlob(from: article)
 
-            // Verify content using extracted blob data (which is sendable)
-            let attributedString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob)
-            if let attributedString = attributedString {
-                AppLogger.database.debug("✅ VERIFICATION: \(fieldName) blob contains valid attributed string with length: \(attributedString.length)")
+            if let blob = blob, !blob.isEmpty {
+                AppLogger.database.debug("✅ VERIFICATION: \(fieldName) blob exists in ArticleModel with size: \(blob.count) bytes")
+
+                // Try to unarchive to verify content
+                do {
+                    if let attributedString = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSAttributedString.self, from: blob) {
+                        AppLogger.database.debug("✅ VERIFICATION: \(fieldName) blob contains valid attributed string with length: \(attributedString.length)")
+                    } else {
+                        AppLogger.database.warning("⚠️ VERIFICATION: \(fieldName) blob unarchived to nil")
+                    }
+                } catch {
+                    AppLogger.database.error("❌ VERIFICATION: \(fieldName) blob unarchive error: \(error)")
+                }
             } else {
-                AppLogger.database.warning("⚠️ VERIFICATION: \(fieldName) blob unarchived to nil")
+                AppLogger.database.warning("⚠️ VERIFICATION: \(fieldName) blob does not exist in ArticleModel")
             }
-        } catch {
-            AppLogger.database.error("❌ VERIFICATION: \(fieldName) verification error: \(error)")
         }
+
+        // Get article with context to verify
+        let model = await getArticleModelWithContext(byId: articleId)
+        // No need for await since verifyWithArticle is not async
+        verifyWithArticle(model)
     }
 }

@@ -5,7 +5,7 @@ import SwiftUI
 extension NewsView {
     // MARK: - Pagination
 
-    func loadMoreArticlesIfNeeded(currentItem: ArticleListItem) {
+    func loadMoreArticlesIfNeeded(currentItem: ArticleModel) {
         guard let lastItem = viewModel.filteredArticles.last else {
             return
         }
@@ -20,7 +20,7 @@ extension NewsView {
 
     // MARK: - Selection Actions
 
-    func performActionOnSelection(_ action: @escaping (ArticleListItem) -> Void) {
+    func performActionOnSelection(_ action: @escaping (ArticleModel) -> Void) {
         let selectedArticles = viewModel.selectedArticleIds
 
         // Create an array of the selected articles
@@ -34,90 +34,27 @@ extension NewsView {
 
     // MARK: - Article Opening
 
-    func openArticle(_ article: ArticleListItem) {
-        // CRITICAL N-1 BUG FIX: Use complete dataset instead of filtered articles
-        // The n-1 bug occurs when we only pass filtered articles to the detail view
-        // but the user expects to navigate through ALL articles in the topic
-        
-        // STEP 1: Get the complete dataset for the current topic to prevent n-1 bug
-        Task {
-            // Verify the article exists in the filtered view
-            guard viewModel.filteredArticles.contains(where: { $0.id == article.id }) else {
-                AppLogger.database.error("Article not found in filtered articles: \(article.id)")
-                return
-            }
-            
-            AppLogger.database.debug("Opening article with ID: \(article.id) from filtered view")
-            
-            // Find the article's index in current filtered view for placeholder
-            guard let currentIndex = viewModel.filteredArticles.firstIndex(where: { $0.id == article.id }) else {
-                AppLogger.database.error("Article not found in filtered articles: \(article.id)")
-                return
-            }
-            
-            await MainActor.run {
-                // Create placeholder models from filtered articles initially
-                let placeholderArticles = viewModel.filteredArticles.map { item in
-            ArticleModel(
-                id: item.id,
-                jsonURL: "",
-                url: "",
-                title: item.title,
-                body: item.body,
-                domain: item.domain ?? "",
-                articleTitle: item.title,
-                affected: item.affected,
-                publishDate: item.publishDate,
-                addedDate: Date(),
-                topic: item.topic,
-                isViewed: item.isViewed,
-                isBookmarked: item.isBookmarked,
-                sourcesQuality: nil,
-                argumentQuality: nil,
-                sourceType: item.sourceType,
-                sourceAnalysis: nil,
-                quality: Int(item.qualityScore),
-                // CRITICAL: Use body as initial summary so content is visible immediately
-                summary: item.body, // Show body content as summary initially
-                criticalAnalysis: "Loading full analysis...",
-                logicalFallacies: nil,
-                relationToTopic: nil,
-                additionalInsights: nil,
-                actionRecommendations: nil,
-                talkingPoints: nil,
-                eli5: nil,
-                engineStats: nil,
-                engineModel: nil,
-                engineElapsedTime: nil,
-                engineRawStats: nil,
-                engineSystemInfo: nil,
-                databaseId: nil,
-                relatedArticles: nil,
-                titleBlob: nil,
-                bodyBlob: nil,
-                summaryBlob: nil,
-                criticalAnalysisBlob: nil,
-                logicalFallaciesBlob: nil,
-                sourceAnalysisBlob: nil,
-                relationToTopicBlob: nil,
-                additionalInsightsBlob: nil,
-                actionRecommendationsBlob: nil,
-                talkingPointsBlob: nil,
-                eli5Blob: nil,
-                clusterSummary: nil,
-                clusterSummaryBlob: nil,
-                entities: []
-            )
+    func openArticle(_ article: ArticleModel) {
+        // STEP 1: Take a snapshot of the current filtered articles immediately
+        // This prevents issues if filters are applied during async operations
+        let articlesSnapshot = viewModel.filteredArticles
+
+        // STEP 2: Find the index in our snapshot (which won't change during async operations)
+        guard let index = articlesSnapshot.firstIndex(where: { $0.id == article.id }) else {
+            AppLogger.database.error("Article not found in filtered articles: \(article.id)")
+            return
         }
-        
-        // Create view model with placeholder models (instant!)
+
+        AppLogger.database.debug("Opening article with ID: \(article.id) at index \(index) of \(articlesSnapshot.count) articles")
+
+        // STEP 3: Create view model with our snapshot and pass NewsViewModel for rich text cache access
         let detailViewModel = NewsDetailViewModel(
-            articles: placeholderArticles,
-            allArticles: placeholderArticles,
-            currentIndex: currentIndex,
+            articles: articlesSnapshot,
+            allArticles: viewModel.allArticles,
+            currentIndex: index,
             initiallyExpandedSection: "Summary",
             newsViewModel: viewModel,
-            needsFullDataset: false
+            needsFullDataset: true
         )
 
         // Create the detail view wrapper
@@ -132,7 +69,7 @@ extension NewsView {
 
         let detailView = DetailViewWrapper(viewModel: detailViewModel)
 
-        // Present immediately - UI should appear instantly
+        // STEP 4: Present immediately before doing any async work
         let hostingController = UIHostingController(rootView: detailView)
         hostingController.modalPresentationStyle = .fullScreen
 
@@ -143,46 +80,24 @@ extension NewsView {
             AppLogger.database.debug("Presenting NewsDetailView for article: \(article.id)")
             rootViewController.present(hostingController, animated: true)
 
-            // Mark as read in background (non-blocking)
-            Task.detached(priority: .background) {
-                await self.viewModel.openArticle(article)
-            }
-            
-            // SIMPLE APPROACH: Load full article and update count with proper handling
+            // STEP 5: After presentation, do the article update and blob generation in the background
             Task {
-                // 1. Fetch the full model for the current article
-                if let fullModel = await viewModel.fetchSwiftDataModel(for: article.id) {
+                // Get article with context
+                let articleOperations = ArticleOperations()
+                if let articleWithContext = await articleOperations.getArticleModelWithContext(byId: article.id) {
+                    // Mark as read
+                    await viewModel.openArticle(articleWithContext)
+
+                    // Generate blobs in the background after view is already shown
                     await MainActor.run {
-                        detailViewModel.currentArticle = fullModel
-                        if currentIndex < detailViewModel.articles.count {
-                            detailViewModel.articles[currentIndex] = fullModel
-                        }
-                        detailViewModel.performDeferredInitialization()
+                        _ = articleOperations.getAttributedContent(for: .title, from: articleWithContext, createIfMissing: true)
+                        _ = articleOperations.getAttributedContent(for: .body, from: articleWithContext, createIfMissing: true)
+                        AppLogger.database.debug("Title and body blobs generated for article: \(article.id)")
                     }
-                }
-                
-                // 2. PERFORMANCE FIX: Query complete dataset in background to avoid UI lockup
-                Task(priority: .background) {
-                    let completeDataset = await viewModel.getCompleteDatasetForNavigation(currentArticleId: article.id)
-                    
-                    // 3. Check if current article is visible in complete dataset
-                    let currentArticleVisible = completeDataset.contains { $0.id == article.id }
-                    
-                    // 4. Calculate correct total: if current article filtered out, add +1
-                    let actualTotal = currentArticleVisible ? completeDataset.count : completeDataset.count + 1
-                    
-                    await MainActor.run {
-                        // Update the view model with correct count via a simple method
-                        detailViewModel.updateNavigationCount(actualTotal)
-                    }
-                    
-                    AppLogger.database.debug("✅ PERFORMANCE FIX: Updated count to \(actualTotal) in background (current visible: \(currentArticleVisible))")
                 }
             }
         } else {
             AppLogger.database.error("Could not get root view controller to present article: \(article.id)")
-        }
-            }
         }
     }
 

@@ -1,0 +1,347 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -scheme Argus -destination "platform=iOS Simulator,id=DD439625-C73D-4D1A-9E8F-E99ADEE93CA0" build
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  SwiftyMarkdown: https://github.com/SimonFairbairn/SwiftyMarkdown.git @ 1.2.4
+
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:iOS Simulator, arch:arm64, id:DD439625-C73D-4D1A-9E8F-E99ADEE93CA0, OS:18.2, name:iPhone 16 Pro }
+{ platform:iOS Simulator, arch:x86_64, id:DD439625-C73D-4D1A-9E8F-E99ADEE93CA0, OS:18.2, name:iPhone 16 Pro }
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (3 targets)
+    Target 'Argus' in project 'Argus'
+        ➜ Explicit dependency on target 'SwiftyMarkdown' in project 'SwiftyMarkdown'
+    Target 'SwiftyMarkdown' in project 'SwiftyMarkdown'
+        ➜ Explicit dependency on target 'SwiftyMarkdown' in project 'SwiftyMarkdown'
+    Target 'SwiftyMarkdown' in project 'SwiftyMarkdown' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/jandrews/devel/swift/Argus-app/Argus/Preview Content/Preview Assets.xcassets /Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: dd5d533a25a3b373f3cc49c7549b5a44
+Build description path: /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/XCBuildData/dd5d533a25a3b373f3cc49c7549b5a44.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk /Users/jandrews/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.0-23A339-26257891a6c027eb51374368541b8346.sdkstatcache
+    cd /Users/jandrews/devel/swift/Argus-app/Argus.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk -o /Users/jandrews/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.0-23A339-26257891a6c027eb51374368541b8346.sdkstatcache
+
+RegisterExecutionPolicyException /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/SwiftyMarkdown.o (in target 'SwiftyMarkdown' from project 'SwiftyMarkdown')
+    cd /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/SourcePackages/checkouts/SwiftyMarkdown
+    builtin-RegisterExecutionPolicyException /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/SwiftyMarkdown.o
+
+SwiftDriver Argus normal arm64 com.apple.xcode.tools.swift.compiler (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name Argus -Onone -enforce-exclusivity\=checked @/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/Argus.SwiftFileList -DDEBUG -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk -target arm64-apple-ios18.2-simulator -g -module-cache-path /Users/jandrews/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -Xfrontend -serialize-debugging-options -profile-coverage-mapping -profile-generate -enable-testing -index-store-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator -F /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/PackageFrameworks -F /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64 -c -j16 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/jandrews/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.0-23A339-26257891a6c027eb51374368541b8346.sdkstatcache -output-file-map /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/Argus-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/jandrews/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -sdk-module-cache-path /Users/jandrews/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/Argus.swiftmodule -validate-clang-modules-once -clang-build-session-file /Users/jandrews/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/Argus_const_extract_protocols.json -Xcc -iquote -Xcc /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus-generated-files.hmap -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus-own-target-headers.hmap -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus-d16f32cc8be5b21acd5f474e97425566-VFS-iphonesimulator/all-product-headers.yaml -Xcc -iquote -Xcc /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus-project-headers.hmap -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/include -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/DerivedSources-normal/arm64 -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/DerivedSources/arm64 -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/Argus-Swift.h -working-directory /Users/jandrews/devel/swift/Argus-app -experimental-emit-module-separately -disable-cmo
+
+CompileAssetCatalogVariant thinned /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app /Users/jandrews/devel/swift/Argus-app/Argus/Preview\ Content/Preview\ Assets.xcassets /Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    /Applications/Xcode.app/Contents/Developer/usr/bin/actool /Users/jandrews/devel/swift/Argus-app/Argus/Preview\ Content/Preview\ Assets.xcassets /Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets --compile /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_output/thinned --output-format human-readable-text --notices --warnings --export-dependency-info /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_dependencies_thinned --output-partial-info-plist /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_generated_info.plist_thinned --app-icon AppIcon --accent-color AccentColor --compress-pngs --enable-on-demand-resources YES --filter-for-thinning-device-configuration iPhone17,1 --filter-for-device-os-version 18.2 --development-region en --target-device iphone --target-device ipad --minimum-deployment-target 18.2 --platform iphonesimulator
+objc[65808]: Class _NoAnimationDelegate is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_23A343/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Frameworks/SwiftUICore.framework/SwiftUICore (0x143f38130) and /Library/Developer/CoreSimulator/Volumes/iOS_23A343/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore (0x1410a1198). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+/* com.apple.actool.document.notices */
+/Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets:./AppIcon.appiconset/[][iphone][57x57][][][1x][][][][]: notice: 57x57 app icons only apply to iPhone apps targeting releases of iOS prior to 7.0
+/Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets:./AppIcon.appiconset/[][iphone][57x57][][][2x][][][][]: notice: 57x57@2x app icons only apply to iPhone apps targeting releases of iOS prior to 7.0
+/Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets:./AppIcon.appiconset/[][ipad][50x50][][][1x][][][][]: notice: 50x50 iPad spotlight icons only apply to iPad apps targeting releases of iOS prior to 7.0
+/Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets:./AppIcon.appiconset/[][ipad][50x50][][][2x][][][][]: notice: 50x50 iPad spotlight icons only apply to iPad apps targeting releases of iOS prior to 7.0
+/Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets:./AppIcon.appiconset/[][ipad][72x72][][][1x][][][][]: notice: 72x72 app icons only apply to iPad apps targeting releases of iOS prior to 7.0
+/Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets:./AppIcon.appiconset/[][ipad][72x72][][][2x][][][][]: notice: 72x72@2x app icons only apply to iPad apps targeting releases of iOS prior to 7.0
+/Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets:./AppIcon.appiconset/[][ipad][76x76][][][1x][][][][]: notice: 76x76@1x app icons only apply to iPad apps targeting releases of iOS prior to 10.0.
+/* com.apple.actool.compilation-results */
+/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_generated_info.plist_thinned
+/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_output/thinned/AppIcon60x60@2x.png
+/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_output/thinned/AppIcon76x76@2x~ipad.png
+/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_output/thinned/Assets.car
+
+
+ValidateDevelopmentAssets /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-validate-development-assets --validate YES_ERROR /Users/jandrews/devel/swift/Argus-app/Argus/Preview\ Content
+
+Ld /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/__preview.dylib normal (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios18.2-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk -O0 -L/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator -F/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/PackageFrameworks -F/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator -install_name @rpath/Argus.debug.dylib -dead_strip -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -debug_variant -Xlinker -dependency_info -Xlinker /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/Argus_dependency_info.dat -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus.app-Simulated.xcent -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __ents_der -Xlinker /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus.app-Simulated.xcent.der -Xlinker -no_adhoc_codesign -o /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/__preview.dylib
+
+CpResource /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/com.andrews.Jeremy\ 2025-01-08\ 11:31.42.707.xcappdata /Users/jandrews/devel/swift/Argus-app/Argus/com.andrews.Jeremy\ 2025-01-08\ 11:31.42.707.xcappdata (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks /Users/jandrews/devel/swift/Argus-app/Argus/com.andrews.Jeremy\ 2025-01-08\ 11:31.42.707.xcappdata /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app
+
+CpResource /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/com.andrews.Argus.Argus\ 2025-04-22\ 07:02.14.994.xcappdata /Users/jandrews/devel/swift/Argus-app/Argus/com.andrews.Argus.Argus\ 2025-04-22\ 07:02.14.994.xcappdata (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks /Users/jandrews/devel/swift/Argus-app/Argus/com.andrews.Argus.Argus\ 2025-04-22\ 07:02.14.994.xcappdata /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app
+
+CpResource /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/com.andrews.Argus.Argus\ 2025-04-22\ 07:09.43.765.xcappdata /Users/jandrews/devel/swift/Argus-app/Argus/com.andrews.Argus.Argus\ 2025-04-22\ 07:09.43.765.xcappdata (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks /Users/jandrews/devel/swift/Argus-app/Argus/com.andrews.Argus.Argus\ 2025-04-22\ 07:09.43.765.xcappdata /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app
+
+SwiftCompile normal arm64 Compiling\ ArticleModels.swift,\ ArticleOperations.swift,\ ArticleService.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleModels.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleOperations.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleService.swift (in target 'Argus' from project 'Argus')
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ArticleModels.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ArticleOperations.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ArticleService.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ ArrayExtensions.swift,\ ArticleDataModels.swift,\ ArticleListModels.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArrayExtensions.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleDataModels.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleListModels.swift (in target 'Argus' from project 'Argus')
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ArrayExtensions.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ArticleDataModels.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ArticleListModels.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ DatabaseCoordinator.swift,\ EnhancedRelatedArticlesTest.swift /Users/jandrews/devel/swift/Argus-app/Argus/DatabaseCoordinator.swift /Users/jandrews/devel/swift/Argus-app/Argus/EnhancedRelatedArticlesTest.swift (in target 'Argus' from project 'Argus')
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/DatabaseCoordinator.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/EnhancedRelatedArticlesTest.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ APIClient.swift,\ AppDelegate.swift,\ ArgusApp.swift /Users/jandrews/devel/swift/Argus-app/Argus/APIClient.swift /Users/jandrews/devel/swift/Argus-app/Argus/AppDelegate.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArgusApp.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/APIClient.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/AppDelegate.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ArgusApp.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ MarkdownUtilities.swift,\ ModernizationLogger.swift /Users/jandrews/devel/swift/Argus-app/Argus/MarkdownUtilities.swift /Users/jandrews/devel/swift/Argus-app/Argus/ModernizationLogger.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/MarkdownUtilities.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ModernizationLogger.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ GlobalSyncCoordinator.swift,\ Logger.swift /Users/jandrews/devel/swift/Argus-app/Argus/GlobalSyncCoordinator.swift /Users/jandrews/devel/swift/Argus-app/Argus/Logger.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/GlobalSyncCoordinator.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/Logger.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ NotificationUtils.swift,\ PreloadManager.swift /Users/jandrews/devel/swift/Argus-app/Argus/NotificationUtils.swift /Users/jandrews/devel/swift/Argus-app/Argus/PreloadManager.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/NotificationUtils.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/PreloadManager.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ ProcessingQueueManager.swift,\ QualityBadges.swift /Users/jandrews/devel/swift/Argus-app/Argus/ProcessingQueueManager.swift /Users/jandrews/devel/swift/Argus-app/Argus/QualityBadges.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ProcessingQueueManager.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/QualityBadges.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ NavigationTypes.swift,\ NewsDetailView.swift /Users/jandrews/devel/swift/Argus-app/Argus/NavigationTypes.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsDetailView.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/NavigationTypes.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/NewsDetailView.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ RelatedArticlesComponents.swift,\ SettingsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/RelatedArticlesComponents.swift /Users/jandrews/devel/swift/Argus-app/Argus/SettingsView.swift (in target 'Argus' from project 'Argus')
+Failed frontend command:
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -c /Users/jandrews/devel/swift/Argus-app/Argus/APIClient.swift /Users/jandrews/devel/swift/Argus-app/Argus/AppDelegate.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArgusApp.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArrayExtensions.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleDataModels.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleListModels.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleModels.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleOperations.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleService.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleServiceProtocol.swift /Users/jandrews/devel/swift/Argus-app/Argus/AutoSyncControlsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/AutoSyncCoordinator.swift /Users/jandrews/devel/swift/Argus-app/Argus/BackgroundContextManager.swift /Users/jandrews/devel/swift/Argus-app/Argus/BackgroundTaskManager.swift /Users/jandrews/devel/swift/Argus-app/Argus/CloudKitHealthMonitor.swift /Users/jandrews/devel/swift/Argus-app/Argus/CloudKitRequestCoordinator.swift /Users/jandrews/devel/swift/Argus-app/Argus/CommonUtilities.swift /Users/jandrews/devel/swift/Argus-app/Argus/ContentView.swift /Users/jandrews/devel/swift/Argus-app/Argus/DatabaseCoordinator.swift /Users/jandrews/devel/swift/Argus-app/Argus/EnhancedRelatedArticlesTest.swift /Users/jandrews/devel/swift/Argus-app/Argus/GlobalSyncCoordinator.swift /Users/jandrews/devel/swift/Argus-app/Argus/Logger.swift /Users/jandrews/devel/swift/Argus-app/Argus/MarkdownUtilities.swift /Users/jandrews/devel/swift/Argus-app/Argus/ModernizationLogger.swift /Users/jandrews/devel/swift/Argus-app/Argus/NavigationTypes.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsDetailView.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsDetailViewModel.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsView+Extensions.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsViewModel.swift /Users/jandrews/devel/swift/Argus-app/Argus/NotificationUtils.swift /Users/jandrews/devel/swift/Argus-app/Argus/PreloadManager.swift /Users/jandrews/devel/swift/Argus-app/Argus/ProcessingQueueManager.swift /Users/jandrews/devel/swift/Argus-app/Argus/QualityBadges.swift -primary-file /Users/jandrews/devel/swift/Argus-app/Argus/RelatedArticlesComponents.swift -primary-file /Users/jandrews/devel/swift/Argus-app/Argus/SettingsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/SubscriptionsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/SwiftDataContainer.swift /Users/jandrews/devel/swift/Argus-app/Argus/SyncStatisticsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/SyncStatus.swift /Users/jandrews/devel/swift/Argus-app/Argus/SyncStatusIndicator.swift /Users/jandrews/devel/swift/Argus-app/Argus/TabNavigationState.swift /Users/jandrews/devel/swift/Argus-app/Argus/TestArticleService.swift /Users/jandrews/devel/swift/Argus-app/Argus/TopicDiagnosticView.swift /Users/jandrews/devel/swift/Argus-app/Argus/UIComponents.swift /Users/jandrews/devel/swift/Argus-app/Argus/UserDefaultsExtensions.swift /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/DerivedSources/GeneratedAssetSymbols.swift -emit-dependencies-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/RelatedArticlesComponents.d -emit-const-values-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/RelatedArticlesComponents.swiftconstvalues -emit-reference-dependencies-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/RelatedArticlesComponents.swiftdeps -serialize-diagnostics-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/RelatedArticlesComponents.dia -emit-dependencies-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/SettingsView.d -emit-const-values-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/SettingsView.swiftconstvalues -emit-reference-dependencies-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/SettingsView.swiftdeps -serialize-diagnostics-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/SettingsView.dia -emit-localized-strings -emit-localized-strings-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64 -target arm64-apple-ios18.2-simulator -module-can-import-version DeveloperToolsSupport 23.0.4 23.0.4 -module-can-import-version SwiftUI 7.0.84.1 7.0.84 -module-can-import-version UIKit 9088.1.113 9088.1.113 -disable-cross-import-overlay-search -swift-module-cross-import SwiftData /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk/System/Library/Frameworks/SwiftData.framework/Modules/SwiftData.swiftcrossimport/CoreData.swiftoverlay -swift-module-cross-import SwiftData /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk/System/Library/Frameworks/SwiftData.framework/Modules/SwiftData.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import WebKit /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Cryptexes/OS/System/Library/Frameworks/WebKit.framework/Modules/WebKit.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import WebKit /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk/System/Library/Frameworks/WebKit.framework/Modules/WebKit.swiftcrossimport/SwiftUI.swiftoverlay -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libFoundationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#FoundationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libObservationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#ObservationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libPreviewsMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#PreviewsMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftDataMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftDataMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftUIMacros -disable-implicit-swift-modules -Xcc -fno-implicit-modules -Xcc -fno-implicit-module-maps -explicit-swift-module-map-file /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/Argus-dependencies-1.json -Xllvm -aarch64-use-tbi -enable-objc-interop -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.0.sdk -I /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator -F /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/PackageFrameworks -F /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator -no-color-diagnostics -Xcc -fno-color-diagnostics -enable-testing -g -debug-info-format\=dwarf -dwarf-version\=5 -module-cache-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -profile-generate -profile-coverage-mapping -swift-version 5 -enforce-exclusivity\=checked -Onone -D DEBUG -serialize-debugging-options -const-gather-protocols-file /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/Argus_const_extract_protocols.json -enable-experimental-feature DebugDescriptionMacro -enable-bare-slash-regex -empty-abi-descriptor -validate-clang-modules-once -clang-build-session-file /Users/jandrews/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -working-directory -Xcc /Users/jandrews/devel/swift/Argus-app -enable-anonymous-context-mangled-names -file-compilation-dir /Users/jandrews/devel/swift/Argus-app -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -Xcc -ivfsstatcache -Xcc /Users/jandrews/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.0-23A339-26257891a6c027eb51374368541b8346.sdkstatcache -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/swift-overrides.hmap -Xcc -iquote -Xcc /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus-generated-files.hmap -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus-own-target-headers.hmap -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus-d16f32cc8be5b21acd5f474e97425566-VFS-iphonesimulator/all-product-headers.yaml -Xcc -iquote -Xcc /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Argus-project-headers.hmap -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/include -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/DerivedSources-normal/arm64 -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/DerivedSources/arm64 -Xcc -I/Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/DerivedSources -Xcc -DDEBUG\=1 -no-auto-bridging-header-chaining -module-name Argus -frontend-parseable-output -disable-clang-spi -target-sdk-version 26.0 -target-sdk-name iphonesimulator26.0 -clang-target arm64-apple-ios26.0-simulator -in-process-plugin-server-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib -o /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/RelatedArticlesComponents.o -o /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/SettingsView.o -index-unit-output-path /Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/RelatedArticlesComponents.o -index-unit-output-path /Argus.build/Debug-iphonesimulator/Argus.build/Objects-normal/arm64/SettingsView.o -index-store-path /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Index.noindex/DataStore -index-system-modules
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/RelatedArticlesComponents.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/SettingsView.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+/Users/jandrews/devel/swift/Argus-app/Argus/SettingsView.swift:151:21: error: cannot find 'ReadingExperienceView' in scope
+                    ReadingExperienceView(textDisplaySettings: $textDisplaySettings, onSettingsChanged: saveTextDisplaySettings)
+                    ^~~~~~~~~~~~~~~~~~~~~
+
+SwiftCompile normal arm64 Compiling\ NewsDetailViewModel.swift,\ NewsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsDetailViewModel.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsView.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/NewsDetailViewModel.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/NewsView.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ SyncStatisticsView.swift,\ TestArticleService.swift /Users/jandrews/devel/swift/Argus-app/Argus/SyncStatisticsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/TestArticleService.swift (in target 'Argus' from project 'Argus')
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/SyncStatisticsView.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/TestArticleService.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ Argus (in target 'Argus' from project 'Argus')
+
+EmitSwiftModule normal arm64 (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ TopicDiagnosticView.swift,\ UIComponents.swift /Users/jandrews/devel/swift/Argus-app/Argus/TopicDiagnosticView.swift /Users/jandrews/devel/swift/Argus-app/Argus/UIComponents.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/TopicDiagnosticView.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/UIComponents.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ SubscriptionsView.swift,\ SwiftDataContainer.swift /Users/jandrews/devel/swift/Argus-app/Argus/SubscriptionsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/SwiftDataContainer.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/SubscriptionsView.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/SwiftDataContainer.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ NewsView+Extensions.swift,\ NewsViewModel.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsView+Extensions.swift /Users/jandrews/devel/swift/Argus-app/Argus/NewsViewModel.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/NewsView+Extensions.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/NewsViewModel.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftDriverJobDiscovery normal arm64 Compiling ProcessingQueueManager.swift, QualityBadges.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 Compiling\ UserDefaultsExtensions.swift,\ GeneratedAssetSymbols.swift /Users/jandrews/devel/swift/Argus-app/Argus/UserDefaultsExtensions.swift /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/DerivedSources/GeneratedAssetSymbols.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/UserDefaultsExtensions.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/DerivedSources/GeneratedAssetSymbols.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftDriverJobDiscovery normal arm64 Compiling NotificationUtils.swift, PreloadManager.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 Compiling\ CloudKitHealthMonitor.swift /Users/jandrews/devel/swift/Argus-app/Argus/CloudKitHealthMonitor.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/CloudKitHealthMonitor.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftDriverJobDiscovery normal arm64 Compiling GlobalSyncCoordinator.swift, Logger.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 Compiling\ TabNavigationState.swift /Users/jandrews/devel/swift/Argus-app/Argus/TabNavigationState.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/TabNavigationState.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftDriverJobDiscovery normal arm64 Compiling MarkdownUtilities.swift, ModernizationLogger.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 Compiling\ SyncStatusIndicator.swift /Users/jandrews/devel/swift/Argus-app/Argus/SyncStatusIndicator.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/SyncStatusIndicator.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftCompile normal arm64 Compiling\ CloudKitRequestCoordinator.swift /Users/jandrews/devel/swift/Argus-app/Argus/CloudKitRequestCoordinator.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/CloudKitRequestCoordinator.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftDriverJobDiscovery normal arm64 Compiling SubscriptionsView.swift, SwiftDataContainer.swift (in target 'Argus' from project 'Argus')
+
+LinkAssetCatalog /Users/jandrews/devel/swift/Argus-app/Argus/Preview\ Content/Preview\ Assets.xcassets /Users/jandrews/devel/swift/Argus-app/Argus/Assets.xcassets (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-linkAssetCatalog --thinned /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_output/thinned --thinned-dependencies /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_dependencies_thinned --thinned-info-plist-content /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_generated_info.plist_thinned --unthinned /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_output/unthinned --unthinned-dependencies /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_dependencies_unthinned --unthinned-info-plist-content /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_generated_info.plist_unthinned --output /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app --plist-output /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_generated_info.plist
+note: Emplaced /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/AppIcon76x76@2x~ipad.png (in target 'Argus' from project 'Argus')
+note: Emplaced /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/Assets.car (in target 'Argus' from project 'Argus')
+note: Emplaced /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/AppIcon60x60@2x.png (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 Compiling\ ArticleServiceProtocol.swift /Users/jandrews/devel/swift/Argus-app/Argus/ArticleServiceProtocol.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/ArticleServiceProtocol.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+SwiftDriverJobDiscovery normal arm64 Compiling TabNavigationState.swift (in target 'Argus' from project 'Argus')
+
+SwiftDriverJobDiscovery normal arm64 Compiling CloudKitHealthMonitor.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 Compiling\ AutoSyncCoordinator.swift /Users/jandrews/devel/swift/Argus-app/Argus/AutoSyncCoordinator.swift (in target 'Argus' from project 'Argus')
+
+SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/AutoSyncCoordinator.swift (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    
+
+ProcessInfoPlistFile /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/Info.plist /Users/jandrews/devel/swift/Argus-app/Argus/Info.plist (in target 'Argus' from project 'Argus')
+    cd /Users/jandrews/devel/swift/Argus-app
+    builtin-infoPlistUtility /Users/jandrews/devel/swift/Argus-app/Argus/Info.plist -producttype com.apple.product-type.application -genpkginfo /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Intermediates.noindex/Argus.build/Debug-iphonesimulator/Argus.build/assetcatalog_generated_info.plist -o /Users/jandrews/Library/Developer/Xcode/DerivedData/Argus-dciofsjewcrtqnafhqonvosebghg/Build/Products/Debug-iphonesimulator/Argus.app/Info.plist
+
+note: Disabling hardened runtime with ad-hoc codesigning. (in target 'Argus' from project 'Argus')
+** BUILD FAILED **
+
+
+The following build commands failed:
+	SwiftCompile normal arm64 Compiling\ RelatedArticlesComponents.swift,\ SettingsView.swift /Users/jandrews/devel/swift/Argus-app/Argus/RelatedArticlesComponents.swift /Users/jandrews/devel/swift/Argus-app/Argus/SettingsView.swift (in target 'Argus' from project 'Argus')
+	SwiftCompile normal arm64 /Users/jandrews/devel/swift/Argus-app/Argus/SettingsView.swift (in target 'Argus' from project 'Argus')
+	Building project Argus with scheme Argus
+(3 failures)

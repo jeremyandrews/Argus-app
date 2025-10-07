@@ -37,16 +37,7 @@ struct ArgusApp: App {
 
                         // Register background tasks
                         registerBackgroundTasks()
-                        
-                        // PHASE 4: Initialize GlobalFontCache at startup to eliminate font loading overhead on article open
-                        // This ensures fonts are cached once per app session instead of per article
-                        Task(priority: .userInitiated) {
-                            await MainActor.run {
-                                _ = GlobalFontCache.shared
-                                AppLogger.database.debug("🎨 GlobalFontCache initialized at app startup")
-                            }
-                        }
-                        
+
                         // Initialize auto-sync coordinator
                         Task {
                             await AutoSyncCoordinator.shared.scheduleInitialSync()
