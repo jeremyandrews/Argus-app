@@ -12,6 +12,7 @@
 	<array>
 	    <string>com.arguspulse.articlesync</string>
 	    <string>com.arguspulse.articlefetch</string>
+	    <string>com.arguspulse.cloudkithealthcheck</string>
 	</array>
 </dict>
 </plist>

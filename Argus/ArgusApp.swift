@@ -35,8 +35,8 @@ struct ArgusApp: App {
                         // Set up CloudKit observers when app appears
                         setupCloudKitObservers()
 
-                        // Register background tasks
-                        registerBackgroundTasks()
+                        // Note: Background tasks are registered in AppDelegate.didFinishLaunchingWithOptions
+                        // to avoid duplicate registration errors
 
                         // Initialize auto-sync coordinator
                         Task {
@@ -290,19 +290,17 @@ struct ArgusApp: App {
     }
 
     /// Registers background tasks for CloudKit health monitoring
+    /// NOTE: This is now handled in AppDelegate.registerCloudKitHealthCheckTask()
+    /// to avoid duplicate registration errors. Keeping this function commented
+    /// for reference but registration happens in AppDelegate.didFinishLaunchingWithOptions
     private func registerBackgroundTasks() {
-        // Register the background task identifier
-        BGTaskScheduler.shared.register(
-            forTaskWithIdentifier: "com.andrews.Argus.cloudKitHealthCheck",
-            using: nil
-        ) { task in
-            handleCloudKitHealthCheck(task: task as! BGProcessingTask)
-        }
+        // REMOVED: Registration moved to AppDelegate to prevent duplicate registration
+        // The background task is registered in AppDelegate.registerCloudKitHealthCheckTask()
     }
 
     /// Schedules a background health check for CloudKit
     private func scheduleCloudKitHealthCheck() {
-        let request = BGProcessingTaskRequest(identifier: "com.andrews.Argus.cloudKitHealthCheck")
+        let request = BGProcessingTaskRequest(identifier: "com.arguspulse.cloudkithealthcheck")
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
 

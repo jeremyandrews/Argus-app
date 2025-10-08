@@ -99,7 +99,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Registers the background task for CloudKit health check
     private func registerCloudKitHealthCheckTask() {
         BGTaskScheduler.shared.register(
-            forTaskWithIdentifier: "com.andrews.Argus.cloudKitHealthCheck",
+            forTaskWithIdentifier: "com.arguspulse.cloudkithealthcheck",
             using: nil
         ) { task in
             self.handleCloudKitHealthCheck(task: task as! BGProcessingTask)
@@ -110,7 +110,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     /// Schedules a background task for CloudKit health check
     private func scheduleCloudKitHealthCheck() {
-        let request = BGProcessingTaskRequest(identifier: "com.andrews.Argus.cloudKitHealthCheck")
+        let request = BGProcessingTaskRequest(identifier: "com.arguspulse.cloudkithealthcheck")
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
 
