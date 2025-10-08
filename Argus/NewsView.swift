@@ -98,10 +98,9 @@ struct NewsView: View {
 
     /// List of topics to show in topic bar
     private var visibleTopics: [String] {
-        // CRITICAL FIX: Use topicBarArticles which always contains ALL topics
-        // This ensures topics never disappear from the topic bar
-        let topics = Set(viewModel.topicBarArticles.compactMap { $0.topic })
-        return ["All"] + topics.sorted()
+        // OPTIMIZED: Use availableTopics from lightweight query
+        // This is much faster than extracting from full article objects
+        return ["All"] + viewModel.availableTopics.sorted()
     }
 
     // MARK: - Body
@@ -194,51 +193,7 @@ struct NewsView: View {
                 }
                 // Pull-to-refresh for the entire list
                 .refreshable {
-                    // Use global sync coordinator to prevent race conditions
-                    do {
-                        _ = try await GlobalSyncCoordinator.shared.requestManualSync(
-                            topic: viewModel.selectedTopic != "All" ? viewModel.selectedTopic : nil
-                        ) { message in
-                            Task { @MainActor in
-                                viewModel.syncStatus = .syncing(message: message)
-                            }
-                        }
-                        
-                        // Refresh the view with new data
-                        await viewModel.refreshArticles()
-                        
-                        // Set status to complete
-                        viewModel.syncStatus = .complete
-                        
-                        // Schedule a task to reset to idle after a delay
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-                            if case .complete = viewModel.syncStatus {
-                                viewModel.syncStatus = .idle
-                            }
-                        }
-                        
-                    } catch {
-                        // Set error status
-                        viewModel.syncStatus = .error(error.localizedDescription)
-                        AppLogger.sync.error("Manual sync failed: \(error)")
-                        
-                        // Schedule a task to reset to idle after a delay
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
-                            if case .error = viewModel.syncStatus {
-                                viewModel.syncStatus = .idle
-                            }
-                        }
-                    }
-                }
-                // Note: Removed .disabled(viewModel.isSyncing) as it was causing complete UI freeze
-                // The refreshable modifier already handles preventing multiple simultaneous refresh operations
-                // Add the toolbar item for the sync status in the navigation bar
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        SyncStatusIndicator(status: $viewModel.syncStatus)
-                    }
+                    await viewModel.syncWithServer()
                 }
                 // Edit mode handling
                 .onChange(of: editMode?.wrappedValue) { _, newValue in

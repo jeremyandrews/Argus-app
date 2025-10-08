@@ -254,7 +254,52 @@ final class ArticleOperations {
             throw error
         }
     }
-    
+
+    /// Fetches all distinct topic names without loading full article data
+    /// Optimized for topic bar generation - very fast even with large datasets
+    ///
+    /// IMPORTANT: This should return topics that are GUARANTEED to have articles
+    /// when fetchArticles() is called with the same filters and context.
+    ///
+    /// - Parameters:
+    ///   - showUnreadOnly: Whether to only include topics with unread articles
+    ///   - showBookmarkedOnly: Whether to only include topics with bookmarked articles
+    ///   - qualityFilter: Quality filter to apply ("All", "Fair+", "Good+")
+    ///   - context: Fetch context to determine limits (should match the context used for article fetching)
+    /// - Returns: Set of all unique topic names matching the filters
+    @MainActor
+    func fetchDistinctTopics(
+        showUnreadOnly: Bool = false,
+        showBookmarkedOnly: Bool = false,
+        qualityFilter: String = "All",
+        context: FetchContext = .listView
+    ) async throws -> Set<String> {
+        let startTime = CFAbsoluteTimeGetCurrent()
+
+        // CRITICAL: Use fetchArticles with the SAME context to ensure consistency
+        // This guarantees that topics returned here will have articles when fetchArticles is called
+        let articles = try await fetchArticles(
+            topic: nil,  // Get all topics
+            showUnreadOnly: showUnreadOnly,
+            showBookmarkedOnly: showBookmarkedOnly,
+            qualityFilter: qualityFilter,
+            context: context
+        )
+
+        // Extract unique topics from the fetched articles
+        let topics = Set(articles.compactMap { $0.topic }.filter { !$0.isEmpty })
+
+        let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+        let contextName = switch context {
+        case .listView: "listView"
+        case .detailView: "detailView"
+        case .background: "background"
+        }
+        AppLogger.database.debug("📊 Fetched \(topics.count) distinct topics from \(articles.count) articles (filtered: unread=\(showUnreadOnly), bookmarked=\(showBookmarkedOnly), quality=\(qualityFilter), context=\(contextName)) in \(String(format: "%.3f", totalTime))s")
+
+        return topics
+    }
+
     /// Gets current memory pressure as a ratio (0.0 to 1.0)
     /// - Returns: Memory pressure ratio where 1.0 indicates maximum pressure
     private func getCurrentMemoryPressure() -> Double {

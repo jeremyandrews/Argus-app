@@ -27,9 +27,12 @@ struct SyncStatusIndicator: View {
                 Text(status.message)
                     .font(.footnote)
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
         .animation(.easeInOut(duration: 0.3), value: status)
     }
 

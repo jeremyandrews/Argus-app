@@ -29,36 +29,101 @@ final class PerformanceTestSuite: XCTestCase {
     // MARK: - Simple Performance Tests
     
     func testTopicSwitchingPerformance() throws {
+        print("\n" + String(repeating: "=", count: 60))
+        print("📊 COMPREHENSIVE TOPIC SWITCHING PERFORMANCE TEST")
+        print(String(repeating: "=", count: 60))
+
         let measureOptions = XCTMeasureOptions()
         measureOptions.iterationCount = 3
-        
+
         measure(metrics: [XCTClockMetric()], options: measureOptions) {
-            // Find available buttons that look like topics
+            // STEP 1: Discover all available topic buttons
+            print("🔍 Discovering available topics...")
             let buttons = app.buttons
-            var topicButtonsFound = 0
-            
+            var topicButtons: [(element: XCUIElement, label: String)] = []
+
             for i in 0..<buttons.count {
                 let button = buttons.element(boundBy: i)
-                if button.exists && topicButtonsFound < 3 {
+                if button.exists {
                     let label = button.label
                     // Skip system buttons and look for topic-like names
-                    if !label.isEmpty && 
+                    if !label.isEmpty &&
                        label.count < 20 &&
-                       !label.contains("Back") && 
+                       !label.contains("Back") &&
                        !label.contains("Settings") &&
-                       !label.contains("Tab") {
-                        print("Tapping button: \(label)")
-                        button.tap()
-                        Thread.sleep(forTimeInterval: 0.3)
-                        topicButtonsFound += 1
+                       !label.contains("Tab") &&
+                       !label.contains("Close") &&
+                       !label.contains("Done") {
+                        topicButtons.append((element: button, label: label))
                     }
                 }
             }
-            
-            if topicButtonsFound == 0 {
-                print("No topic buttons found - app may have no topics or different UI")
+
+            let topicCount = topicButtons.count
+            print("📋 Found \(topicCount) topic buttons: \(topicButtons.map { $0.label }.joined(separator: ", "))")
+
+            if topicCount == 0 {
+                print("⚠️ No topic buttons found - app may have no topics or different UI")
+                return
             }
+
+            // STEP 2: Cycle through ALL topics TWICE
+            print("\n🔄 Starting 2 complete cycles through all \(topicCount) topics...")
+
+            for cycle in 1...2 {
+                print("\n📍 Cycle \(cycle) of 2")
+
+                for (index, topicButton) in topicButtons.enumerated() {
+                    let topicName = topicButton.label
+                    let topicNum = index + 1
+
+                    print("   [\(cycle).\(topicNum)/\(topicCount)] Switching to '\(topicName)'...")
+
+                    let switchStart = Date()
+                    topicButton.element.tap()
+
+                    // Wait for article list to update
+                    Thread.sleep(forTimeInterval: 0.3)
+
+                    let switchTime = Date().timeIntervalSince(switchStart)
+                    let switchTimeMs = Int(switchTime * 1000)
+
+                    // Check if we have articles loaded
+                    let cells = app.tables.cells
+                    let articleCount = cells.count
+
+                    // Performance rating
+                    let rating: String
+                    if switchTimeMs < 250 {
+                        rating = "✅ EXCELLENT"
+                    } else if switchTimeMs < 400 {
+                        rating = "✅ GOOD"
+                    } else if switchTimeMs < 500 {
+                        rating = "⚠️ WARNING"
+                    } else {
+                        rating = "❌ SLOW"
+                    }
+
+                    print("      → \(switchTimeMs)ms \(rating) (\(articleCount) articles)")
+
+                    // Brief pause before next topic
+                    if index < topicButtons.count - 1 {
+                        Thread.sleep(forTimeInterval: 0.1)
+                    }
+                }
+
+                // Pause between cycles
+                if cycle == 1 {
+                    print("\n   ⏸️ Brief pause before cycle 2...")
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+            }
+
+            print("\n✅ Completed 2 full cycles through all \(topicCount) topics")
+            print("   Total topic switches: \(topicCount * 2)")
         }
+
+        print(String(repeating: "=", count: 60) + "\n")
     }
     
     func testArticleDetailViewPerformance() throws {
